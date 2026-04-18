@@ -583,10 +583,18 @@
     $('#pinInput').focus();
   }
   function enterApp() {
-    $('#pinScreen').hidden = true;
-    $('#app').hidden = false;
+    console.log('[ezone] enterApp: hiding #pinScreen, showing #app');
+    var pin = $('#pinScreen');
+    var app = $('#app');
+    console.log('[ezone] enterApp elements: pinScreen=%o app=%o', !!pin, !!app);
+    if (pin) pin.hidden = true;
+    if (app) app.hidden = false;
+    console.log('[ezone] enterApp after toggle: pinScreen.hidden=%o app.hidden=%o',
+      pin && pin.hidden, app && app.hidden);
     applyRole();
+    console.log('[ezone] enterApp: role applied, calling setView(dashboard)');
     setView('dashboard');
+    console.log('[ezone] enterApp: setView done');
   }
 
   // --- init --------------------------------------------------------------
@@ -613,15 +621,28 @@
     console.log('[ezone] wireEvents: start');
 
     // PIN  — wired first so it survives any later wiring failure
-    on('#pinSubmit', 'click', function () {
+    on('#pinSubmit', 'click', function (ev) {
       console.log('[ezone] PIN key clicked:', 'submit');
       var input = $('#pinInput');
+      var raw = input ? input.value : '(no input)';
       var v = (input && input.value || '').trim();
-      if (v === '2107') {
-        try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
+      var match = (v === '2107');
+      console.log('[ezone] PIN submit: raw=%o trimmed=%o length=%d match=%o',
+        raw, v, v.length, match);
+      if (match) {
+        try { sessionStorage.setItem('ez_role', 'editor'); }
+        catch (e) { console.warn('[ezone] sessionStorage set failed', e); }
         state.role = 'editor';
-        enterApp();
+        console.log('[ezone] PIN ok → calling enterApp()');
+        try {
+          enterApp();
+          console.log('[ezone] enterApp returned OK');
+        } catch (e) {
+          console.error('[ezone] enterApp threw', e);
+        }
       } else {
+        console.log('[ezone] PIN mismatch — char codes:',
+          Array.prototype.map.call(v, function (c) { return c.charCodeAt(0); }));
         var err = $('#pinError'); if (err) err.hidden = false;
       }
     });
