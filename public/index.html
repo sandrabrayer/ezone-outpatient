@@ -108,13 +108,13 @@
       </div>
     </div>
 
-    <!-- Agreement modal (sessionsPerWeek + pricePerSession) -->
+    <!-- Agreement modal (sessions breakdown + monthly package price) -->
     <div id="agreementModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">מתחיל טיפול</div>
         <form id="agreementForm" class="form-grid">
-          <label>מפגשים בשבוע (מספר שלם)<input name="sessionsPerWeek" type="number" min="0" step="1" required /></label>
-          <label>מחיר למפגש (₪) — עבור כל החבילה<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <div class="wide sessions-host" data-host="agreementSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>
@@ -138,9 +138,9 @@
               <option>קיסריה גמילה</option>
             </select>
           </label>
-          <label>מפגשים בשבוע (מספר שלם)<input name="sessionsPerWeek" type="number" min="0" step="1" required /></label>
-          <label>מחיר למפגש (₪) — עבור כל החבילה<input name="pricePerSession" type="number" min="0" step="1" required /></label>
-          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+          <div class="wide sessions-host" data-host="activateSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label class="wide">תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>

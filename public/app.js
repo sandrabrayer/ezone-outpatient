@@ -75,6 +75,38 @@
     return n < 0 ? 0 : n;
   }
 
+  // sessionsPerWeek is stored as JSON object { "פרטני": 3, "קבוצה": 1 }
+  // but legacy rows may hold a plain number. parse handles both.
+  function parseSessionsBreakdown(v, services) {
+    var out = {};
+    if (!v && v !== 0) return out;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      Object.keys(v).forEach(function (k) { out[k] = wholeSessions(v[k]); });
+      return out;
+    }
+    var s = String(v).trim();
+    if (s && s.charAt(0) === '{') {
+      try {
+        var parsed = JSON.parse(s);
+        Object.keys(parsed).forEach(function (k) { out[k] = wholeSessions(parsed[k]); });
+        return out;
+      } catch (_) {}
+    }
+    // legacy numeric — bucket under the single service if there is exactly one
+    var list = parseServices(services);
+    var n = wholeSessions(s);
+    if (list.length === 1) { out[list[0]] = n; return out; }
+    if (n) out._total = n;
+    return out;
+  }
+  function formatSessionsBreakdown(b) {
+    return JSON.stringify(b || {});
+  }
+  function totalSessions(v, services) {
+    var b = parseSessionsBreakdown(v, services);
+    return Object.keys(b).reduce(function (s, k) { return s + wholeSessions(b[k]); }, 0);
+  }
+
   // --- state -------------------------------------------------------------
   var state = {
     role: 'viewer',          // 'viewer' | 'editor'
@@ -114,7 +146,8 @@
     return isFinite(n) ? n : 0;
   }
   function monthlyRevenue(c) {
-    return wholeSessions(c.sessionsPerWeek) * toNum(c.pricePerSession) * AVG_WEEKS_PER_MONTH;
+    // pricePerSession now stores the monthly package price — already monthly
+    return toNum(c.pricePerSession);
   }
   function toast(msg, isError) {
     var t = $('#toast');
@@ -150,15 +183,16 @@
 
   // Map rows from Sheets (Hebrew stage strings, maybe Date-y fields) → internal.
   function normalizeLeadFromSheet(row) {
+    var services = formatServices(parseServices(row.serviceType));
     return {
       id: row.id || uid(),
       name: row.name || '',
       phone: row.phone || '',
-      serviceType: formatServices(parseServices(row.serviceType)),
+      serviceType: services,
       location: row.location || '',
       note: row.note || '',
       stage: heToId(row.stage || ''),
-      sessionsPerWeek: row.sessionsPerWeek === '' ? '' : wholeSessions(row.sessionsPerWeek),
+      sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
       pricePerSession: row.pricePerSession === '' ? '' : toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       created: fmtDate(row.created) || today(),
@@ -166,12 +200,13 @@
     };
   }
   function normalizeClientFromSheet(row) {
+    var services = formatServices(parseServices(row.serviceType));
     return {
       id: row.id || uid(),
       name: row.name || '',
-      serviceType: formatServices(parseServices(row.serviceType)),
+      serviceType: services,
       location: row.location || '',
-      sessionsPerWeek: wholeSessions(row.sessionsPerWeek),
+      sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
       pricePerSession: toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       status: row.status || 'פעיל',
@@ -182,15 +217,17 @@
 
   // Map internal → rows for Sheets (Hebrew stage strings).
   function leadForSheet(l) {
+    var services = formatServices(parseServices(l.serviceType));
+    var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
     return {
       id: l.id,
       name: l.name,
       phone: l.phone,
-      serviceType: formatServices(parseServices(l.serviceType)),
+      serviceType: services,
       location: l.location,
       note: l.note,
       stage: idToHe(l.stage),
-      sessionsPerWeek: l.sessionsPerWeek === '' ? '' : wholeSessions(l.sessionsPerWeek),
+      sessionsPerWeek: Object.keys(breakdown).length ? formatSessionsBreakdown(breakdown) : '',
       pricePerSession: l.pricePerSession === '' ? '' : toNum(l.pricePerSession),
       startDate: l.startDate || '',
       created: l.created || today(),
@@ -198,12 +235,14 @@
     };
   }
   function clientForSheet(c) {
+    var services = formatServices(parseServices(c.serviceType));
+    var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, services);
     return {
       id: c.id,
       name: c.name,
-      serviceType: formatServices(parseServices(c.serviceType)),
+      serviceType: services,
       location: c.location,
-      sessionsPerWeek: wholeSessions(c.sessionsPerWeek),
+      sessionsPerWeek: formatSessionsBreakdown(breakdown),
       pricePerSession: toNum(c.pricePerSession),
       startDate: c.startDate || '',
       status: c.status || 'פעיל',
@@ -345,9 +384,15 @@
     }
     var agreementFields = '';
     if (stage.id === 'agreement') {
+      var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
+      var bdChips = Object.keys(breakdown).map(function (k) {
+        return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+      }).join('');
       agreementFields =
-        '<div class="row"><span class="chip">מפגשים/שבוע: ' + (l.sessionsPerWeek || '—') + '</span>' +
-        '<span class="chip">מחיר למפגש: ' + (l.pricePerSession ? money(l.pricePerSession) : '—') + '</span></div>';
+        '<div class="row">' +
+          (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') +
+        '</div>' +
+        '<div class="row"><span class="chip">חבילה חודשית: ' + (l.pricePerSession ? money(l.pricePerSession) : '—') + '</span></div>';
     }
     var createdLine = l.created ? '<div class="meta">נוצר: ' + escapeHtml(l.created) + '</div>' : '';
     card.innerHTML =
@@ -370,6 +415,16 @@
       dt.type = 'datetime-local';
       dt.value = l.introDateTime || '';
       if (state.role !== 'editor') dt.disabled = true;
+      dt.addEventListener('click', function () {
+        if (typeof dt.showPicker === 'function') {
+          try { dt.showPicker(); } catch (_) {}
+        }
+      });
+      dt.addEventListener('focus', function () {
+        if (typeof dt.showPicker === 'function') {
+          try { dt.showPicker(); } catch (_) {}
+        }
+      });
       dt.addEventListener('change', function () {
         l.introDateTime = dt.value;
         persist().then(function () { toast('נשמר'); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
@@ -480,16 +535,22 @@
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
+    var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
+    var breakdownChips = Object.keys(breakdown).map(function (k) {
+      return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+    }).join('');
+    var total = totalSessions(c.sessionsPerWeek, c.serviceType);
     card.innerHTML =
       '<div class="client-head">' +
         '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
       '<div class="client-meta">' + serviceChips + locationChip + '</div>' +
+      (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' +
-        '<span>מפגשים/שבוע: <b>' + wholeSessions(c.sessionsPerWeek) + '</b></span>' +
-        '<span>מחיר: <b>' + money(c.pricePerSession) + '</b></span>' +
-        '<span>הכנסה חודשית: <b>' + money(rev) + '</b></span>' +
+        '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
+        '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
+        '<span>הכנסה: <b>' + money(rev) + '</b></span>' +
       '</div>' +
       '<div class="client-meta">' +
         (c.startDate ? 'החל: ' + escapeHtml(c.startDate) : '') +
@@ -595,6 +656,40 @@
     lead.created = f.created;
   }
 
+  // --- dynamic per-service sessions fields ------------------------------
+  function renderSessionsHost(host, services, values) {
+    host.innerHTML = '';
+    var list = parseServices(services);
+    if (!list.length) {
+      var msg = document.createElement('div');
+      msg.className = 'empty';
+      msg.textContent = 'יש לבחור לפחות סוג טיפול אחד לפני קביעת מפגשים.';
+      host.appendChild(msg);
+      return;
+    }
+    var current = parseSessionsBreakdown(values, services);
+    list.forEach(function (svc) {
+      var label = document.createElement('label');
+      label.textContent = 'מפגשים בשבוע — ' + svc;
+      var input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.step = '1';
+      input.required = true;
+      input.dataset.service = svc;
+      input.value = current[svc] != null ? current[svc] : '';
+      label.appendChild(input);
+      host.appendChild(label);
+    });
+  }
+  function readSessionsHost(host) {
+    var out = {};
+    $$('input[data-service]', host).forEach(function (inp) {
+      out[inp.dataset.service] = wholeSessions(inp.value);
+    });
+    return out;
+  }
+
   // --- service checkbox group -------------------------------------------
   function populateServiceGroup(group, selected) {
     group.innerHTML = '';
@@ -679,7 +774,7 @@
     agreementAdvance = !!advance;
     var f = $('#agreementForm');
     f.reset();
-    f.sessionsPerWeek.value = lead.sessionsPerWeek || '';
+    renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek);
     f.pricePerSession.value = lead.pricePerSession || '';
     $('#agreementModal').hidden = false;
   }
@@ -693,7 +788,16 @@
     var group = $('[data-group="serviceType"]', f);
     populateServiceGroup(group, lead.serviceType);
     if (lead.location) f.location.value = lead.location;
-    f.sessionsPerWeek.value = lead.sessionsPerWeek || '';
+    var host = $('[data-host="activateSessions"]', f);
+    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek);
+    // keep the per-service sessions in sync when checkboxes change
+    $$('input[type="checkbox"]', group).forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var picked = readServiceGroup(group);
+        var current = readSessionsHost(host);
+        renderSessionsHost(host, formatServices(picked), current);
+      });
+    });
     f.pricePerSession.value = lead.pricePerSession || '';
     f.startDate.value = lead.startDate || today();
     updateLocationVisibility(f);
@@ -871,7 +975,8 @@
       var lead = state.leads.find(function (l) { return l.id === agreementLeadId; });
       if (!lead) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
-      lead.sessionsPerWeek = wholeSessions(fd.get('sessionsPerWeek'));
+      var host = $('[data-host="agreementSessions"]', e.target);
+      lead.sessionsPerWeek = readSessionsHost(host);
       lead.pricePerSession = toNum(fd.get('pricePerSession'));
       if (agreementAdvance) lead.stage = 'agreement';
       persist()
@@ -896,13 +1001,18 @@
         toast('יש לבחור לפחות סוג טיפול אחד', true);
         return;
       }
+      var host = $('[data-host="activateSessions"]', e.target);
+      var breakdown = readSessionsHost(host);
+      // trim to selected services only
+      var cleanBreakdown = {};
+      services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
       var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
       var client = {
         id: uid(),
         name: lead.name,
         serviceType: formatServices(services),
         location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
-        sessionsPerWeek: wholeSessions(fd.get('sessionsPerWeek')),
+        sessionsPerWeek: cleanBreakdown,
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: fd.get('startDate') || today(),
         status: 'פעיל',
