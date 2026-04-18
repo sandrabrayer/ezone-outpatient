@@ -1,11 +1,25 @@
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SHEETS_URL = process.env.SHEETS_URL || '';
+const BUILD = String(Date.now());
 
 app.use(express.json({ limit: '2mb' }));
+
+const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
+function sendIndex(res) {
+  fs.readFile(INDEX_PATH, 'utf8', (err, html) => {
+    if (err) return res.status(500).send('index load error');
+    res.set('Cache-Control', 'no-store');
+    res.type('html').send(html.replace(/__BUILD__/g, BUILD));
+  });
+}
+app.get('/', (req, res) => sendIndex(res));
+app.get('/index.html', (req, res) => sendIndex(res));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const lastLoad = {
@@ -101,9 +115,7 @@ app.get('/api/debug/last-load', (req, res) => {
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.get('*', (req, res) => sendIndex(res));
 
 app.listen(PORT, () => {
   console.log(`E-ZONE Outpatient listening on :${PORT}`);

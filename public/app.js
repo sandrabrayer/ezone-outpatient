@@ -2,6 +2,23 @@
 (function () {
   'use strict';
 
+  window.addEventListener('error', function (ev) {
+    try {
+      var msg = (ev && ev.error && ev.error.message) || ev.message || 'Unknown error';
+      var where = ev.filename ? (' @ ' + ev.filename + ':' + ev.lineno) : '';
+      var t = document.getElementById('toast');
+      if (t) {
+        t.textContent = 'JS error: ' + msg + where;
+        t.classList.add('error');
+        t.hidden = false;
+      }
+      console.error('[ezone] window error', ev.error || ev.message, where);
+    } catch (_) {}
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    console.error('[ezone] unhandled rejection', ev.reason);
+  });
+
   // --- constants ---------------------------------------------------------
   var SERVICE_TYPES = [
     'פרטני',
@@ -586,49 +603,63 @@
     }
   }
 
+  function on(sel, ev, fn) {
+    var el = typeof sel === 'string' ? $(sel) : sel;
+    if (!el) { console.warn('[ezone] missing element for', sel); return; }
+    el.addEventListener(ev, fn);
+  }
+
   function wireEvents() {
-    // PIN
-    $('#pinSubmit').addEventListener('click', function () {
-      var v = $('#pinInput').value.trim();
+    console.log('[ezone] wireEvents: start');
+
+    // PIN  — wired first so it survives any later wiring failure
+    on('#pinSubmit', 'click', function () {
+      var input = $('#pinInput');
+      var v = (input && input.value || '').trim();
       if (v === '2107') {
-        sessionStorage.setItem('ez_role', 'editor');
+        try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
         state.role = 'editor';
         enterApp();
       } else {
-        $('#pinError').hidden = false;
+        var err = $('#pinError'); if (err) err.hidden = false;
       }
     });
-    $('#pinInput').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') $('#pinSubmit').click();
-      $('#pinError').hidden = true;
+    on('#pinInput', 'keydown', function (e) {
+      var err = $('#pinError'); if (err) err.hidden = true;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var btn = $('#pinSubmit'); if (btn) btn.click();
+      }
     });
-    $('#pinViewer').addEventListener('click', function () {
-      sessionStorage.setItem('ez_role', 'viewer');
+    on('#pinViewer', 'click', function () {
+      try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {}
       state.role = 'viewer';
       enterApp();
     });
-    $('#logoutBtn').addEventListener('click', function () {
-      sessionStorage.removeItem('ez_role');
+    on('#logoutBtn', 'click', function () {
+      try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';
       showPin();
     });
+
+    console.log('[ezone] wireEvents: PIN bound');
 
     // Tabs
     $$('.tab').forEach(function (t) {
       t.addEventListener('click', function () { setView(t.dataset.view); });
     });
-    $('#refreshBtn').addEventListener('click', function () {
+    on('#refreshBtn', 'click', function () {
       loadAll().then(function () { toast('רועננו'); }).catch(function () {});
     });
 
     // Leads
-    $('#leadsSearch').addEventListener('input', function (e) {
+    on('#leadsSearch', 'input', function (e) {
       state.leadSearch = e.target.value; renderLeads();
     });
-    $('#addLeadBtn').addEventListener('click', function () { openLeadModal(null); });
+    on('#addLeadBtn', 'click', function () { openLeadModal(null); });
 
     // Clients
-    $('#clientsSearch').addEventListener('input', function (e) {
+    on('#clientsSearch', 'input', function (e) {
       state.clientSearch = e.target.value; renderClients();
     });
 
@@ -729,8 +760,12 @@
   }
 
   function init() {
-    wireEvents();
-    var saved = sessionStorage.getItem('ez_role');
+    console.log('[ezone] init');
+    try { wireEvents(); }
+    catch (e) { console.error('[ezone] wireEvents failed', e); }
+
+    var saved = null;
+    try { saved = sessionStorage.getItem('ez_role'); } catch (_) {}
     if (saved === 'editor' || saved === 'viewer') {
       state.role = saved;
       enterApp();
@@ -740,9 +775,12 @@
     loadAll().catch(function () { /* toast already shown */ });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  function bootWhenReady() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+      init();
+    }
   }
+  bootWhenReady();
 })();
