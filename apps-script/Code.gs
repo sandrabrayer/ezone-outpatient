@@ -12,7 +12,7 @@
 
 var LEADS_HEADERS = [
   'id', 'name', 'phone', 'serviceType', 'location', 'note',
-  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created'
+  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime'
 ];
 
 var CLIENTS_HEADERS = [

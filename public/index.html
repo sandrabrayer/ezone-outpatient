@@ -87,18 +87,10 @@
         <form id="leadForm" class="form-grid">
           <label>שם<input name="name" required /></label>
           <label>טלפון<input name="phone" required /></label>
-          <label>סוג טיפול
-            <select name="serviceType" required>
-              <option value="">—</option>
-              <option>פרטני</option>
-              <option>פרטני CBT</option>
-              <option>פרטני EMDR</option>
-              <option>קבוצה</option>
-              <option>טיפול משפחתי</option>
-              <option>מרכז יום</option>
-            </select>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="leadForm"></div>
           </label>
-          <label>סניף
+          <label id="leadLocationWrap">סניף
             <select name="location" required>
               <option value="">—</option>
               <option>רעננה הפרדס</option>
@@ -106,6 +98,7 @@
               <option>קיסריה גמילה</option>
             </select>
           </label>
+          <label>תאריך יצירה<input name="created" type="date" required /></label>
           <label class="wide">הערות<textarea name="note" rows="2"></textarea></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
@@ -118,10 +111,10 @@
     <!-- Agreement modal (sessionsPerWeek + pricePerSession) -->
     <div id="agreementModal" class="modal" hidden>
       <div class="modal-card">
-        <div class="modal-title">הסכם נחתם</div>
+        <div class="modal-title">מתחיל טיפול</div>
         <form id="agreementForm" class="form-grid">
-          <label>מפגשים בשבוע<input name="sessionsPerWeek" type="number" min="0" step="0.5" required /></label>
-          <label>מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>מפגשים בשבוע (מספר שלם)<input name="sessionsPerWeek" type="number" min="0" step="1" required /></label>
+          <label>מחיר למפגש (₪) — עבור כל החבילה<input name="pricePerSession" type="number" min="0" step="1" required /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>
@@ -135,25 +128,18 @@
       <div class="modal-card">
         <div class="modal-title">מעבר למטופל פעיל</div>
         <form id="activateForm" class="form-grid">
-          <label>סוג טיפול
-            <select name="serviceType" required>
-              <option>פרטני</option>
-              <option>פרטני CBT</option>
-              <option>פרטני EMDR</option>
-              <option>קבוצה</option>
-              <option>טיפול משפחתי</option>
-              <option>מרכז יום</option>
-            </select>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="activateForm"></div>
           </label>
-          <label>סניף
+          <label id="activateLocationWrap">סניף
             <select name="location" required>
               <option>רעננה הפרדס</option>
               <option>רמות השבים</option>
               <option>קיסריה גמילה</option>
             </select>
           </label>
-          <label>מפגשים בשבוע<input name="sessionsPerWeek" type="number" min="0" step="0.5" required /></label>
-          <label>מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>מפגשים בשבוע (מספר שלם)<input name="sessionsPerWeek" type="number" min="0" step="1" required /></label>
+          <label>מחיר למפגש (₪) — עבור כל החבילה<input name="pricePerSession" type="number" min="0" step="1" required /></label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
