@@ -614,6 +614,7 @@
 
     // PIN  — wired first so it survives any later wiring failure
     on('#pinSubmit', 'click', function () {
+      console.log('[ezone] PIN key clicked:', 'submit');
       var input = $('#pinInput');
       var v = (input && input.value || '').trim();
       if (v === '2107') {
@@ -625,6 +626,7 @@
       }
     });
     on('#pinInput', 'keydown', function (e) {
+      console.log('[ezone] PIN key clicked:', e.key);
       var err = $('#pinError'); if (err) err.hidden = true;
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -632,6 +634,7 @@
       }
     });
     on('#pinViewer', 'click', function () {
+      console.log('[ezone] PIN key clicked:', 'viewer');
       try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {}
       state.role = 'viewer';
       enterApp();
