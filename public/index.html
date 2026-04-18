@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>E-ZONE Outpatient</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- PIN screen -->
+  <div id="pinScreen" class="pin-screen">
+    <div class="pin-card">
+      <div class="brand">E-ZONE Outpatient</div>
+      <div class="pin-sub">הזן קוד גישה</div>
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" />
+      <div id="pinError" class="pin-error" hidden>קוד שגוי</div>
+      <button id="pinSubmit" class="btn btn-primary">כניסה</button>
+      <button id="pinViewer" class="btn btn-ghost">המשך כצופה בלבד</button>
+    </div>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="logo">E-ZONE <span>Outpatient</span></div>
+      <nav class="tabs">
+        <button class="tab active" data-view="dashboard">דשבורד</button>
+        <button class="tab" data-view="leads">לידים</button>
+        <button class="tab" data-view="clients">מטופלים</button>
+      </nav>
+      <div class="topbar-right">
+        <span id="roleBadge" class="role-badge">צופה</span>
+        <button id="refreshBtn" class="btn btn-ghost" title="רענון">↻</button>
+        <button id="logoutBtn" class="btn btn-ghost">יציאה</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view active">
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">פילוח לפי סוג טיפול</div>
+            <div id="byService" class="bars"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">פילוח לפי סניף</div>
+            <div id="byLocation" class="bars"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">צנרת לידים</div>
+            <div id="pipeline" class="pipeline-counts"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Leads -->
+      <section id="view-leads" class="view">
+        <div class="toolbar">
+          <input id="leadsSearch" class="search" placeholder="חיפוש לפי שם או טלפון…" />
+          <button id="addLeadBtn" class="btn btn-primary edit-only">+ ליד חדש</button>
+        </div>
+        <div id="kanban" class="kanban"></div>
+      </section>
+
+      <!-- Clients -->
+      <section id="view-clients" class="view">
+        <div class="toolbar">
+          <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <div id="clientTabs" class="client-tabs"></div>
+        </div>
+        <div id="clientsList" class="clients-list"></div>
+      </section>
+    </main>
+
+    <!-- Toast -->
+    <div id="toast" class="toast" hidden></div>
+
+    <!-- Lead form modal -->
+    <div id="leadModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title" id="leadModalTitle">ליד חדש</div>
+        <form id="leadForm" class="form-grid">
+          <label>שם<input name="name" required /></label>
+          <label>טלפון<input name="phone" required /></label>
+          <label>סוג טיפול
+            <select name="serviceType" required>
+              <option value="">—</option>
+              <option>פרטני</option>
+              <option>פרטני CBT</option>
+              <option>פרטני EMDR</option>
+              <option>קבוצה</option>
+              <option>טיפול משפחתי</option>
+              <option>מרכז יום</option>
+            </select>
+          </label>
+          <label>סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+            </select>
+          </label>
+          <label class="wide">הערות<textarea name="note" rows="2"></textarea></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="leadFormSubmit">שמירה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Agreement modal (sessionsPerWeek + pricePerSession) -->
+    <div id="agreementModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">הסכם נחתם</div>
+        <form id="agreementForm" class="form-grid">
+          <label>מפגשים בשבוע<input name="sessionsPerWeek" type="number" min="0" step="0.5" required /></label>
+          <label>מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Activation modal (move lead → active client) -->
+    <div id="activateModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">מעבר למטופל פעיל</div>
+        <form id="activateForm" class="form-grid">
+          <label>סוג טיפול
+            <select name="serviceType" required>
+              <option>פרטני</option>
+              <option>פרטני CBT</option>
+              <option>פרטני EMDR</option>
+              <option>קבוצה</option>
+              <option>טיפול משפחתי</option>
+              <option>מרכז יום</option>
+            </select>
+          </label>
+          <label>סניף
+            <select name="location" required>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+            </select>
+          </label>
+          <label>מפגשים בשבוע<input name="sessionsPerWeek" type="number" min="0" step="0.5" required /></label>
+          <label>מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Exit client modal -->
+    <div id="exitModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">סיום טיפול</div>
+        <form id="exitForm" class="form-grid">
+          <label>תאריך סיום<input name="exitDate" type="date" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="exitSubmit">סיום</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var s = document.createElement('script');
+      s.src = 'app.js?v=' + Date.now();
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

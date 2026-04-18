@@ -1,0 +1,15 @@
+{
+  "name": "ezone-outpatient",
+  "version": "1.0.0",
+  "description": "E-ZONE Outpatient Dashboard — leads CRM + clients management backed by Google Sheets.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
