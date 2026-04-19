@@ -57,8 +57,6 @@
     return STAGES[0].he;
   }
 
-  var AVG_WEEKS_PER_MONTH = 4.3;
-
   // serviceType serialization: multi-value stored as "A, B" in one cell
   function parseServices(v) {
     if (!v) return [];
@@ -113,7 +111,7 @@
     role: 'viewer',          // 'viewer' | 'editor'
     view: 'dashboard',
     leads: [],               // [{id,name,phone,serviceType,location,note,stage (id), sessionsPerWeek, pricePerSession, startDate, created}]
-    clients: [],             // [{id,name,serviceType,location,sessionsPerWeek,pricePerSession,startDate,status,exitDate,fromLead,billingType,billingDay,bundle*,source,notes}]
+    clients: [],             // [{id,name,serviceType,location,sessionsPerWeek,pricePerSession,startDate,status,exitDate,fromLead,billingType,billingDay,source,notes}]
     payments: [],            // [{id,clientId,clientName,billingType,dueDate,amountDue,amountPaid,status,paymentDate,method,notes,bundleSize,sessionsUsed}]
     leadSearch: '',
     clientSearch: '',
@@ -121,8 +119,6 @@
     billingDate: '',
     loaded: false
   };
-
-  var BILLING_TYPE_LABEL = { monthly: 'חודשי', single: 'חד-פעמי', bundle: 'חבילה' };
 
   var PAYMENT_STATUSES = [
     { id: 'paid',    he: 'שולם' },
@@ -221,11 +217,8 @@
   }
   function normalizeClientFromSheet(row) {
     var services = formatServices(parseServices(row.serviceType));
-    // billingType defaults to 'monthly' so legacy rows (no column) keep
-    // their existing behavior — they get billed on their startDate's
-    // day-of-month using pricePerSession as the monthly package price.
-    var billingType = (row.billingType || '').toString().trim().toLowerCase();
-    if (billingType !== 'single' && billingType !== 'bundle') billingType = 'monthly';
+    // All clients are now monthly. Legacy rows with other billingType
+    // values (or blanks) are coerced to 'monthly'.
     return {
       id: row.id || uid(),
       name: row.name || '',
@@ -240,13 +233,8 @@
       fromLead: row.fromLead || '',
       source: row.source || 'lead',
       notes: row.notes || '',
-      billingType: billingType,
-      billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay),
-      bundleSize: toNum(row.bundleSize),
-      bundlePrice: toNum(row.bundlePrice),
-      sessionsUsed: toNum(row.sessionsUsed),
-      bundlePaid: row.bundlePaid === true || row.bundlePaid === 'TRUE'
-        || row.bundlePaid === 'true' || row.bundlePaid === 1 || row.bundlePaid === '1'
+      billingType: 'monthly',
+      billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay)
     };
   }
 
@@ -286,12 +274,8 @@
       fromLead: c.fromLead || '',
       source: c.source || 'lead',
       notes: c.notes || '',
-      billingType: c.billingType || 'monthly',
-      billingDay: c.billingDay === '' || c.billingDay == null ? '' : toNum(c.billingDay),
-      bundleSize: toNum(c.bundleSize),
-      bundlePrice: toNum(c.bundlePrice),
-      sessionsUsed: toNum(c.sessionsUsed),
-      bundlePaid: c.bundlePaid ? 'TRUE' : ''
+      billingType: 'monthly',
+      billingDay: c.billingDay === '' || c.billingDay == null ? '' : toNum(c.billingDay)
     };
   }
 
@@ -386,19 +370,10 @@
 
   // Billing amount owed for a given billing cycle.
   function clientAmountDue(c) {
-    if (c.billingType === 'single') return toNum(c.pricePerSession);
-    if (c.billingType === 'bundle') return toNum(c.bundlePrice);
     return toNum(c.pricePerSession); // monthly package price, already monthly
   }
 
   function paymentId(client, dueDateISO) {
-    var bt = client.billingType || 'monthly';
-    if (bt === 'single') {
-      return 'pay::' + client.id + '::single::' + String(dueDateISO).replace(/-/g, '');
-    }
-    if (bt === 'bundle') {
-      return 'pay::' + client.id + '::bundle::' + (client.startDate || dueDateISO || 'NA');
-    }
     return 'pay::' + client.id + '::' + monthKey(dueDateISO);
   }
 
@@ -419,7 +394,7 @@
       id: id,
       clientId: client.id,
       clientName: client.name,
-      billingType: client.billingType || 'monthly',
+      billingType: 'monthly',
       dueDate: dueDateISO,
       amountDue: clientAmountDue(client),
       amountPaid: 0,
@@ -427,8 +402,8 @@
       paymentDate: '',
       method: '',
       notes: '',
-      bundleSize: toNum(client.bundleSize),
-      sessionsUsed: toNum(client.sessionsUsed)
+      bundleSize: 0,
+      sessionsUsed: 0
     };
   }
 
@@ -506,24 +481,8 @@
     var out = [];
     state.clients.forEach(function (c) {
       if (c.status === 'סיים טיפול') return;
-      var bt = c.billingType || 'monthly';
-      if (bt === 'monthly') {
-        var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
-        if (bd && bd === d) out.push(c);
-      } else if (bt === 'single') {
-        if (fmtDate(c.startDate) === dateISO) {
-          var pid = paymentId(c, dateISO);
-          var p = findPaymentById(pid);
-          // Keep showing after the due date until paid in full.
-          if (!p || p.status !== 'paid') out.push(c);
-        }
-      } else if (bt === 'bundle') {
-        var pid2 = paymentId(c, c.startDate || dateISO);
-        var p2 = findPaymentById(pid2);
-        var unpaid = !p2 || p2.status !== 'paid';
-        var exhausted = toNum(c.sessionsUsed) >= toNum(c.bundleSize);
-        if (unpaid && !exhausted) out.push(c);
-      }
+      var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
+      if (bd && bd === d) out.push(c);
     });
     return out;
   }
@@ -535,8 +494,7 @@
     var selected = state.billingDate;
 
     var due = clientsDueOn(selected).map(function (c) {
-      var dueISO = (c.billingType === 'bundle') ? (c.startDate || selected) : selected;
-      return { client: c, payment: paymentForClientOn(c, dueISO) };
+      return { client: c, payment: paymentForClientOn(c, selected) };
     });
 
     var totalDue = due.reduce(function (s, d) { return s + (d.payment.amountDue || 0); }, 0);
@@ -548,13 +506,7 @@
 
     renderBillingDueList(due, selected);
     renderBillingOpenList(selected);
-    renderBillingBundlesList();
     renderBillingMonthlySummary(selected);
-  }
-
-  function billingTypeChip(bt) {
-    var label = BILLING_TYPE_LABEL[bt] || bt;
-    return '<span class="bt-chip ' + escapeHtml(bt) + '">' + escapeHtml(label) + '</span>';
   }
 
   function renderBillingDueList(dueItems, selectedISO) {
@@ -565,8 +517,7 @@
       return;
     }
     dueItems.forEach(function (d) {
-      var dueISO = (d.client.billingType === 'bundle') ? (d.client.startDate || selectedISO) : selectedISO;
-      list.appendChild(buildBillingRow(d.client, d.payment, dueISO, false));
+      list.appendChild(buildBillingRow(d.client, d.payment, selectedISO, false));
     });
   }
 
@@ -576,9 +527,6 @@
     var open = state.payments.filter(function (p) {
       if (p.status === 'paid') return false;
       if (!p.dueDate) return false;
-      // Bundles always appear (no strict time-based due); non-bundle only
-      // when the due date is strictly before the selected date.
-      if (p.billingType === 'bundle') return true;
       return p.dueDate < selectedISO;
     }).sort(function (a, b) { return String(a.dueDate).localeCompare(String(b.dueDate)); });
     if (!open.length) {
@@ -587,53 +535,17 @@
     }
     open.forEach(function (p) {
       var client = state.clients.find(function (c) { return c.id === p.clientId; })
-        || { id: p.clientId, name: p.clientName, billingType: p.billingType,
-             pricePerSession: p.amountDue, bundlePrice: p.amountDue, bundleSize: p.bundleSize,
-             sessionsUsed: p.sessionsUsed, startDate: p.dueDate };
+        || { id: p.clientId, name: p.clientName, billingType: 'monthly',
+             pricePerSession: p.amountDue, startDate: p.dueDate };
       list.appendChild(buildBillingRow(client, p, p.dueDate, true));
     });
   }
 
-  function renderBillingBundlesList() {
-    var list = $('#billingBundlesList');
-    list.innerHTML = '';
-    var bundles = state.clients.filter(function (c) {
-      return c.billingType === 'bundle' && c.status !== 'סיים טיפול';
-    });
-    if (!bundles.length) {
-      list.innerHTML = '<div class="billing-empty">אין חבילות פעילות</div>';
-      return;
-    }
-    bundles.forEach(function (c) {
-      var used = toNum(c.sessionsUsed);
-      var size = toNum(c.bundleSize);
-      var remaining = Math.max(0, size - used);
-      var lowClass = (remaining <= 2) ? ' bundle-low' : '';
-      var pay = findPaymentById(paymentId(c, c.startDate || today()));
-      var statusHe = pay ? (PAYMENT_STATUSES.find(function (s) { return s.id === pay.status; }) || {}).he || pay.status : 'לא שולם';
-      var row = document.createElement('div');
-      row.className = 'billing-row' + lowClass;
-      row.innerHTML =
-        '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(c.name) + billingTypeChip('bundle') + '</span></div>' +
-        '<div><span class="p-label">מפגשים</span><span class="p-val">נותרו ' + remaining + ' מתוך ' + size + '</span></div>' +
-        '<div><span class="p-label">מחיר חבילה</span><span class="p-val">' + money(toNum(c.bundlePrice)) + '</span></div>' +
-        '<div><span class="p-label">סטטוס תשלום</span><span class="p-val">' + escapeHtml(statusHe) + '</span></div>' +
-        '<div class="edit-only"><span class="p-label">רישום מפגש</span>' +
-          '<button type="button" class="btn btn-primary bundle-plus" data-cid="' + escapeHtml(c.id) + '">+ מפגש</button></div>' +
-        '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money((pay ? (pay.amountDue - pay.amountPaid) : toNum(c.bundlePrice))) + '</span></div>';
-      var plus = row.querySelector('.bundle-plus');
-      if (plus) plus.addEventListener('click', function () { incrementBundle(c); });
-      list.appendChild(row);
-    });
-  }
-
   // Uniform billing row builder for the "due today" and "open balances"
-  // sections. Supports all three billing types; bundle rows additionally
-  // show sessions-used in the date column.
+  // sections.
   function buildBillingRow(client, payment, dueDateISO, isCarry) {
     var row = document.createElement('div');
     row.className = 'billing-row' + (isCarry ? ' carry' : '');
-    var bt = payment.billingType || client.billingType || 'monthly';
     var amount = payment.amountDue || clientAmountDue(client) || 0;
     var disabled = state.role === 'editor' ? '' : ' disabled';
 
@@ -641,23 +553,11 @@
       return '<option value="' + s.id + '"' + (payment.status === s.id ? ' selected' : '') + '>' + s.he + '</option>';
     }).join('');
 
-    var dateCellLabel, dateCellVal;
-    if (bt === 'bundle') {
-      dateCellLabel = 'מפגשים';
-      var used = toNum(client.sessionsUsed) || 0;
-      var size = toNum(client.bundleSize) || 0;
-      dateCellVal = 'נותרו ' + Math.max(0, size - used) + ' / ' + size;
-    } else if (isCarry) {
-      dateCellLabel = 'תאריך מקורי';
-      dateCellVal = fmtDate(dueDateISO);
-    } else {
-      dateCellLabel = 'סכום חודשי';
-      dateCellVal = money(amount);
-    }
+    var dateCellLabel = isCarry ? 'תאריך מקורי' : 'סכום חודשי';
+    var dateCellVal = isCarry ? fmtDate(dueDateISO) : money(amount);
 
     row.innerHTML =
-      '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(client.name || payment.clientName) + billingTypeChip(bt) + '</span></div>' +
-      '<div><span class="p-label">סוג גבייה</span><span class="p-val">' + escapeHtml(BILLING_TYPE_LABEL[bt] || bt) + '</span></div>' +
+      '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(client.name || payment.clientName) + '</span></div>' +
       '<div><span class="p-label">' + dateCellLabel + '</span><span class="p-val">' + escapeHtml(dateCellVal) + '</span></div>' +
       '<div><span class="p-label">סטטוס</span><select class="billing-status"' + disabled + '>' + statusSelect + '</select></div>' +
       '<div class="billing-paid-wrap ' + (payment.status === 'partial' ? '' : 'hidden') + '">' +
@@ -684,7 +584,7 @@
         id: payment.id,
         clientId: payment.clientId || client.id,
         clientName: payment.clientName || client.name || '',
-        billingType: bt,
+        billingType: 'monthly',
         dueDate: dueDateISO,
         amountDue: amount,
         amountPaid: ap,
@@ -692,8 +592,8 @@
         paymentDate: newStatus === 'paid' ? today() : (payment.paymentDate || ''),
         method: payment.method || '',
         notes: payment.notes || '',
-        bundleSize: toNum(client.bundleSize),
-        sessionsUsed: toNum(client.sessionsUsed)
+        bundleSize: 0,
+        sessionsUsed: 0
       };
     }
 
@@ -744,28 +644,6 @@
     $('#billMonthCollected').textContent = money(collected);
     $('#billMonthOutstanding').textContent = money(outstanding);
 
-    // By type
-    var byType = { monthly: 0, single: 0, bundle: 0 };
-    thisMonth.forEach(function (p) {
-      if (byType[p.billingType] === undefined) byType[p.billingType] = 0;
-      byType[p.billingType] += (p.amountPaid || 0);
-    });
-    var typeEl = $('#billMonthByType');
-    typeEl.innerHTML = '';
-    var typeNames = Object.keys(byType);
-    var max = typeNames.reduce(function (m, k) { return Math.max(m, byType[k]); }, 0);
-    typeNames.forEach(function (k) {
-      var v = byType[k];
-      var pct = max ? Math.round((v / max) * 100) : 0;
-      var r = document.createElement('div');
-      r.className = 'bar-row';
-      r.innerHTML =
-        '<div class="bar-label">' + escapeHtml(BILLING_TYPE_LABEL[k] || k) + '</div>' +
-        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="bar-value">' + money(v) + '</div>';
-      typeEl.appendChild(r);
-    });
-
     // By client
     var byClient = {};
     thisMonth.forEach(function (p) {
@@ -791,27 +669,6 @@
         ' · <span class="bd-out">יתרה ' + money(c.outstanding) + '</span></span>';
       clientEl.appendChild(row);
     });
-  }
-
-  function incrementBundle(client) {
-    if (state.role !== 'editor') return;
-    // Optimistic local bump; roll back on failure.
-    var prev = toNum(client.sessionsUsed) || 0;
-    client.sessionsUsed = prev + 1;
-    // Mirror into any local bundle payment row.
-    var pay = findPaymentById(paymentId(client, client.startDate || today()));
-    if (pay) pay.sessionsUsed = client.sessionsUsed;
-    render();
-    apiPostAction('incrementBundleUsage', { clientId: client.id })
-      .then(function (r) {
-        toast('נרשם מפגש. נותרו ' + (r.remaining != null ? r.remaining : '—'));
-      })
-      .catch(function (e) {
-        client.sessionsUsed = prev;
-        if (pay) pay.sessionsUsed = prev;
-        render();
-        toast('שגיאה: ' + e.message, true);
-      });
   }
 
   function renderBars(sel, obj) {
@@ -1028,41 +885,17 @@
       return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
     }).join('');
     var total = totalSessions(c.sessionsPerWeek, c.serviceType);
-    var bt = c.billingType || 'monthly';
-    var btChip = '<span class="bt-chip ' + escapeHtml(bt) + '">' + (BILLING_TYPE_LABEL[bt] || bt) + '</span>';
-    // Bundle-only: remaining-sessions chip.
-    var bundleChip = '';
-    if (bt === 'bundle') {
-      var remaining = Math.max(0, toNum(c.bundleSize) - toNum(c.sessionsUsed));
-      var warnCls = (remaining <= 2) ? ' warn' : '';
-      bundleChip = '<span class="chip bundle-remaining' + warnCls + '">'
-        + 'נותרו ' + remaining + ' / ' + toNum(c.bundleSize) + ' מפגשים</span>';
-    }
-
-    // Stats differ by billing type. Monthly keeps the legacy view.
-    var statsHtml;
-    if (bt === 'single') {
-      statsHtml =
-        '<span>סוג גבייה: <b>' + (BILLING_TYPE_LABEL[bt] || bt) + '</b></span>' +
-        '<span>מחיר: <b>' + money(c.pricePerSession) + '</b></span>';
-    } else if (bt === 'bundle') {
-      statsHtml =
-        '<span>סוג גבייה: <b>' + (BILLING_TYPE_LABEL[bt] || bt) + '</b></span>' +
-        '<span>מחיר חבילה: <b>' + money(c.bundlePrice) + '</b></span>' +
-        '<span>מפגשים: <b>' + toNum(c.sessionsUsed) + ' / ' + toNum(c.bundleSize) + '</b></span>';
-    } else {
-      statsHtml =
-        '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
-        '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
-        '<span>הכנסה: <b>' + money(rev) + '</b></span>';
-    }
+    var statsHtml =
+      '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
+      '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
+      '<span>הכנסה: <b>' + money(rev) + '</b></span>';
 
     card.innerHTML =
       '<div class="client-head">' +
-        '<div class="client-name">' + escapeHtml(c.name) + btChip + '</div>' +
+        '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
-      '<div class="client-meta">' + serviceChips + locationChip + (bundleChip || '') + '</div>' +
+      '<div class="client-meta">' + serviceChips + locationChip + '</div>' +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       '<div class="client-meta">' +
@@ -1073,16 +906,6 @@
 
     if (state.role === 'editor') {
       var actions = $('.client-actions', card);
-
-      if (c.status !== 'סיים טיפול' && bt === 'bundle'
-          && toNum(c.sessionsUsed) < toNum(c.bundleSize)) {
-        var plus = document.createElement('button');
-        plus.className = 'btn btn-primary';
-        plus.textContent = '+ מפגש';
-        plus.title = 'רישום מפגש בחבילה';
-        plus.onclick = function () { incrementBundle(c); };
-        actions.appendChild(plus);
-      }
 
       if (c.status !== 'סיים טיפול') {
         var statusSel = document.createElement('select');
@@ -1336,43 +1159,14 @@
     var group = $('[data-group="serviceType"]', f);
     populateServiceGroup(group, '');
     f.startDate.value = today();
-    if (f.billingType) f.billingType.value = 'monthly';
     if (f.billingDay) f.billingDay.value = '';
-    if (f.pricePerSession) f.pricePerSession.value = 400;
-    if (f.singlePrice) f.singlePrice.value = 400;
-    if (f.bundleSize) f.bundleSize.value = 10;
-    if (f.bundlePrice) f.bundlePrice.value = '';
-    if (f.bundlePaid) f.bundlePaid.checked = false;
+    if (f.monthlyAmount) f.monthlyAmount.value = '';
     renderSessionsHost($('[data-host="directSessions"]', f), '', {});
-    updateDirectBillingTypeVisibility();
-    updateDirectMonthlyHint();
     updateLocationVisibilityForDirect(f);
     m.hidden = false;
   }
   function closeDirectClientModal() { $('#directClientModal').hidden = true; }
 
-  function updateDirectBillingTypeVisibility() {
-    var f = $('#directClientForm');
-    if (!f) return;
-    var bt = f.billingType.value || 'monthly';
-    $$('.direct-bt-fields', f).forEach(function (el) {
-      el.hidden = (el.dataset.bt !== bt);
-    });
-  }
-  function updateDirectMonthlyHint() {
-    var f = $('#directClientForm');
-    if (!f) return;
-    var hint = $('#directMonthlyHint');
-    if (!hint) return;
-    if (f.billingType.value !== 'monthly') { hint.textContent = ''; return; }
-    var host = $('[data-host="directSessions"]', f);
-    var breakdown = readSessionsHost(host);
-    var total = Object.keys(breakdown).reduce(function (s, k) { return s + wholeSessions(breakdown[k]); }, 0);
-    var pps = toNum(f.pricePerSession.value);
-    if (!total || !pps) { hint.textContent = ''; return; }
-    var monthly = Math.round(total * pps * AVG_WEEKS_PER_MONTH);
-    hint.textContent = 'סכום חודשי מחושב: ' + money(monthly) + ' (' + total + ' מפגשים × ' + money(pps) + ' × 4.3)';
-  }
   function updateLocationVisibilityForDirect(form) {
     var group = $('[data-group="serviceType"]', form);
     var wrap = $('#directLocationWrap');
@@ -1542,9 +1336,8 @@
       });
     });
 
-    // Direct-add client: billing type + inputs drive dynamic fields and
-    // the monthly-hint line. Service-group changes also re-render the
-    // per-service sessions host and the location-visibility rule.
+    // Direct-add client: service-group changes re-render the per-service
+    // sessions host and the location-visibility rule.
     (function wireDirectClient() {
       var f = $('#directClientForm');
       if (!f) return;
@@ -1556,23 +1349,8 @@
           var current = readSessionsHost(host);
           renderSessionsHost(host, formatServices(picked), current);
           updateLocationVisibilityForDirect(f);
-          updateDirectMonthlyHint();
         });
       }
-      var bt = $('#directBillingType');
-      if (bt) bt.addEventListener('change', function () {
-        updateDirectBillingTypeVisibility();
-        updateDirectMonthlyHint();
-      });
-      ['pricePerSession'].forEach(function (n) {
-        if (f[n]) f[n].addEventListener('input', updateDirectMonthlyHint);
-      });
-      f.addEventListener('input', function (ev) {
-        // per-service sessions inputs bubble up through the form; re-hint.
-        if (ev.target && ev.target.dataset && ev.target.dataset.service) {
-          updateDirectMonthlyHint();
-        }
-      });
     })();
 
     // Direct-add client: form submit
@@ -1589,107 +1367,46 @@
         var services = readServiceGroup(group);
         if (!services.length) { toast('יש לבחור לפחות סוג טיפול אחד', true); submit.disabled = false; return; }
         var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
-        var billingType = fd.get('billingType') || 'monthly';
         var name = (fd.get('name') || '').trim();
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
         var startDate = fd.get('startDate') || today();
+        var monthlyAmount = toNum(fd.get('monthlyAmount'));
+        if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
 
+        var host = $('[data-host="directSessions"]', form);
+        var breakdown = readSessionsHost(host);
+        var clean = {};
+        services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
+
+        var bd = fd.get('billingDay');
         var client = {
           id: uid(),
           name: name,
           phone: (fd.get('phone') || '').trim(),
           serviceType: formatServices(services),
           location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
-          sessionsPerWeek: {},
-          pricePerSession: 0,
+          sessionsPerWeek: clean,
+          pricePerSession: monthlyAmount,
           startDate: startDate,
           status: 'פעיל',
           exitDate: '',
           fromLead: '',
           source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
-          billingType: billingType,
-          billingDay: '',
-          bundleSize: 0,
-          bundlePrice: 0,
-          sessionsUsed: 0,
-          bundlePaid: false
+          billingType: 'monthly',
+          billingDay: bd ? toNum(bd) : dayOfMonth(startDate) || ''
         };
-
-        if (billingType === 'monthly') {
-          var host = $('[data-host="directSessions"]', form);
-          var breakdown = readSessionsHost(host);
-          var clean = {};
-          services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
-          client.sessionsPerWeek = clean;
-          var total = Object.keys(clean).reduce(function (s, k) { return s + clean[k]; }, 0);
-          var pps = toNum(fd.get('pricePerSession'));
-          if (!total || !pps) { toast('יש להזין מפגשים ומחיר למפגש', true); submit.disabled = false; return; }
-          // Store the computed monthly amount in pricePerSession so the
-          // existing dashboard revenue logic (which reads pricePerSession
-          // as the monthly package price) stays correct.
-          client.pricePerSession = Math.round(total * pps * AVG_WEEKS_PER_MONTH);
-          var bd = fd.get('billingDay');
-          client.billingDay = bd ? toNum(bd) : dayOfMonth(startDate) || '';
-        } else if (billingType === 'single') {
-          var single = toNum(fd.get('singlePrice'));
-          if (!single) { toast('יש להזין מחיר', true); submit.disabled = false; return; }
-          client.pricePerSession = single;
-        } else if (billingType === 'bundle') {
-          var bsize = toNum(fd.get('bundleSize'));
-          var bprice = toNum(fd.get('bundlePrice'));
-          if (!bsize || !bprice) { toast('יש להזין גודל ומחיר חבילה', true); submit.disabled = false; return; }
-          client.bundleSize = bsize;
-          client.bundlePrice = bprice;
-          client.bundlePaid = !!fd.get('bundlePaid');
-        }
 
         state.clients.push(client);
 
-        // Build + attach the one payment row for single/bundle types so
-        // the bill shows up in the Billing tab immediately.
-        var pendingPayment = null;
-        if (billingType === 'single') {
-          pendingPayment = {
-            id: paymentId(client, startDate),
-            clientId: client.id, clientName: client.name,
-            billingType: 'single', dueDate: startDate,
-            amountDue: client.pricePerSession, amountPaid: 0,
-            status: 'unpaid', paymentDate: '', method: '', notes: '',
-            bundleSize: 0, sessionsUsed: 0
-          };
-        } else if (billingType === 'bundle') {
-          pendingPayment = {
-            id: paymentId(client, startDate),
-            clientId: client.id, clientName: client.name,
-            billingType: 'bundle', dueDate: startDate,
-            amountDue: client.bundlePrice,
-            amountPaid: client.bundlePaid ? client.bundlePrice : 0,
-            status: client.bundlePaid ? 'paid' : 'unpaid',
-            paymentDate: client.bundlePaid ? today() : '',
-            method: '', notes: '',
-            bundleSize: client.bundleSize, sessionsUsed: 0
-          };
-        }
-
         persist()
-          .then(function () {
-            if (pendingPayment) {
-              state.payments.push(pendingPayment);
-              return persistPayment(pendingPayment);
-            }
-          })
           .then(function () {
             toast('המטופל נוסף');
             closeDirectClientModal();
             render();
           })
           .catch(function (err) {
-            // Roll back local mutations on failure so the UI matches Sheets.
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            if (pendingPayment) {
-              state.payments = state.payments.filter(function (p) { return p.id !== pendingPayment.id; });
-            }
             render();
             toast('שגיאה: ' + err.message, true);
           })

@@ -102,18 +102,11 @@
         </div>
 
         <div class="panel">
-          <div class="panel-title">חבילות פעילות</div>
-          <div id="billingBundlesList" class="billing-list"></div>
-        </div>
-
-        <div class="panel">
           <div class="panel-title">סיכום חודשי <span id="billMonthLabel" class="panel-sub"></span></div>
           <div class="billing-summary-row">
             <div class="kpi"><div class="kpi-label">נגבה החודש</div><div id="billMonthCollected" class="kpi-value">₪0</div></div>
             <div class="kpi"><div class="kpi-label">יתרה פתוחה</div><div id="billMonthOutstanding" class="kpi-value">₪0</div></div>
           </div>
-          <div class="panel-subtitle">לפי סוג גבייה</div>
-          <div id="billMonthByType" class="bars"></div>
           <div class="panel-subtitle">לפי מטופל</div>
           <div id="billMonthByClient" class="billing-breakdown"></div>
         </div>
@@ -211,37 +204,9 @@
             </select>
           </label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
-          <label class="wide">סוג גבייה
-            <select name="billingType" id="directBillingType" required>
-              <option value="monthly">חודשי</option>
-              <option value="single">חד-פעמי</option>
-              <option value="bundle">חבילה</option>
-            </select>
-          </label>
-
-          <!-- Monthly-only fields -->
-          <div class="wide direct-bt-fields" data-bt="monthly">
-            <div class="wide sessions-host" data-host="directSessions"></div>
-            <label class="wide">מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" value="400" /></label>
-            <label class="wide">יום גבייה חודשי (1-31, ברירת מחדל: יום הכניסה)<input name="billingDay" type="number" min="1" max="31" /></label>
-            <div class="wide direct-monthly-hint muted-hint" id="directMonthlyHint"></div>
-          </div>
-
-          <!-- Single-only fields -->
-          <div class="wide direct-bt-fields" data-bt="single" hidden>
-            <label class="wide">מחיר (₪)<input name="singlePrice" type="number" min="0" step="1" value="400" /></label>
-          </div>
-
-          <!-- Bundle-only fields -->
-          <div class="wide direct-bt-fields" data-bt="bundle" hidden>
-            <label>מספר מפגשים בחבילה<input name="bundleSize" type="number" min="1" step="1" value="10" /></label>
-            <label>מחיר החבילה (₪)<input name="bundlePrice" type="number" min="0" step="1" /></label>
-            <label class="wide checkbox-row">
-              <input type="checkbox" name="bundlePaid" />
-              <span>החבילה כבר שולמה</span>
-            </label>
-          </div>
-
+          <div class="wide sessions-host" data-host="directSessions"></div>
+          <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
+          <label class="wide">יום גבייה חודשי (1-31, ברירת מחדל: יום הכניסה)<input name="billingDay" type="number" min="1" max="31" /></label>
           <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
 
           <div class="form-actions">

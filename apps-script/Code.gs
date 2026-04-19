@@ -155,68 +155,6 @@ function _upsertPayment(payment) {
   }
 }
 
-/* Bump sessionsUsed for the client's active bundle. Updates both the
- * Clients row (so the client list shows the new count immediately) and
- * the Payments row for the bundle (so billing reflects used/remaining).
- * Identifies the bundle by clientId only — one active bundle per client. */
-function _incrementBundleUsage(params) {
-  var clientId = params && params.clientId;
-  if (!clientId) return { ok: false, error: 'missing_clientId' };
-  var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
-  try {
-    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var lastRow = clientsSh.getLastRow();
-    if (lastRow < 2) return { ok: false, error: 'client_not_found' };
-    var values = clientsSh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
-    var idIdx = CLIENTS_HEADERS.indexOf('id');
-    var usedIdx = CLIENTS_HEADERS.indexOf('sessionsUsed');
-    var sizeIdx = CLIENTS_HEADERS.indexOf('bundleSize');
-    var typeIdx = CLIENTS_HEADERS.indexOf('billingType');
-    var clientName = '';
-    var newUsed = null;
-    var bundleSize = null;
-    for (var i = 0; i < values.length; i++) {
-      if (String(values[i][idIdx]) === String(clientId)) {
-        if (String(values[i][typeIdx]) !== 'bundle') {
-          return { ok: false, error: 'not_a_bundle' };
-        }
-        var cur = Number(values[i][usedIdx]) || 0;
-        newUsed = cur + 1;
-        bundleSize = Number(values[i][sizeIdx]) || 0;
-        clientName = String(values[i][CLIENTS_HEADERS.indexOf('name')] || '');
-        clientsSh.getRange(i + 2, usedIdx + 1).setValue(newUsed);
-        break;
-      }
-    }
-    if (newUsed === null) return { ok: false, error: 'client_not_found' };
-
-    // Mirror the new count into the bundle's Payments row (best-effort).
-    var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-    var pRow = paymentsSh.getLastRow();
-    if (pRow > 1) {
-      var pVals = paymentsSh.getRange(2, 1, pRow - 1, PAYMENTS_HEADERS.length).getValues();
-      var pClientIdx = PAYMENTS_HEADERS.indexOf('clientId');
-      var pTypeIdx = PAYMENTS_HEADERS.indexOf('billingType');
-      var pUsedIdx = PAYMENTS_HEADERS.indexOf('sessionsUsed');
-      for (var j = 0; j < pVals.length; j++) {
-        if (String(pVals[j][pClientIdx]) === String(clientId)
-            && String(pVals[j][pTypeIdx]) === 'bundle') {
-          paymentsSh.getRange(j + 2, pUsedIdx + 1).setValue(newUsed);
-          break;
-        }
-      }
-    }
-    return {
-      ok: true, clientId: clientId, clientName: clientName,
-      sessionsUsed: newUsed, bundleSize: bundleSize,
-      remaining: Math.max(0, bundleSize - newUsed)
-    };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
 function _json(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -262,9 +200,6 @@ function doPost(e) {
     if (action === 'getPayments') return _json(_getPayments());
     if (action === 'savePayment' || action === 'updatePayment') {
       return _json(_upsertPayment(payload.payment));
-    }
-    if (action === 'incrementBundleUsage') {
-      return _json(_incrementBundleUsage(payload));
     }
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
