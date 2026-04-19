@@ -44,17 +44,21 @@ function requireSheetsUrl(res) {
 app.get('/api/sheets', async (req, res) => {
   if (!requireSheetsUrl(res)) return;
   try {
-    const url = SHEETS_URL + (SHEETS_URL.includes('?') ? '&' : '?') + 'action=getData';
+    const action = (req.query && req.query.action) || 'getData';
+    const url = SHEETS_URL + (SHEETS_URL.includes('?') ? '&' : '?') + 'action=' + encodeURIComponent(action);
     const r = await fetch(url, { redirect: 'follow' });
     const text = await r.text();
     let data;
     try { data = JSON.parse(text); }
     catch (_) { throw new Error('Non-JSON from Apps Script: ' + text.slice(0, 200)); }
-    lastLoad.at = new Date().toISOString();
-    lastLoad.status = r.status;
-    lastLoad.leads = Array.isArray(data.leads) ? data.leads.length : 0;
-    lastLoad.clients = Array.isArray(data.clients) ? data.clients.length : 0;
-    lastLoad.error = data.ok === false ? (data.error || 'unknown') : null;
+    // Track load metrics only on the bulk read so they stay meaningful.
+    if (action === 'getData') {
+      lastLoad.at = new Date().toISOString();
+      lastLoad.status = r.status;
+      lastLoad.leads = Array.isArray(data.leads) ? data.leads.length : 0;
+      lastLoad.clients = Array.isArray(data.clients) ? data.clients.length : 0;
+      lastLoad.error = data.ok === false ? (data.error || 'unknown') : null;
+    }
     res.status(r.status).json(data);
   } catch (err) {
     lastLoad.at = new Date().toISOString();
@@ -67,11 +71,14 @@ app.get('/api/sheets', async (req, res) => {
 app.post('/api/sheets', async (req, res) => {
   if (!requireSheetsUrl(res)) return;
   try {
-    const body = {
-      action: 'saveAll',
-      leads: Array.isArray(req.body?.leads) ? req.body.leads : [],
-      clients: Array.isArray(req.body?.clients) ? req.body.clients : []
-    };
+    // Pass through whatever action the client asked for. saveAll is the
+    // legacy default (back when the client couldn't pick an action) so
+    // requests without an explicit action keep working.
+    const body = Object.assign({ action: 'saveAll' }, req.body || {});
+    if (body.action === 'saveAll') {
+      body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
+      body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
+    }
     const r = await fetch(SHEETS_URL, {
       method: 'POST',
       redirect: 'follow',

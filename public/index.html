@@ -26,6 +26,7 @@
         <button class="tab active" data-view="dashboard">דשבורד</button>
         <button class="tab" data-view="leads">לידים</button>
         <button class="tab" data-view="clients">מטופלים</button>
+        <button class="tab" data-view="billing">גבייה</button>
       </nav>
       <div class="topbar-right">
         <span id="roleBadge" class="role-badge">צופה</span>
@@ -71,9 +72,51 @@
       <section id="view-clients" class="view">
         <div class="toolbar">
           <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <button id="addClientBtn" class="btn btn-primary edit-only">+ הוסף מטופל ישירות</button>
           <div id="clientTabs" class="client-tabs"></div>
         </div>
         <div id="clientsList" class="clients-list"></div>
+      </section>
+
+      <!-- Billing -->
+      <section id="view-billing" class="view">
+        <div class="toolbar">
+          <label class="billing-date-label">תאריך
+            <input id="billingDate" type="date" />
+          </label>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטופלים לתשלום בתאריך</div><div id="billDueCount" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">סך לגבייה</div><div id="billDueTotal" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">נגבה</div><div id="billDueCollected" class="kpi-value">₪0</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">לגבייה בתאריך הנבחר</div>
+          <div id="billingDueList" class="billing-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">יתרות פתוחות מתאריכים קודמים</div>
+          <div id="billingOpenList" class="billing-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">חבילות פעילות</div>
+          <div id="billingBundlesList" class="billing-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">סיכום חודשי <span id="billMonthLabel" class="panel-sub"></span></div>
+          <div class="billing-summary-row">
+            <div class="kpi"><div class="kpi-label">נגבה החודש</div><div id="billMonthCollected" class="kpi-value">₪0</div></div>
+            <div class="kpi"><div class="kpi-label">יתרה פתוחה</div><div id="billMonthOutstanding" class="kpi-value">₪0</div></div>
+          </div>
+          <div class="panel-subtitle">לפי סוג גבייה</div>
+          <div id="billMonthByType" class="bars"></div>
+          <div class="panel-subtitle">לפי מטופל</div>
+          <div id="billMonthByClient" class="billing-breakdown"></div>
+        </div>
       </section>
     </main>
 
@@ -144,6 +187,66 @@
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Direct-add client modal (admin bypass of the Lead → Client flow) -->
+    <div id="directClientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">הוספת מטופל ישירות</div>
+        <form id="directClientForm" class="form-grid">
+          <label>שם מטופל<input name="name" required /></label>
+          <label>טלפון<input name="phone" /></label>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="directClientForm"></div>
+          </label>
+          <label id="directLocationWrap">סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+            </select>
+          </label>
+          <label>תאריך כניסה<input name="startDate" type="date" required /></label>
+          <label class="wide">סוג גבייה
+            <select name="billingType" id="directBillingType" required>
+              <option value="monthly">חודשי</option>
+              <option value="single">חד-פעמי</option>
+              <option value="bundle">חבילה</option>
+            </select>
+          </label>
+
+          <!-- Monthly-only fields -->
+          <div class="wide direct-bt-fields" data-bt="monthly">
+            <div class="wide sessions-host" data-host="directSessions"></div>
+            <label class="wide">מחיר למפגש (₪)<input name="pricePerSession" type="number" min="0" step="1" value="400" /></label>
+            <label class="wide">יום גבייה חודשי (1-31, ברירת מחדל: יום הכניסה)<input name="billingDay" type="number" min="1" max="31" /></label>
+            <div class="wide direct-monthly-hint muted-hint" id="directMonthlyHint"></div>
+          </div>
+
+          <!-- Single-only fields -->
+          <div class="wide direct-bt-fields" data-bt="single" hidden>
+            <label class="wide">מחיר (₪)<input name="singlePrice" type="number" min="0" step="1" value="400" /></label>
+          </div>
+
+          <!-- Bundle-only fields -->
+          <div class="wide direct-bt-fields" data-bt="bundle" hidden>
+            <label>מספר מפגשים בחבילה<input name="bundleSize" type="number" min="1" step="1" value="10" /></label>
+            <label>מחיר החבילה (₪)<input name="bundlePrice" type="number" min="0" step="1" /></label>
+            <label class="wide checkbox-row">
+              <input type="checkbox" name="bundlePaid" />
+              <span>החבילה כבר שולמה</span>
+            </label>
+          </div>
+
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="directClientSubmit">הוסף מטופל</button>
           </div>
         </form>
       </div>
