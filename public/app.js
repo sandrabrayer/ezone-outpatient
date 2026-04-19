@@ -475,14 +475,29 @@
     });
   }
 
+  // Last day of the calendar month that dateISO belongs to. Used so
+  // clients whose billingDay exceeds the current month's length roll
+  // onto that month's last day (e.g. bd=31 → Feb 28/29, Apr 30).
+  function lastDayOfMonth(dateISO) {
+    var parts = String(dateISO).slice(0, 10).split('-');
+    if (parts.length < 3) return null;
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return null;
+    return new Date(y, m, 0).getDate();
+  }
+
   // ---- Billing
   function clientsDueOn(dateISO) {
     var d = dayOfMonth(dateISO);
+    var last = lastDayOfMonth(dateISO);
     var out = [];
     state.clients.forEach(function (c) {
       if (c.status === 'סיים טיפול') return;
       var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
-      if (bd && bd === d) out.push(c);
+      if (!bd) return;
+      var effective = (last && bd > last) ? last : bd;
+      if (effective === d) out.push(c);
     });
     return out;
   }
@@ -1379,6 +1394,7 @@
         services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
 
         var bd = fd.get('billingDay');
+        var bdDay = bd ? dayOfMonth(bd) : null;
         var client = {
           id: uid(),
           name: name,
@@ -1394,7 +1410,7 @@
           source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
           billingType: 'monthly',
-          billingDay: bd ? toNum(bd) : dayOfMonth(startDate) || ''
+          billingDay: bdDay || dayOfMonth(startDate) || ''
         };
 
         state.clients.push(client);
