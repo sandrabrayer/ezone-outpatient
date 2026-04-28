@@ -377,3 +377,82 @@ body.viewer .edit-only { display: none !important; }
 .muted-hint { color: var(--muted); font-size: 12px; }
 .checkbox-row { flex-direction: row !important; align-items: center; gap: 8px; }
 .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--green); }
+/* ===== ADDITIONS — append to the bottom of style.css ===== */
+
+/* Payment status chips */
+.chip-paid    { background: #d4edda; color: #155724; }
+.chip-partial { background: #fff3cd; color: #856404; }
+.chip-unpaid  { background: #f8d7da; color: #721c24; }
+.chip-next    { background: #cce5ff; color: #004085; font-weight: 600; }
+
+.next-bill { color: #004085; font-weight: 600; }
+
+.form-section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1a2e4a;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+
+.retention-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #9fcfcf;
+  padding: 18px 4px 8px;
+  border-bottom: 2px solid #2a3f5a;
+  margin-bottom: 12px;
+  letter-spacing: 0.03em;
+}
+
+.ret-card {
+  background: #1a2e4a;
+  border: 1px solid #2a3f5a;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 10px;
+}
+
+.ret-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ret-name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.ret-tag {
+  font-size: 0.72rem;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+.ret-tag.not-rel  { background: #f8d7da; color: #721c24; }
+.ret-tag.finished { background: #d4edda; color: #155724; }
+
+.ret-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ret-line {
+  display: flex;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: #c5d5e8;
+}
+
+.ret-label {
+  color: #7a9bbf;
+  min-width: 100px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
