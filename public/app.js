@@ -34,14 +34,12 @@
   var DAY_CENTER = 'מרכז יום';
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
 
-  // forward stages
   var STAGES = [
     { id: 'new',        he: 'ליד חדש' },
     { id: 'intro',      he: 'שיחת היכרות' },
     { id: 'agreement',  he: 'מתחיל טיפול' },
     { id: 'active',     he: 'מטופל פעיל' }
   ];
-  // legacy Hebrew labels that should map back to a stage id
   var STAGE_ALIASES = { 'הסכם נחתם': 'agreement' };
   var NOT_RELEVANT_HE = 'לא רלוונטי';
 
@@ -57,25 +55,15 @@
     return STAGES[0].he;
   }
 
-  // serviceType serialization: multi-value stored as "A, B" in one cell
   function parseServices(v) {
     if (!v) return [];
     if (Array.isArray(v)) return v.map(function (s) { return String(s).trim(); }).filter(Boolean);
     return String(v).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   }
-  function formatServices(arr) {
-    return (arr || []).join(', ');
-  }
-  function hasDayCenter(arr) {
-    return parseServices(arr).indexOf(DAY_CENTER) !== -1;
-  }
-  function wholeSessions(v) {
-    var n = Math.round(toNum(v));
-    return n < 0 ? 0 : n;
-  }
+  function formatServices(arr) { return (arr || []).join(', '); }
+  function hasDayCenter(arr) { return parseServices(arr).indexOf(DAY_CENTER) !== -1; }
+  function wholeSessions(v) { var n = Math.round(toNum(v)); return n < 0 ? 0 : n; }
 
-  // sessionsPerWeek is stored as JSON object { "פרטני": 3, "קבוצה": 1 }
-  // but legacy rows may hold a plain number. parse handles both.
   function parseSessionsBreakdown(v, services) {
     var out = {};
     if (!v && v !== 0) return out;
@@ -91,16 +79,13 @@
         return out;
       } catch (_) {}
     }
-    // legacy numeric — bucket under the single service if there is exactly one
     var list = parseServices(services);
     var n = wholeSessions(s);
     if (list.length === 1) { out[list[0]] = n; return out; }
     if (n) out._total = n;
     return out;
   }
-  function formatSessionsBreakdown(b) {
-    return JSON.stringify(b || {});
-  }
+  function formatSessionsBreakdown(b) { return JSON.stringify(b || {}); }
   function totalSessions(v, services) {
     var b = parseSessionsBreakdown(v, services);
     return Object.keys(b).reduce(function (s, k) { return s + wholeSessions(b[k]); }, 0);
@@ -108,11 +93,12 @@
 
   // --- state -------------------------------------------------------------
   var state = {
-    role: 'viewer',          // 'viewer' | 'editor'
+    role: 'viewer',
     view: 'dashboard',
-    leads: [],               // [{id,name,phone,serviceType,location,note,stage (id), sessionsPerWeek, pricePerSession, startDate, created}]
-    clients: [],             // [{id,name,serviceType,location,sessionsPerWeek,pricePerSession,startDate,status,exitDate,fromLead,billingType,billingDay,source,notes}]
-    payments: [],            // [{id,clientId,clientName,billingType,dueDate,amountDue,amountPaid,status,paymentDate,method,notes,bundleSize,sessionsUsed}]
+    leads: [],
+    clients: [],
+    payments: [],
+    retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
     clientTab: 'all',
@@ -148,10 +134,18 @@
   function fmtDate(v) {
     if (!v) return '';
     var s = String(v);
-    // strip time portion if present: "2024-05-11T21:00:00.000Z" → "2024-05-11"
     if (s.indexOf('T') !== -1) s = s.split('T')[0];
     return s;
   }
+  // Display date as DD/MM/YYYY
+  function displayDate(v) {
+    var s = fmtDate(v);
+    if (!s) return '';
+    var parts = s.split('-');
+    if (parts.length !== 3) return s;
+    return parts[2] + '/' + parts[1] + '/' + parts[0];
+  }
+  // Format money with comma + ₪ sign — consistent format everywhere
   function money(n) {
     if (!isFinite(n)) return '₪0';
     return '₪' + Math.round(n).toLocaleString('he-IL');
@@ -161,10 +155,7 @@
     var n = Number(v);
     return isFinite(n) ? n : 0;
   }
-  function monthlyRevenue(c) {
-    // pricePerSession now stores the monthly package price — already monthly
-    return toNum(c.pricePerSession);
-  }
+  function monthlyRevenue(c) { return toNum(c.pricePerSession); }
   function toast(msg, isError) {
     var t = $('#toast');
     t.textContent = msg;
@@ -173,14 +164,22 @@
     clearTimeout(toast._tid);
     toast._tid = setTimeout(function () { t.hidden = true; }, 2600);
   }
+  // Add 30 days to an ISO date string, return ISO string
+  function addDays(isoDate, days) {
+    if (!isoDate) return '';
+    var d = new Date(isoDate);
+    if (isNaN(d)) return '';
+    d.setDate(d.getDate() + days);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
 
   // --- API ---------------------------------------------------------------
   async function apiLoad() {
     var r = await fetch('/api/sheets', { cache: 'no-store' });
     var data = await r.json();
-    if (!r.ok || data.ok === false) {
-      throw new Error(data.error || ('HTTP ' + r.status));
-    }
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiSave(payload) {
@@ -191,13 +190,10 @@
     });
     var data = {};
     try { data = await r.json(); } catch (_) {}
-    if (!r.ok || data.ok === false) {
-      throw new Error(data.error || ('HTTP ' + r.status));
-    }
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
 
-  // Map rows from Sheets (Hebrew stage strings, maybe Date-y fields) → internal.
   function normalizeLeadFromSheet(row) {
     var services = formatServices(parseServices(row.serviceType));
     return {
@@ -212,13 +208,15 @@
       pricePerSession: row.pricePerSession === '' ? '' : toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       created: fmtDate(row.created) || today(),
-      introDateTime: row.introDateTime || ''
+      introDateTime: row.introDateTime || '',
+      // billing info when lead becomes active
+      paymentStatus: row.paymentStatus || '',   // 'paid' | 'partial' | 'unpaid'
+      paymentDate: fmtDate(row.paymentDate),
+      nextBillingDate: fmtDate(row.nextBillingDate)
     };
   }
   function normalizeClientFromSheet(row) {
     var services = formatServices(parseServices(row.serviceType));
-    // All clients are now monthly. Legacy rows with other billingType
-    // values (or blanks) are coerced to 'monthly'.
     return {
       id: row.id || uid(),
       name: row.name || '',
@@ -234,11 +232,14 @@
       source: row.source || 'lead',
       notes: row.notes || '',
       billingType: 'monthly',
-      billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay)
+      billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay),
+      // payment info
+      paymentStatus: row.paymentStatus || '',
+      paymentDate: fmtDate(row.paymentDate),
+      nextBillingDate: fmtDate(row.nextBillingDate)
     };
   }
 
-  // Map internal → rows for Sheets (Hebrew stage strings).
   function leadForSheet(l) {
     var services = formatServices(parseServices(l.serviceType));
     var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
@@ -254,7 +255,10 @@
       pricePerSession: l.pricePerSession === '' ? '' : toNum(l.pricePerSession),
       startDate: l.startDate || '',
       created: l.created || today(),
-      introDateTime: l.introDateTime || ''
+      introDateTime: l.introDateTime || '',
+      paymentStatus: l.paymentStatus || '',
+      paymentDate: l.paymentDate || '',
+      nextBillingDate: l.nextBillingDate || ''
     };
   }
   function clientForSheet(c) {
@@ -275,7 +279,10 @@
       source: c.source || 'lead',
       notes: c.notes || '',
       billingType: 'monthly',
-      billingDay: c.billingDay === '' || c.billingDay == null ? '' : toNum(c.billingDay)
+      billingDay: c.billingDay === '' || c.billingDay == null ? '' : toNum(c.billingDay),
+      paymentStatus: c.paymentStatus || '',
+      paymentDate: c.paymentDate || '',
+      nextBillingDate: c.nextBillingDate || ''
     };
   }
 
@@ -291,13 +298,9 @@
   async function apiGetPayments() {
     var r = await fetch('/api/sheets?action=getPayments', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || data.ok === false) {
-      throw new Error(data.error || ('HTTP ' + r.status));
-    }
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
-  // Non-saveAll POSTs go through here so we don't accidentally wipe the
-  // Leads / Clients sheets via a payload without those arrays.
   async function apiPostAction(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
     var r = await fetch('/api/sheets', {
@@ -307,23 +310,19 @@
     });
     var data = {};
     try { data = await r.json(); } catch (_) {}
-    if (!r.ok || data.ok === false) {
-      throw new Error(data.error || ('HTTP ' + r.status));
-    }
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
 
   function normalizePaymentFromSheet(row) {
-    var amountDue  = toNum(row.amountDue);
-    var amountPaid = toNum(row.amountPaid);
     return {
       id: row.id || '',
       clientId: row.clientId || '',
       clientName: row.clientName || '',
       billingType: (row.billingType || 'monthly').toString().toLowerCase(),
       dueDate: fmtDate(row.dueDate),
-      amountDue: amountDue,
-      amountPaid: amountPaid,
+      amountDue: toNum(row.amountDue),
+      amountPaid: toNum(row.amountPaid),
       status: normalizePaymentStatus(row.status),
       paymentDate: fmtDate(row.paymentDate),
       method: row.method || '',
@@ -367,55 +366,32 @@
     if (isNaN(d)) return iso || '';
     return d.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
   }
-
-  // Billing amount owed for a given billing cycle.
-  function clientAmountDue(c) {
-    return toNum(c.pricePerSession); // monthly package price, already monthly
-  }
-
-  function paymentId(client, dueDateISO) {
-    return 'pay::' + client.id + '::' + monthKey(dueDateISO);
-  }
-
+  function clientAmountDue(c) { return toNum(c.pricePerSession); }
+  function paymentId(client, dueDateISO) { return 'pay::' + client.id + '::' + monthKey(dueDateISO); }
   function findPaymentById(id) {
     for (var i = 0; i < state.payments.length; i++) {
       if (state.payments[i].id === id) return state.payments[i];
     }
     return null;
   }
-
-  // Synthesize an in-memory "unpaid" placeholder for a given client + due
-  // date. Added to state.payments only when saved.
   function paymentForClientOn(client, dueDateISO) {
     var id = paymentId(client, dueDateISO);
     var existing = findPaymentById(id);
     if (existing) return existing;
     return {
-      id: id,
-      clientId: client.id,
-      clientName: client.name,
-      billingType: 'monthly',
-      dueDate: dueDateISO,
-      amountDue: clientAmountDue(client),
-      amountPaid: 0,
-      status: 'unpaid',
-      paymentDate: '',
-      method: '',
-      notes: '',
-      bundleSize: 0,
-      sessionsUsed: 0
+      id: id, clientId: client.id, clientName: client.name,
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: clientAmountDue(client), amountPaid: 0,
+      status: 'unpaid', paymentDate: '', method: '', notes: '',
+      bundleSize: 0, sessionsUsed: 0
     };
   }
 
   // --- rendering ---------------------------------------------------------
   function setView(view) {
     state.view = view;
-    $$('.tab').forEach(function (t) {
-      t.classList.toggle('active', t.dataset.view === view);
-    });
-    $$('.view').forEach(function (v) {
-      v.classList.toggle('active', v.id === 'view-' + view);
-    });
+    $$('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === view); });
+    $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
     render();
   }
 
@@ -424,24 +400,20 @@
     else if (state.view === 'leads') renderLeads();
     else if (state.view === 'clients') renderClients();
     else if (state.view === 'billing') renderBilling();
+    else if (state.view === 'retention') renderRetention();
   }
 
   // ---- Dashboard
   function renderDashboard() {
     var activeClients = state.clients.filter(function (c) { return c.status !== 'סיים טיפול'; });
     $('#kpiActive').textContent = activeClients.filter(function(c){return c.status==='פעיל';}).length;
-
-    var totalRev = activeClients
-      .filter(function (c) { return c.status === 'פעיל'; })
+    var totalRev = activeClients.filter(function (c) { return c.status === 'פעיל'; })
       .reduce(function (s, c) { return s + monthlyRevenue(c); }, 0);
     $('#kpiRevenue').textContent = money(totalRev);
-
     var openLeads = state.leads.filter(function (l) { return l.stage !== 'not_relevant' && l.stage !== 'active'; }).length;
     $('#kpiLeads').textContent = openLeads;
-
     var activeOnly = activeClients.filter(function (c) { return c.status === 'פעיל'; });
 
-    // By service — a multi-service client counts in each of its services
     var byService = {};
     SERVICE_TYPES.forEach(function (s) { byService[s] = 0; });
     activeOnly.forEach(function (c) {
@@ -452,7 +424,6 @@
     });
     renderBars('#byService', byService);
 
-    // By location — מרכז יום clients always count under רעננה הפרדס
     var byLoc = {};
     LOCATIONS.forEach(function (l) { byLoc[l] = 0; });
     activeOnly.forEach(function (c) {
@@ -463,7 +434,6 @@
     });
     renderBars('#byLocation', byLoc);
 
-    // Pipeline counts
     var pipeline = $('#pipeline');
     pipeline.innerHTML = '';
     STAGES.forEach(function (s) {
@@ -475,9 +445,6 @@
     });
   }
 
-  // Last day of the calendar month that dateISO belongs to. Used so
-  // clients whose billingDay exceeds the current month's length roll
-  // onto that month's last day (e.g. bd=31 → Feb 28/29, Apr 30).
   function lastDayOfMonth(dateISO) {
     var parts = String(dateISO).slice(0, 10).split('-');
     if (parts.length < 3) return null;
@@ -507,18 +474,14 @@
     var dateInput = $('#billingDate');
     if (dateInput && dateInput.value !== state.billingDate) dateInput.value = state.billingDate;
     var selected = state.billingDate;
-
     var due = clientsDueOn(selected).map(function (c) {
       return { client: c, payment: paymentForClientOn(c, selected) };
     });
-
     var totalDue = due.reduce(function (s, d) { return s + (d.payment.amountDue || 0); }, 0);
     var totalCollected = due.reduce(function (s, d) { return s + (d.payment.amountPaid || 0); }, 0);
-
     $('#billDueCount').textContent = due.length;
     $('#billDueTotal').textContent = money(totalDue);
     $('#billDueCollected').textContent = money(totalCollected);
-
     renderBillingDueList(due, selected);
     renderBillingOpenList(selected);
     renderBillingMonthlySummary(selected);
@@ -531,9 +494,7 @@
       list.innerHTML = '<div class="billing-empty">אין תשלומים לגבייה בתאריך זה</div>';
       return;
     }
-    dueItems.forEach(function (d) {
-      list.appendChild(buildBillingRow(d.client, d.payment, selectedISO, false));
-    });
+    dueItems.forEach(function (d) { list.appendChild(buildBillingRow(d.client, d.payment, selectedISO, false)); });
   }
 
   function renderBillingOpenList(selectedISO) {
@@ -550,26 +511,27 @@
     }
     open.forEach(function (p) {
       var client = state.clients.find(function (c) { return c.id === p.clientId; })
-        || { id: p.clientId, name: p.clientName, billingType: 'monthly',
-             pricePerSession: p.amountDue, startDate: p.dueDate };
+        || { id: p.clientId, name: p.clientName, billingType: 'monthly', pricePerSession: p.amountDue, startDate: p.dueDate };
       list.appendChild(buildBillingRow(client, p, p.dueDate, true));
     });
   }
 
-  // Uniform billing row builder for the "due today" and "open balances"
-  // sections.
   function buildBillingRow(client, payment, dueDateISO, isCarry) {
     var row = document.createElement('div');
     row.className = 'billing-row' + (isCarry ? ' carry' : '');
     var amount = payment.amountDue || clientAmountDue(client) || 0;
     var disabled = state.role === 'editor' ? '' : ' disabled';
-
     var statusSelect = PAYMENT_STATUSES.map(function (s) {
       return '<option value="' + s.id + '"' + (payment.status === s.id ? ' selected' : '') + '>' + s.he + '</option>';
     }).join('');
-
     var dateCellLabel = isCarry ? 'תאריך מקורי' : 'סכום חודשי';
-    var dateCellVal = isCarry ? fmtDate(dueDateISO) : money(amount);
+    var dateCellVal = isCarry ? displayDate(dueDateISO) : money(amount);
+
+    // Show next billing date if available on client
+    var nextBillHtml = '';
+    if (client.nextBillingDate) {
+      nextBillHtml = '<div><span class="p-label">גבייה הבאה</span><span class="p-val next-bill">' + displayDate(client.nextBillingDate) + '</span></div>';
+    }
 
     row.innerHTML =
       '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(client.name || payment.clientName) + '</span></div>' +
@@ -579,7 +541,8 @@
         '<span class="p-label">שולם בפועל</span>' +
         '<input class="billing-paid" type="number" min="0" step="1" value="' + (payment.amountPaid || 0) + '"' + disabled + ' />' +
       '</div>' +
-      '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span></div>';
+      '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span></div>' +
+      nextBillHtml;
 
     var statusSel = row.querySelector('.billing-status');
     var paidWrap  = row.querySelector('.billing-paid-wrap');
@@ -596,43 +559,30 @@
       paidWrap.classList.toggle('hidden', newStatus !== 'partial');
       paidInput.value = ap;
       return {
-        id: payment.id,
-        clientId: payment.clientId || client.id,
+        id: payment.id, clientId: payment.clientId || client.id,
         clientName: payment.clientName || client.name || '',
-        billingType: 'monthly',
-        dueDate: dueDateISO,
-        amountDue: amount,
-        amountPaid: ap,
-        status: newStatus,
+        billingType: 'monthly', dueDate: dueDateISO,
+        amountDue: amount, amountPaid: ap, status: newStatus,
         paymentDate: newStatus === 'paid' ? today() : (payment.paymentDate || ''),
-        method: payment.method || '',
-        notes: payment.notes || '',
-        bundleSize: 0,
-        sessionsUsed: 0
+        method: payment.method || '', notes: payment.notes || '',
+        bundleSize: 0, sessionsUsed: 0
       };
     }
 
     if (statusSel) statusSel.addEventListener('change', function () {
-      var updated = recompute(statusSel.value, paidInput.value);
-      saveBillingRow(updated);
+      saveBillingRow(recompute(statusSel.value, paidInput.value));
     });
     if (paidInput) paidInput.addEventListener('change', function () {
       if (statusSel.value !== 'partial') return;
       var v = toNum(paidInput.value);
-      if (v >= amount) {
-        statusSel.value = 'paid';
-        saveBillingRow(recompute('paid', amount));
-      } else {
-        saveBillingRow(recompute('partial', v));
-      }
+      if (v >= amount) { statusSel.value = 'paid'; saveBillingRow(recompute('paid', amount)); }
+      else { saveBillingRow(recompute('partial', v)); }
     });
-
     return row;
   }
 
   function saveBillingRow(updated) {
     if (state.role !== 'editor') return;
-    // Upsert locally for instant feedback, then persist.
     var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
     if (idx >= 0) state.payments[idx] = updated;
@@ -641,7 +591,6 @@
     persistPayment(updated)
       .then(function () { toast('נשמר'); })
       .catch(function (e) {
-        // rollback
         if (prev) state.payments[idx] = prev;
         else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
         renderBilling();
@@ -658,8 +607,6 @@
       .reduce(function (s, p) { return s + Math.max(0, (p.amountDue || 0) - (p.amountPaid || 0)); }, 0);
     $('#billMonthCollected').textContent = money(collected);
     $('#billMonthOutstanding').textContent = money(outstanding);
-
-    // By client
     var byClient = {};
     thisMonth.forEach(function (p) {
       var key = p.clientId || p.clientName || '—';
@@ -704,6 +651,72 @@
     });
   }
 
+  // ---- Retention view (not_relevant + finished clients)
+  function renderRetention() {
+    var list = $('#retentionList');
+    list.innerHTML = '';
+
+    // not_relevant leads
+    var notRel = state.leads.filter(function (l) { return l.stage === 'not_relevant'; });
+    // finished clients
+    var finished = state.clients.filter(function (c) { return c.status === 'סיים טיפול'; });
+
+    if (!notRel.length && !finished.length) {
+      list.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין רשומות בשימור לידים</p></div>';
+      return;
+    }
+
+    if (notRel.length) {
+      var h1 = document.createElement('div');
+      h1.className = 'retention-section-title';
+      h1.textContent = 'לא רלוונטים';
+      list.appendChild(h1);
+      notRel.forEach(function (l) {
+        var row = document.createElement('div');
+        row.className = 'retention-row';
+        row.innerHTML =
+          '<span class="ret-name">' + escapeHtml(l.name) + '</span>' +
+          '<span class="ret-tag not-rel">לא רלוונטי</span>' +
+          '<span class="ret-meta">' + (l.phone ? escapeHtml(l.phone) : '') + '</span>' +
+          '<span class="ret-meta">' + escapeHtml(formatServices(parseServices(l.serviceType))) + '</span>' +
+          '<span class="ret-date">נוצר: ' + displayDate(l.created) + '</span>' +
+          (l.note ? '<span class="ret-note">' + escapeHtml(l.note) + '</span>' : '');
+        // Restore button
+        if (state.role === 'editor') {
+          var restoreBtn = document.createElement('button');
+          restoreBtn.className = 'btn btn-ghost';
+          restoreBtn.textContent = 'שחזר לליד';
+          restoreBtn.onclick = function () {
+            l.stage = 'new';
+            persist().then(function () { toast('שוחזר'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+          };
+          row.appendChild(restoreBtn);
+        }
+        list.appendChild(row);
+      });
+    }
+
+    if (finished.length) {
+      var h2 = document.createElement('div');
+      h2.className = 'retention-section-title';
+      h2.textContent = 'סיימו טיפול';
+      list.appendChild(h2);
+      finished.forEach(function (c) {
+        var row = document.createElement('div');
+        row.className = 'retention-row';
+        row.innerHTML =
+          '<span class="ret-name">' + escapeHtml(c.name) + '</span>' +
+          '<span class="ret-tag finished">סיים טיפול</span>' +
+          '<span class="ret-meta">' + escapeHtml(formatServices(parseServices(c.serviceType))) + '</span>' +
+          '<span class="ret-meta">' + escapeHtml(c.location || '') + '</span>' +
+          '<span class="ret-date">תחילת טיפול: ' + displayDate(c.startDate) + '</span>' +
+          '<span class="ret-date">סיום: ' + displayDate(c.exitDate) + '</span>' +
+          (c.notes ? '<span class="ret-note">' + escapeHtml(c.notes) + '</span>' : '');
+        list.appendChild(row);
+      });
+    }
+  }
+
   // ---- Leads kanban
   function renderLeads() {
     var kanban = $('#kanban');
@@ -715,7 +728,6 @@
       var hay = (l.name + ' ' + l.phone).toLowerCase();
       return hay.indexOf(q.toLowerCase()) !== -1;
     });
-
     STAGES.forEach(function (stage) {
       var col = document.createElement('div');
       col.className = 'col';
@@ -734,9 +746,7 @@
     var card = document.createElement('div');
     card.className = 'card';
     var services = parseServices(l.serviceType);
-    var chipsHtml = services.map(function (s) {
-      return '<span class="chip">' + escapeHtml(s) + '</span>';
-    }).join('');
+    var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
     if (l.location && !hasDayCenter(services)) {
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
     } else if (hasDayCenter(services)) {
@@ -749,23 +759,36 @@
         return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
       }).join('');
       agreementFields =
-        '<div class="row">' +
-          (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') +
-        '</div>' +
+        '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
         '<div class="row"><span class="chip">חבילה חודשית: ' + (l.pricePerSession ? money(l.pricePerSession) : '—') + '</span></div>';
     }
-    var createdLine = l.created ? '<div class="meta">נוצר: ' + escapeHtml(l.created) + '</div>' : '';
+
+    // Show payment info if lead is active
+    var paymentInfoHtml = '';
+    if (stage.id === 'active' && l.paymentStatus) {
+      var psLabel = l.paymentStatus === 'paid' ? 'שולם' : l.paymentStatus === 'partial' ? 'שולם חלקית' : 'לא שולם';
+      var psClass = l.paymentStatus === 'paid' ? 'chip chip-paid' : l.paymentStatus === 'partial' ? 'chip chip-partial' : 'chip chip-unpaid';
+      paymentInfoHtml =
+        '<div class="row">' +
+          '<span class="' + psClass + '">תשלום: ' + psLabel + '</span>' +
+          (l.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(l.paymentDate) + '</span>' : '') +
+          (l.nextBillingDate ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(l.nextBillingDate) + '</span>' : '') +
+        '</div>';
+    }
+
+    var createdLine = l.created ? '<div class="meta">נוצר: ' + displayDate(l.created) + '</div>' : '';
+    var startLine = l.startDate ? '<div class="meta">תחילת טיפול: ' + displayDate(l.startDate) + '</div>' : '';
+
     card.innerHTML =
       '<div class="name">' + escapeHtml(l.name) + '</div>' +
       '<div class="meta">' + escapeHtml(l.phone) + '</div>' +
-      createdLine +
+      createdLine + startLine +
       (chipsHtml ? '<div class="row">' + chipsHtml + '</div>' : '') +
       (l.note ? '<div class="note">' + escapeHtml(l.note) + '</div>' : '') +
-      agreementFields +
+      agreementFields + paymentInfoHtml +
       '<div class="intro-slot"></div>' +
       '<div class="actions edit-only"></div>';
 
-    // Inline datetime field on the intro stage card
     if (stage.id === 'intro') {
       var slot = $('.intro-slot', card);
       var wrap = document.createElement('label');
@@ -775,16 +798,8 @@
       dt.type = 'datetime-local';
       dt.value = l.introDateTime || '';
       if (state.role !== 'editor') dt.disabled = true;
-      dt.addEventListener('click', function () {
-        if (typeof dt.showPicker === 'function') {
-          try { dt.showPicker(); } catch (_) {}
-        }
-      });
-      dt.addEventListener('focus', function () {
-        if (typeof dt.showPicker === 'function') {
-          try { dt.showPicker(); } catch (_) {}
-        }
-      });
+      dt.addEventListener('click', function () { try { dt.showPicker && dt.showPicker(); } catch (_) {} });
+      dt.addEventListener('focus', function () { try { dt.showPicker && dt.showPicker(); } catch (_) {} });
       dt.addEventListener('change', function () {
         l.introDateTime = dt.value;
         persist().then(function () { toast('נשמר'); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
@@ -796,8 +811,6 @@
     if (state.role === 'editor') {
       var actions = $('.actions', card);
       var idx = STAGES.findIndex(function (s) { return s.id === stage.id; });
-
-      // In Hebrew RTL: → points to previous (right), ← points to next (left)
       if (idx > 0) {
         var back = document.createElement('button');
         back.className = 'btn btn-ghost';
@@ -805,7 +818,6 @@
         back.onclick = function () { moveLead(l.id, STAGES[idx - 1].id); };
         actions.appendChild(back);
       }
-
       if (stage.id === 'agreement') {
         var setAgree = document.createElement('button');
         setAgree.className = 'btn';
@@ -813,24 +825,18 @@
         setAgree.onclick = function () { openAgreementModal(l); };
         actions.appendChild(setAgree);
       }
-
       if (idx < STAGES.length - 1) {
         var next = document.createElement('button');
         next.className = 'btn btn-primary';
         var nextStage = STAGES[idx + 1];
         next.textContent = '← שלב הבא: ' + nextStage.he;
         next.onclick = function () {
-          if (nextStage.id === 'agreement') {
-            openAgreementModal(l, true);
-          } else if (nextStage.id === 'active') {
-            openActivateModal(l);
-          } else {
-            moveLead(l.id, nextStage.id);
-          }
+          if (nextStage.id === 'agreement') openAgreementModal(l, true);
+          else if (nextStage.id === 'active') openActivateModal(l);
+          else moveLead(l.id, nextStage.id);
         };
         actions.appendChild(next);
       }
-
       var edit = document.createElement('button');
       edit.className = 'btn btn-ghost';
       edit.textContent = 'עריכה';
@@ -848,7 +854,6 @@
 
   // ---- Clients
   function renderClients() {
-    // tabs
     var tabsEl = $('#clientTabs');
     tabsEl.innerHTML = '';
     var tabs = [{ id: 'all', label: 'הכול' }].concat(SERVICE_TYPES.map(function (s) { return { id: s, label: s }; }));
@@ -859,11 +864,11 @@
       b.onclick = function () { state.clientTab = t.id; renderClients(); };
       tabsEl.appendChild(b);
     });
-
     var list = $('#clientsList');
     list.innerHTML = '';
     var q = state.clientSearch.trim().toLowerCase();
     var visible = state.clients.filter(function (c) {
+      if (c.status === 'סיים טיפול') return false; // finished go to retention
       if (state.clientTab !== 'all') {
         var svcs = parseServices(c.serviceType);
         if (svcs.indexOf(state.clientTab) === -1) return false;
@@ -871,11 +876,8 @@
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
-
     visible.forEach(function (c) { list.appendChild(clientCard(c)); });
-    if (!visible.length) {
-      list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
-    }
+    if (!visible.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
   }
 
   function statusClass(s) {
@@ -886,12 +888,10 @@
 
   function clientCard(c) {
     var card = document.createElement('div');
-    card.className = 'client-card' + (c.status === 'סיים טיפול' ? ' finished' : '');
+    card.className = 'client-card';
     var rev = monthlyRevenue(c);
     var services = parseServices(c.serviceType);
-    var serviceChips = services.map(function (s) {
-      return '<span class="chip">' + escapeHtml(s) + '</span>';
-    }).join('');
+    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
@@ -905,6 +905,18 @@
       '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
       '<span>הכנסה: <b>' + money(rev) + '</b></span>';
 
+    // Payment status badge
+    var paymentHtml = '';
+    if (c.paymentStatus) {
+      var psLabel = c.paymentStatus === 'paid' ? 'שולם' : c.paymentStatus === 'partial' ? 'שולם חלקית' : 'לא שולם';
+      var psClass = c.paymentStatus === 'paid' ? 'chip chip-paid' : c.paymentStatus === 'partial' ? 'chip chip-partial' : 'chip chip-unpaid';
+      paymentHtml = '<div class="client-meta">' +
+        '<span class="' + psClass + '">חבילה: ' + psLabel + '</span>' +
+        (c.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(c.paymentDate) + '</span>' : '') +
+        (c.nextBillingDate ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>' : '') +
+        '</div>';
+    }
+
     card.innerHTML =
       '<div class="client-head">' +
         '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
@@ -913,36 +925,33 @@
       '<div class="client-meta">' + serviceChips + locationChip + '</div>' +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
+      paymentHtml +
       '<div class="client-meta">' +
-        (c.startDate ? 'החל: ' + escapeHtml(c.startDate) : '') +
-        (c.exitDate ? ' · סיים: ' + escapeHtml(c.exitDate) : '') +
+        (c.startDate ? 'תחילת טיפול: ' + displayDate(c.startDate) : '') +
       '</div>' +
       '<div class="client-actions edit-only"></div>';
 
     if (state.role === 'editor') {
       var actions = $('.client-actions', card);
+      var statusSel = document.createElement('select');
+      ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        if (c.status === opt) o.selected = true;
+        statusSel.appendChild(o);
+      });
+      statusSel.onchange = function () {
+        c.status = statusSel.value;
+        persist().then(function () { toast('עודכן'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+      };
+      statusSel.className = 'btn';
+      actions.appendChild(statusSel);
 
-      if (c.status !== 'סיים טיפול') {
-        var statusSel = document.createElement('select');
-        ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
-          var o = document.createElement('option');
-          o.value = opt; o.textContent = opt;
-          if (c.status === opt) o.selected = true;
-          statusSel.appendChild(o);
-        });
-        statusSel.onchange = function () {
-          c.status = statusSel.value;
-          persist().then(function () { toast('עודכן'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
-        };
-        statusSel.className = 'btn';
-        actions.appendChild(statusSel);
-
-        var endBtn = document.createElement('button');
-        endBtn.className = 'btn btn-danger';
-        endBtn.textContent = 'סיים טיפול';
-        endBtn.onclick = function () { openExitModal(c); };
-        actions.appendChild(endBtn);
-      }
+      var endBtn = document.createElement('button');
+      endBtn.className = 'btn btn-danger';
+      endBtn.textContent = 'סיים טיפול';
+      endBtn.onclick = function () { openExitModal(c); };
+      actions.appendChild(endBtn);
 
       var del = document.createElement('button');
       del.className = 'btn btn-danger';
@@ -969,9 +978,7 @@
     var lead = state.leads.find(function (l) { return l.id === id; });
     if (!lead) return;
     lead.stage = newStage;
-    persist().then(function () { toast('הועבר'); render(); }).catch(function (e) {
-      toast('שגיאה: ' + e.message, true);
-    });
+    persist().then(function () { toast('הועבר'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
   }
 
   function readLeadFormFields(form) {
@@ -991,33 +998,24 @@
   function addLeadFromForm(form) {
     var f = readLeadFormFields(form);
     var lead = {
-      id: uid(),
-      name: f.name,
-      phone: f.phone,
-      serviceType: f.serviceType,
-      location: f.location,
-      note: f.note,
-      stage: 'new',
-      sessionsPerWeek: '',
-      pricePerSession: '',
-      startDate: '',
-      created: f.created,
-      introDateTime: ''
+      id: uid(), name: f.name, phone: f.phone,
+      serviceType: f.serviceType, location: f.location,
+      note: f.note, stage: 'new', sessionsPerWeek: '',
+      pricePerSession: '', startDate: '',
+      created: f.created, introDateTime: '',
+      paymentStatus: '', paymentDate: '', nextBillingDate: ''
     };
     state.leads.push(lead);
     return lead;
   }
   function updateLeadFromForm(lead, form) {
     var f = readLeadFormFields(form);
-    lead.name = f.name;
-    lead.phone = f.phone;
-    lead.serviceType = f.serviceType;
-    lead.location = f.location;
-    lead.note = f.note;
-    lead.created = f.created;
+    lead.name = f.name; lead.phone = f.phone;
+    lead.serviceType = f.serviceType; lead.location = f.location;
+    lead.note = f.note; lead.created = f.created;
   }
 
-  // --- dynamic per-service sessions fields ------------------------------
+  // --- dynamic per-service sessions fields
   function renderSessionsHost(host, services, values) {
     host.innerHTML = '';
     var list = parseServices(services);
@@ -1033,10 +1031,7 @@
       var label = document.createElement('label');
       label.textContent = 'מפגשים בשבוע — ' + svc;
       var input = document.createElement('input');
-      input.type = 'number';
-      input.min = '0';
-      input.step = '1';
-      input.required = true;
+      input.type = 'number'; input.min = '0'; input.step = '1'; input.required = true;
       input.dataset.service = svc;
       input.value = current[svc] != null ? current[svc] : '';
       label.appendChild(input);
@@ -1045,38 +1040,28 @@
   }
   function readSessionsHost(host) {
     var out = {};
-    $$('input[data-service]', host).forEach(function (inp) {
-      out[inp.dataset.service] = wholeSessions(inp.value);
-    });
+    $$('input[data-service]', host).forEach(function (inp) { out[inp.dataset.service] = wholeSessions(inp.value); });
     return out;
   }
 
-  // --- service checkbox group -------------------------------------------
+  // --- service checkbox group
   function populateServiceGroup(group, selected) {
     group.innerHTML = '';
     var picked = parseServices(selected);
     SERVICE_TYPES.forEach(function (s) {
       var lab = document.createElement('label');
       var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = s;
-      cb.checked = picked.indexOf(s) !== -1;
-      cb.addEventListener('change', function () {
-        updateLocationVisibility(group.closest('form'));
-      });
+      cb.type = 'checkbox'; cb.value = s; cb.checked = picked.indexOf(s) !== -1;
+      cb.addEventListener('change', function () { updateLocationVisibility(group.closest('form')); });
       var span = document.createElement('span');
       span.textContent = s;
-      lab.appendChild(cb);
-      lab.appendChild(span);
+      lab.appendChild(cb); lab.appendChild(span);
       group.appendChild(lab);
     });
   }
   function readServiceGroup(group) {
-    return $$('input[type="checkbox"]', group)
-      .filter(function (cb) { return cb.checked; })
-      .map(function (cb) { return cb.value; });
+    return $$('input[type="checkbox"]', group).filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
   }
-
   function formLocationWrap(form) {
     if (!form) return null;
     if (form.id === 'leadForm') return $('#leadLocationWrap');
@@ -1093,10 +1078,7 @@
     if (picked.indexOf(DAY_CENTER) !== -1) {
       wrap.classList.add('field-hidden');
       var sel = $('select[name="location"]', form);
-      if (sel) {
-        sel.required = false;
-        sel.value = DAY_CENTER_LOCATION;
-      }
+      if (sel) { sel.required = false; sel.value = DAY_CENTER_LOCATION; }
     } else {
       wrap.classList.remove('field-hidden');
       var sel2 = $('select[name="location"]', form);
@@ -1151,7 +1133,6 @@
     if (lead.location) f.location.value = lead.location;
     var host = $('[data-host="activateSessions"]', f);
     renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek);
-    // keep the per-service sessions in sync when checkboxes change
     $$('input[type="checkbox"]', group).forEach(function (cb) {
       cb.addEventListener('change', function () {
         var picked = readServiceGroup(group);
@@ -1161,12 +1142,13 @@
     });
     f.pricePerSession.value = lead.pricePerSession || '';
     f.startDate.value = lead.startDate || today();
+    // pre-fill payment date to today
+    if (f.paymentDate) f.paymentDate.value = today();
     updateLocationVisibility(f);
     $('#activateModal').hidden = false;
   }
   function closeActivateModal() { $('#activateModal').hidden = true; activateLeadId = null; }
 
-  // --- Direct-add client modal (admin bypass of Lead → Client flow) ----
   function openDirectClientModal() {
     var m = $('#directClientModal');
     var f = $('#directClientForm');
@@ -1176,6 +1158,7 @@
     f.startDate.value = today();
     if (f.billingDay) f.billingDay.value = '';
     if (f.monthlyAmount) f.monthlyAmount.value = '';
+    if (f.paymentDate) f.paymentDate.value = today();
     renderSessionsHost($('[data-host="directSessions"]', f), '', {});
     updateLocationVisibilityForDirect(f);
     m.hidden = false;
@@ -1207,14 +1190,13 @@
   }
   function closeExitModal() { $('#exitModal').hidden = true; exitClientId = null; }
 
-  // --- auth --------------------------------------------------------------
+  // --- auth
   function applyRole() {
     document.body.classList.toggle('viewer', state.role !== 'editor');
     var badge = $('#roleBadge');
     badge.textContent = state.role === 'editor' ? 'עורך' : 'צופה';
     badge.classList.toggle('editor', state.role === 'editor');
   }
-
   function showPin() {
     $('#pinScreen').hidden = false;
     $('#app').hidden = true;
@@ -1222,32 +1204,23 @@
     $('#pinInput').focus();
   }
   function enterApp() {
-    console.log('[ezone] enterApp: hiding #pinScreen, showing #app');
     var pin = $('#pinScreen');
     var app = $('#app');
-    console.log('[ezone] enterApp elements: pinScreen=%o app=%o', !!pin, !!app);
     if (pin) pin.hidden = true;
     if (app) app.hidden = false;
-    console.log('[ezone] enterApp after toggle: pinScreen.hidden=%o app.hidden=%o',
-      pin && pin.hidden, app && app.hidden);
     applyRole();
-    console.log('[ezone] enterApp: role applied, calling setView(dashboard)');
     setView('dashboard');
-    console.log('[ezone] enterApp: setView done');
   }
 
-  // --- init --------------------------------------------------------------
+  // --- init
   async function loadAll() {
     try {
       var data = await apiLoad();
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
-      // Payments live on their own sheet / action. Treat load failure as
-      // empty list so the rest of the app still renders.
       try {
         var pr = await apiGetPayments();
-        state.payments = (pr.payments || []).map(normalizePaymentFromSheet)
-          .filter(function (p) { return !!p.id; });
+        state.payments = (pr.payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
       } catch (pe) {
         console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
         state.payments = [];
@@ -1267,44 +1240,22 @@
   }
 
   function wireEvents() {
-    console.log('[ezone] wireEvents: start');
-
-    // PIN  — wired first so it survives any later wiring failure
-    on('#pinSubmit', 'click', function (ev) {
-      console.log('[ezone] PIN key clicked:', 'submit');
+    on('#pinSubmit', 'click', function () {
       var input = $('#pinInput');
-      var raw = input ? input.value : '(no input)';
       var v = (input && input.value || '').trim();
-      var match = (v === '2107');
-      console.log('[ezone] PIN submit: raw=%o trimmed=%o length=%d match=%o',
-        raw, v, v.length, match);
-      if (match) {
-        try { sessionStorage.setItem('ez_role', 'editor'); }
-        catch (e) { console.warn('[ezone] sessionStorage set failed', e); }
+      if (v === '2107') {
+        try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
         state.role = 'editor';
-        console.log('[ezone] PIN ok → calling enterApp()');
-        try {
-          enterApp();
-          console.log('[ezone] enterApp returned OK');
-        } catch (e) {
-          console.error('[ezone] enterApp threw', e);
-        }
+        enterApp();
       } else {
-        console.log('[ezone] PIN mismatch — char codes:',
-          Array.prototype.map.call(v, function (c) { return c.charCodeAt(0); }));
         var err = $('#pinError'); if (err) err.hidden = false;
       }
     });
     on('#pinInput', 'keydown', function (e) {
-      console.log('[ezone] PIN key clicked:', e.key);
       var err = $('#pinError'); if (err) err.hidden = true;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        var btn = $('#pinSubmit'); if (btn) btn.click();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); var btn = $('#pinSubmit'); if (btn) btn.click(); }
     });
     on('#pinViewer', 'click', function () {
-      console.log('[ezone] PIN key clicked:', 'viewer');
       try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {}
       state.role = 'viewer';
       enterApp();
@@ -1315,44 +1266,21 @@
       showPin();
     });
 
-    console.log('[ezone] wireEvents: PIN bound');
-
-    // Tabs
-    $$('.tab').forEach(function (t) {
-      t.addEventListener('click', function () { setView(t.dataset.view); });
-    });
-    on('#refreshBtn', 'click', function () {
-      loadAll().then(function () { toast('רועננו'); }).catch(function () {});
-    });
-
-    // Leads
-    on('#leadsSearch', 'input', function (e) {
-      state.leadSearch = e.target.value; renderLeads();
-    });
+    $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
+    on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
+    on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
-
-    // Clients
-    on('#clientsSearch', 'input', function (e) {
-      state.clientSearch = e.target.value; renderClients();
-    });
+    on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
+    on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
 
-    // Billing
-    on('#billingDate', 'change', function (e) {
-      state.billingDate = e.target.value || today();
-      renderBilling();
-    });
-
-    // Modals close
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal();
-        closeDirectClientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal();
       });
     });
 
-    // Direct-add client: service-group changes re-render the per-service
-    // sessions host and the location-visibility rule.
+    // Direct-add client wiring
     (function wireDirectClient() {
       var f = $('#directClientForm');
       if (!f) return;
@@ -1368,7 +1296,6 @@
       }
     })();
 
-    // Direct-add client: form submit
     var directForm = $('#directClientForm');
     if (directForm) directForm.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -1387,63 +1314,47 @@
         var startDate = fd.get('startDate') || today();
         var monthlyAmount = toNum(fd.get('monthlyAmount'));
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
-
         var host = $('[data-host="directSessions"]', form);
         var breakdown = readSessionsHost(host);
         var clean = {};
         services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
-
         var bd = fd.get('billingDay');
         var bdDay = bd ? dayOfMonth(bd) : null;
+        var payStatus = fd.get('paymentStatus') || '';
+        var payDate = fd.get('paymentDate') || '';
+        var nextBill = payDate ? addDays(payDate, 30) : (startDate ? addDays(startDate, 30) : '');
         var client = {
-          id: uid(),
-          name: name,
-          phone: (fd.get('phone') || '').trim(),
+          id: uid(), name: name, phone: (fd.get('phone') || '').trim(),
           serviceType: formatServices(services),
           location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
-          sessionsPerWeek: clean,
-          pricePerSession: monthlyAmount,
-          startDate: startDate,
-          status: 'פעיל',
-          exitDate: '',
-          fromLead: '',
-          source: 'direct_admin',
+          sessionsPerWeek: clean, pricePerSession: monthlyAmount,
+          startDate: startDate, status: 'פעיל', exitDate: '',
+          fromLead: '', source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
           billingType: 'monthly',
-          billingDay: bdDay || dayOfMonth(startDate) || ''
+          billingDay: bdDay || dayOfMonth(startDate) || '',
+          paymentStatus: payStatus,
+          paymentDate: payDate,
+          nextBillingDate: nextBill
         };
-
         state.clients.push(client);
-
         persist()
-          .then(function () {
-            toast('המטופל נוסף');
-            closeDirectClientModal();
-            render();
-          })
+          .then(function () { toast('המטופל נוסף'); closeDirectClientModal(); render(); })
           .catch(function (err) {
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            render();
-            toast('שגיאה: ' + err.message, true);
+            render(); toast('שגיאה: ' + err.message, true);
           })
           .finally(function () { submit.disabled = false; });
-      } catch (e) {
-        toast('שגיאה: ' + e.message, true);
-        submit.disabled = false;
-      }
+      } catch (e2) { toast('שגיאה: ' + e2.message, true); submit.disabled = false; }
     });
 
-    // Lead form submit
     $('#leadForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var submit = $('#leadFormSubmit');
       if (submit.disabled) return;
       var form = e.target;
       var group = $('[data-group="serviceType"]', form);
-      if (!readServiceGroup(group).length) {
-        toast('יש לבחור לפחות סוג טיפול אחד', true);
-        return;
-      }
+      if (!readServiceGroup(group).length) { toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       submit.disabled = true;
       var lead;
       if (editingLeadId) {
@@ -1459,7 +1370,6 @@
         .finally(function () { submit.disabled = false; });
     });
 
-    // Agreement form submit
     $('#agreementForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var submit = $('#agreementSubmit');
@@ -1478,7 +1388,7 @@
         .finally(function () { submit.disabled = false; });
     });
 
-    // Activate form submit
+    // Activate form — now includes payment fields
     $('#activateForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var submit = $('#activateSubmit');
@@ -1489,28 +1399,31 @@
       var fd = new FormData(e.target);
       var group = $('[data-group="serviceType"]', e.target);
       var services = readServiceGroup(group);
-      if (!services.length) {
-        submit.disabled = false;
-        toast('יש לבחור לפחות סוג טיפול אחד', true);
-        return;
-      }
+      if (!services.length) { submit.disabled = false; toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       var host = $('[data-host="activateSessions"]', e.target);
       var breakdown = readSessionsHost(host);
-      // trim to selected services only
       var cleanBreakdown = {};
       services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
       var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
+      var startDate = fd.get('startDate') || today();
+      var payStatus = fd.get('paymentStatus') || 'unpaid';
+      var payDate = fd.get('paymentDate') || '';
+      // Next billing = 30 days from payment date (or start date if not paid)
+      var nextBill = payDate ? addDays(payDate, 30) : addDays(startDate, 30);
+
       var client = {
-        id: uid(),
-        name: lead.name,
+        id: uid(), name: lead.name, phone: lead.phone || '',
         serviceType: formatServices(services),
         location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
         pricePerSession: toNum(fd.get('pricePerSession')),
-        startDate: fd.get('startDate') || today(),
-        status: 'פעיל',
-        exitDate: '',
-        fromLead: lead.id
+        startDate: startDate,
+        status: 'פעיל', exitDate: '', fromLead: lead.id,
+        source: 'lead', notes: '', billingType: 'monthly',
+        billingDay: dayOfMonth(startDate) || '',
+        paymentStatus: payStatus,
+        paymentDate: payDate,
+        nextBillingDate: nextBill
       };
       state.clients.push(client);
       lead.stage = 'active';
@@ -1519,13 +1432,15 @@
       lead.sessionsPerWeek = client.sessionsPerWeek;
       lead.pricePerSession = client.pricePerSession;
       lead.startDate = client.startDate;
+      lead.paymentStatus = payStatus;
+      lead.paymentDate = payDate;
+      lead.nextBillingDate = nextBill;
       persist()
         .then(function () { toast('המטופל נוסף'); closeActivateModal(); setView('clients'); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
     });
 
-    // Exit form submit
     $('#exitForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var submit = $('#exitSubmit');
@@ -1544,27 +1459,17 @@
   }
 
   function init() {
-    console.log('[ezone] init');
-    try { wireEvents(); }
-    catch (e) { console.error('[ezone] wireEvents failed', e); }
-
+    try { wireEvents(); } catch (e) { console.error('[ezone] wireEvents failed', e); }
     var saved = null;
     try { saved = sessionStorage.getItem('ez_role'); } catch (_) {}
-    if (saved === 'editor' || saved === 'viewer') {
-      state.role = saved;
-      enterApp();
-    } else {
-      showPin();
-    }
-    loadAll().catch(function () { /* toast already shown */ });
+    if (saved === 'editor' || saved === 'viewer') { state.role = saved; enterApp(); }
+    else { showPin(); }
+    loadAll().catch(function () {});
   }
 
   function bootWhenReady() {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init, { once: true });
-    } else {
-      init();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+    else init();
   }
   bootWhenReady();
 })();

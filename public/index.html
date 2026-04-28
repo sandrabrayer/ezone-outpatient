@@ -27,6 +27,7 @@
         <button class="tab" data-view="leads">לידים</button>
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
+        <button class="tab" data-view="retention">שימור לידים</button>
       </nav>
       <div class="topbar-right">
         <span id="roleBadge" class="role-badge">צופה</span>
@@ -90,17 +91,14 @@
           <div class="kpi"><div class="kpi-label">סך לגבייה</div><div id="billDueTotal" class="kpi-value">₪0</div></div>
           <div class="kpi"><div class="kpi-label">נגבה</div><div id="billDueCollected" class="kpi-value">₪0</div></div>
         </div>
-
         <div class="panel">
           <div class="panel-title">לגבייה בתאריך הנבחר</div>
           <div id="billingDueList" class="billing-list"></div>
         </div>
-
         <div class="panel">
           <div class="panel-title">יתרות פתוחות מתאריכים קודמים</div>
           <div id="billingOpenList" class="billing-list"></div>
         </div>
-
         <div class="panel">
           <div class="panel-title">סיכום חודשי <span id="billMonthLabel" class="panel-sub"></span></div>
           <div class="billing-summary-row">
@@ -110,6 +108,14 @@
           <div class="panel-subtitle">לפי מטופל</div>
           <div id="billMonthByClient" class="billing-breakdown"></div>
         </div>
+      </section>
+
+      <!-- Retention -->
+      <section id="view-retention" class="view">
+        <div class="toolbar">
+          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">שימור לידים — לא רלוונטים וסיימו טיפול</h2>
+        </div>
+        <div id="retentionList"></div>
       </section>
     </main>
 
@@ -144,7 +150,7 @@
       </div>
     </div>
 
-    <!-- Agreement modal (sessions breakdown + monthly package price) -->
+    <!-- Agreement modal -->
     <div id="agreementModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">מתחיל טיפול</div>
@@ -159,7 +165,7 @@
       </div>
     </div>
 
-    <!-- Activation modal (move lead → active client) -->
+    <!-- Activation modal — now includes payment fields -->
     <div id="activateModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">מעבר למטופל פעיל</div>
@@ -176,7 +182,19 @@
           </label>
           <div class="wide sessions-host" data-host="activateSessions"></div>
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
-          <label class="wide">תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus" required>
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
+
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>
@@ -185,7 +203,7 @@
       </div>
     </div>
 
-    <!-- Direct-add client modal (admin bypass of the Lead → Client flow) -->
+    <!-- Direct-add client modal -->
     <div id="directClientModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">הוספת מטופל ישירות</div>
@@ -207,8 +225,19 @@
           <div class="wide sessions-host" data-host="directSessions"></div>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
-          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
 
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus">
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
+
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="directClientSubmit">הוסף מטופל</button>
