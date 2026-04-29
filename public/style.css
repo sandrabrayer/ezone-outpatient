@@ -451,8 +451,32 @@ body.viewer .edit-only { display: none !important; }
 }
 
 .ret-label {
-  color: #7a9bbf;
+  color: #7a9bbf
   min-width: 100px;
   font-weight: 600;
   flex-shrink: 0;
+}
+.ret-card {
+  display: block !important;
+  margin-bottom: 12px;
+}
+
+.ret-card-header {
+  display: flex !important;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ret-card-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0;
+}
+
+.ret-line {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid #1e3a56;
 }
