@@ -479,4 +479,12 @@ body.viewer .edit-only { display: none !important; }
   gap: 12px;
   padding: 4px 0;
   border-bottom: 1px solid #1e3a56;
+}.modal {
+  overflow-y: auto !important;
+}
+
+.modal-card {
+  max-height: 90vh !important;
+  overflow-y: auto !important;
+  margin: 20px auto !important;
 }
