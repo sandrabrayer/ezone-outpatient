@@ -29,7 +29,7 @@
     'מרכז יום',
     'מעקב פסיכיאטרי'
   ];
-  var LOCATIONS = ['רעננה הפרדס', 'רמות השבים', 'קיסריה גמילה'];
+  var LOCATIONS = ['רעננה הפרדס', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
 
   var DAY_CENTER = 'מרכז יום';
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
@@ -652,13 +652,19 @@
   }
 
   // ---- Retention view (not_relevant + finished clients)
+  function retRow(label, val) {
+    if (!val) return '';
+    return '<div style="display:flex;gap:12px;padding:5px 0;border-bottom:1px solid #1e3a56;font-size:0.85rem;">' +
+      '<span style="color:#7a9bbf;font-weight:600;min-width:110px;flex-shrink:0;">' + label + '</span>' +
+      '<span style="color:#c5d5e8;">' + val + '</span>' +
+      '</div>';
+  }
+
   function renderRetention() {
     var list = $('#retentionList');
     list.innerHTML = '';
 
-    // not_relevant leads
     var notRel = state.leads.filter(function (l) { return l.stage === 'not_relevant'; });
-    // finished clients
     var finished = state.clients.filter(function (c) { return c.status === 'סיים טיפול'; });
 
     if (!notRel.length && !finished.length) {
@@ -668,51 +674,57 @@
 
     if (notRel.length) {
       var h1 = document.createElement('div');
-      h1.className = 'retention-section-title';
+      h1.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
       h1.textContent = 'לא רלוונטים';
       list.appendChild(h1);
       notRel.forEach(function (l) {
-        var row = document.createElement('div');
-        row.className = 'retention-row';
-        row.innerHTML =
-          '<span class="ret-name">' + escapeHtml(l.name) + '</span>' +
-          '<span class="ret-tag not-rel">לא רלוונטי</span>' +
-          '<span class="ret-meta">' + (l.phone ? escapeHtml(l.phone) : '') + '</span>' +
-          '<span class="ret-meta">' + escapeHtml(formatServices(parseServices(l.serviceType))) + '</span>' +
-          '<span class="ret-date">נוצר: ' + displayDate(l.created) + '</span>' +
-          (l.note ? '<span class="ret-note">' + escapeHtml(l.note) + '</span>' : '');
-        // Restore button
+        var card = document.createElement('div');
+        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
+        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(l.name) + '</span>' +
+          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא רלוונטי</span>' +
+          '</div>';
+        var body = retRow('טלפון', l.phone ? escapeHtml(String(l.phone)) : '') +
+          retRow('סוג טיפול', l.serviceType ? escapeHtml(formatServices(parseServices(l.serviceType))) : '') +
+          retRow('סניף', l.location ? escapeHtml(l.location) : '') +
+          retRow('תאריך יצירה', l.created ? displayDate(l.created) : '') +
+          retRow('הערה', l.note ? escapeHtml(l.note) : '');
+        card.innerHTML = header + body;
         if (state.role === 'editor') {
           var restoreBtn = document.createElement('button');
           restoreBtn.className = 'btn btn-ghost';
+          restoreBtn.style.marginTop = '10px';
           restoreBtn.textContent = 'שחזר לליד';
           restoreBtn.onclick = function () {
             l.stage = 'new';
             persist().then(function () { toast('שוחזר'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
           };
-          row.appendChild(restoreBtn);
+          card.appendChild(restoreBtn);
         }
-        list.appendChild(row);
+        list.appendChild(card);
       });
     }
 
     if (finished.length) {
       var h2 = document.createElement('div');
-      h2.className = 'retention-section-title';
+      h2.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
       h2.textContent = 'סיימו טיפול';
       list.appendChild(h2);
       finished.forEach(function (c) {
-        var row = document.createElement('div');
-        row.className = 'retention-row';
-        row.innerHTML =
-          '<span class="ret-name">' + escapeHtml(c.name) + '</span>' +
-          '<span class="ret-tag finished">סיים טיפול</span>' +
-          '<span class="ret-meta">' + escapeHtml(formatServices(parseServices(c.serviceType))) + '</span>' +
-          '<span class="ret-meta">' + escapeHtml(c.location || '') + '</span>' +
-          '<span class="ret-date">תחילת טיפול: ' + displayDate(c.startDate) + '</span>' +
-          '<span class="ret-date">סיום: ' + displayDate(c.exitDate) + '</span>' +
-          (c.notes ? '<span class="ret-note">' + escapeHtml(c.notes) + '</span>' : '');
-        list.appendChild(row);
+        var card = document.createElement('div');
+        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
+        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(c.name) + '</span>' +
+          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#d4edda;color:#155724;font-weight:600;">סיים טיפול</span>' +
+          '</div>';
+        var body = retRow('טלפון', c.phone ? escapeHtml(String(c.phone)) : '') +
+          retRow('סוג טיפול', c.serviceType ? escapeHtml(formatServices(parseServices(c.serviceType))) : '') +
+          retRow('סניף', c.location ? escapeHtml(c.location) : '') +
+          retRow('תחילת טיפול', c.startDate ? displayDate(c.startDate) : '') +
+          retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : '') +
+          retRow('הערות', c.notes ? escapeHtml(c.notes) : '');
+        card.innerHTML = header + body;
+        list.appendChild(card);
       });
     }
   }
@@ -1322,6 +1334,11 @@
         var bdDay = bd ? dayOfMonth(bd) : null;
         var payStatus = fd.get('paymentStatus') || '';
         var payDate = fd.get('paymentDate') || '';
+        if ((payStatus === 'paid' || payStatus === 'partial') && !payDate) {
+          toast('יש להזין תאריך תשלום', true);
+          submit.disabled = false;
+          return;
+        }
         var nextBill = payDate ? addDays(payDate, 30) : (startDate ? addDays(startDate, 30) : '');
         var client = {
           id: uid(), name: name, phone: (fd.get('phone') || '').trim(),
@@ -1408,7 +1425,11 @@
       var startDate = fd.get('startDate') || today();
       var payStatus = fd.get('paymentStatus') || 'unpaid';
       var payDate = fd.get('paymentDate') || '';
-      // Next billing = 30 days from payment date (or start date if not paid)
+      if ((payStatus === 'paid' || payStatus === 'partial') && !payDate) {
+        submit.disabled = false;
+        toast('יש להזין תאריך תשלום', true);
+        return;
+      }
       var nextBill = payDate ? addDays(payDate, 30) : addDays(startDate, 30);
 
       var client = {
