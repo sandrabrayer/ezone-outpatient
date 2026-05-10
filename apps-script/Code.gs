@@ -12,7 +12,8 @@
 
 var LEADS_HEADERS = [
   'id', 'name', 'phone', 'serviceType', 'location', 'note',
-  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime'
+  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
+  'house_of_origin'
 ];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,
@@ -24,7 +25,8 @@ var CLIENTS_HEADERS = [
   'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
   'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
   'source', 'notes', 'billingType', 'billingDay',
-  'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid'
+  'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
+  'house_of_origin'
 ];
 
 var PAYMENTS_HEADERS = [

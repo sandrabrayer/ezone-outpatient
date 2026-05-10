@@ -31,6 +31,18 @@
   ];
   var LOCATIONS = ['רעננה הפרדס', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
 
+  var HOUSE_OF_ORIGIN_LABELS = {
+    raanana:  'רעננה אשר',
+    ramot:    'רמות השבים',
+    efroni:   'קיסריה עפרוני',
+    rehab:    'קיסריה ריהאב',
+    external: 'חיצוני'
+  };
+  function houseOfOriginLabel(v) {
+    var s = String(v == null ? '' : v).trim();
+    return HOUSE_OF_ORIGIN_LABELS[s] || '';
+  }
+
   var DAY_CENTER = 'מרכז יום';
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
 
@@ -212,7 +224,8 @@
       // billing info when lead becomes active
       paymentStatus: row.paymentStatus || '',   // 'paid' | 'partial' | 'unpaid'
       paymentDate: fmtDate(row.paymentDate),
-      nextBillingDate: fmtDate(row.nextBillingDate)
+      nextBillingDate: fmtDate(row.nextBillingDate),
+      house_of_origin: row.house_of_origin || ''
     };
   }
   function normalizeClientFromSheet(row) {
@@ -236,7 +249,8 @@
       // payment info
       paymentStatus: row.paymentStatus || '',
       paymentDate: fmtDate(row.paymentDate),
-      nextBillingDate: fmtDate(row.nextBillingDate)
+      nextBillingDate: fmtDate(row.nextBillingDate),
+      house_of_origin: row.house_of_origin || ''
     };
   }
 
@@ -258,7 +272,8 @@
       introDateTime: l.introDateTime || '',
       paymentStatus: l.paymentStatus || '',
       paymentDate: l.paymentDate || '',
-      nextBillingDate: l.nextBillingDate || ''
+      nextBillingDate: l.nextBillingDate || '',
+      house_of_origin: l.house_of_origin || ''
     };
   }
   function clientForSheet(c) {
@@ -282,7 +297,8 @@
       billingDay: c.billingDay === '' || c.billingDay == null ? '' : toNum(c.billingDay),
       paymentStatus: c.paymentStatus || '',
       paymentDate: c.paymentDate || '',
-      nextBillingDate: c.nextBillingDate || ''
+      nextBillingDate: c.nextBillingDate || '',
+      house_of_origin: c.house_of_origin || ''
     };
   }
 
@@ -687,6 +703,7 @@
         var body = retRow('טלפון', l.phone ? escapeHtml(String(l.phone)) : '') +
           retRow('סוג טיפול', l.serviceType ? escapeHtml(formatServices(parseServices(l.serviceType))) : '') +
           retRow('סניף', l.location ? escapeHtml(l.location) : '') +
+          retRow('בית מוצא', escapeHtml(houseOfOriginLabel(l.house_of_origin))) +
           retRow('תאריך יצירה', l.created ? displayDate(l.created) : '') +
           retRow('הערה', l.note ? escapeHtml(l.note) : '');
         card.innerHTML = header + body;
@@ -720,6 +737,7 @@
         var body = retRow('טלפון', c.phone ? escapeHtml(String(c.phone)) : '') +
           retRow('סוג טיפול', c.serviceType ? escapeHtml(formatServices(parseServices(c.serviceType))) : '') +
           retRow('סניף', c.location ? escapeHtml(c.location) : '') +
+          retRow('בית מוצא', escapeHtml(houseOfOriginLabel(c.house_of_origin))) +
           retRow('תחילת טיפול', c.startDate ? displayDate(c.startDate) : '') +
           retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : '') +
           retRow('הערות', c.notes ? escapeHtml(c.notes) : '');
@@ -763,6 +781,10 @@
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
     } else if (hasDayCenter(services)) {
       chipsHtml += '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>';
+    }
+    var hooLabel = houseOfOriginLabel(l.house_of_origin);
+    if (hooLabel) {
+      chipsHtml += '<span class="chip">בית מוצא: ' + escapeHtml(hooLabel) + '</span>';
     }
     var agreementFields = '';
     if (stage.id === 'agreement') {
@@ -907,6 +929,8 @@
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
+    var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
+    var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var breakdownChips = Object.keys(breakdown).map(function (k) {
       return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
@@ -934,7 +958,7 @@
         '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
-      '<div class="client-meta">' + serviceChips + locationChip + '</div>' +
+      '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       paymentHtml +
@@ -1004,7 +1028,8 @@
       serviceType: formatServices(services),
       location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
       note: (fd.get('note') || '').trim(),
-      created: fd.get('created') || today()
+      created: fd.get('created') || today(),
+      house_of_origin: (fd.get('house_of_origin') || '').trim()
     };
   }
   function addLeadFromForm(form) {
@@ -1015,7 +1040,8 @@
       note: f.note, stage: 'new', sessionsPerWeek: '',
       pricePerSession: '', startDate: '',
       created: f.created, introDateTime: '',
-      paymentStatus: '', paymentDate: '', nextBillingDate: ''
+      paymentStatus: '', paymentDate: '', nextBillingDate: '',
+      house_of_origin: f.house_of_origin
     };
     state.leads.push(lead);
     return lead;
@@ -1025,6 +1051,7 @@
     lead.name = f.name; lead.phone = f.phone;
     lead.serviceType = f.serviceType; lead.location = f.location;
     lead.note = f.note; lead.created = f.created;
+    if (f.house_of_origin) lead.house_of_origin = f.house_of_origin;
   }
 
   // --- dynamic per-service sessions fields
@@ -1114,8 +1141,13 @@
       f.location.value = lead.location || '';
       f.note.value = lead.note;
       f.created.value = lead.created || today();
+      f.house_of_origin.value = lead.house_of_origin || '';
+      // Don't force backfill: optional when editing a historical lead that lacks a value.
+      f.house_of_origin.required = !!lead.house_of_origin;
     } else {
       f.created.value = today();
+      f.house_of_origin.value = '';
+      f.house_of_origin.required = true;
     }
     updateLocationVisibility(f);
     m.hidden = false;
@@ -1352,7 +1384,8 @@
           billingDay: bdDay || dayOfMonth(startDate) || '',
           paymentStatus: payStatus,
           paymentDate: payDate,
-          nextBillingDate: nextBill
+          nextBillingDate: nextBill,
+          house_of_origin: (fd.get('house_of_origin') || '').trim()
         };
         state.clients.push(client);
         persist()
@@ -1444,7 +1477,8 @@
         billingDay: dayOfMonth(startDate) || '',
         paymentStatus: payStatus,
         paymentDate: payDate,
-        nextBillingDate: nextBill
+        nextBillingDate: nextBill,
+        house_of_origin: lead.house_of_origin || ''
       };
       state.clients.push(client);
       lead.stage = 'active';
