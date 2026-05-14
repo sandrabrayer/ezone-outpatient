@@ -44,6 +44,13 @@
           <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
           <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
         </div>
+
+        <!-- Renewals & overdue alerts -->
+        <div class="panel renewals-panel">
+          <div class="panel-title">⚠️ חידושים ועצירות טיפול</div>
+          <div id="renewalsAlerts" class="renewals-list"></div>
+        </div>
+
         <div class="grid-2">
           <div class="panel">
             <div class="panel-title">פילוח לפי סוג טיפול</div>
@@ -291,9 +298,46 @@
       </div>
     </div>
 
+    <!-- Edit client modal -->
+    <div id="editClientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">ערוך פרטי טיפול</div>
+        <form id="editClientForm" class="form-grid">
+          <input type="hidden" name="clientId" />
+          <div class="wide" id="editClientName" style="font-weight:600;color:#1a2e4a;margin-bottom:4px;"></div>
+
+          <label class="wide">היקף טיפול
+            <select name="serviceScope" required>
+              <option value="">—</option>
+              <option value="individual">טיפול פרטני</option>
+              <option value="program">תוכנית מורחבת</option>
+            </select>
+          </label>
+          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
+            <input name="responsiblePerson" type="text" required />
+          </label>
+
+          <div class="wide form-section-title">פרטי תשלום אחרון</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus">
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום אחרון<input name="paymentDate" type="date" /></label>
+          <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" /></label>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="editClientSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Exit client modal -->
     <div id="exitModal" class="modal" hidden>
-      <div class="modal-title">סיום טיפול</div>
       <div class="modal-card">
         <div class="modal-title">סיום טיפול</div>
         <form id="exitForm" class="form-grid">
