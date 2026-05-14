@@ -565,3 +565,26 @@ body.viewer .edit-only { display: none !important; }
 .client-card-warn { box-shadow: 0 0 0 2px var(--amber) inset, var(--shadow); }
 .chip-scope { background: var(--panel-2); color: var(--green-2); }
 .chip-resp  { background: var(--panel-2); color: var(--text-soft); }
+
+/* ===== WhatsApp action buttons (Step 3) ===== */
+.renewal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  width: 100%;
+}
+.btn-wa {
+  background: #25d366 !important;
+  color: #053a1c !important;
+  border: 1px solid #1aa84f !important;
+  font-weight: 700;
+}
+.btn-wa:hover { background: #2ee676 !important; }
+.btn-wa-stop {
+  background: #ff5252 !important;
+  color: #fff !important;
+  border: 1px solid #c33 !important;
+  font-weight: 700;
+}
+.btn-wa-stop:hover { background: #ff7676 !important; }
