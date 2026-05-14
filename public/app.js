@@ -187,6 +187,58 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
+  // Add 1 calendar month to an ISO date string
+  function addMonth(isoDate) {
+    if (!isoDate) return '';
+    var d = new Date(isoDate);
+    if (isNaN(d)) return '';
+    var origDay = d.getDate();
+    d.setMonth(d.getMonth() + 1);
+    // Handle edge case: Jan 31 + 1 month -> Mar 3 (skips Feb). Cap at last day of target month.
+    if (d.getDate() !== origDay) d.setDate(0);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  // Days between two ISO dates (b - a). Negative if a is after b.
+  function daysBetween(aIso, bIso) {
+    if (!aIso || !bIso) return null;
+    var a = new Date(aIso);
+    var b = new Date(bIso);
+    if (isNaN(a) || isNaN(b)) return null;
+    return Math.round((b - a) / 86400000);
+  }
+
+  // Compute renewal info for a client.
+  // Returns { renewalDate, daysLeft, status: 'overdue'|'due_soon'|'ok'|'unknown' }
+  // Logic: payment is always paid in advance for the next month.
+  //   - If paymentStatus === 'paid' and paymentDate exists: next renewal = paymentDate + 1 month
+  //   - If paymentStatus is partial/unpaid: client is already in trouble -> overdue immediately if past start
+  //   - If no paymentDate at all: use startDate as fallback
+  function renewalInfo(c) {
+    if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
+    var anchor = c.paymentDate || c.startDate || '';
+    if (!anchor) return { status: 'unknown' };
+    var renewal = addMonth(anchor);
+    var daysLeft = daysBetween(today(), renewal);
+    var paid = c.paymentStatus === 'paid';
+    var status;
+    if (!paid) {
+      // Not fully paid for current cycle - treat as overdue
+      status = 'overdue';
+    } else if (daysLeft === null) {
+      status = 'unknown';
+    } else if (daysLeft < 0) {
+      status = 'overdue';
+    } else if (daysLeft <= 7) {
+      status = 'due_soon';
+    } else {
+      status = 'ok';
+    }
+    return { renewalDate: renewal, daysLeft: daysLeft, status: status };
+  }
+
   // --- API ---------------------------------------------------------------
   async function apiLoad() {
     var r = await fetch('/api/sheets', { cache: 'no-store' });
@@ -463,6 +515,81 @@
       div.innerHTML = '<div class="n">' + n + '</div><div class="l">' + s.he + '</div>';
       pipeline.appendChild(div);
     });
+
+    renderRenewalAlerts(activeOnly);
+  }
+
+  function renderRenewalAlerts(activeClients) {
+    var box = $('#renewalsAlerts');
+    if (!box) return;
+    var overdue = [];
+    var dueSoon = [];
+    activeClients.forEach(function (c) {
+      var info = renewalInfo(c);
+      if (info.status === 'overdue') overdue.push({ client: c, info: info });
+      else if (info.status === 'due_soon') dueSoon.push({ client: c, info: info });
+    });
+    // Sort: most urgent first
+    overdue.sort(function (a, b) { return (a.info.daysLeft || 0) - (b.info.daysLeft || 0); });
+    dueSoon.sort(function (a, b) { return (a.info.daysLeft || 0) - (b.info.daysLeft || 0); });
+
+    if (!overdue.length && !dueSoon.length) {
+      box.innerHTML = '<div class="renewals-empty">✅ אין חידושים דחופים ואין עצירות טיפול</div>';
+      return;
+    }
+
+    var html = '';
+    if (overdue.length) {
+      html += '<div class="renewals-section renewals-stop">' +
+        '<div class="renewals-section-title">🛑 עצור טיפול — לא שולם</div>';
+      overdue.forEach(function (item) {
+        html += renderRenewalRow(item.client, item.info, 'stop');
+      });
+      html += '</div>';
+    }
+    if (dueSoon.length) {
+      html += '<div class="renewals-section renewals-warn">' +
+        '<div class="renewals-section-title">⏰ חידושים השבוע — לגבות לפני</div>';
+      dueSoon.forEach(function (item) {
+        html += renderRenewalRow(item.client, item.info, 'warn');
+      });
+      html += '</div>';
+    }
+    box.innerHTML = html;
+  }
+
+  function renderRenewalRow(c, info, kind) {
+    var responsible = c.responsiblePerson || '— לא הוגדר אחראי —';
+    var scope = c.serviceScope === 'individual' ? 'טיפול פרטני'
+              : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
+    var roleLabel = c.serviceScope === 'individual' ? 'מטפל'
+                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
+    var daysText;
+    if (kind === 'stop') {
+      if (info.daysLeft === null || info.daysLeft === undefined) {
+        daysText = 'תשלום לא שולם';
+      } else if (info.daysLeft < 0) {
+        daysText = 'באיחור של ' + Math.abs(info.daysLeft) + ' ימים';
+      } else {
+        daysText = 'תשלום לא שולם לחודש הנוכחי';
+      }
+    } else {
+      daysText = info.daysLeft === 0 ? 'היום!'
+               : info.daysLeft === 1 ? 'מחר'
+               : 'בעוד ' + info.daysLeft + ' ימים';
+    }
+    return '<div class="renewal-row renewal-' + kind + '">' +
+      '<div class="renewal-main">' +
+        '<div class="renewal-name">' + escapeHtml(c.name) + '</div>' +
+        (scope ? '<span class="chip">' + scope + '</span>' : '') +
+        '<span class="chip">' + roleLabel + ': ' + escapeHtml(responsible) + '</span>' +
+      '</div>' +
+      '<div class="renewal-meta">' +
+        '<span class="renewal-date">' + (info.renewalDate ? displayDate(info.renewalDate) : '') + '</span>' +
+        '<span class="renewal-days">' + daysText + '</span>' +
+        '<span class="chip chip-amount">' + money(c.pricePerSession) + '</span>' +
+      '</div>' +
+    '</div>';
   }
 
   function lastDayOfMonth(dateISO) {
@@ -957,12 +1084,40 @@
         '</div>';
     }
 
+    // Renewal status banner (overdue / due soon)
+    var renewBannerHtml = '';
+    var renew = renewalInfo(c);
+    if (renew.status === 'overdue') {
+      card.classList.add('client-card-stop');
+      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
+    } else if (renew.status === 'due_soon') {
+      card.classList.add('client-card-warn');
+      var dl = renew.daysLeft;
+      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
+      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
+    }
+
+    // Responsible person + scope chips (always show if filled)
+    var responsibleHtml = '';
+    if (c.responsiblePerson || c.serviceScope) {
+      var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
+                   : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
+      var roleLbl = c.serviceScope === 'individual' ? 'מטפל'
+                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
+      responsibleHtml = '<div class="client-meta">' +
+        (scopeLbl ? '<span class="chip chip-scope">' + scopeLbl + '</span>' : '') +
+        (c.responsiblePerson ? '<span class="chip chip-resp">' + roleLbl + ': ' + escapeHtml(c.responsiblePerson) + '</span>' : '') +
+        '</div>';
+    }
+
     card.innerHTML =
+      renewBannerHtml +
       '<div class="client-head">' +
         '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
       '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
+      responsibleHtml +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       paymentHtml +
@@ -973,6 +1128,14 @@
 
     if (state.role === 'editor') {
       var actions = $('.client-actions', card);
+
+      var editBtn = document.createElement('button');
+      editBtn.className = 'btn btn-ghost';
+      editBtn.textContent = '✏️ ערוך';
+      editBtn.title = 'ערוך פרטי טיפול';
+      editBtn.onclick = function () { openEditClientModal(c); };
+      actions.appendChild(editBtn);
+
       var statusSel = document.createElement('select');
       ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
         var o = document.createElement('option');
@@ -1238,6 +1401,22 @@
   }
   function closeExitModal() { $('#exitModal').hidden = true; exitClientId = null; }
 
+  var editClientId = null;
+  function openEditClientModal(client) {
+    editClientId = client.id;
+    var form = $('#editClientForm');
+    form.reset();
+    $('#editClientName').textContent = client.name;
+    form.clientId.value = client.id;
+    form.serviceScope.value = client.serviceScope || '';
+    form.responsiblePerson.value = client.responsiblePerson || '';
+    form.paymentStatus.value = client.paymentStatus || 'paid';
+    form.paymentDate.value = client.paymentDate || '';
+    form.monthlyAmount.value = client.pricePerSession || '';
+    $('#editClientModal').hidden = false;
+  }
+  function closeEditClientModal() { $('#editClientModal').hidden = true; editClientId = null; }
+
   // --- auth
   function applyRole() {
     document.body.classList.toggle('viewer', state.role !== 'editor');
@@ -1324,7 +1503,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal();
       });
     });
 
@@ -1517,6 +1696,43 @@
       persist()
         .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
+        .finally(function () { submit.disabled = false; });
+    });
+
+    var editForm = $('#editClientForm');
+    if (editForm) editForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#editClientSubmit');
+      if (submit.disabled) return;
+      submit.disabled = true;
+      var client = state.clients.find(function (c) { return c.id === editClientId; });
+      if (!client) { submit.disabled = false; return; }
+      var fd = new FormData(e.target);
+      var scope = fd.get('serviceScope') || '';
+      var resp = (fd.get('responsiblePerson') || '').trim();
+      if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
+      if (!resp) { toast('יש להזין שם איש קשר אחראי', true); submit.disabled = false; return; }
+      var prev = {
+        serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
+        paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
+        pricePerSession: client.pricePerSession
+      };
+      client.serviceScope = scope;
+      client.responsiblePerson = resp;
+      var ps = fd.get('paymentStatus') || '';
+      if (ps) client.paymentStatus = ps;
+      var pd = fd.get('paymentDate') || '';
+      if (pd) client.paymentDate = pd;
+      var amt = toNum(fd.get('monthlyAmount'));
+      if (amt) client.pricePerSession = amt;
+      persist()
+        .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
+        .catch(function (err) {
+          // rollback
+          Object.assign(client, prev);
+          toast('שגיאה: ' + err.message, true);
+          render();
+        })
         .finally(function () { submit.disabled = false; });
     });
   }
