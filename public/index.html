@@ -31,6 +31,7 @@
       </nav>
       <div class="topbar-right">
         <span id="roleBadge" class="role-badge">צופה</span>
+        <button id="settingsBtn" class="btn btn-ghost edit-only" title="הגדרות">⚙️</button>
         <button id="refreshBtn" class="btn btn-ghost" title="רענון">↻</button>
         <button id="logoutBtn" class="btn btn-ghost">יציאה</button>
       </div>
@@ -298,6 +299,24 @@
       </div>
     </div>
 
+    <!-- Settings modal -->
+    <div id="settingsModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">⚙️ הגדרות גלובליות</div>
+        <form id="settingsForm" class="form-grid">
+          <div class="wide form-section-title">פרטי חשבון בנק לגבייה</div>
+          <label>שם הבנק<input name="bankName" type="text" /></label>
+          <label>סניף<input name="bankBranch" type="text" /></label>
+          <label>מספר חשבון<input name="bankAccount" type="text" /></label>
+          <label>ע"ש (שם בעל החשבון)<input name="bankHolder" type="text" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="settingsSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Edit client modal -->
     <div id="editClientModal" class="modal" hidden>
       <div class="modal-card">
@@ -313,9 +332,15 @@
               <option value="program">תוכנית מורחבת</option>
             </select>
           </label>
-          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
-            <input name="responsiblePerson" type="text" required />
-          </label>
+
+          <div class="wide form-section-title">אחראי טיפול (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)</div>
+          <label>שם אחראי טיפול<input name="responsiblePerson" type="text" required /></label>
+          <label>טלפון אחראי טיפול<input name="treatmentContactPhone" type="tel" placeholder="050-1234567" /></label>
+
+          <div class="wide form-section-title">גורם משלם (קרוב משפחה או המטופל עצמו)</div>
+          <label>שם גורם משלם<input name="payerName" type="text" /></label>
+          <label>טלפון גורם משלם<input name="payerPhone" type="tel" placeholder="050-1234567" /></label>
+          <label class="wide">לינק לתשלום באשראי (אופציונלי)<input name="paymentLink" type="url" placeholder="https://..." /></label>
 
           <div class="wide form-section-title">פרטי תשלום אחרון</div>
           <label>סטטוס תשלום
