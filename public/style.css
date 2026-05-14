@@ -488,3 +488,80 @@ body.viewer .edit-only { display: none !important; }
   overflow-y: auto !important;
   margin: 20px auto !important;
 }
+/* ===== Renewals & overdue alerts (Step 2) ===== */
+.renewals-panel { border: 2px solid var(--border); }
+.renewals-list { display: flex; flex-direction: column; gap: 12px; }
+.renewals-empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.renewals-section {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+}
+.renewals-section-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+.renewals-stop {
+  background: rgba(255, 60, 60, 0.10);
+  border-color: #d33;
+}
+.renewals-stop .renewals-section-title { color: #ff9d9d; }
+.renewals-warn {
+  background: rgba(242, 195, 85, 0.10);
+  border-color: var(--amber);
+}
+.renewals-warn .renewals-section-title { color: var(--amber); }
+
+.renewal-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.18);
+  margin-bottom: 6px;
+}
+.renewal-row:last-child { margin-bottom: 0; }
+.renewal-main {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.renewal-name { font-weight: 700; font-size: 1rem; color: var(--text); }
+.renewal-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+.renewal-date { color: var(--muted); }
+.renewal-stop .renewal-days { color: #ff9d9d; font-weight: 700; }
+.renewal-warn .renewal-days { color: var(--amber); font-weight: 700; }
+.chip-amount { background: var(--panel-2); color: var(--green-2); font-weight: 600; }
+
+/* Card banners + colored borders */
+.card-banner {
+  padding: 8px 12px;
+  border-radius: 8px 8px 0 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: -14px -14px 12px -14px;
+}
+.card-banner-stop {
+  background: #5c1a1a;
+  color: #ffe0e0;
+  border-bottom: 2px solid #ff7676;
+}
+.card-banner-warn {
+  background: #5a4517;
+  color: #fff2cf;
+  border-bottom: 2px solid var(--amber);
+}
+.client-card-stop { box-shadow: 0 0 0 2px #ff7676 inset, var(--shadow); }
+.client-card-warn { box-shadow: 0 0 0 2px var(--amber) inset, var(--shadow); }
+.chip-scope { background: var(--panel-2); color: var(--green-2); }
+.chip-resp  { background: var(--panel-2); color: var(--text-soft); }
