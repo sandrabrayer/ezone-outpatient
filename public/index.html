@@ -93,4 +93,220 @@
         </div>
         <div class="panel">
           <div class="panel-title">לגבייה בתאריך הנבחר</div>
-          <div id="billingDue
+          <div id="billingDueList" class="billing-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">יתרות פתוחות מתאריכים קודמים</div>
+          <div id="billingOpenList" class="billing-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">סיכום חודשי <span id="billMonthLabel" class="panel-sub"></span></div>
+          <div class="billing-summary-row">
+            <div class="kpi"><div class="kpi-label">נגבה החודש</div><div id="billMonthCollected" class="kpi-value">₪0</div></div>
+            <div class="kpi"><div class="kpi-label">יתרה פתוחה</div><div id="billMonthOutstanding" class="kpi-value">₪0</div></div>
+          </div>
+          <div class="panel-subtitle">לפי מטופל</div>
+          <div id="billMonthByClient" class="billing-breakdown"></div>
+        </div>
+      </section>
+
+      <!-- Retention -->
+      <section id="view-retention" class="view">
+        <div class="toolbar">
+          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">שימור לידים — לא רלוונטים וסיימו טיפול</h2>
+        </div>
+        <div id="retentionList"></div>
+      </section>
+    </main>
+
+    <!-- Toast -->
+    <div id="toast" class="toast" hidden></div>
+
+    <!-- Lead form modal -->
+    <div id="leadModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title" id="leadModalTitle">ליד חדש</div>
+        <form id="leadForm" class="form-grid">
+          <label>שם<input name="name" required /></label>
+          <label>טלפון<input name="phone" required /></label>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="leadForm"></div>
+          </label>
+          <label id="leadLocationWrap">סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <label>בית מוצא
+            <select name="house_of_origin" required>
+              <option value="">—</option>
+              <option value="raanana">רעננה אשר</option>
+              <option value="ramot">רמות השבים</option>
+              <option value="efroni">קיסריה עפרוני</option>
+              <option value="rehab">קיסריה ריהאב</option>
+              <option value="external">חיצוני</option>
+            </select>
+          </label>
+          <label>תאריך יצירה<input name="created" type="date" required /></label>
+          <label class="wide">הערות<textarea name="note" rows="2"></textarea></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="leadFormSubmit">שמירה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Agreement modal -->
+    <div id="agreementModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">מתחיל טיפול</div>
+        <form id="agreementForm" class="form-grid">
+          <div class="wide sessions-host" data-host="agreementSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Activation modal — now includes payment fields -->
+    <div id="activateModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">מעבר למטופל פעיל</div>
+        <form id="activateForm" class="form-grid">
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="activateForm"></div>
+          </label>
+          <label id="activateLocationWrap">סניף
+            <select name="location" required>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <div class="wide sessions-host" data-host="activateSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+
+          <label class="wide">היקף טיפול
+            <select name="serviceScope" required>
+              <option value="">—</option>
+              <option value="individual">טיפול פרטני</option>
+              <option value="program">תוכנית מורחבת</option>
+            </select>
+          </label>
+          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
+            <input name="responsiblePerson" type="text" required />
+          </label>
+
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus" required>
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Direct-add client modal -->
+    <div id="directClientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">הוספת מטופל ישירות</div>
+        <form id="directClientForm" class="form-grid">
+          <label>שם מטופל<input name="name" required /></label>
+          <label>טלפון<input name="phone" /></label>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="directClientForm"></div>
+          </label>
+          <label id="directLocationWrap">סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <label>בית מוצא
+            <select name="house_of_origin" required>
+              <option value="">—</option>
+              <option value="raanana">רעננה אשר</option>
+              <option value="ramot">רמות השבים</option>
+              <option value="efroni">קיסריה עפרוני</option>
+              <option value="rehab">קיסריה ריהאב</option>
+              <option value="external">חיצוני</option>
+            </select>
+          </label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+          <div class="wide sessions-host" data-host="directSessions"></div>
+          <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
+          <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
+
+          <label class="wide">היקף טיפול
+            <select name="serviceScope" required>
+              <option value="">—</option>
+              <option value="individual">טיפול פרטני</option>
+              <option value="program">תוכנית מורחבת</option>
+            </select>
+          </label>
+          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
+            <input name="responsiblePerson" type="text" required />
+          </label>
+
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus">
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
+
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="directClientSubmit">הוסף מטופל</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Exit client modal -->
+    <div id="exitModal" class="modal" hidden>
+      <div class="modal-title">סיום טיפול</div>
+      <div class="modal-card">
+        <div class="modal-title">סיום טיפול</div>
+        <form id="exitForm" class="form-grid">
+          <label>תאריך סיום<input name="exitDate" type="date" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="exitSubmit">סיום</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=__BUILD__" defer></script>
+</body>
+</html>
