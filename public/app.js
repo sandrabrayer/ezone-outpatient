@@ -250,7 +250,9 @@
       paymentStatus: row.paymentStatus || '',
       paymentDate: fmtDate(row.paymentDate),
       nextBillingDate: fmtDate(row.nextBillingDate),
-      house_of_origin: row.house_of_origin || ''
+      house_of_origin: row.house_of_origin || '',
+      responsiblePerson: row.responsiblePerson || '',
+      serviceScope: row.serviceScope || ''
     };
   }
 
@@ -298,7 +300,9 @@
       paymentStatus: c.paymentStatus || '',
       paymentDate: c.paymentDate || '',
       nextBillingDate: c.nextBillingDate || '',
-      house_of_origin: c.house_of_origin || ''
+      house_of_origin: c.house_of_origin || '',
+      responsiblePerson: c.responsiblePerson || '',
+      serviceScope: c.serviceScope || ''
     };
   }
 
@@ -1385,7 +1389,9 @@
           paymentStatus: payStatus,
           paymentDate: payDate,
           nextBillingDate: nextBill,
-          house_of_origin: (fd.get('house_of_origin') || '').trim()
+          house_of_origin: (fd.get('house_of_origin') || '').trim(),
+          responsiblePerson: (fd.get('responsiblePerson') || '').trim(),
+          serviceScope: fd.get('serviceScope') || ''
         };
         state.clients.push(client);
         persist()
@@ -1478,7 +1484,9 @@
         paymentStatus: payStatus,
         paymentDate: payDate,
         nextBillingDate: nextBill,
-        house_of_origin: lead.house_of_origin || ''
+        house_of_origin: lead.house_of_origin || '',
+        responsiblePerson: (fd.get('responsiblePerson') || '').trim(),
+        serviceScope: fd.get('serviceScope') || ''
       };
       state.clients.push(client);
       lead.stage = 'active';
