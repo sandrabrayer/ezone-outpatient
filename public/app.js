@@ -115,6 +115,7 @@
     clientSearch: '',
     clientTab: 'all',
     billingDate: '',
+    settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
   };
 
@@ -258,6 +259,26 @@
     return data;
   }
 
+  async function apiLoadSettings() {
+    try {
+      var r = await fetch('/api/sheets?action=getSettings', { cache: 'no-store' });
+      var data = await r.json();
+      if (!r.ok || data.ok === false) return {};
+      return data.settings || {};
+    } catch (_) { return {}; }
+  }
+  async function apiSaveSettings(settings) {
+    var r = await fetch('/api/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'saveSettings', settings: settings })
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+
   function normalizeLeadFromSheet(row) {
     var services = formatServices(parseServices(row.serviceType));
     return {
@@ -304,7 +325,11 @@
       nextBillingDate: fmtDate(row.nextBillingDate),
       house_of_origin: row.house_of_origin || '',
       responsiblePerson: row.responsiblePerson || '',
-      serviceScope: row.serviceScope || ''
+      serviceScope: row.serviceScope || '',
+      treatmentContactPhone: row.treatmentContactPhone || '',
+      payerName: row.payerName || '',
+      payerPhone: row.payerPhone || '',
+      paymentLink: row.paymentLink || ''
     };
   }
 
@@ -354,7 +379,11 @@
       nextBillingDate: c.nextBillingDate || '',
       house_of_origin: c.house_of_origin || '',
       responsiblePerson: c.responsiblePerson || '',
-      serviceScope: c.serviceScope || ''
+      serviceScope: c.serviceScope || '',
+      treatmentContactPhone: c.treatmentContactPhone || '',
+      payerName: c.payerName || '',
+      payerPhone: c.payerPhone || '',
+      paymentLink: c.paymentLink || ''
     };
   }
 
@@ -519,6 +548,61 @@
     renderRenewalAlerts(activeOnly);
   }
 
+  // ---- WhatsApp helpers
+  // Normalize a phone number to international format for wa.me.
+  // Israeli numbers: 050-1234567 -> 972501234567
+  function normalizePhone(raw) {
+    if (!raw) return '';
+    var s = String(raw).replace(/[\s\-\(\)]/g, '');
+    if (s.indexOf('+') === 0) s = s.slice(1);
+    if (s.indexOf('00') === 0) s = s.slice(2);
+    if (s.indexOf('0') === 0) s = '972' + s.slice(1);
+    return s.replace(/\D/g, '');
+  }
+
+  function bankDetailsLine() {
+    var s = state.settings || {};
+    var parts = [];
+    if (s.bankName) parts.push('בנק ' + s.bankName);
+    if (s.bankBranch) parts.push('סניף ' + s.bankBranch);
+    if (s.bankAccount) parts.push('חשבון ' + s.bankAccount);
+    if (s.bankHolder) parts.push('ע"ש ' + s.bankHolder);
+    return parts.join(', ');
+  }
+
+  function buildPayerRenewalMsg(c, info) {
+    var amt = money(c.pricePerSession);
+    var renew = info && info.renewalDate ? displayDate(info.renewalDate) : '';
+    var bank = bankDetailsLine();
+    var link = c.paymentLink ? ' או דרך לינק התשלום: ' + c.paymentLink : '';
+    var bankPart = bank ? ' דרך העברה לחשבון הבנק שלנו: ' + bank : '';
+    return 'שלום ' + (c.payerName || '') + ', החבילה החודשית של ' + c.name +
+      ' עומדת להסתיים בתאריך ' + renew + '. על מנת לא לפגוע ברצף הטיפול של ' + c.name +
+      ' יש להסדיר את התשלום בסך ' + amt + bankPart + link + '. תודה, צוות E-ZONE איזון';
+  }
+
+  function buildPayerOverdueMsg(c) {
+    var amt = money(c.pricePerSession);
+    var bank = bankDetailsLine();
+    var link = c.paymentLink ? ' או דרך לינק התשלום: ' + c.paymentLink : '';
+    var bankPart = bank ? ' דרך העברה לחשבון הבנק שלנו: ' + bank : '';
+    return 'שלום ' + (c.payerName || '') + ', התשלום החודשי של ' + c.name +
+      ' בסך ' + amt + ' טרם התקבל. על מנת לא לפגוע ברצף הטיפול של ' + c.name +
+      ' יש להסדיר את התשלום בהקדם' + bankPart + link + '. תודה, צוות E-ZONE איזון';
+  }
+
+  function buildStopTreatmentMsg(c) {
+    return 'שלום ' + (c.responsiblePerson || '') + ', המטופל ' + c.name +
+      ' טרם הסדיר את התשלום החודשי. נא לא להעניק טיפול עד הסדרת התשלום מול ההנהלה. בתודה, צוות E-ZONE איזון';
+  }
+
+  function openWhatsApp(phone, message) {
+    var p = normalizePhone(phone);
+    if (!p) { toast('חסר מספר טלפון', true); return; }
+    var url = 'https://wa.me/' + p + '?text=' + encodeURIComponent(message);
+    window.open(url, '_blank');
+  }
+
   function renderRenewalAlerts(activeClients) {
     var box = $('#renewalsAlerts');
     if (!box) return;
@@ -578,10 +662,11 @@
                : info.daysLeft === 1 ? 'מחר'
                : 'בעוד ' + info.daysLeft + ' ימים';
     }
-    return '<div class="renewal-row renewal-' + kind + '">' +
+    return '<div class="renewal-row renewal-' + kind + '" data-client-id="' + escapeHtml(c.id) + '">' +
       '<div class="renewal-main">' +
         '<div class="renewal-name">' + escapeHtml(c.name) + '</div>' +
         (scope ? '<span class="chip">' + scope + '</span>' : '') +
+        '<span class="chip">משלם: ' + escapeHtml(c.payerName || '— לא הוגדר —') + '</span>' +
         '<span class="chip">' + roleLabel + ': ' + escapeHtml(responsible) + '</span>' +
       '</div>' +
       '<div class="renewal-meta">' +
@@ -589,7 +674,37 @@
         '<span class="renewal-days">' + daysText + '</span>' +
         '<span class="chip chip-amount">' + money(c.pricePerSession) + '</span>' +
       '</div>' +
+      '<div class="renewal-actions">' +
+        (kind === 'stop'
+          ? '<button class="btn btn-wa" data-action="wa-payer-overdue">💬 בקשת תשלום למשלם</button>' +
+            '<button class="btn btn-wa-stop" data-action="wa-stop">🛑 הודעת עצירת טיפול</button>'
+          : '<button class="btn btn-wa" data-action="wa-payer-renewal">💬 בקשת חידוש למשלם</button>'
+        ) +
+      '</div>' +
     '</div>';
+  }
+
+  // Delegated click handler for renewal action buttons
+  function handleRenewalActionClick(e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var row = btn.closest('[data-client-id]');
+    if (!row) return;
+    var cid = row.getAttribute('data-client-id');
+    var c = state.clients.find(function (x) { return x.id === cid; });
+    if (!c) { toast('מטופל לא נמצא', true); return; }
+    var info = renewalInfo(c);
+    var action = btn.getAttribute('data-action');
+    if (action === 'wa-payer-renewal') {
+      if (!c.payerPhone) { toast('חסר טלפון של גורם משלם — ערוך מטופל', true); return; }
+      openWhatsApp(c.payerPhone, buildPayerRenewalMsg(c, info));
+    } else if (action === 'wa-payer-overdue') {
+      if (!c.payerPhone) { toast('חסר טלפון של גורם משלם — ערוך מטופל', true); return; }
+      openWhatsApp(c.payerPhone, buildPayerOverdueMsg(c));
+    } else if (action === 'wa-stop') {
+      if (!c.treatmentContactPhone) { toast('חסר טלפון של אחראי טיפול — ערוך מטופל', true); return; }
+      openWhatsApp(c.treatmentContactPhone, buildStopTreatmentMsg(c));
+    }
   }
 
   function lastDayOfMonth(dateISO) {
@@ -1410,12 +1525,29 @@
     form.clientId.value = client.id;
     form.serviceScope.value = client.serviceScope || '';
     form.responsiblePerson.value = client.responsiblePerson || '';
+    form.treatmentContactPhone.value = client.treatmentContactPhone || '';
+    form.payerName.value = client.payerName || '';
+    form.payerPhone.value = client.payerPhone || '';
+    form.paymentLink.value = client.paymentLink || '';
     form.paymentStatus.value = client.paymentStatus || 'paid';
     form.paymentDate.value = client.paymentDate || '';
     form.monthlyAmount.value = client.pricePerSession || '';
     $('#editClientModal').hidden = false;
   }
   function closeEditClientModal() { $('#editClientModal').hidden = true; editClientId = null; }
+
+  function openSettingsModal() {
+    var form = $('#settingsForm');
+    if (!form) return;
+    form.reset();
+    var s = state.settings || {};
+    form.bankName.value = s.bankName || '';
+    form.bankBranch.value = s.bankBranch || '';
+    form.bankAccount.value = s.bankAccount || '';
+    form.bankHolder.value = s.bankHolder || '';
+    $('#settingsModal').hidden = false;
+  }
+  function closeSettingsModal() { $('#settingsModal').hidden = true; }
 
   // --- auth
   function applyRole() {
@@ -1452,6 +1584,15 @@
         console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
         state.payments = [];
       }
+      try {
+        var s = await apiLoadSettings();
+        state.settings = {
+          bankName: s.bankName || '',
+          bankBranch: s.bankBranch || '',
+          bankAccount: s.bankAccount || '',
+          bankHolder: s.bankHolder || ''
+        };
+      } catch (_) {}
       state.loaded = true;
       render();
     } catch (e) {
@@ -1495,6 +1636,9 @@
 
     $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
     on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
+    on('#settingsBtn', 'click', function () { openSettingsModal(); });
+    var renewalsBox = $('#renewalsAlerts');
+    if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
@@ -1503,7 +1647,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal();
       });
     });
 
@@ -1711,14 +1855,21 @@
       var scope = fd.get('serviceScope') || '';
       var resp = (fd.get('responsiblePerson') || '').trim();
       if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
-      if (!resp) { toast('יש להזין שם איש קשר אחראי', true); submit.disabled = false; return; }
+      if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
       var prev = {
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
+        treatmentContactPhone: client.treatmentContactPhone,
+        payerName: client.payerName, payerPhone: client.payerPhone,
+        paymentLink: client.paymentLink,
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
         pricePerSession: client.pricePerSession
       };
       client.serviceScope = scope;
       client.responsiblePerson = resp;
+      client.treatmentContactPhone = (fd.get('treatmentContactPhone') || '').trim();
+      client.payerName = (fd.get('payerName') || '').trim();
+      client.payerPhone = (fd.get('payerPhone') || '').trim();
+      client.paymentLink = (fd.get('paymentLink') || '').trim();
       var ps = fd.get('paymentStatus') || '';
       if (ps) client.paymentStatus = ps;
       var pd = fd.get('paymentDate') || '';
@@ -1728,11 +1879,33 @@
       persist()
         .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
         .catch(function (err) {
-          // rollback
           Object.assign(client, prev);
           toast('שגיאה: ' + err.message, true);
           render();
         })
+        .finally(function () { submit.disabled = false; });
+    });
+
+    var settingsForm = $('#settingsForm');
+    if (settingsForm) settingsForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#settingsSubmit');
+      if (submit.disabled) return;
+      submit.disabled = true;
+      var fd = new FormData(e.target);
+      var next = {
+        bankName: (fd.get('bankName') || '').trim(),
+        bankBranch: (fd.get('bankBranch') || '').trim(),
+        bankAccount: (fd.get('bankAccount') || '').trim(),
+        bankHolder: (fd.get('bankHolder') || '').trim()
+      };
+      apiSaveSettings(next)
+        .then(function () {
+          state.settings = next;
+          toast('הגדרות נשמרו');
+          closeSettingsModal();
+        })
+        .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
     });
   }
