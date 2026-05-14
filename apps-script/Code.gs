@@ -1,211 +1,312 @@
-/**
- * E-ZONE Outpatient — Apps Script backend
- *
- * Setup:
- *  1. Create a new Google Sheet named "E-ZONE Outpatient".
- *  2. Extensions → Apps Script → paste this file as Code.gs.
- *  3. Deploy → New deployment → Web app
- *       - Execute as: Me
- *       - Who has access: Anyone (with link)
- *  4. Copy the /exec URL and set it as SHEETS_URL in the Node server env.
- */
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>E-ZONE Outpatient</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- PIN screen -->
+  <div id="pinScreen" class="pin-screen">
+    <div class="pin-card">
+      <div class="brand">E-ZONE Outpatient</div>
+      <div class="pin-sub">הזן קוד גישה</div>
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" />
+      <div id="pinError" class="pin-error" hidden>קוד שגוי</div>
+      <button type="button" id="pinSubmit" class="btn btn-primary">כניסה</button>
+      <button type="button" id="pinViewer" class="btn btn-ghost">המשך כצופה בלבד</button>
+    </div>
+  </div>
 
-var LEADS_HEADERS = [
-  'id', 'name', 'phone', 'serviceType', 'location', 'note',
-  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
-  'house_of_origin'
-];
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="logo">E-ZONE <span>Outpatient</span></div>
+      <nav class="tabs">
+        <button class="tab active" data-view="dashboard">דשבורד</button>
+        <button class="tab" data-view="leads">לידים</button>
+        <button class="tab" data-view="clients">מטופלים</button>
+        <button class="tab" data-view="billing">גבייה</button>
+        <button class="tab" data-view="retention">שימור לידים</button>
+      </nav>
+      <div class="topbar-right">
+        <span id="roleBadge" class="role-badge">צופה</span>
+        <button id="refreshBtn" class="btn btn-ghost" title="רענון">↻</button>
+        <button id="logoutBtn" class="btn btn-ghost">יציאה</button>
+      </div>
+    </header>
 
-/* Extra columns (source, notes, billingType, billingDay, bundleSize,
- * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
- * non-destructively extends existing sheets on next read so no migration
- * is needed — old rows get blank values for the new columns and default
- * to billingType='monthly' on the client. */
-var CLIENTS_HEADERS = [
-  'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
-  'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
-  'source', 'notes', 'billingType', 'billingDay',
-  'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
-  'house_of_origin',
-  'responsiblePerson', 'serviceScope'
-];
+    <main class="main">
+      <!-- Dashboard -->
+      <section id="view-dashboard" class="view active">
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-title">פילוח לפי סוג טיפול</div>
+            <div id="byService" class="bars"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">פילוח לפי סניף</div>
+            <div id="byLocation" class="bars"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">צנרת לידים</div>
+            <div id="pipeline" class="pipeline-counts"></div>
+          </div>
+        </div>
+      </section>
 
-var PAYMENTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'billingType', 'dueDate',
-  'amountDue', 'amountPaid', 'status', 'paymentDate', 'method',
-  'notes', 'bundleSize', 'sessionsUsed'
-];
+      <!-- Leads -->
+      <section id="view-leads" class="view">
+        <div class="toolbar">
+          <input id="leadsSearch" class="search" placeholder="חיפוש לפי שם או טלפון…" />
+          <button id="addLeadBtn" class="btn btn-primary edit-only">+ ליד חדש</button>
+        </div>
+        <div id="kanban" class="kanban"></div>
+      </section>
 
-function _ss() {
-  return SpreadsheetApp.getActiveSpreadsheet();
-}
+      <!-- Clients -->
+      <section id="view-clients" class="view">
+        <div class="toolbar">
+          <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <button id="addClientBtn" class="btn btn-primary edit-only">+ הוסף מטופל ישירות</button>
+          <div id="clientTabs" class="client-tabs"></div>
+        </div>
+        <div id="clientsList" class="clients-list"></div>
+      </section>
 
-function _ensureSheet(name, headers) {
-  var ss = _ss();
-  var sh = ss.getSheetByName(name);
-  if (!sh) {
-    sh = ss.insertSheet(name);
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sh.setFrozenRows(1);
-    return sh;
-  }
-  var lastCol = Math.max(sh.getLastColumn(), headers.length);
-  var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-  var needsHeader = false;
-  for (var i = 0; i < headers.length; i++) {
-    if (existing[i] !== headers[i]) { needsHeader = true; break; }
-  }
-  if (needsHeader) {
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sh.setFrozenRows(1);
-  }
-  return sh;
-}
+      <!-- Billing -->
+      <section id="view-billing" class="view">
+        <div class="toolbar">
+          <label class="billing-date-label">תאריך
+            <input id="billingDate" type="date" />
+          </label>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטופלים לתשלום בתאריך</div><div id="billDueCount" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">סך לגבייה</div><div id="billDueTotal" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">נגבה</div><div id="billDueCollected" class="kpi-value">₪0</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">לגבייה בתאריך הנבחר</div>
+          <div id="billingDueList" class="billing-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">יתרות פתוחות מתאריכים קודמים</div>
+          <div id="billingOpenList" class="billing-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">סיכום חודשי <span id="billMonthLabel" class="panel-sub"></span></div>
+          <div class="billing-summary-row">
+            <div class="kpi"><div class="kpi-label">נגבה החודש</div><div id="billMonthCollected" class="kpi-value">₪0</div></div>
+            <div class="kpi"><div class="kpi-label">יתרה פתוחה</div><div id="billMonthOutstanding" class="kpi-value">₪0</div></div>
+          </div>
+          <div class="panel-subtitle">לפי מטופל</div>
+          <div id="billMonthByClient" class="billing-breakdown"></div>
+        </div>
+      </section>
 
-function _readAll(sh, headers) {
-  var lastRow = sh.getLastRow();
-  if (lastRow < 2) return [];
-  var values = sh.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  var out = [];
-  for (var r = 0; r < values.length; r++) {
-    var row = values[r];
-    if (row.every(function (c) { return c === '' || c === null; })) continue;
-    var obj = {};
-    for (var c = 0; c < headers.length; c++) {
-      var v = row[c];
-      if (v instanceof Date) {
-        v = Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
-      }
-      obj[headers[c]] = v;
-    }
-    out.push(obj);
-  }
-  return out;
-}
+      <!-- Retention -->
+      <section id="view-retention" class="view">
+        <div class="toolbar">
+          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">שימור לידים — לא רלוונטים וסיימו טיפול</h2>
+        </div>
+        <div id="retentionList"></div>
+      </section>
+    </main>
 
-function _writeAll(sh, headers, rows) {
-  var lastRow = sh.getLastRow();
-  if (lastRow > 1) {
-    sh.getRange(2, 1, lastRow - 1, headers.length).clearContent();
-  }
-  if (!rows || !rows.length) return;
-  var values = rows.map(function (row) {
-    return headers.map(function (h) {
-      var v = row[h];
-      if (v === undefined || v === null) return '';
-      return v;
-    });
-  });
-  sh.getRange(2, 1, values.length, headers.length).setValues(values);
-}
+    <!-- Toast -->
+    <div id="toast" class="toast" hidden></div>
 
-function _getData() {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  return {
-    ok: true,
-    leads: _readAll(leadsSh, LEADS_HEADERS),
-    clients: _readAll(clientsSh, CLIENTS_HEADERS)
-  };
-}
+    <!-- Lead form modal -->
+    <div id="leadModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title" id="leadModalTitle">ליד חדש</div>
+        <form id="leadForm" class="form-grid">
+          <label>שם<input name="name" required /></label>
+          <label>טלפון<input name="phone" required /></label>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="leadForm"></div>
+          </label>
+          <label id="leadLocationWrap">סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <label>בית מוצא
+            <select name="house_of_origin" required>
+              <option value="">—</option>
+              <option value="raanana">רעננה אשר</option>
+              <option value="ramot">רמות השבים</option>
+              <option value="efroni">קיסריה עפרוני</option>
+              <option value="rehab">קיסריה ריהאב</option>
+              <option value="external">חיצוני</option>
+            </select>
+          </label>
+          <label>תאריך יצירה<input name="created" type="date" required /></label>
+          <label class="wide">הערות<textarea name="note" rows="2"></textarea></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="leadFormSubmit">שמירה</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-function _saveAll(payload) {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var leads = (payload && payload.leads) || [];
-  var clients = (payload && payload.clients) || [];
-  _writeAll(leadsSh, LEADS_HEADERS, leads);
-  _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-  return { ok: true, savedLeads: leads.length, savedClients: clients.length };
-}
+    <!-- Agreement modal -->
+    <div id="agreementModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">מתחיל טיפול</div>
+        <form id="agreementForm" class="form-grid">
+          <div class="wide sessions-host" data-host="agreementSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-/* ===== Payments =====
- * id is deterministic (built on the client) so the same monthly /
- * single / bundle bill always upserts into the same row. */
-function _getPayments() {
-  var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-  return { ok: true, payments: _readAll(sh, PAYMENTS_HEADERS) };
-}
+    <!-- Activation modal — now includes payment fields -->
+    <div id="activateModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">מעבר למטופל פעיל</div>
+        <form id="activateForm" class="form-grid">
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="activateForm"></div>
+          </label>
+          <label id="activateLocationWrap">סניף
+            <select name="location" required>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <div class="wide sessions-host" data-host="activateSessions"></div>
+          <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
 
-function _upsertPayment(payment) {
-  if (!payment || typeof payment !== 'object') {
-    return { ok: false, error: 'missing_payment' };
-  }
-  if (!payment.id) return { ok: false, error: 'missing_id' };
-  var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
-  try {
-    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-    var idIdx = PAYMENTS_HEADERS.indexOf('id');
-    var lastRow = sh.getLastRow();
-    var row = PAYMENTS_HEADERS.map(function (h) {
-      var v = payment[h];
-      return (v === undefined || v === null) ? '' : v;
-    });
-    if (lastRow > 1) {
-      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < ids.length; i++) {
-        if (String(ids[i][0]) === String(payment.id)) {
-          sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
-          return { ok: true, payment: payment, updated: true };
-        }
-      }
-    }
-    sh.appendRow(row);
-    return { ok: true, payment: payment, created: true };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
+          <label class="wide">היקף טיפול
+            <select name="serviceScope" required>
+              <option value="">—</option>
+              <option value="individual">טיפול פרטני</option>
+              <option value="program">תוכנית מורחבת</option>
+            </select>
+          </label>
+          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
+            <input name="responsiblePerson" type="text" required />
+          </label>
 
-function _json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus" required>
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
 
-function doGet(e) {
-  try {
-    var action = (e && e.parameter && e.parameter.action) || 'getData';
-    if (action === 'getData')      return _json(_getData());
-    if (action === 'getPayments')  return _json(_getPayments());
-    if (action === 'saveAll') {
-      var payload = { leads: [], clients: [] };
-      if (e.parameter.payload) {
-        try { payload = JSON.parse(e.parameter.payload); } catch (err) {}
-      } else {
-        if (e.parameter.leads) try { payload.leads = JSON.parse(e.parameter.leads); } catch (_) {}
-        if (e.parameter.clients) try { payload.clients = JSON.parse(e.parameter.clients); } catch (_) {}
-      }
-      return _json(_saveAll(payload));
-    }
-    return _json({ ok: false, error: 'unknown action: ' + action });
-  } catch (err) {
-    return _json({ ok: false, error: String(err) });
-  }
-}
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="activateSubmit">אישור</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-function doPost(e) {
-  try {
-    var action = (e && e.parameter && e.parameter.action) || 'saveAll';
-    var payload = {};
-    if (e.postData && e.postData.contents) {
-      try { payload = JSON.parse(e.postData.contents); } catch (err) {}
-      if (payload && payload.action) action = payload.action;
-    }
-    if (action === 'saveAll') {
-      return _json(_saveAll({
-        leads:   Array.isArray(payload.leads)   ? payload.leads   : [],
-        clients: Array.isArray(payload.clients) ? payload.clients : []
-      }));
-    }
-    if (action === 'getData')     return _json(_getData());
-    if (action === 'getPayments') return _json(_getPayments());
-    if (action === 'savePayment' || action === 'updatePayment') {
-      return _json(_upsertPayment(payload.payment));
-    }
-    return _json({ ok: false, error: 'unknown action: ' + action });
-  } catch (err) {
-    return _json({ ok: false, error: String(err) });
-  }
-}
+    <!-- Direct-add client modal -->
+    <div id="directClientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">הוספת מטופל ישירות</div>
+        <form id="directClientForm" class="form-grid">
+          <label>שם מטופל<input name="name" required /></label>
+          <label>טלפון<input name="phone" /></label>
+          <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
+            <div class="checkgroup" data-group="serviceType" data-for="directClientForm"></div>
+          </label>
+          <label id="directLocationWrap">סניף
+            <select name="location" required>
+              <option value="">—</option>
+              <option>רעננה הפרדס</option>
+              <option>רמות השבים</option>
+              <option>קיסריה גמילה</option>
+              <option>קיסריה עפרוני</option>
+            </select>
+          </label>
+          <label>בית מוצא
+            <select name="house_of_origin" required>
+              <option value="">—</option>
+              <option value="raanana">רעננה אשר</option>
+              <option value="ramot">רמות השבים</option>
+              <option value="efroni">קיסריה עפרוני</option>
+              <option value="rehab">קיסריה ריהאב</option>
+              <option value="external">חיצוני</option>
+            </select>
+          </label>
+          <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
+          <div class="wide sessions-host" data-host="directSessions"></div>
+          <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
+          <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
+
+          <label class="wide">היקף טיפול
+            <select name="serviceScope" required>
+              <option value="">—</option>
+              <option value="individual">טיפול פרטני</option>
+              <option value="program">תוכנית מורחבת</option>
+            </select>
+          </label>
+          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
+            <input name="responsiblePerson" type="text" required />
+          </label>
+
+          <!-- Payment fields -->
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus">
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
+
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="directClientSubmit">הוסף מטופל</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Exit client modal -->
+    <div id="exitModal" class="modal" hidden>
+      <div class="modal-title">סיום טיפול</div>
+      <div class="modal-card">
+        <div class="modal-title">סיום טיפול</div>
+        <form id="exitForm" class="form-grid">
+          <label>תאריך סיום<input name="exitDate" type="date" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="exitSubmit">סיום</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=__BUILD__" defer></script>
+</body>
+</html>
