@@ -26,7 +26,8 @@ var CLIENTS_HEADERS = [
   'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
   'source', 'notes', 'billingType', 'billingDay',
   'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
-  'house_of_origin'
+  'house_of_origin',
+  'responsiblePerson', 'serviceScope'
 ];
 
 var PAYMENTS_HEADERS = [
