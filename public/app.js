@@ -1541,6 +1541,20 @@
     form.paymentStatus.value = client.paymentStatus || 'paid';
     form.paymentDate.value = client.paymentDate || '';
     form.monthlyAmount.value = client.pricePerSession || '';
+    // Treatment plan: service types + sessions per week per treatment
+    var ecGroup = $('[data-group="serviceType"]', form);
+    var ecHost = $('[data-host="editClientSessions"]', form);
+    if (ecGroup && ecHost) {
+      populateServiceGroup(ecGroup, client.serviceType);
+      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek);
+      $$('input[type="checkbox"]', ecGroup).forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var picked = readServiceGroup(ecGroup);
+          var current = readSessionsHost(ecHost);
+          renderSessionsHost(ecHost, formatServices(picked), current);
+        });
+      });
+    }
     $('#editClientModal').hidden = false;
   }
   function closeEditClientModal() { $('#editClientModal').hidden = true; editClientId = null; }
@@ -1871,7 +1885,9 @@
         payerName: client.payerName, payerPhone: client.payerPhone,
         paymentLink: client.paymentLink,
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
-        pricePerSession: client.pricePerSession
+        pricePerSession: client.pricePerSession,
+        serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
+        nextBillingDate: client.nextBillingDate
       };
       client.serviceScope = scope;
       client.responsiblePerson = resp;
@@ -1885,6 +1901,23 @@
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
+      // Treatment plan: service types + sessions per week
+      var ecGroup2 = $('[data-group="serviceType"]', e.target);
+      var ecHost2 = $('[data-host="editClientSessions"]', e.target);
+      if (ecGroup2 && ecHost2) {
+        var pickedSvc = readServiceGroup(ecGroup2);
+        if (pickedSvc.length) {
+          var bd = readSessionsHost(ecHost2);
+          var cleanBd = {};
+          pickedSvc.forEach(function (s) { cleanBd[s] = wholeSessions(bd[s] || 0); });
+          client.serviceType = formatServices(pickedSvc);
+          client.sessionsPerWeek = cleanBd;
+        }
+      }
+      // Recalculate next billing date from payment date (+30 days), as on activate
+      if (client.paymentDate) {
+        client.nextBillingDate = addDays(client.paymentDate, 30);
+      }
       persist()
         .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
         .catch(function (err) {
