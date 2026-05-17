@@ -134,6 +134,16 @@
     return PAYMENT_STATUS_ALIASES[s] || PAYMENT_STATUS_ALIASES[s.toLowerCase()] || 'unpaid';
   }
 
+  // Only an EXPLICIT partial/unpaid status is a billing problem.
+  // Empty/legacy status = assumed paid (no false alarm for old patients).
+  function hasBillingProblem(c) {
+    if (!c) return false;
+    var raw = String(c.paymentStatus == null ? '' : c.paymentStatus).trim();
+    if (!raw) return false;
+    var st = PAYMENT_STATUS_ALIASES[raw] || PAYMENT_STATUS_ALIASES[raw.toLowerCase()] || '';
+    return st === 'partial' || st === 'unpaid';
+  }
+
   // --- utils -------------------------------------------------------------
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
@@ -223,10 +233,9 @@
     if (!anchor) return { status: 'unknown' };
     var renewal = addMonth(anchor);
     var daysLeft = daysBetween(today(), renewal);
-    var paid = c.paymentStatus === 'paid';
     var status;
-    if (!paid) {
-      // Not fully paid for current cycle - treat as overdue
+    if (hasBillingProblem(c)) {
+      // Explicitly marked partial/unpaid - overdue
       status = 'overdue';
     } else if (daysLeft === null) {
       status = 'unknown';
