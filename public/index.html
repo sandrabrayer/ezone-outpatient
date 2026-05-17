@@ -176,6 +176,15 @@
         <form id="agreementForm" class="form-grid">
           <div class="wide sessions-host" data-host="agreementSessions"></div>
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <div class="wide form-section-title">פרטי תשלום חבילה</div>
+          <label>סטטוס תשלום
+            <select name="paymentStatus" required>
+              <option value="paid">שולם במלואו</option>
+              <option value="partial">שולם חלקית</option>
+              <option value="unpaid">לא שולם</option>
+            </select>
+          </label>
+          <label>תאריך תשלום<input name="paymentDate" type="date" /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="agreementSubmit">שמור</button>

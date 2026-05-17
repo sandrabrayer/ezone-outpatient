@@ -1454,6 +1454,8 @@
     f.reset();
     renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek);
     f.pricePerSession.value = lead.pricePerSession || '';
+    if (f.paymentStatus) f.paymentStatus.value = lead.paymentStatus || 'paid';
+    if (f.paymentDate) f.paymentDate.value = lead.paymentDate || today();
     $('#agreementModal').hidden = false;
   }
   function closeAgreementModal() { $('#agreementModal').hidden = true; agreementLeadId = null; }
@@ -1783,6 +1785,18 @@
       var host = $('[data-host="agreementSessions"]', e.target);
       lead.sessionsPerWeek = readSessionsHost(host);
       lead.pricePerSession = toNum(fd.get('pricePerSession'));
+      var agPayStatus = fd.get('paymentStatus') || '';
+      var agPayDate = fd.get('paymentDate') || '';
+      if ((agPayStatus === 'paid' || agPayStatus === 'partial') && !agPayDate) {
+        toast('יש להזין תאריך תשלום', true);
+        submit.disabled = false;
+        return;
+      }
+      if (agPayStatus) lead.paymentStatus = agPayStatus;
+      if (agPayDate) {
+        lead.paymentDate = agPayDate;
+        lead.nextBillingDate = addDays(agPayDate, 30);
+      }
       if (agreementAdvance) lead.stage = 'agreement';
       persist()
         .then(function () { toast('נשמר'); closeAgreementModal(); render(); })
