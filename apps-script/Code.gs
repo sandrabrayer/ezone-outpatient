@@ -192,12 +192,89 @@ function _json(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+/* ===== Win-back source (read-only cross-app endpoint) =====
+ *
+ * Consumed by the E-Zone-Dashboard win-back call list.
+ *
+ * Returns only the two projections the dashboard is allowed to see:
+ *   lostLeads:         rows from Leads where stage === 'לא רלוונטי'
+ *   dischargedClients: rows from Clients where status === 'סיים טיפול'
+ *
+ * Each row is projected to exactly the columns the dashboard renders.
+ * Fields like pricePerSession, paymentLink, payerPhone, bundle*, etc.
+ * are deliberately NOT included — the dashboard never receives billing
+ * or payer data even though it lives in the same sheet.
+ *
+ * Auth: optional shared secret. If a Script Property named
+ * 'WINBACK_SECRET' exists, the request must pass ?secret=<value> that
+ * matches. If the property is absent the endpoint is open (URL-only
+ * obscurity — same security level as every other action on this script).
+ */
+var LOST_LEAD_STAGE_HE = 'לא רלוונטי';
+var DISCHARGED_CLIENT_STATUS_HE = 'סיים טיפול';
+
+function _winbackAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('WINBACK_SECRET');
+  if (!expected) return true; // not configured → open
+  var got = (params && params.secret) ? String(params.secret) : '';
+  return got === expected;
+}
+
+function _getWinbackSource() {
+  var leadsSh   = _ensureSheet('Leads',   LEADS_HEADERS);
+  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+  var leads     = _readAll(leadsSh,   LEADS_HEADERS);
+  var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
+
+  var lostLeads = [];
+  for (var i = 0; i < leads.length; i++) {
+    var l = leads[i];
+    if (l.stage !== LOST_LEAD_STAGE_HE) continue;
+    lostLeads.push({
+      sourceApp:       'ezone-outpatient',
+      sourceId:        l.id,
+      name:            l.name           || '',
+      phone:           l.phone          || '',
+      originalService: l.serviceType    || '',
+      location:        l.location       || '',
+      reasonLeft:      l.note           || '',  // best-available proxy
+      dateLeft:        l.created        || '',  // best-available proxy
+      kind:            'lost_lead'
+    });
+  }
+
+  var dischargedClients = [];
+  for (var j = 0; j < clients.length; j++) {
+    var c = clients[j];
+    if (c.status !== DISCHARGED_CLIENT_STATUS_HE) continue;
+    dischargedClients.push({
+      sourceApp:       'ezone-outpatient',
+      sourceId:        c.id,
+      name:            c.name           || '',
+      phone:           c.phone          || '',
+      originalService: c.serviceType    || '',
+      location:        c.location       || '',
+      reasonLeft:      c.notes          || '',  // best-available proxy
+      dateLeft:        c.exitDate       || '',
+      kind:            'discharged'
+    });
+  }
+
+  return { ok: true, lostLeads: lostLeads, dischargedClients: dischargedClients };
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
     if (action === 'getData')      return _json(_getData());
     if (action === 'getPayments')  return _json(_getPayments());
     if (action === 'getSettings')  return _json(_getSettings());
+    if (action === 'getWinbackSource') {
+      if (!_winbackAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getWinbackSource());
+    }
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -231,6 +308,14 @@ function doPost(e) {
     if (action === 'getData')     return _json(_getData());
     if (action === 'getPayments') return _json(_getPayments());
     if (action === 'getSettings') return _json(_getSettings());
+    if (action === 'getWinbackSource') {
+      var authParams = (e && e.parameter) || {};
+      if (payload && payload.secret) authParams.secret = payload.secret;
+      if (!_winbackAuthOk(authParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getWinbackSource());
+    }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
     }
