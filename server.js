@@ -79,7 +79,10 @@ app.get('/api/sheets', async (req, res) => {
   }
 
   try {
-    const url = SHEETS_URL + (SHEETS_URL.includes('?') ? '&' : '?') + 'action=' + encodeURIComponent(action);
+    const url = SHEETS_URL
+      + (SHEETS_URL.includes('?') ? '&' : '?')
+      + 'action=' + encodeURIComponent(action)
+      + (req.query.secret ? '&secret=' + encodeURIComponent(req.query.secret) : '');
     const r = await fetch(url, { redirect: 'follow' });
     const text = await r.text();
     let data;

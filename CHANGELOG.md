@@ -6,6 +6,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **GET /api/sheets now forwards the `secret` query parameter to Apps Script,**
+  so authenticated endpoints (e.g. `getWinbackSource`) work. `server.js:82`.
+
 - **False "stop treatment" alerts for every existing patient.**
   `renewalInfo()` in `public/app.js` treated any patient whose
   `paymentStatus` was not exactly `'paid'` as overdue. Patient records
