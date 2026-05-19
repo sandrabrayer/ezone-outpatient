@@ -118,3 +118,62 @@ Remaining for step 2 design (do not affect this module):
    a trailing window) — shapes the step-2 hand-off, not this computation.
 2. The cross-app transport (mirror the existing `getWinbackSource`
    read-only, minimal-projection, optional-shared-secret pattern).
+
+---
+
+# Step 2 — OUTPATIENTS export contract (for the DASHBOARD-side work)
+
+The OUTPATIENTS source endpoint is built and tested. DASHBOARD consumes it.
+
+**Request**
+
+```
+GET  <SHEETS_URL>?action=getContinuationBonus&secret=<BONUS_SECRET>
+POST <SHEETS_URL>   body: { "action":"getContinuationBonus", "secret":"<BONUS_SECRET>" }
+```
+
+(Through MANAGERS/DASHBOARD this is the relative `/api/sheets?...` proxy,
+exactly as `getWinbackSource` is consumed today.)
+
+**Success response (current month only)**
+
+```json
+{
+  "ok": true,
+  "sourceApp": "ezone-outpatient",
+  "kind": "continuation_bonus",
+  "month": "2026-05",
+  "ratePct": 5,
+  "byHouse": { "raanana": 210, "ramot": 0, "efroni": 175, "rehab": 0 },
+  "total": 385
+}
+```
+
+- `byHouse` keys are the canonical house ids (match
+  `HOUSE_OF_ORIGIN_LABELS` in `public/app.js`). `external` is intentionally
+  absent.
+- Figures are whole ₪ (already rounded). `total` == sum of `byHouse`.
+- Projection is intentionally minimal — no PII, no billing/payer, no
+  per-patient lines.
+
+**Failure**
+
+```json
+{ "ok": false, "error": "unauthorized" }   // missing/invalid secret, or BONUS_SECRET not configured
+```
+
+**DASHBOARD-side rules for step 3 (additive pass-through)**
+
+1. Read this endpoint with the shared secret.
+2. Thread `byHouse`/`total` into DASHBOARD's own feed **additively** —
+   new field(s) only. Do **not** rename, reuse, or alter any existing
+   field, and do **not** touch occupancy logic.
+3. MANAGERS then reads the new field and adds it as a line in
+   "פירוט חישוב הבונוס" (step 4 — small; the app already renders a
+   "בונוס הפניות להמשך טיפול" line).
+
+**Open (cannot finalise without the DASHBOARD repo)**
+
+- Exact DASHBOARD sheet/tab + column name the figure should land in.
+- Whether DASHBOARD stores a snapshot row per month or just passes the
+  live current-month value through its feed.

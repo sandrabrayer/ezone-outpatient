@@ -263,6 +263,134 @@ function _getWinbackSource() {
   return { ok: true, lostLeads: lostLeads, dischargedClients: dischargedClients };
 }
 
+/* ===== Outpatient-continuation bonus (read-only cross-app endpoint) =====
+ *
+ * STEP 2 source. Consumed by E-Zone-Dashboard, which passes the figure
+ * through (additively) to the MANAGERS app where the bonus is displayed.
+ *
+ * Returns the CURRENT MONTH per-source-house 5% bonus only. The figure is
+ * 5% of the contracted monthly package, which is charged UPFRONT — so the
+ * bonus is earned in the billed month, independent of session delivery or
+ * carry-overs (those are a separate operational system, NOT a dependency).
+ *
+ * Projection is deliberately minimal: ONLY { month, ratePct, byHouse,
+ * total }. No patient names, no billing/payer fields, no per-patient lines
+ * — the dashboard never receives PII or financial detail, exactly as
+ * getWinbackSource restricts its own projection.
+ *
+ * Auth: shared secret REQUIRED. Unlike getWinbackSource (optional secret),
+ * this is a money endpoint: if the Script Property 'BONUS_SECRET' is absent
+ * OR the passed ?secret= does not match, the request is rejected. Fail
+ * closed.
+ *
+ * IMPORTANT — DUAL IMPLEMENTATION:
+ * The canonical, unit-tested logic lives in public/continuation-bonus.js.
+ * Apps Script cannot require() that module, so the rules below are a
+ * faithful re-implementation of it (same as the billing-status.js <->
+ * app.js arrangement already used in this codebase). ANY change to the
+ * bonus rule MUST update both places together, and test/continuation-
+ * bonus.test.js is the guard for the canonical side. Logic kept 1:1:
+ *  - basis: contracted monthly package (pricePerSession; bundlePrice
+ *    fallback only when no monthly figure)
+ *  - real houses only (external / unknown excluded)
+ *  - status 'סיים טיפול' never accrues; 'הפסקה זמנית' excluded by default
+ *  - month must be within [startDate month, exitDate month]
+ *  - ratePct default 5
+ */
+var BONUS_REAL_HOUSES = ['raanana', 'ramot', 'efroni', 'rehab'];
+var BONUS_STATUS_FINISHED_HE = 'סיים טיפול';
+var BONUS_STATUS_PAUSED_HE   = 'הפסקה זמנית';
+var BONUS_DEFAULT_RATE_PCT   = 5;
+
+function _bonusAuthOk(params) {
+  // Fail closed: secret must be configured AND must match.
+  var expected = PropertiesService.getScriptProperties().getProperty('BONUS_SECRET');
+  if (!expected) return false;
+  var got = (params && params.secret) ? String(params.secret) : '';
+  return got === expected;
+}
+
+function _bonusNum(v) {
+  if (v === '' || v === null || v === undefined) return 0;
+  var n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
+function _bonusYmIndex(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  var s = String(v);
+  if (s.indexOf('T') !== -1) s = s.split('T')[0];
+  var parts = s.split('-');
+  if (parts.length < 2) return null;
+  var y = parseInt(parts[0], 10);
+  var m = parseInt(parts[1], 10);
+  if (!isFinite(y) || !isFinite(m) || m < 1 || m > 12) return null;
+  return y * 12 + (m - 1);
+}
+
+function _bonusPackageAmount(c) {
+  var monthly = _bonusNum(c.pricePerSession);
+  if (monthly > 0) return monthly;
+  var bundlePrice = _bonusNum(c.bundlePrice);
+  if (bundlePrice > 0) return bundlePrice;
+  return 0;
+}
+
+/* monthKey 'YYYY-MM' for "now" in the script timezone. */
+function _bonusCurrentMonthKey() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Jerusalem';
+  return Utilities.formatDate(new Date(), tz, 'yyyy-MM');
+}
+
+function _getContinuationBonus() {
+  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+  var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
+
+  var monthKey = _bonusCurrentMonthKey();
+  var mi = _bonusYmIndex(monthKey + '-01');
+
+  var byHouse = {};
+  for (var h = 0; h < BONUS_REAL_HOUSES.length; h++) {
+    byHouse[BONUS_REAL_HOUSES[h]] = 0;
+  }
+  var total = 0;
+
+  for (var i = 0; i < clients.length; i++) {
+    var c = clients[i] || {};
+    var house = String(c.house_of_origin == null ? '' : c.house_of_origin).trim();
+    if (BONUS_REAL_HOUSES.indexOf(house) === -1) continue; // external/unknown
+
+    var status = String(c.status == null ? '' : c.status).trim();
+    if (status === BONUS_STATUS_FINISHED_HE) continue;
+    if (status === BONUS_STATUS_PAUSED_HE) continue; // default: not counted
+
+    var si = _bonusYmIndex(c.startDate);
+    var ei = _bonusYmIndex(c.exitDate);
+    if (si !== null && mi < si) continue; // not started yet
+    if (ei !== null && mi > ei) continue; // already exited
+
+    var amount = _bonusPackageAmount(c);
+    var bonus = amount * (BONUS_DEFAULT_RATE_PCT / 100);
+    byHouse[house] += bonus;
+    total += bonus;
+  }
+
+  for (var k = 0; k < BONUS_REAL_HOUSES.length; k++) {
+    var key = BONUS_REAL_HOUSES[k];
+    byHouse[key] = Math.round(byHouse[key]);
+  }
+
+  return {
+    ok: true,
+    sourceApp: 'ezone-outpatient',
+    kind: 'continuation_bonus',
+    month: monthKey,
+    ratePct: BONUS_DEFAULT_RATE_PCT,
+    byHouse: byHouse,
+    total: Math.round(total)
+  };
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -274,6 +402,12 @@ function doGet(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getWinbackSource());
+    }
+    if (action === 'getContinuationBonus') {
+      if (!_bonusAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getContinuationBonus());
     }
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
@@ -315,6 +449,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getWinbackSource());
+    }
+    if (action === 'getContinuationBonus') {
+      var bonusAuthParams = (e && e.parameter) || {};
+      if (payload && payload.secret) bonusAuthParams.secret = payload.secret;
+      if (!_bonusAuthOk(bonusAuthParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getContinuationBonus());
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));

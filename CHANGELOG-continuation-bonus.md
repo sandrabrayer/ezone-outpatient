@@ -92,3 +92,63 @@ logged separately when they begin.
   **separate future operational system** (different owner — not Vered).
   The bonus computation does not read, need, or wait on that system. This
   is recorded so no future change re-couples them.
+
+## [Unreleased] — step 2 source (OUTPATIENTS export endpoint)
+
+### Added
+
+- **`getContinuationBonus` read-only cross-app endpoint in
+  `apps-script/Code.gs`.** This is the source side of step 2 (hand-off):
+  DASHBOARD will pull from it, then pass the figure through additively to
+  MANAGERS.
+  - Returns the **current month only**, per-source-house: minimal
+    projection `{ ok, sourceApp, kind, month, ratePct, byHouse, total }`.
+    No patient names, phones, billing, payer, or per-patient lines — same
+    deliberate restriction `getWinbackSource` applies to its own output.
+  - Logic is a faithful re-implementation of the canonical, unit-tested
+    `public/continuation-bonus.js` (Apps Script cannot `require()` it —
+    same dual-implementation arrangement as `billing-status.js` ↔
+    `app.js`). Basis = upfront monthly package; real houses only;
+    finished/paused excluded; start/exit month window respected; rate 5%.
+  - Wired into both `doGet` and `doPost`.
+
+### Security
+
+- **Auth is fail-closed and REQUIRED** (stronger than `getWinbackSource`,
+  whose secret is optional). `_bonusAuthOk` returns `false` unless a
+  Script Property `BONUS_SECRET` exists **and** the request's `?secret=`
+  matches exactly. No secret configured ⇒ endpoint denies all requests.
+  Rationale: this is a money endpoint.
+- No `server.js` change required: the existing `/api/sheets` proxy already
+  forwards arbitrary `action` + `secret` upstream (covered by
+  `test/sheets-secret-forwarding.test.js`), so the new action rides the
+  same path with no new surface.
+- Endpoint is read-only and additive; it does not modify any sheet, does
+  not alter existing actions, and does not touch occupancy logic.
+
+### Tests
+
+- **`test/continuation-bonus-appsscript-parity.test.js`** (5 tests): proves
+  the Code.gs port produces byte-identical `byHouse`/`total` to the
+  canonical module on a shared mixed dataset and a boundary case (guards
+  against silent drift between the two implementations), asserts the
+  minimal projection leaks no PII/billing keys, and verifies the
+  fail-closed + exact-match auth behaviour. All pass.
+- Suite: 31/32 pass; the single failure is the pre-existing, unrelated
+  `sheets-secret-forwarding.test.js` (unchanged by this work).
+
+### Operator setup (required before DASHBOARD can consume)
+
+1. In the OUTPATIENTS Apps Script project: **Project Settings → Script
+   Properties → add `BONUS_SECRET`** with a strong random value.
+2. Re-deploy the Web App (new version) so the new action is live.
+3. Verify:
+   `GET <SHEETS_URL>?action=getContinuationBonus&secret=<BONUS_SECRET>`
+   returns `{ ok:true, month:"YYYY-MM", byHouse:{...}, total:... }`.
+   Without the secret it must return `{ ok:false, error:"unauthorized" }`.
+
+### Still blocked (steps 2 wiring + 3) — needs the DASHBOARD repo
+
+- The consumer side (DASHBOARD pulling this endpoint and additively
+  threading the figure into its own feed without touching occupancy) cannot
+  be designed until the DASHBOARD codebase/sheet/Apps Script is available.
