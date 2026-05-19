@@ -8,53 +8,60 @@
  * For each *source house* ("מאיזה בית" / `house_of_origin`), the monthly bonus
  * owed because former patients of that house continue as outpatients here.
  *
- * The business rule (from the project brief):
+ * The business rule (confirmed with stakeholder):
  *   "A manager earns 5% of the monthly treatment package for each former
  *    patient of their house who continues as an outpatient."
  *
- * SCOPE / DESIGN DECISIONS (deliberate, see project brief)
- * -------------------------------------------------------
+ *   - The package is charged UPFRONT. The manager's 5% is therefore earned
+ *     in the month the package is billed/collected — it does NOT wait for
+ *     sessions to be delivered.
+ *   - Carry-over sessions (patient paid for 4, used 3, 1 rolls to next
+ *     month) are a purely OPERATIONAL matter and have ZERO bonus
+ *     implication: the money was already collected, so the bonus was
+ *     already earned. Session attendance / carry-over / daily room
+ *     scheduling live in a SEPARATE operational system and are explicitly
+ *     NOT a dependency of this computation.
+ *   - Cadence: every month the patient is a continuing outpatient (i.e.
+ *     every month a monthly package is billed for them).
+ *
+ * SCOPE / DESIGN DECISIONS (deliberate, see project brief & docs)
+ * --------------------------------------------------------------
  * 1. OUTPUT IS PER-HOUSE, NOT PER-MANAGER.
  *    OUTPATIENTS stores only `house_of_origin`; it has no manager identity.
- *    The house->manager mapping lives downstream (DASHBOARD / MANAGERS), where
- *    it already exists. Emitting per-house keeps this app from owning data it
- *    does not have. The downstream join is trivial and unambiguous.
+ *    The house->manager mapping lives downstream (DASHBOARD / MANAGERS),
+ *    where it already exists. Emitting per-house keeps this app from owning
+ *    data it does not have. The downstream join is trivial and unambiguous.
  *
- * 2. TWO BUSINESS QUESTIONS ARE CONFIGURABLE (not hardcoded), because they
- *    were not finalised when this was written:
- *      a. `basis`  — which figure the 5% applies to:
- *           'package'    -> the contracted monthly package amount
- *                           (Clients.pricePerSession; UI label "חבילה חודשית";
- *                           mirrors the app's own monthlyRevenue()).
- *           'treatments' -> treatments actually received that month
- *                           (best available proxy from sheet data; see
- *                           treatmentsReceivedAmount()).
- *      b. `ratePct` — the percentage itself (defaults to 5).
- *    Cadence is fixed per the confirmed answer ("every month they continue"),
- *    realised by iterating each month in the requested window in which the
- *    patient is continuing.
+ * 2. BASIS IS THE CONTRACTED MONTHLY PACKAGE — and ONLY that.
+ *    `Clients.pricePerSession` holds the monthly package amount for clients
+ *    (UI label "חבילה חודשית"); this mirrors the app's own monthlyRevenue().
+ *    An earlier "treatments actually received" idea was removed: because the
+ *    package is collected upfront, the bonus is settled at collection time;
+ *    a per-session/delivery figure is neither needed nor correct here.
  *
- * 3. `external` IS EXCLUDED. It is not a real house; no manager owns it.
- *    Empty / unknown `house_of_origin` is likewise excluded (cannot attribute).
+ * 3. CONFIGURABLE: only `ratePct` (default 5) and `countPausedStatus`
+ *    (default false). These are genuine policy knobs, not tied to any
+ *    unresolved question.
  *
- * 4. ONLY CONTINUING PATIENTS ACCRUE.
+ * 4. `external` IS EXCLUDED. It is not a real house; no manager owns it.
+ *    Empty / unknown `house_of_origin` is likewise excluded (cannot
+ *    attribute).
+ *
+ * 5. ONLY CONTINUING PATIENTS ACCRUE.
  *    status 'סיים טיפול' (finished) never accrues. 'פעיל' always accrues.
  *    'הפסקה זמנית' (temporary pause) is configurable via
- *    `countPausedStatus` (default false — a paused patient is not receiving
- *    treatment that month, so no package is delivered).
+ *    `countPausedStatus` (default false — a paused patient is not being
+ *    billed a package that month, so nothing was collected).
  *
- * 5. MONTH BOUNDS. A patient accrues for month M only if M is within
+ * 6. MONTH BOUNDS. A patient accrues for month M only if M is within
  *    [startDate month, exitDate month]. Missing startDate -> treated as
- *    "already ongoing" (accrues for any requested month up to exit).
- *    Missing exitDate -> open-ended (accrues through the window end).
+ *    "already ongoing". Missing exitDate -> open-ended (through window end).
  *
  * This module is PURE and has NO dependencies. It mirrors the UMD pattern of
  * billing-status.js so it runs in Node tests and (optionally) the browser
  * without a build step. It performs NO I/O and MUTATES NOTHING — it only
- * reads the `clients` array the app already loads from Sheets.
- *
- * IMPORTANT: This module does not write to any sheet, does not call any
- * network, and does not touch occupancy logic anywhere. It is the
+ * reads the `clients` array the app already loads from Sheets. It does not
+ * touch occupancy logic and does not write to any sheet. This is the
  * "compute + preview" half of step 1 only. Hand-off to DASHBOARD is step 2.
  */
 (function (root, factory) {
@@ -73,13 +80,10 @@
 
   var STATUS_FINISHED_HE = 'סיים טיפול';
   var STATUS_PAUSED_HE   = 'הפסקה זמנית';
-  var STATUS_ACTIVE_HE   = 'פעיל';
 
   var DEFAULTS = {
     ratePct: 5,                 // 5%
-    basis: 'package',           // 'package' | 'treatments'
-    countPausedStatus: false,   // count 'הפסקה זמנית' months?
-    weeksPerMonth: 4.33         // only used by the 'treatments' basis
+    countPausedStatus: false    // count 'הפסקה זמנית' months?
   };
 
   function _num(v) {
@@ -93,7 +97,7 @@
   }
 
   /**
-   * Parse a value into a {year, month} (month 1-12), or null if unparseable.
+   * Parse a value into {y, m} (month 1-12), or null if unparseable.
    * Accepts 'YYYY-MM-DD', 'YYYY-MM-DDTHH:MM:SSZ', Date, or 'YYYY-MM'.
    */
   function _ym(v) {
@@ -115,7 +119,7 @@
   function _ymIndex(ym) { return ym ? (ym.y * 12 + (ym.m - 1)) : null; }
 
   /**
-   * Sum the indices of every calendar month in [from, to] inclusive.
+   * Every calendar month in [from, to] inclusive.
    * `from` / `to` are 'YYYY-MM' strings or {y,m}. Returns an array of
    * { y, m, key:'YYYY-MM', index } in chronological order.
    */
@@ -140,43 +144,16 @@
   /**
    * The contracted monthly package amount for a client.
    * Mirrors app.js monthlyRevenue(): for clients, `pricePerSession` holds
-   * the monthly package (UI label "חבילה חודשית"), regardless of billingType.
-   * Bundle clients: prefer an explicit monthly package if present, else
-   * amortise the bundle price across its size as a monthly-ish figure ONLY
-   * when no monthly figure exists (defensive; most rows carry pricePerSession).
+   * the monthly package (UI label "חבילה חודשית"), regardless of
+   * billingType. Defensive fallback to bundlePrice only when no monthly
+   * figure exists (most rows carry pricePerSession).
    */
   function packageAmount(client) {
     var monthly = _num(client.pricePerSession);
     if (monthly > 0) return monthly;
-    // Defensive fallback for pure-bundle rows with no monthly figure.
     var bundlePrice = _num(client.bundlePrice);
     if (bundlePrice > 0) return bundlePrice;
     return 0;
-  }
-
-  /**
-   * Best-available proxy for "treatments actually received that month".
-   * The sheet does not store per-month delivered-treatment revenue, so this
-   * is intentionally a documented approximation, used ONLY when
-   * basis === 'treatments'. It is deliberately conservative and clearly
-   * labelled so the preview surfaces it before any money moves.
-   *
-   * monthly billing  -> same as packageAmount (package == month of treatment)
-   * bundle billing    -> pricePerSession treated as per-session price *
-   *                       sessions/week * weeksPerMonth (sessions actually
-   *                       scheduled per month)
-   */
-  function treatmentsReceivedAmount(client, cfg) {
-    var billing = _str(client.billingType).toLowerCase() || 'monthly';
-    if (billing !== 'bundle') {
-      return packageAmount(client);
-    }
-    var perSession = _num(client.pricePerSession);
-    var perWeek = _num(client.sessionsPerWeek);
-    if (perSession > 0 && perWeek > 0) {
-      return perSession * perWeek * cfg.weeksPerMonth;
-    }
-    return packageAmount(client);
   }
 
   function _isContinuing(client, cfg) {
@@ -188,10 +165,8 @@
   }
 
   function _accruesInMonth(client, monthIndex) {
-    var start = _ym(client.startDate);
-    var exit = _ym(client.exitDate);
-    var si = _ymIndex(start);
-    var ei = _ymIndex(exit);
+    var si = _ymIndex(_ym(client.startDate));
+    var ei = _ymIndex(_ym(client.exitDate));
     if (si !== null && monthIndex < si) return false; // not started yet
     if (ei !== null && monthIndex > ei) return false; // already exited
     return true;
@@ -209,19 +184,10 @@
         }
       }
     }
-    if (cfg.basis !== 'package' && cfg.basis !== 'treatments') {
-      throw new Error("continuation-bonus: cfg.basis must be 'package' or 'treatments', got: " + cfg.basis);
-    }
     if (!(cfg.ratePct >= 0)) {
       throw new Error('continuation-bonus: cfg.ratePct must be a non-negative number, got: ' + cfg.ratePct);
     }
     return cfg;
-  }
-
-  function _basisAmount(client, cfg) {
-    return cfg.basis === 'treatments'
-      ? treatmentsReceivedAmount(client, cfg)
-      : packageAmount(client);
   }
 
   /**
@@ -231,7 +197,7 @@
    * @param {string} monthKey 'YYYY-MM'
    * @param {object} [opts]   config overrides (see DEFAULTS)
    * @returns {{
-   *   ok: boolean, month: string, ratePct: number, basis: string,
+   *   ok: boolean, month: string, ratePct: number,
    *   byHouse: Object<string, number>,    // house id -> bonus (rounded ₪)
    *   total: number,
    *   lines: Array  // per-patient preview rows (for dry-run / audit)
@@ -239,13 +205,11 @@
    */
   function computeMonth(clients, monthKey, opts) {
     var cfg = _mergeConfig(opts);
-    var month = _ym(monthKey + '-01');
-    var mi = _ymIndex(month);
+    var mi = _ymIndex(_ym(monthKey + '-01'));
     var result = {
       ok: true,
       month: monthKey,
       ratePct: cfg.ratePct,
-      basis: cfg.basis,
       byHouse: {},
       total: 0,
       lines: []
@@ -267,7 +231,7 @@
         house: house,
         included: false,
         reason: '',
-        basisAmount: 0,
+        packageAmount: 0,
         bonus: 0
       };
 
@@ -289,10 +253,10 @@
         continue;
       }
 
-      var amount = _basisAmount(c, cfg);
+      var amount = packageAmount(c);
       var bonus = amount * (cfg.ratePct / 100);
       line.included = true;
-      line.basisAmount = Math.round(amount);
+      line.packageAmount = Math.round(amount);
       line.bonus = Math.round(bonus);
       line.reason = 'included';
       result.byHouse[house] += bonus;
@@ -346,12 +310,13 @@
     if (!windowResult || !windowResult.ok) return 'no preview available';
     var lines = [];
     lines.push('Outpatient-continuation bonus — money preview (NOT yet sent anywhere)');
+    lines.push('Basis: contracted monthly package, charged upfront (5% earned at collection).');
     lines.push('Window: ' + windowResult.from + ' .. ' + windowResult.to);
     lines.push('');
     windowResult.perMonth.forEach(function (r) {
       if (!r.ok) { lines.push(r.month + ': ERROR ' + r.error); return; }
       var included = r.lines.filter(function (l) { return l.included; });
-      lines.push(r.month + '  (rate ' + r.ratePct + '%, basis ' + r.basis + ', ' +
+      lines.push(r.month + '  (rate ' + r.ratePct + '%, ' +
                  included.length + ' continuing patient(s))');
       REAL_HOUSES.forEach(function (h) {
         if (r.byHouse[h]) lines.push('    ' + h + ': ₪' + r.byHouse[h]);
@@ -371,7 +336,6 @@
     REAL_HOUSES: REAL_HOUSES,
     DEFAULTS: DEFAULTS,
     packageAmount: packageAmount,
-    treatmentsReceivedAmount: treatmentsReceivedAmount,
     monthsInWindow: monthsInWindow,
     computeMonth: computeMonth,
     computeWindow: computeWindow,

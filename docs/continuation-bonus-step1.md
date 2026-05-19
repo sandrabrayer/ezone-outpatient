@@ -54,29 +54,28 @@ A *continuing outpatient* = a row in the **`Clients`** sheet.
 | `startDate`       | first month the patient can accrue                      |
 | `exitDate`        | last month the patient can accrue                       |
 
-## Configurable business rules
+## Configurable policy knobs
 
-| option              | default     | effect |
-|---------------------|-------------|--------|
-| `ratePct`           | `5`         | the percentage |
-| `basis`             | `'package'` | `'package'` = 5% of `pricePerSession` (contracted monthly package). `'treatments'` = 5% of a documented proxy for treatments actually received that month |
-| `countPausedStatus` | `false`     | whether `הפסקה זמנית` months accrue (a paused patient receives no treatment that month, so default is no) |
-| `weeksPerMonth`     | `4.33`      | only used by the `treatments` proxy for bundle billing |
+| option              | default | effect |
+|---------------------|---------|--------|
+| `ratePct`           | `5`     | the percentage |
+| `countPausedStatus` | `false` | whether `הפסקה זמנית` months accrue (a paused patient is not billed a package that month, so default is no) |
 
-### The `treatments` basis is an approximation — read before choosing it
+There is **no basis option**. The basis is always the contracted monthly
+package (`Clients.pricePerSession`). The package is charged **upfront**, so
+the manager's 5% is earned in the month it is billed/collected. It does not
+wait for sessions to be delivered.
 
-The sheet does **not** store per-month delivered-treatment revenue. When
-`basis='treatments'`:
+### Why "treatments received" was removed
 
-- monthly billing → same as the package figure (a month of package == a
-  month of treatment),
-- bundle billing → `pricePerSession × sessionsPerWeek × weeksPerMonth`
-  (sessions actually scheduled per month).
-
-This is conservative and clearly labelled in the preview. **If finance needs
-true delivered-treatment amounts, that data does not exist in the current
-schema and must be sourced before `basis='treatments'` is used in
-production.** This is the main open item blocking step 2 sign-off.
+An earlier draft had a `treatments` basis. It was removed after stakeholder
+clarification: because the package is collected upfront, the bonus is settled
+at collection time. Carry-over sessions (patient paid for 4, used 3, 1 rolls
+to next month) are a purely **operational** matter and have **zero bonus
+implication** — the money was already collected, so the bonus was already
+earned. Session attendance, carry-overs, and daily room scheduling belong to
+a **separate future operational system** (different owner, not Vered) which
+this computation does **not** read, need, or wait on.
 
 ## Accrual logic (per patient, per month M)
 
@@ -112,8 +111,10 @@ console.log(CB.previewText(w));   // human-readable, sends nothing anywhere
 
 ## Open items to confirm before step 2 (hand-off to DASHBOARD)
 
-1. Final `basis`: `package` or `treatments`?
-2. If `treatments`: is the documented proxy acceptable, or must a real
-   per-month delivered figure be added to the schema first?
-3. Which month(s) DASHBOARD expects per feed refresh (current month only, or
-   a trailing window) — affects the step-2 hand-off shape, not this module.
+The basis question is now CLOSED (contracted monthly package, upfront).
+Remaining for step 2 design (do not affect this module):
+
+1. Which month(s) DASHBOARD expects per feed refresh (current month only, or
+   a trailing window) — shapes the step-2 hand-off, not this computation.
+2. The cross-app transport (mirror the existing `getWinbackSource`
+   read-only, minimal-projection, optional-shared-secret pattern).

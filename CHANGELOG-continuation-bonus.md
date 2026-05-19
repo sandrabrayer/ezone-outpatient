@@ -65,3 +65,30 @@ logged separately when they begin.
   - final `basis` (`package` vs `treatments`);
   - whether the `treatments` proxy is acceptable or a real per-month
     delivered-treatment figure must be sourced.
+
+## [Unreleased] — revision after stakeholder clarification
+
+### Changed
+
+- **Locked the basis to the contracted monthly package; removed the
+  `treatments` mode entirely.** Stakeholder clarified the package is charged
+  **upfront**, so the manager's 5% is earned in the month the package is
+  billed/collected — it does not wait for sessions to be delivered.
+  Carry-over sessions (paid 4, used 3, 1 rolls over) are a purely
+  operational matter with **zero bonus implication** (the money was already
+  collected). Config surface is now just `ratePct` and `countPausedStatus`.
+
+### Removed
+
+- `treatmentsReceivedAmount()`, the `basis` option, and `weeksPerMonth`.
+  The session-delivery idea is dead, not dormant: because billing is
+  upfront, a per-session/delivery figure is neither needed nor correct for
+  the bonus. Test count adjusted to 19 (all pass); the removed tests covered
+  only the deleted mode.
+
+### Explicitly NOT a dependency
+
+- Session attendance, carry-over tracking, and daily room scheduling are a
+  **separate future operational system** (different owner — not Vered).
+  The bonus computation does not read, need, or wait on that system. This
+  is recorded so no future change re-couples them.
