@@ -1543,6 +1543,8 @@
     form.paymentStatus.value = client.paymentStatus || 'paid';
     form.paymentDate.value = client.paymentDate || '';
     form.monthlyAmount.value = client.pricePerSession || '';
+    if (form.house_of_origin) form.house_of_origin.value = client.house_of_origin || '';
+    if (form.notes) form.notes.value = client.notes || '';
     // Treatment plan: service types + sessions per week per treatment
     var ecGroup = $('[data-group="serviceType"]', form);
     var ecHost = $('[data-host="editClientSessions"]', form);
@@ -1901,7 +1903,8 @@
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
         pricePerSession: client.pricePerSession,
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
-        nextBillingDate: client.nextBillingDate
+        nextBillingDate: client.nextBillingDate,
+        house_of_origin: client.house_of_origin, notes: client.notes
       };
       client.serviceScope = scope;
       client.responsiblePerson = resp;
@@ -1915,6 +1918,10 @@
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
+      // house_of_origin: allow setting OR clearing (user may correct a wrong value).
+      if (fd.has('house_of_origin')) client.house_of_origin = (fd.get('house_of_origin') || '').trim();
+      // notes: allow setting OR clearing.
+      if (fd.has('notes')) client.notes = (fd.get('notes') || '').trim();
       // Treatment plan: service types + sessions per week
       var ecGroup2 = $('[data-group="serviceType"]', e.target);
       var ecHost2 = $('[data-host="editClientSessions"]', e.target);
