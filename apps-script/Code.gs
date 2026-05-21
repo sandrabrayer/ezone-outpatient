@@ -13,7 +13,8 @@
 var LEADS_HEADERS = [
   'id', 'name', 'phone', 'serviceType', 'location', 'note',
   'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
-  'house_of_origin'
+  'house_of_origin',
+  'not_relevant_reason'
 ];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,

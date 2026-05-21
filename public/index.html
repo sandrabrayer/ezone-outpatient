@@ -402,6 +402,26 @@
         </form>
       </div>
     </div>
+
+    <div id="notRelevantReasonModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">סיבת אי-רלוונטיות</div>
+        <form id="notRelevantReasonForm" class="form-grid">
+          <label>סיבה
+            <select name="not_relevant_reason" required>
+              <option value="">—</option>
+              <option value="never_relevant">לא היה רלוונטי מלכתחילה</option>
+              <option value="stopped_from_house">המשיך מאחד הבתים והפסיק</option>
+              <option value="stopped_new">ליד חדש שהתחיל והפסיק</option>
+            </select>
+          </label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary">אישור</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 
   <script src="app.js?v=__BUILD__" defer></script>

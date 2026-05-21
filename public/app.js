@@ -960,6 +960,7 @@
           retRow('סניף', l.location ? escapeHtml(l.location) : '') +
           retRow('בית מוצא', escapeHtml(houseOfOriginLabel(l.house_of_origin))) +
           retRow('תאריך יצירה', l.created ? displayDate(l.created) : '') +
+          retRow('סיבה', escapeHtml(notRelevantReasonLabel(l.not_relevant_reason))) +
           retRow('הערה', l.note ? escapeHtml(l.note) : '');
         card.innerHTML = header + body;
         if (state.role === 'editor') {
@@ -1135,7 +1136,7 @@
       var notRel = document.createElement('button');
       notRel.className = 'btn btn-danger';
       notRel.textContent = 'לא רלוונטי';
-      notRel.onclick = function () { moveLead(l.id, 'not_relevant'); };
+      notRel.onclick = function () { openNotRelevantReasonModal(l); };
       actions.appendChild(notRel);
     }
     return card;
@@ -1306,6 +1307,33 @@
     if (!lead) return;
     lead.stage = newStage;
     persist().then(function () { toast('הועבר'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+  }
+
+  // ---- 'Not relevant' reason flow ----
+  // When the user clicks "לא רלוונטי" on a lead, a small modal asks her to
+  // pick ONE of three fixed reasons before the lead is moved. The reason
+  // is stored on the lead as `not_relevant_reason` for later reporting.
+  // See docs/SPEC-lead-not-relevant-reason.md for the full design.
+  var NOT_RELEVANT_REASON_LABELS = {
+    never_relevant:     'לא היה רלוונטי מלכתחילה',
+    stopped_from_house: 'המשיך מאחד הבתים והפסיק',
+    stopped_new:        'ליד חדש שהתחיל והפסיק'
+  };
+  function notRelevantReasonLabel(v) {
+    var s = String(v == null ? '' : v).trim();
+    return NOT_RELEVANT_REASON_LABELS[s] || '';
+  }
+  var notRelevantLeadId = null;
+  function openNotRelevantReasonModal(lead) {
+    notRelevantLeadId = lead.id;
+    var form = $('#notRelevantReasonForm');
+    if (form) form.reset();
+    $('#notRelevantReasonModal').hidden = false;
+  }
+  function closeNotRelevantReasonModal() {
+    var m = $('#notRelevantReasonModal');
+    if (m) m.hidden = true;
+    notRelevantLeadId = null;
   }
 
   function readLeadFormFields(form) {
@@ -1674,7 +1702,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal();
       });
     });
 
@@ -1880,6 +1908,27 @@
         .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
+    });
+
+    var nrrForm = $('#notRelevantReasonForm');
+    if (nrrForm) nrrForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var reason = (fd.get('not_relevant_reason') || '').trim();
+      if (!NOT_RELEVANT_REASON_LABELS[reason]) { toast('יש לבחור סיבה', true); return; }
+      var lead = state.leads.find(function (l) { return l.id === notRelevantLeadId; });
+      if (!lead) { closeNotRelevantReasonModal(); return; }
+      var prev = { stage: lead.stage, not_relevant_reason: lead.not_relevant_reason };
+      lead.stage = 'not_relevant';
+      lead.not_relevant_reason = reason;
+      persist()
+        .then(function () { toast('סומן כלא רלוונטי'); closeNotRelevantReasonModal(); render(); })
+        .catch(function (err) {
+          // Revert on persist failure so the UI matches what's actually saved.
+          lead.stage = prev.stage;
+          lead.not_relevant_reason = prev.not_relevant_reason;
+          toast('שגיאה: ' + err.message, true);
+        });
     });
 
     var editForm = $('#editClientForm');
