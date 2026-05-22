@@ -361,6 +361,7 @@
       paymentStatus: l.paymentStatus || '',
       paymentDate: l.paymentDate || '',
       nextBillingDate: l.nextBillingDate || '',
+      not_relevant_reason: l.not_relevant_reason || '',
       house_of_origin: l.house_of_origin || ''
     };
   }
