@@ -362,6 +362,7 @@
       paymentDate: l.paymentDate || '',
       nextBillingDate: l.nextBillingDate || '',
       not_relevant_reason: l.not_relevant_reason || '',
+      not_relevant_note: l.not_relevant_note || '',
       house_of_origin: l.house_of_origin || ''
     };
   }
@@ -962,6 +963,7 @@
           retRow('בית מוצא', escapeHtml(houseOfOriginLabel(l.house_of_origin))) +
           retRow('תאריך יצירה', l.created ? displayDate(l.created) : '') +
           retRow('סיבה', escapeHtml(notRelevantReasonLabel(l.not_relevant_reason))) +
+          retRow('פירוט', escapeHtml(l.not_relevant_note)) +
           retRow('הערה', l.note ? escapeHtml(l.note) : '');
         card.innerHTML = header + body;
         if (state.role === 'editor') {
@@ -1919,15 +1921,18 @@
       if (!NOT_RELEVANT_REASON_LABELS[reason]) { toast('יש לבחור סיבה', true); return; }
       var lead = state.leads.find(function (l) { return l.id === notRelevantLeadId; });
       if (!lead) { closeNotRelevantReasonModal(); return; }
-      var prev = { stage: lead.stage, not_relevant_reason: lead.not_relevant_reason };
+      var note = (fd.get('not_relevant_note') || '').trim().slice(0, 500);
+      var prev = { stage: lead.stage, not_relevant_reason: lead.not_relevant_reason, not_relevant_note: lead.not_relevant_note };
       lead.stage = 'not_relevant';
       lead.not_relevant_reason = reason;
+      lead.not_relevant_note = note;
       persist()
         .then(function () { toast('סומן כלא רלוונטי'); closeNotRelevantReasonModal(); render(); })
         .catch(function (err) {
           // Revert on persist failure so the UI matches what's actually saved.
           lead.stage = prev.stage;
           lead.not_relevant_reason = prev.not_relevant_reason;
+          lead.not_relevant_note = prev.not_relevant_note;
           toast('שגיאה: ' + err.message, true);
         });
     });
