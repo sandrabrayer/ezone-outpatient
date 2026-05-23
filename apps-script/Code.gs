@@ -43,6 +43,20 @@ var PAYMENTS_HEADERS = [
   'notes', 'bundleSize', 'sessionsUsed'
 ];
 
+/* Removed leads sheet: soft-deleted leads moved out of Leads.
+ * Same columns as LEADS_HEADERS plus removedAt timestamp and
+ * originSheet for restore-by-hand. New headers added at the end
+ * per the _ensureSheet append-only rule. */
+var REMOVED_LEADS_HEADERS = [
+  'id', 'name', 'phone', 'serviceType', 'location', 'note',
+  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
+  'house_of_origin',
+  'not_relevant_reason',
+  'not_relevant_note',
+  'removedAt',
+  'originSheet'
+];
+
 function _ss() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
@@ -162,6 +176,56 @@ function _upsertPayment(payment) {
     return { ok: true, payment: payment, created: true };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _removeLead(lead) {
+  if (!lead || typeof lead !== 'object') return { ok: false, error: 'missing_lead' };
+  if (!lead.id) return { ok: false, error: 'missing_id' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = _ss();
+    var sheet = ss.getSheetByName('Leads');
+    if (!sheet) return { ok: false, error: 'not_found' };
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok: false, error: 'not_found' };
+    var headers = data[0];
+    var idCol = headers.indexOf('id');
+    if (idCol === -1) return { ok: false, error: 'not_found' };
+
+    var rowIndex = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idCol]) === String(lead.id)) {
+        rowIndex = i;
+        break;
+      }
+    }
+    if (rowIndex === -1) return { ok: false, error: 'not_found' };
+
+    var sourceRow = data[rowIndex];
+    var rowObj = {};
+    for (var j = 0; j < headers.length; j++) {
+      rowObj[headers[j]] = sourceRow[j];
+    }
+    rowObj.removedAt = new Date().toISOString();
+    rowObj.originSheet = 'Leads';
+
+    var removedSheet = _ensureSheet('לידים שהוסרו', REMOVED_LEADS_HEADERS);
+    var newRow = REMOVED_LEADS_HEADERS.map(function(h) {
+      return rowObj[h] !== undefined ? rowObj[h] : '';
+    });
+    removedSheet.appendRow(newRow);
+
+    sheet.deleteRow(rowIndex + 1);
+
+    return { ok: true, lead: lead, removed: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -324,6 +388,7 @@ function doPost(e) {
     if (action === 'savePayment' || action === 'updatePayment') {
       return _json(_upsertPayment(payload.payment));
     }
+    if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
