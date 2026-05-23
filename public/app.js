@@ -464,6 +464,10 @@
     await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
   }
 
+  async function persistRemoveLead(lead) {
+    await apiPostAction('removeLead', { lead: leadForSheet(lead) });
+  }
+
   // --- Billing helpers --------------------------------------------------
   function dayOfMonth(iso) {
     if (!iso) return null;
@@ -1141,6 +1145,12 @@
       notRel.textContent = 'לא רלוונטי';
       notRel.onclick = function () { openNotRelevantReasonModal(l); };
       actions.appendChild(notRel);
+
+      var remove = document.createElement('button');
+      remove.className = 'btn btn-danger';
+      remove.textContent = 'הסר';
+      remove.onclick = function () { openRemoveLeadModal(l); };
+      actions.appendChild(remove);
     }
     return card;
   }
@@ -1327,6 +1337,7 @@
     return NOT_RELEVANT_REASON_LABELS[s] || '';
   }
   var notRelevantLeadId = null;
+  var removingLeadId = null;
   function openNotRelevantReasonModal(lead) {
     notRelevantLeadId = lead.id;
     var form = $('#notRelevantReasonForm');
@@ -1337,6 +1348,17 @@
     var m = $('#notRelevantReasonModal');
     if (m) m.hidden = true;
     notRelevantLeadId = null;
+  }
+
+  function openRemoveLeadModal(lead) {
+    removingLeadId = lead.id;
+    $('#removeLeadModal').hidden = false;
+  }
+
+  function closeRemoveLeadModal() {
+    var m = $('#removeLeadModal');
+    if (m) m.hidden = true;
+    removingLeadId = null;
   }
 
   function readLeadFormFields(form) {
@@ -1934,6 +1956,26 @@
           lead.not_relevant_reason = prev.not_relevant_reason;
           lead.not_relevant_note = prev.not_relevant_note;
           toast('שגיאה: ' + err.message, true);
+        });
+    });
+
+    var rlForm = $('#removeLeadForm');
+    if (rlForm) rlForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var lead = state.leads.find(function (l) { return l.id === removingLeadId; });
+      if (!lead) { closeRemoveLeadModal(); return; }
+      var prevLeads = state.leads.slice();
+      state.leads = state.leads.filter(function (l) { return l.id !== lead.id; });
+      persistRemoveLead(lead)
+        .then(function () {
+          toast('הליד הוסר', true);
+          closeRemoveLeadModal();
+          render();
+        })
+        .catch(function (err) {
+          state.leads = prevLeads;
+          toast('שגיאה: ' + err.message, true);
+          render();
         });
     });
 
