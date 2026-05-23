@@ -1361,6 +1361,20 @@
     removingLeadId = null;
   }
 
+  var pendingDuplicateLead = null;
+  function openDuplicateLeadModal(existingLead, onConfirm) {
+    pendingDuplicateLead = { existing: existingLead, onConfirm: onConfirm };
+    var nameEl = $('#duplicateLeadExistingName');
+    if (nameEl) nameEl.textContent = (existingLead && existingLead.name) ? existingLead.name : '';
+    var m = $('#duplicateLeadModal');
+    if (m) m.hidden = false;
+  }
+  function closeDuplicateLeadModal() {
+    var m = $('#duplicateLeadModal');
+    if (m) m.hidden = true;
+    pendingDuplicateLead = null;
+  }
+
   function readLeadFormFields(form) {
     var fd = new FormData(form);
     var group = $('[data-group="serviceType"]', form);
@@ -1727,7 +1741,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal();
       });
     });
 
@@ -1815,18 +1829,35 @@
       var group = $('[data-group="serviceType"]', form);
       if (!readServiceGroup(group).length) { toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       submit.disabled = true;
-      var lead;
+      function runAddFlow() {
+        submit.disabled = true;
+        addLeadFromForm(form);
+        persist()
+          .then(function () { toast('נשמר'); closeLeadModal(); render(); })
+          .catch(function (err) { toast('שגיאה: ' + err.message, true); })
+          .finally(function () { submit.disabled = false; });
+      }
       if (editingLeadId) {
-        lead = state.leads.find(function (l) { return l.id === editingLeadId; });
+        var lead = state.leads.find(function (l) { return l.id === editingLeadId; });
         if (!lead) { submit.disabled = false; return; }
         updateLeadFromForm(lead, form);
+        persist()
+          .then(function () { toast('נשמר'); closeLeadModal(); render(); })
+          .catch(function (err) { toast('שגיאה: ' + err.message, true); })
+          .finally(function () { submit.disabled = false; });
       } else {
-        lead = addLeadFromForm(form);
+        var newPhoneNorm = normalizePhone((form.phone && form.phone.value) || '');
+        var existing = newPhoneNorm ? state.leads.find(function (l) {
+          if (!l || l.stage === 'removed') return false;
+          return normalizePhone(l.phone || '') === newPhoneNorm;
+        }) : null;
+        if (existing) {
+          submit.disabled = false;
+          openDuplicateLeadModal(existing, runAddFlow);
+        } else {
+          runAddFlow();
+        }
       }
-      persist()
-        .then(function () { toast('נשמר'); closeLeadModal(); render(); })
-        .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
     });
 
     $('#agreementForm').addEventListener('submit', function (e) {
@@ -1977,6 +2008,14 @@
           toast('שגיאה: ' + err.message, true);
           render();
         });
+    });
+
+    var dupForm = $('#duplicateLeadForm');
+    if (dupForm) dupForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var pending = pendingDuplicateLead;
+      closeDuplicateLeadModal();
+      if (pending && typeof pending.onConfirm === 'function') pending.onConfirm();
     });
 
     var editForm = $('#editClientForm');
