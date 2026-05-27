@@ -1,0 +1,131 @@
+/**
+ * charges-logic.js
+ * -----------------------------------------------------------------------------
+ * Pure, framework-free helpers for extra-charges and the layered payment-id
+ * scheme. Same UMD pattern as billing-status.js: Node tests `require()` this
+ * module; `public/app.js` keeps an inline copy of the same logic because the
+ * browser cannot import without a build step. Any rule change must update
+ * BOTH places together.
+ *
+ * Payment-id scheme:
+ *   base monthly:    pay::<clientId>::base::<YYYY-MM>
+ *   extra monthly:   pay::<clientId>::chg-<chargeId>::<YYYY-MM>
+ *   one-time extra:  pay::<clientId>::chg-<chargeId>::once
+ *   legacy:          pay::<clientId>::<YYYY-MM>          (pre-PR base monthly)
+ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
+  } else {
+    root.ChargesLogic = api;
+  }
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  function monthKey(iso) { return String(iso || '').slice(0, 7); }
+
+  function dayOfMonth(iso) {
+    if (!iso) return null;
+    var parts = String(iso).slice(0, 10).split('-');
+    if (parts.length < 3) return null;
+    var d = parseInt(parts[2], 10);
+    return isFinite(d) ? d : null;
+  }
+
+  function lastDayOfMonth(iso) {
+    var parts = String(iso).slice(0, 10).split('-');
+    if (parts.length < 3) return null;
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return null;
+    return new Date(y, m, 0).getDate();
+  }
+
+  function paymentId(clientId, dueDateISO, kind, chargeId, chargeBillingType) {
+    if (kind === 'extra') {
+      if (!chargeId) throw new Error('paymentId: chargeId required for kind=extra');
+      var suffix = chargeBillingType === 'one_time' ? 'once' : monthKey(dueDateISO);
+      return 'pay::' + clientId + '::chg-' + chargeId + '::' + suffix;
+    }
+    return 'pay::' + clientId + '::base::' + monthKey(dueDateISO);
+  }
+
+  function legacyBasePaymentId(clientId, dueDateISO) {
+    return 'pay::' + clientId + '::' + monthKey(dueDateISO);
+  }
+
+  // Legacy = exactly 3 '::'-separated segments, ending in YYYY-MM.
+  function isLegacyBasePaymentId(id) {
+    if (!id) return false;
+    var parts = String(id).split('::');
+    if (parts.length !== 3) return false;
+    if (parts[0] !== 'pay') return false;
+    return /^\d{4}-\d{2}$/.test(parts[2]);
+  }
+
+  // Classify a payment id by inspecting it. Legacy ids classify as base.
+  function paymentKindFromId(id) {
+    var s = String(id || '');
+    var m = s.match(/::chg-([^:]+)::/);
+    if (m) return { kind: 'extra', chargeId: m[1] };
+    return { kind: 'base' };
+  }
+
+  // Returns due items on a given ISO date:
+  //   [{ clientId, kind: 'base'|'extra', chargeId?, dueDate, amount }]
+  // Pure: takes clients + charges arrays, no shared state.
+  function dueItemsOn(clients, charges, dateISO) {
+    var d = dayOfMonth(dateISO);
+    var last = lastDayOfMonth(dateISO);
+    var selectedMonth = monthKey(dateISO);
+    var out = [];
+    (clients || []).forEach(function (c) {
+      if (c.status === 'סיים טיפול') return;
+      var bd = c.billingDay ? Number(c.billingDay) : dayOfMonth(c.startDate);
+      if (bd) {
+        var effective = (last && bd > last) ? last : bd;
+        if (effective === d) {
+          out.push({
+            clientId: c.id, kind: 'base', dueDate: dateISO,
+            amount: Number(c.pricePerSession) || 0
+          });
+        }
+      }
+      (charges || []).forEach(function (charge) {
+        if (charge.clientId !== c.id) return;
+        if (charge.active === false) return;
+        if (charge.billingType === 'monthly') {
+          var day = charge.billingDay ? Number(charge.billingDay) : dayOfMonth(charge.chargeDate);
+          if (!day) return;
+          var eff = (last && day > last) ? last : day;
+          if (eff !== d) return;
+          if (selectedMonth < monthKey(charge.chargeDate)) return;
+          out.push({
+            clientId: c.id, kind: 'extra', chargeId: charge.id,
+            dueDate: dateISO, amount: Number(charge.amount) || 0
+          });
+        } else if (charge.billingType === 'one_time') {
+          if (charge.chargeDate === dateISO) {
+            out.push({
+              clientId: c.id, kind: 'extra', chargeId: charge.id,
+              dueDate: dateISO, amount: Number(charge.amount) || 0
+            });
+          }
+        }
+      });
+    });
+    return out;
+  }
+
+  return {
+    monthKey: monthKey,
+    dayOfMonth: dayOfMonth,
+    lastDayOfMonth: lastDayOfMonth,
+    paymentId: paymentId,
+    legacyBasePaymentId: legacyBasePaymentId,
+    isLegacyBasePaymentId: isLegacyBasePaymentId,
+    paymentKindFromId: paymentKindFromId,
+    dueItemsOn: dueItemsOn
+  };
+});

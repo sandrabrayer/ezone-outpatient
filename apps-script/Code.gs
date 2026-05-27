@@ -43,6 +43,20 @@ var PAYMENTS_HEADERS = [
   'notes', 'bundleSize', 'sessionsUsed'
 ];
 
+/* Extra charges per client (חיובים נוספים). One row per ad-hoc treatment,
+ * layered on top of the base monthly subscription. billingType is either
+ * 'one_time' (chargeDate is the single due date) or 'monthly' (chargeDate
+ * is the start date; billingDay overrides dayOfMonth(chargeDate) for the
+ * recurring day). active='false' soft-disables a charge without delete. */
+var CHARGES_HEADERS = [
+  'id', 'clientId', 'description', 'amount',
+  'billingType',
+  'chargeDate',
+  'billingDay',
+  'active',
+  'notes', 'created'
+];
+
 /* Removed leads sheet: soft-deleted leads moved out of Leads.
  * Same columns as LEADS_HEADERS plus removedAt timestamp and
  * originSheet for restore-by-hand. New headers added at the end
@@ -174,6 +188,65 @@ function _upsertPayment(payment) {
     }
     sh.appendRow(row);
     return { ok: true, payment: payment, created: true };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== Client charges ===== */
+function _getCharges() {
+  var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+  return { ok: true, charges: _readAll(sh, CHARGES_HEADERS) };
+}
+
+function _upsertCharge(charge) {
+  if (!charge || typeof charge !== 'object') {
+    return { ok: false, error: 'missing_charge' };
+  }
+  if (!charge.id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var idIdx = CHARGES_HEADERS.indexOf('id');
+    var lastRow = sh.getLastRow();
+    var row = CHARGES_HEADERS.map(function (h) {
+      var v = charge[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    if (lastRow > 1) {
+      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]) === String(charge.id)) {
+          sh.getRange(i + 2, 1, 1, CHARGES_HEADERS.length).setValues([row]);
+          return { ok: true, charge: charge, updated: true };
+        }
+      }
+    }
+    sh.appendRow(row);
+    return { ok: true, charge: charge, created: true };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _removeCharge(chargeId) {
+  if (!chargeId) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = CHARGES_HEADERS.indexOf('id');
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(chargeId)) {
+        sh.deleteRow(i + 2);
+        return { ok: true, removed: true, id: chargeId };
+      }
+    }
+    return { ok: false, error: 'not_found' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -334,6 +407,7 @@ function doGet(e) {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
     if (action === 'getData')      return _json(_getData());
     if (action === 'getPayments')  return _json(_getPayments());
+    if (action === 'getCharges')   return _json(_getCharges());
     if (action === 'getSettings')  return _json(_getSettings());
     if (action === 'getWinbackSource') {
       if (!_winbackAuthOk(e && e.parameter)) {
@@ -373,6 +447,7 @@ function doPost(e) {
     }
     if (action === 'getData')     return _json(_getData());
     if (action === 'getPayments') return _json(_getPayments());
+    if (action === 'getCharges')  return _json(_getCharges());
     if (action === 'getSettings') return _json(_getSettings());
     if (action === 'getWinbackSource') {
       var authParams = (e && e.parameter) || {};
@@ -387,6 +462,13 @@ function doPost(e) {
     }
     if (action === 'savePayment' || action === 'updatePayment') {
       return _json(_upsertPayment(payload.payment));
+    }
+    if (action === 'saveCharge' || action === 'updateCharge') {
+      return _json(_upsertCharge(payload.charge));
+    }
+    if (action === 'removeCharge') {
+      var chgId = payload.id || (payload.charge && payload.charge.id) || '';
+      return _json(_removeCharge(chgId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });

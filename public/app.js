@@ -110,6 +110,7 @@
     leads: [],
     clients: [],
     payments: [],
+    charges: [],
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
@@ -415,6 +416,12 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  async function apiGetCharges() {
+    var r = await fetch('/api/sheets?action=getCharges', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
   async function apiPostAction(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
     var r = await fetch('/api/sheets', {
@@ -466,6 +473,43 @@
     await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
   }
 
+  function normalizeChargeFromSheet(row) {
+    var active = row.active;
+    var activeBool = (active === true) || (String(active).toLowerCase() === 'true');
+    return {
+      id: row.id || '',
+      clientId: row.clientId || '',
+      description: row.description || '',
+      amount: toNum(row.amount),
+      billingType: (row.billingType || 'one_time').toString().toLowerCase(),
+      chargeDate: fmtDate(row.chargeDate),
+      billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay),
+      active: activeBool,
+      notes: row.notes || '',
+      created: fmtDate(row.created)
+    };
+  }
+  function chargeForSheet(c) {
+    return {
+      id: c.id,
+      clientId: c.clientId || '',
+      description: c.description || '',
+      amount: toNum(c.amount),
+      billingType: c.billingType || 'one_time',
+      chargeDate: c.chargeDate || '',
+      billingDay: (c.billingDay === '' || c.billingDay == null) ? '' : toNum(c.billingDay),
+      active: c.active === false ? 'false' : 'true',
+      notes: c.notes || '',
+      created: c.created || today()
+    };
+  }
+  async function persistCharge(charge) {
+    await apiPostAction('saveCharge', { charge: chargeForSheet(charge) });
+  }
+  async function persistRemoveCharge(id) {
+    await apiPostAction('removeCharge', { id: id });
+  }
+
   async function persistRemoveLead(lead) {
     await apiPostAction('removeLead', { lead: leadForSheet(lead) });
   }
@@ -485,7 +529,40 @@
     return d.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
   }
   function clientAmountDue(c) { return toNum(c.pricePerSession); }
-  function paymentId(client, dueDateISO) { return 'pay::' + client.id + '::' + monthKey(dueDateISO); }
+
+  // Payment id scheme — see CHANGELOG-extra-charges.md for the full design.
+  //   base monthly:    pay::<clientId>::base::<YYYY-MM>
+  //   extra monthly:   pay::<clientId>::chg-<chargeId>::<YYYY-MM>
+  //   one-time extra:  pay::<clientId>::chg-<chargeId>::once
+  //   legacy (pre-PR): pay::<clientId>::<YYYY-MM>          (read-only, base-monthly)
+  function paymentId(client, dueDateISO, kind, chargeId) {
+    if (kind === 'extra') {
+      if (!chargeId) throw new Error('paymentId: chargeId required for kind=extra');
+      var charge = state.charges.find(function (c) { return c.id === chargeId; });
+      var suffix = (charge && charge.billingType === 'one_time') ? 'once' : monthKey(dueDateISO);
+      return 'pay::' + client.id + '::chg-' + chargeId + '::' + suffix;
+    }
+    return 'pay::' + client.id + '::base::' + monthKey(dueDateISO);
+  }
+  function legacyBasePaymentId(clientId, dueDateISO) {
+    return 'pay::' + clientId + '::' + monthKey(dueDateISO);
+  }
+  // Detect: 'pay::<clientId>::<YYYY-MM>' has 3 segments; new shapes have 4.
+  function isLegacyBasePaymentId(id) {
+    if (!id) return false;
+    var parts = String(id).split('::');
+    if (parts.length !== 3) return false;
+    if (parts[0] !== 'pay') return false;
+    return /^\d{4}-\d{2}$/.test(parts[2]);
+  }
+  // Inspect an existing payment id to classify it.
+  function paymentKindFromId(id) {
+    var s = String(id || '');
+    var m = s.match(/::chg-([^:]+)::/);
+    if (m) return { kind: 'extra', chargeId: m[1] };
+    return { kind: 'base' };
+  }
+
   function findPaymentById(id) {
     for (var i = 0; i < state.payments.length; i++) {
       if (state.payments[i].id === id) return state.payments[i];
@@ -493,14 +570,33 @@
     return null;
   }
   function paymentForClientOn(client, dueDateISO) {
-    var id = paymentId(client, dueDateISO);
+    // Look up base monthly under either the new or legacy shape. The legacy
+    // row keeps its legacy id forever; new patients/months get the new id.
+    var newId = paymentId(client, dueDateISO, 'base');
+    var existing = findPaymentById(newId);
+    if (existing) return existing;
+    var legacyId = legacyBasePaymentId(client.id, dueDateISO);
+    existing = findPaymentById(legacyId);
+    if (existing) return existing;
+    return {
+      id: newId, clientId: client.id, clientName: client.name,
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: clientAmountDue(client), amountPaid: 0,
+      status: 'unpaid', paymentDate: '', method: '', notes: '',
+      bundleSize: 0, sessionsUsed: 0
+    };
+  }
+  function paymentForExtraOn(client, charge, dueDateISO) {
+    var id = paymentId(client, dueDateISO, 'extra', charge.id);
     var existing = findPaymentById(id);
     if (existing) return existing;
     return {
       id: id, clientId: client.id, clientName: client.name,
-      billingType: 'monthly', dueDate: dueDateISO,
-      amountDue: clientAmountDue(client), amountPaid: 0,
-      status: 'unpaid', paymentDate: '', method: '', notes: '',
+      billingType: charge.billingType === 'one_time' ? 'one_time' : 'monthly',
+      dueDate: dueDateISO,
+      amountDue: toNum(charge.amount), amountPaid: 0,
+      status: 'unpaid', paymentDate: '', method: '',
+      notes: charge.description || '',
       bundleSize: 0, sessionsUsed: 0
     };
   }
@@ -734,16 +830,40 @@
   }
 
   // ---- Billing
+  // Returns an array of due items for the selected date:
+  //   { client, kind: 'base'|'extra', charge?, dueDate, amount }
   function clientsDueOn(dateISO) {
     var d = dayOfMonth(dateISO);
     var last = lastDayOfMonth(dateISO);
+    var selectedMonthKey = monthKey(dateISO);
     var out = [];
     state.clients.forEach(function (c) {
       if (c.status === 'סיים טיפול') return;
+      // Base monthly
       var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
-      if (!bd) return;
-      var effective = (last && bd > last) ? last : bd;
-      if (effective === d) out.push(c);
+      if (bd) {
+        var effective = (last && bd > last) ? last : bd;
+        if (effective === d) {
+          out.push({ client: c, kind: 'base', dueDate: dateISO, amount: clientAmountDue(c) });
+        }
+      }
+      // Extra charges
+      state.charges.forEach(function (charge) {
+        if (charge.clientId !== c.id) return;
+        if (charge.active === false) return;
+        if (charge.billingType === 'monthly') {
+          var day = charge.billingDay ? toNum(charge.billingDay) : dayOfMonth(charge.chargeDate);
+          if (!day) return;
+          var eff = (last && day > last) ? last : day;
+          if (eff !== d) return;
+          if (selectedMonthKey < monthKey(charge.chargeDate)) return;
+          out.push({ client: c, kind: 'extra', charge: charge, dueDate: dateISO, amount: toNum(charge.amount) });
+        } else if (charge.billingType === 'one_time') {
+          if (charge.chargeDate === dateISO) {
+            out.push({ client: c, kind: 'extra', charge: charge, dueDate: dateISO, amount: toNum(charge.amount) });
+          }
+        }
+      });
     });
     return out;
   }
@@ -755,9 +875,12 @@
     var selected = state.billingDate;
     var q = state.billingSearch.trim().toLowerCase();
     var due = clientsDueOn(selected)
-      .filter(function (c) { return !q || (c.name || '').toLowerCase().indexOf(q) !== -1; })
-      .map(function (c) {
-        return { client: c, payment: paymentForClientOn(c, selected) };
+      .filter(function (item) { return !q || (item.client.name || '').toLowerCase().indexOf(q) !== -1; })
+      .map(function (item) {
+        var payment = item.kind === 'extra'
+          ? paymentForExtraOn(item.client, item.charge, selected)
+          : paymentForClientOn(item.client, selected);
+        return { client: item.client, kind: item.kind, charge: item.charge || null, payment: payment };
       });
     var totalDue = due.reduce(function (s, d) { return s + (d.payment.amountDue || 0); }, 0);
     var totalCollected = due.reduce(function (s, d) { return s + (d.payment.amountPaid || 0); }, 0);
@@ -776,7 +899,9 @@
       list.innerHTML = '<div class="billing-empty">אין תשלומים לגבייה בתאריך זה</div>';
       return;
     }
-    dueItems.forEach(function (d) { list.appendChild(buildBillingRow(d.client, d.payment, selectedISO, false)); });
+    dueItems.forEach(function (d) {
+      list.appendChild(buildBillingRow(d.client, d.payment, selectedISO, false, d.kind, d.charge));
+    });
   }
 
   function renderBillingOpenList(selectedISO) {
@@ -797,14 +922,21 @@
     open.forEach(function (p) {
       var client = state.clients.find(function (c) { return c.id === p.clientId; })
         || { id: p.clientId, name: p.clientName, billingType: 'monthly', pricePerSession: p.amountDue, startDate: p.dueDate };
-      list.appendChild(buildBillingRow(client, p, p.dueDate, true));
+      var info = paymentKindFromId(p.id);
+      var charge = info.kind === 'extra'
+        ? state.charges.find(function (c) { return c.id === info.chargeId; })
+        : null;
+      list.appendChild(buildBillingRow(client, p, p.dueDate, true, info.kind, charge));
     });
   }
 
-  function buildBillingRow(client, payment, dueDateISO, isCarry) {
+  function buildBillingRow(client, payment, dueDateISO, isCarry, kind, charge) {
+    var isExtra = kind === 'extra';
     var row = document.createElement('div');
-    row.className = 'billing-row' + (isCarry ? ' carry' : '');
-    var amount = payment.amountDue || clientAmountDue(client) || 0;
+    row.className = 'billing-row'
+      + (isCarry ? ' carry' : '')
+      + (isExtra ? ' billing-row-extra' : '');
+    var amount = payment.amountDue || (isExtra ? toNum(charge && charge.amount) : clientAmountDue(client)) || 0;
     var disabled = state.role === 'editor' ? '' : ' disabled';
     var statusSelect = PAYMENT_STATUSES.map(function (s) {
       return '<option value="' + s.id + '"' + (payment.status === s.id ? ' selected' : '') + '>' + s.he + '</option>';
@@ -818,8 +950,13 @@
       nextBillHtml = '<div><span class="p-label">גבייה הבאה</span><span class="p-val next-bill">' + displayDate(client.nextBillingDate) + '</span></div>';
     }
 
+    var nameDisplay = client.name || payment.clientName || '';
+    if (isExtra) {
+      var desc = (charge && charge.description) || payment.notes || '';
+      nameDisplay = 'חיוב נוסף: ' + desc + ' — ' + nameDisplay;
+    }
     row.innerHTML =
-      '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(client.name || payment.clientName) + '</span></div>' +
+      '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(nameDisplay) + '</span></div>' +
       '<div><span class="p-label">' + dateCellLabel + '</span><span class="p-val">' + escapeHtml(dateCellVal) + '</span></div>' +
       '<div><span class="p-label">סטטוס</span><select class="billing-status"' + disabled + '>' + statusSelect + '</select></div>' +
       '<div class="billing-paid-wrap ' + (payment.status === 'partial' ? '' : 'hidden') + '">' +
@@ -846,7 +983,8 @@
       return {
         id: payment.id, clientId: payment.clientId || client.id,
         clientName: payment.clientName || client.name || '',
-        billingType: 'monthly', dueDate: dueDateISO,
+        billingType: payment.billingType || (isExtra && charge && charge.billingType === 'one_time' ? 'one_time' : 'monthly'),
+        dueDate: dueDateISO,
         amountDue: amount, amountPaid: ap, status: newStatus,
         paymentDate: newStatus === 'paid' ? today() : (payment.paymentDate || ''),
         method: payment.method || '', notes: payment.notes || '',
@@ -1268,6 +1406,30 @@
         '</div>';
     }
 
+    // Extra charges (active only) shown inline as a compact list.
+    var activeCharges = state.charges.filter(function (ch) {
+      return ch.clientId === c.id && ch.active !== false;
+    });
+    var chargesHtml = '';
+    if (activeCharges.length) {
+      var items = activeCharges.map(function (ch) {
+        var label;
+        if (ch.billingType === 'monthly') {
+          var day = ch.billingDay || dayOfMonth(ch.chargeDate) || '';
+          label = 'חודשי: ' + escapeHtml(ch.description) + ' — ' + money(ch.amount) +
+                  (day ? ' (יום ' + day + ')' : '');
+        } else {
+          label = 'חד-פעמי: ' + escapeHtml(ch.description) + ' — ' + money(ch.amount) +
+                  (ch.chargeDate ? ' (' + displayDate(ch.chargeDate) + ')' : '');
+        }
+        return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
+          '<span class="charge-label">' + label + '</span>' +
+          '<button type="button" class="charge-remove edit-only" title="הסר חיוב" data-charge-remove="' + escapeHtml(ch.id) + '">×</button>' +
+          '</li>';
+      }).join('');
+      chargesHtml = '<ul class="client-charges">' + items + '</ul>';
+    }
+
     card.innerHTML =
       renewBannerHtml +
       '<div class="client-head">' +
@@ -1279,6 +1441,7 @@
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       paymentHtml +
+      chargesHtml +
       '<div class="client-meta">' +
         (c.startDate ? 'תחילת טיפול: ' + displayDate(c.startDate) : '') +
       '</div>' +
@@ -1293,6 +1456,21 @@
       editBtn.title = 'ערוך פרטי טיפול';
       editBtn.onclick = function () { openEditClientModal(c); };
       actions.appendChild(editBtn);
+
+      var addChargeBtn = document.createElement('button');
+      addChargeBtn.className = 'btn btn-ghost edit-only';
+      addChargeBtn.textContent = '+ הוסף טיפול';
+      addChargeBtn.title = 'הוסף חיוב חד-פעמי או חודשי';
+      addChargeBtn.onclick = function () { openAddChargeModal(c); };
+      actions.appendChild(addChargeBtn);
+
+      // Wire × buttons on the inline charge list.
+      $$('[data-charge-remove]', card).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var chargeId = btn.getAttribute('data-charge-remove');
+          handleRemoveCharge(chargeId);
+        });
+      });
 
       var statusSel = document.createElement('select');
       ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
@@ -1650,6 +1828,49 @@
   }
   function closeEditClientModal() { $('#editClientModal').hidden = true; editClientId = null; }
 
+  var addChargeClientId = null;
+  function openAddChargeModal(client) {
+    addChargeClientId = client.id;
+    var form = $('#addChargeForm');
+    if (!form) return;
+    form.reset();
+    $('#addChargeClientName').textContent = client.name || '';
+    if (form.chargeDate) form.chargeDate.value = today();
+    if (form.billingType) form.billingType.value = 'one_time';
+    updateAddChargeBillingDayVisibility(form);
+    $('#addChargeModal').hidden = false;
+  }
+  function closeAddChargeModal() {
+    var m = $('#addChargeModal');
+    if (m) m.hidden = true;
+    addChargeClientId = null;
+  }
+  function updateAddChargeBillingDayVisibility(form) {
+    if (!form) return;
+    var type = form.billingType && form.billingType.value;
+    var wrap = $('#addChargeBillingDayWrap');
+    if (!wrap) return;
+    if (type === 'monthly') wrap.classList.remove('field-hidden');
+    else wrap.classList.add('field-hidden');
+  }
+
+  function handleRemoveCharge(chargeId) {
+    if (state.role !== 'editor') return;
+    var charge = state.charges.find(function (c) { return c.id === chargeId; });
+    if (!charge) return;
+    if (!confirm('להסיר חיוב זה?\n' + (charge.description || ''))) return;
+    var prevCharges = state.charges.slice();
+    state.charges = state.charges.filter(function (c) { return c.id !== chargeId; });
+    render();
+    persistRemoveCharge(chargeId)
+      .then(function () { toast('החיוב הוסר'); })
+      .catch(function (e) {
+        state.charges = prevCharges;
+        render();
+        toast('שגיאה: ' + e.message, true);
+      });
+  }
+
   function openSettingsModal() {
     var form = $('#settingsForm');
     if (!form) return;
@@ -1697,6 +1918,13 @@
       } catch (pe) {
         console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
         state.payments = [];
+      }
+      try {
+        var cr = await apiGetCharges();
+        state.charges = (cr.charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
+      } catch (ce) {
+        console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
+        state.charges = [];
       }
       try {
         var s = await apiLoadSettings();
@@ -1763,8 +1991,56 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal();
       });
+    });
+
+    var acTypeSel = $('#addChargeForm select[name="billingType"]');
+    if (acTypeSel) acTypeSel.addEventListener('change', function () {
+      updateAddChargeBillingDayVisibility($('#addChargeForm'));
+    });
+
+    var addChargeForm = $('#addChargeForm');
+    if (addChargeForm) addChargeForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#addChargeSubmit');
+      if (submit.disabled) return;
+      if (!addChargeClientId) return;
+      var client = state.clients.find(function (c) { return c.id === addChargeClientId; });
+      if (!client) { toast('מטופל לא נמצא', true); return; }
+      var fd = new FormData(e.target);
+      var billingType = (fd.get('billingType') || 'one_time').toString();
+      var description = (fd.get('description') || '').trim();
+      var amount = toNum(fd.get('amount'));
+      var chargeDate = fd.get('chargeDate') || '';
+      var billingDay = fd.get('billingDay');
+      var notes = (fd.get('notes') || '').trim();
+      if (!description) { toast('חסר תיאור', true); return; }
+      if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      if (!chargeDate) { toast('יש להזין תאריך', true); return; }
+      submit.disabled = true;
+      var charge = {
+        id: uid(),
+        clientId: client.id,
+        description: description,
+        amount: amount,
+        billingType: billingType === 'monthly' ? 'monthly' : 'one_time',
+        chargeDate: chargeDate,
+        billingDay: billingType === 'monthly' && billingDay ? toNum(billingDay) : '',
+        active: true,
+        notes: notes,
+        created: today()
+      };
+      state.charges.push(charge);
+      render();
+      persistCharge(charge)
+        .then(function () { toast('הטיפול נוסף'); closeAddChargeModal(); })
+        .catch(function (err) {
+          state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
+          render();
+          toast('שגיאה: ' + err.message, true);
+        })
+        .finally(function () { submit.disabled = false; });
     });
 
     // Direct-add client wiring
