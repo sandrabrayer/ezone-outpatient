@@ -626,3 +626,13 @@ body.viewer .edit-only { display: none !important; }
   padding: 0;
 }
 .client-charges .charge-remove:hover { background: #2a1515; }
+.client-charges .charge-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.charge-status-paid    { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
+.charge-status-partial { background: #3a310f; color: var(--amber); border-color: #5a4818; }
+.charge-status-unpaid  { background: #3a0f10; color: #ef8484; border-color: #5a1818; }

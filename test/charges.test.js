@@ -16,7 +16,8 @@ const {
   isLegacyBasePaymentId,
   legacyBasePaymentId,
   paymentKindFromId,
-  dueItemsOn
+  dueItemsOn,
+  chargeStatusFor
 } = require('../public/charges-logic');
 
 test('paymentId scheme: base / extra-monthly / one-time-extra produce distinct ids', () => {
@@ -139,4 +140,69 @@ test('clientsDueOn skips inactive charges and ignores discharged clients', () =>
   assert.equal(due.length, 1);
   assert.equal(due[0].kind, 'base');
   assert.equal(due[0].clientId, 'abc');
+});
+
+/* ===== chargeStatusFor ===== */
+
+test('chargeStatusFor returns paid when state.payments has a paid row', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'one_time' };
+  const payId = paymentId('abc', '2026-05-15', 'extra', 'c1', 'one_time');
+  const payments = [{ id: payId, status: 'paid' }];
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'paid');
+});
+
+test('chargeStatusFor returns partial when state.payments has a partial row', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'one_time' };
+  const payId = paymentId('abc', '2026-05-15', 'extra', 'c1', 'one_time');
+  const payments = [{ id: payId, status: 'partial' }];
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'partial');
+});
+
+test('chargeStatusFor returns unpaid when no payment row exists yet (newly added charge)', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'one_time' };
+  // payments array is empty: Vered just added the charge.
+  assert.equal(chargeStatusFor([], client, charge, '2026-05-15'), 'unpaid');
+});
+
+test('chargeStatusFor returns unpaid when payment row exists with status:unpaid', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'one_time' };
+  const payId = paymentId('abc', '2026-05-15', 'extra', 'c1', 'one_time');
+  const payments = [{ id: payId, status: 'unpaid' }];
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'unpaid');
+});
+
+test('chargeStatusFor for monthly charge: status comes from the CURRENT month, not chargeDate.month', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'monthly', chargeDate: '2026-01-15' };
+  // Today is May; we want May's status, not January's.
+  const mayId = paymentId('abc', '2026-05-15', 'extra', 'c1', 'monthly');
+  const janId = paymentId('abc', '2026-01-15', 'extra', 'c1', 'monthly');
+  // Sanity: the two ids are different — the test would be meaningless otherwise.
+  assert.notEqual(mayId, janId);
+  // January is paid, May is unpaid. The badge should reflect May (today).
+  const payments = [
+    { id: janId, status: 'paid' },
+    { id: mayId, status: 'unpaid' }
+  ];
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'unpaid');
+  // Flip it: May paid, January unpaid -> badge reads paid.
+  payments[0].status = 'unpaid';
+  payments[1].status = 'paid';
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'paid');
+});
+
+test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {
+  const client = { id: 'abc' };
+  const charge = { id: 'c1', billingType: 'one_time' };
+  const onceId = paymentId('abc', '2026-05-15', 'extra', 'c1', 'one_time');
+  // Confirm the id ends in ::once and is therefore not month-keyed.
+  assert.equal(onceId, 'pay::abc::chg-c1::once');
+  const payments = [{ id: onceId, status: 'paid' }];
+  // Same paid status regardless of which date we pass in.
+  assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'paid');
+  assert.equal(chargeStatusFor(payments, client, charge, '2027-11-30'), 'paid');
 });
