@@ -439,6 +439,35 @@
       </div>
     </div>
 
+    <!-- Add extra-charge modal -->
+    <div id="addChargeModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">הוסף טיפול</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="addChargeClientName"></span>
+        </div>
+        <form id="addChargeForm" class="form-grid">
+          <label>סוג חיוב
+            <select name="billingType" required>
+              <option value="one_time">חד-פעמי</option>
+              <option value="monthly">חודשי</option>
+            </select>
+          </label>
+          <label>סכום ₪<input name="amount" type="number" min="0" step="1" required /></label>
+          <label class="wide">תיאור<input name="description" type="text" required placeholder="למשל: טיפול CBT נוסף" /></label>
+          <label>תאריך<input name="chargeDate" type="date" required /></label>
+          <label id="addChargeBillingDayWrap">יום גבייה חודשי
+            <input name="billingDay" type="number" min="1" max="31" placeholder="ריק = יום החודש של התאריך" />
+          </label>
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="addChargeSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="duplicateLeadModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">ליד עם טלפון זה כבר קיים</div>
