@@ -118,6 +118,27 @@
     return out;
   }
 
+  // Status of a charge for display on the client card, lookup-only.
+  //   one_time charge: status of the ::once payment row.
+  //   monthly charge:  status of the CURRENT month's payment row
+  //                    (todayISO determines the month; older unpaid months
+  //                    show up in גבייה's יתרות פתוחות, not here).
+  // Returns 'paid' | 'partial' | 'unpaid'. Default when no row exists is
+  // 'unpaid' — Vered just added the charge and hasn't collected yet.
+  function chargeStatusFor(payments, client, charge, todayISO) {
+    if (!client || !charge) return 'unpaid';
+    var billingType = charge.billingType === 'one_time' ? 'one_time' : 'monthly';
+    var id = paymentId(client.id, todayISO, 'extra', charge.id, billingType);
+    var found = null;
+    for (var i = 0; i < (payments || []).length; i++) {
+      if (payments[i] && payments[i].id === id) { found = payments[i]; break; }
+    }
+    if (!found) return 'unpaid';
+    if (found.status === 'paid') return 'paid';
+    if (found.status === 'partial') return 'partial';
+    return 'unpaid';
+  }
+
   return {
     monthKey: monthKey,
     dayOfMonth: dayOfMonth,
@@ -126,6 +147,7 @@
     legacyBasePaymentId: legacyBasePaymentId,
     isLegacyBasePaymentId: isLegacyBasePaymentId,
     paymentKindFromId: paymentKindFromId,
-    dueItemsOn: dueItemsOn
+    dueItemsOn: dueItemsOn,
+    chargeStatusFor: chargeStatusFor
   };
 });

@@ -600,6 +600,20 @@
       bundleSize: 0, sessionsUsed: 0
     };
   }
+  // Display-only status for a charge on the client card. Mirrors the pure
+  // chargeStatusFor in public/charges-logic.js — keep both in sync.
+  //   one_time -> ::once payment row.
+  //   monthly  -> CURRENT month's payment row (older months show up in
+  //               גבייה's יתרות פתוחות, not on the card).
+  function chargeStatusFor(client, charge) {
+    if (!client || !charge) return 'unpaid';
+    var id = paymentId(client, today(), 'extra', charge.id);
+    var found = findPaymentById(id);
+    if (!found) return 'unpaid';
+    if (found.status === 'paid') return 'paid';
+    if (found.status === 'partial') return 'partial';
+    return 'unpaid';
+  }
 
   // --- rendering ---------------------------------------------------------
   function setView(view) {
@@ -1422,8 +1436,12 @@
           label = 'חד-פעמי: ' + escapeHtml(ch.description) + ' — ' + money(ch.amount) +
                   (ch.chargeDate ? ' (' + displayDate(ch.chargeDate) + ')' : '');
         }
+        var status = chargeStatusFor(c, ch);
+        var statusLabel = status === 'paid' ? 'שולם' : status === 'partial' ? 'שולם חלקית' : 'לא שולם';
+        var statusBadge = '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
         return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
           '<span class="charge-label">' + label + '</span>' +
+          statusBadge +
           '<button type="button" class="charge-remove edit-only" title="הסר חיוב" data-charge-remove="' + escapeHtml(ch.id) + '">×</button>' +
           '</li>';
       }).join('');
