@@ -113,6 +113,8 @@
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
+    retentionSearch: '',
+    billingSearch: '',
     clientTab: 'all',
     billingDate: '',
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
@@ -751,9 +753,12 @@
     var dateInput = $('#billingDate');
     if (dateInput && dateInput.value !== state.billingDate) dateInput.value = state.billingDate;
     var selected = state.billingDate;
-    var due = clientsDueOn(selected).map(function (c) {
-      return { client: c, payment: paymentForClientOn(c, selected) };
-    });
+    var q = state.billingSearch.trim().toLowerCase();
+    var due = clientsDueOn(selected)
+      .filter(function (c) { return !q || (c.name || '').toLowerCase().indexOf(q) !== -1; })
+      .map(function (c) {
+        return { client: c, payment: paymentForClientOn(c, selected) };
+      });
     var totalDue = due.reduce(function (s, d) { return s + (d.payment.amountDue || 0); }, 0);
     var totalCollected = due.reduce(function (s, d) { return s + (d.payment.amountPaid || 0); }, 0);
     $('#billDueCount').textContent = due.length;
@@ -777,10 +782,13 @@
   function renderBillingOpenList(selectedISO) {
     var list = $('#billingOpenList');
     list.innerHTML = '';
+    var q = state.billingSearch.trim().toLowerCase();
     var open = state.payments.filter(function (p) {
       if (p.status === 'paid') return false;
       if (!p.dueDate) return false;
-      return p.dueDate < selectedISO;
+      if (p.dueDate >= selectedISO) return false;
+      if (q && (p.clientName || '').toLowerCase().indexOf(q) === -1) return false;
+      return true;
     }).sort(function (a, b) { return String(a.dueDate).localeCompare(String(b.dueDate)); });
     if (!open.length) {
       list.innerHTML = '<div class="billing-empty">אין יתרות פתוחות מתאריכים קודמים</div>';
@@ -878,14 +886,18 @@
   function renderBillingMonthlySummary(selectedISO) {
     var mk = monthKey(selectedISO);
     $('#billMonthLabel').textContent = '— ' + monthLabel(selectedISO);
+    // KPIs stay global (computed from the unfiltered month set). The
+    // per-client breakdown below honors state.billingSearch.
     var thisMonth = state.payments.filter(function (p) { return monthKey(p.dueDate) === mk; });
     var collected = thisMonth.reduce(function (s, p) { return s + (p.amountPaid || 0); }, 0);
     var outstanding = thisMonth.filter(function (p) { return p.status !== 'paid'; })
       .reduce(function (s, p) { return s + Math.max(0, (p.amountDue || 0) - (p.amountPaid || 0)); }, 0);
     $('#billMonthCollected').textContent = money(collected);
     $('#billMonthOutstanding').textContent = money(outstanding);
+    var q = state.billingSearch.trim().toLowerCase();
     var byClient = {};
     thisMonth.forEach(function (p) {
+      if (q && (p.clientName || '').toLowerCase().indexOf(q) === -1) return;
       var key = p.clientId || p.clientName || '—';
       if (!byClient[key]) byClient[key] = { name: p.clientName || '—', collected: 0, outstanding: 0 };
       byClient[key].collected += (p.amountPaid || 0);
@@ -941,8 +953,17 @@
     var list = $('#retentionList');
     list.innerHTML = '';
 
-    var notRel = state.leads.filter(function (l) { return l.stage === 'not_relevant'; });
-    var finished = state.clients.filter(function (c) { return c.status === 'סיים טיפול'; });
+    var rq = state.retentionSearch.trim().toLowerCase();
+    var notRel = state.leads.filter(function (l) {
+      if (l.stage !== 'not_relevant') return false;
+      if (rq && l.name.toLowerCase().indexOf(rq) === -1) return false;
+      return true;
+    });
+    var finished = state.clients.filter(function (c) {
+      if (c.status !== 'סיים טיפול') return false;
+      if (rq && c.name.toLowerCase().indexOf(rq) === -1) return false;
+      return true;
+    });
 
     if (!notRel.length && !finished.length) {
       list.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין רשומות בשימור לידים</p></div>';
@@ -1014,12 +1035,11 @@
   function renderLeads() {
     var kanban = $('#kanban');
     kanban.innerHTML = '';
-    var q = state.leadSearch.trim();
+    var q = state.leadSearch.trim().toLowerCase();
     var filtered = state.leads.filter(function (l) {
       if (l.stage === 'not_relevant') return false;
-      if (!q) return true;
-      var hay = (l.name + ' ' + l.phone).toLowerCase();
-      return hay.indexOf(q.toLowerCase()) !== -1;
+      if (q && l.name.toLowerCase().indexOf(q) === -1) return false;
+      return true;
     });
     STAGES.forEach(function (stage) {
       var col = document.createElement('div');
@@ -1736,6 +1756,8 @@
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
+    on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
+    on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
 
