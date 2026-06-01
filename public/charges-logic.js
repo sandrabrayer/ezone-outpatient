@@ -25,6 +25,33 @@
 
   function monthKey(iso) { return String(iso || '').slice(0, 7); }
 
+  // Add 1 calendar month to an ISO date string, clamping to the last day of
+  // the target month (Jan 31 + 1mo -> Feb 28). Mirrors addMonth in
+  // public/app.js — keep both in sync.
+  function addMonth(isoDate) {
+    if (!isoDate) return '';
+    var d = new Date(isoDate);
+    if (isNaN(d)) return '';
+    var origDay = d.getDate();
+    d.setMonth(d.getMonth() + 1);
+    if (d.getDate() !== origDay) d.setDate(0);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  // The ISO due-date of a client's next monthly renewal. Anchors on the last
+  // payment date when present, else the start date, then advances one calendar
+  // month (short-month clamp via addMonth). Mirrors renewalInfo()'s date calc
+  // in public/app.js — keep both in sync. This is the single source the
+  // "renewal banner" and the "חידוש ותשלום" button share so they never diverge.
+  function nextRenewalDueDate(client) {
+    if (!client) return '';
+    var anchor = client.paymentDate || client.startDate || '';
+    if (!anchor) return '';
+    return addMonth(anchor);
+  }
+
   function dayOfMonth(iso) {
     if (!iso) return null;
     var parts = String(iso).slice(0, 10).split('-');
@@ -141,6 +168,8 @@
 
   return {
     monthKey: monthKey,
+    addMonth: addMonth,
+    nextRenewalDueDate: nextRenewalDueDate,
     dayOfMonth: dayOfMonth,
     lastDayOfMonth: lastDayOfMonth,
     paymentId: paymentId,

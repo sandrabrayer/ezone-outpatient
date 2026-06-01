@@ -215,6 +215,17 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
+  // The ISO due-date of a client's next monthly renewal — anchor (last payment
+  // date, else start date) + 1 month with short-month clamp. Mirrors
+  // nextRenewalDueDate in public/charges-logic.js — keep both in sync. Shared
+  // by renewalInfo()'s banner and the "חידוש ותשלום" button so they never diverge.
+  function nextRenewalDueDate(c) {
+    if (!c) return '';
+    var anchor = c.paymentDate || c.startDate || '';
+    if (!anchor) return '';
+    return addMonth(anchor);
+  }
+
   // Days between two ISO dates (b - a). Negative if a is after b.
   function daysBetween(aIso, bIso) {
     if (!aIso || !bIso) return null;
@@ -234,7 +245,7 @@
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
     var anchor = c.paymentDate || c.startDate || '';
     if (!anchor) return { status: 'unknown' };
-    var renewal = addMonth(anchor);
+    var renewal = nextRenewalDueDate(c);
     var daysLeft = daysBetween(today(), renewal);
     var status;
     if (hasBillingProblem(c)) {
@@ -1482,6 +1493,13 @@
       addChargeBtn.onclick = function () { openAddChargeModal(c); };
       actions.appendChild(addChargeBtn);
 
+      var renewBtn = document.createElement('button');
+      renewBtn.className = 'btn btn-ghost edit-only';
+      renewBtn.textContent = 'חידוש ותשלום';
+      renewBtn.title = 'רשום תשלום מראש לחודש הבא ועדכן את הסכום החודשי';
+      renewBtn.onclick = function () { openRenewModal(c); };
+      actions.appendChild(renewBtn);
+
       // Wire × buttons on the inline charge list.
       $$('[data-charge-remove]', card).forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -1863,6 +1881,30 @@
     if (m) m.hidden = true;
     addChargeClientId = null;
   }
+  // --- Renew & pay modal -------------------------------------------------
+  // Records next month's base payment as paid-in-advance with a manual amount,
+  // and sets that amount as the client's new going-forward monthly default.
+  // Service-type / sessions changes stay in the ✏️ ערוך modal — this is amount only.
+  var renewClientId = null;
+  function openRenewModal(client) {
+    renewClientId = client.id;
+    var form = $('#renewForm');
+    if (!form) return;
+    form.reset();
+    // The billed month comes from renewalInfo(c).renewalDate via the shared
+    // helper, so the modal can never diverge from the renewal banner.
+    var renewalDate = nextRenewalDueDate(client);
+    $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
+      (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
+    form.renewAmount.value = client.pricePerSession || '';
+    $('#renewModal').hidden = false;
+  }
+  function closeRenewModal() {
+    var m = $('#renewModal');
+    if (m) m.hidden = true;
+    renewClientId = null;
+  }
+
   function updateAddChargeBillingDayVisibility(form) {
     if (!form) return;
     var type = form.billingType && form.billingType.value;
@@ -2009,7 +2051,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal();
       });
     });
 
@@ -2057,6 +2099,65 @@
           state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
           render();
           toast('שגיאה: ' + err.message, true);
+        })
+        .finally(function () { submit.disabled = false; });
+    });
+
+    var renewForm = $('#renewForm');
+    if (renewForm) renewForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#renewSubmit');
+      if (submit.disabled) return;
+      if (!renewClientId) return;
+      var c = state.clients.find(function (x) { return x.id === renewClientId; });
+      if (!c) { toast('מטופל לא נמצא', true); return; }
+      // Same shared helper as the renewal banner — never recompute today()+1mo.
+      var renewalDate = nextRenewalDueDate(c);
+      if (!renewalDate) { toast('לא ניתן לחשב תאריך חידוש', true); return; }
+      var fd = new FormData(e.target);
+      var amount = toNum(fd.get('renewAmount'));
+      if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      submit.disabled = true;
+
+      // ORDERING IS DELIBERATE: persist the client default FIRST, payment
+      // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
+      // failure mode; the payment row is idempotent (deterministic id) and
+      // safely re-clickable, so it is the safer step to leave for retry.
+      var prev = { pricePerSession: c.pricePerSession };
+      c.pricePerSession = amount;
+      persist()
+        .then(function () {
+          var payment = {
+            id: paymentId(c, renewalDate, 'base'),
+            clientId: c.id, clientName: c.name, billingType: 'monthly',
+            dueDate: renewalDate, amountDue: amount, amountPaid: amount,
+            status: 'paid', paymentDate: today(), method: '', notes: '',
+            bundleSize: '', sessionsUsed: ''
+          };
+          return persistPayment(payment)
+            .then(function () {
+              // Upsert by id so גבייה reflects it without a reload.
+              var idx = state.payments.findIndex(function (p) { return p.id === payment.id; });
+              if (idx >= 0) state.payments[idx] = payment;
+              else state.payments.push(payment);
+              toast('חודש שולם מראש');
+              closeRenewModal();
+              render();
+            })
+            .catch(function (err) {
+              // The client default change is legitimately saved — do NOT roll
+              // it back. The payment can be retried via גבייה or by clicking
+              // the button again (same deterministic id, no duplicate).
+              toast('הסכום עודכן אך רישום התשלום נכשל, נסה שוב: ' + err.message, true);
+              render();
+            });
+        })
+        .catch(function (err) {
+          // Client persist failed: roll back the in-memory change and abort
+          // (do not write the payment).
+          Object.assign(c, prev);
+          toast('שגיאה: ' + err.message, true);
+          render();
         })
         .finally(function () { submit.disabled = false; });
     });

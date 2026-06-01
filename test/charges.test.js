@@ -17,7 +17,8 @@ const {
   legacyBasePaymentId,
   paymentKindFromId,
   dueItemsOn,
-  chargeStatusFor
+  chargeStatusFor,
+  nextRenewalDueDate
 } = require('../public/charges-logic');
 
 test('paymentId scheme: base / extra-monthly / one-time-extra produce distinct ids', () => {
@@ -193,6 +194,43 @@ test('chargeStatusFor for monthly charge: status comes from the CURRENT month, n
   payments[0].status = 'unpaid';
   payments[1].status = 'paid';
   assert.equal(chargeStatusFor(payments, client, charge, '2026-05-15'), 'paid');
+});
+
+/* ===== nextRenewalDueDate + renewal base paymentId (חידוש ותשלום) ===== */
+
+test('nextRenewalDueDate anchors on paymentDate when present, else startDate', () => {
+  // paymentDate wins over startDate.
+  assert.equal(
+    nextRenewalDueDate({ id: 'abc', paymentDate: '2026-05-15', startDate: '2026-01-10' }),
+    '2026-06-15'
+  );
+  // No paymentDate: fall back to startDate.
+  assert.equal(
+    nextRenewalDueDate({ id: 'abc', startDate: '2026-01-10' }),
+    '2026-02-10'
+  );
+  // Neither: empty string.
+  assert.equal(nextRenewalDueDate({ id: 'abc' }), '');
+});
+
+test('nextRenewalDueDate adds 1 month with short-month clamp (Jan 31 -> Feb 28)', () => {
+  assert.equal(nextRenewalDueDate({ id: 'abc', paymentDate: '2026-01-31' }), '2026-02-28');
+  // Leap year: Jan 31 -> Feb 29.
+  assert.equal(nextRenewalDueDate({ id: 'abc', paymentDate: '2028-01-31' }), '2028-02-29');
+});
+
+test('paymentId(client.id, nextRenewalDueDate(client), base) is pay::<id>::base::<YYYY-MM>', () => {
+  const client = { id: 'abc', paymentDate: '2026-05-15' };
+  const due = nextRenewalDueDate(client); // 2026-06-15
+  assert.equal(paymentId(client.id, due, 'base'), 'pay::abc::base::2026-06');
+});
+
+test('renewal base paymentId is idempotent: same client+month -> identical id', () => {
+  const client = { id: 'abc', paymentDate: '2026-05-15' };
+  const a = paymentId(client.id, nextRenewalDueDate(client), 'base');
+  const b = paymentId(client.id, nextRenewalDueDate(client), 'base');
+  assert.equal(a, b);
+  assert.equal(a, 'pay::abc::base::2026-06');
 });
 
 test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {
