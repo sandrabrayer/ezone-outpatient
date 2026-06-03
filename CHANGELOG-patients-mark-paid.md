@@ -64,17 +64,75 @@ prompt. To stay consistent, the card button also does **not** prompt. (There is
 no `showConfirm` helper in the codebase, and adding a confirm only here would
 diverge the two flows.)
 
+## Follow-up: red "עצור טיפול" banner now reads the same per-month row
+
+The first pass switched only the **badge** to the per-month payment row. The
+red overdue/stop banner is driven separately by `renewalInfo(c)`, which decided
+"overdue" from (A) `hasBillingProblem(c)` reading the client-level
+`c.paymentStatus` field, and (B) `daysLeft < 0` from a stale `c.paymentDate`
+anchor. Marking the month paid via the badge writes only the payment row, so the
+banner never learned about it — badge showed `שולם` while the card stayed red.
+
+Fix: `renewalInfo` now consults the **current-month base payment row** first, as
+the single source of truth for "is this month paid":
+
+```js
+var paidThisMonth = paymentForClientOn(c, currentMonthBaseDueDate(c)).status === 'paid';
+if (paidThisMonth) {
+  // never overdue; only a 0..7-day renewal hint, else 'ok'
+  if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 7) status = 'due_soon';
+  else status = 'ok';
+} else if (hasBillingProblem(c)) { ... }   // unchanged fallback
+```
+
+- A paid current month clears the red banner regardless of the legacy
+  `c.paymentStatus`.
+- When **no** payment row exists, `paymentForClientOn` returns a fresh `unpaid`
+  template, so `paidThisMonth` is false and the previous behavior
+  (`hasBillingProblem` + renewal-date) is preserved exactly.
+- The paid branch guards against negative `daysLeft` so a stale renewal date
+  resolves to `ok` instead of a nonsensical "חידוש בעוד -N ימים" countdown.
+
+`hasBillingProblem` itself is unchanged (it is only consumed by `renewalInfo`);
+the per-month row simply takes priority over it.
+
+## Follow-up: badge is a two-way toggle (paid ⇄ unpaid)
+
+The chip is now clickable in **both** states for editors:
+
+- **unpaid / partial → paid**: as before (full amount, `paymentDate = today()`).
+- **paid → unpaid**: reverts the current-month row, matching the גבייה
+  `recompute('unpaid')` write **exactly** — `amountPaid = 0`, `status = 'unpaid'`,
+  `amountDue` unchanged, and the prior `paymentDate` is **kept** (`base.paymentDate
+  || ''`), not cleared, just like the billing-tab status select.
+
+`markCurrentMonthPaid(c)` was generalized to `setCurrentMonthPaid(c, makePaid)`
+— one function, both directions, same optimistic-update + rollback +
+`persistPayment` path. An unpaid write is just `persistPayment` with
+`status: 'unpaid'` (the persist path does not branch on status).
+
+The paid button uses `data-action="mark-month-unpaid"` (↺); the unpaid/partial
+button keeps `data-action="mark-month-paid"` (✓). Both carry the existing
+`month-pay-btn` class, so the cursor/hover affordance already applies to the paid
+state — no CSS change needed. The "שולם ב: <date>" chip is now shown only when
+the row is actually `paid`, so a reverted (unpaid) row no longer displays a
+paid-on date.
+
 ## Files touched
 
 - `public/app.js`
-  - `currentMonthBaseDueDate(c)` — new helper (current-month base billing date,
+  - `currentMonthBaseDueDate(c)` — helper (current-month base billing date,
     mirroring `clientsDueOn` day selection).
-  - `markCurrentMonthPaid(c)` — new handler (optimistic upsert + rollback +
-    `persistPayment`, re-renders the active view).
-  - `clientCard()` — the `חבילה: …` chip now reads the per-month payment row and
-    renders as a button (editor + unpaid) wired to `markCurrentMonthPaid`.
+  - `setCurrentMonthPaid(c, makePaid)` — toggle handler (paid ⇄ unpaid),
+    optimistic upsert + rollback + `persistPayment`, re-renders the active view.
+    Mirrors the גבייה `recompute()` amount/paidAmount/paymentDate handling.
+  - `clientCard()` — the `חבילה: …` chip reads the per-month payment row and
+    renders as a paid⇄unpaid toggle button (editor) wired to
+    `setCurrentMonthPaid`; paid-on chip gated to the `paid` state.
+  - `renewalInfo(c)` — overdue/stop decision reads the same current-month
+    payment row first, so a paid month clears the red banner.
 - `public/style.css` — `button.month-pay-btn` (cursor: pointer + hover/active
-  affordance).
+  affordance; applies to both toggle states).
 
 **Code.gs is NOT modified.** No Apps Script redeploy required — `savePayment` /
 `_upsertPayment` already exist. Railway frontend deploy is sufficient.
