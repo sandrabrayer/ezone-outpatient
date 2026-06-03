@@ -385,6 +385,16 @@ body.viewer .edit-only { display: none !important; }
 .chip-unpaid  { background: #f8d7da; color: #721c24; }
 .chip-next    { background: #cce5ff; color: #004085; font-weight: 600; }
 
+/* Clickable monthly-payment chip on the patient card (editor, unpaid). */
+button.month-pay-btn {
+  font-family: inherit;
+  cursor: pointer;
+  font-weight: 600;
+  transition: filter 0.12s ease, box-shadow 0.12s ease;
+}
+button.month-pay-btn:hover { filter: brightness(0.94); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12) inset; }
+button.month-pay-btn:active { filter: brightness(0.88); }
+
 .next-bill { color: #004085; font-weight: 600; }
 
 .form-section-title {

@@ -854,6 +854,20 @@
     return new Date(y, m, 0).getDate();
   }
 
+  // ISO date of the CURRENT month's base billing day for a client, matching the
+  // day clientsDueOn() uses (c.billingDay, else the start-date day-of-month),
+  // clamped to the last day of the month. Falls back to today() when neither is
+  // known. The payment id keys only on the month, but we keep the day aligned so
+  // the row matches what the גבייה tab renders for the same client.
+  function currentMonthBaseDueDate(c) {
+    var t = today();
+    var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
+    if (!bd) return t;
+    var last = lastDayOfMonth(t);
+    var eff = (last && bd > last) ? last : bd;
+    return t.slice(0, 7) + '-' + String(eff).padStart(2, '0');
+  }
+
   // ---- Billing
   // Returns an array of due items for the selected date:
   //   { client, kind: 'base'|'extra', charge?, dueDate, amount }
@@ -1042,6 +1056,42 @@
         if (prev) state.payments[idx] = prev;
         else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
         renderBilling();
+        toast('שמירה נכשלה: ' + e.message, true);
+      });
+  }
+
+  // Mark the CURRENT month's base payment as paid from the patient card.
+  // Builds the same paid row the גבייה tab would (full amount, paymentDate =
+  // today) and writes it through the same single path — persistPayment /
+  // savePayment — with an optimistic update + rollback. Re-renders the active
+  // view so the card badge reflects the change. No separate write path.
+  function markCurrentMonthPaid(c) {
+    if (state.role !== 'editor') return;
+    var dueDateISO = currentMonthBaseDueDate(c);
+    var base = paymentForClientOn(c, dueDateISO);
+    if (base.status === 'paid') return;
+    var amount = base.amountDue || clientAmountDue(c) || 0;
+    var updated = {
+      id: base.id,
+      clientId: base.clientId || c.id,
+      clientName: base.clientName || c.name || '',
+      billingType: base.billingType || 'monthly',
+      dueDate: base.dueDate || dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: today(), method: base.method || '', notes: base.notes || '',
+      bundleSize: 0, sessionsUsed: 0
+    };
+    var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
+    var prev = idx >= 0 ? state.payments[idx] : null;
+    if (idx >= 0) state.payments[idx] = updated;
+    else state.payments.push(updated);
+    render();
+    persistPayment(updated)
+      .then(function () { toast('החודש סומן כשולם'); })
+      .catch(function (e) {
+        if (prev) state.payments[idx] = prev;
+        else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        render();
         toast('שמירה נכשלה: ' + e.message, true);
       });
   }
@@ -1393,14 +1443,22 @@
       '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
       '<span>הכנסה: <b>' + money(rev) + '</b></span>';
 
-    // Payment status badge
+    // Monthly base-payment status for the CURRENT month. Driven by the same
+    // per-month payment row the גבייה tab uses (paymentForClientOn) so both
+    // tabs stay consistent. For editors, when not yet paid it renders as a
+    // button that marks the current month paid via persistPayment.
     var paymentHtml = '';
-    if (c.paymentStatus) {
-      var psLabel = c.paymentStatus === 'paid' ? 'שולם' : c.paymentStatus === 'partial' ? 'שולם חלקית' : 'לא שולם';
-      var psClass = c.paymentStatus === 'paid' ? 'chip chip-paid' : c.paymentStatus === 'partial' ? 'chip chip-partial' : 'chip chip-unpaid';
+    if (c.status !== 'סיים טיפול') {
+      var basePay = paymentForClientOn(c, currentMonthBaseDueDate(c));
+      var psId = basePay.status === 'paid' ? 'paid' : basePay.status === 'partial' ? 'partial' : 'unpaid';
+      var psLabel = psId === 'paid' ? 'שולם' : psId === 'partial' ? 'שולם חלקית' : 'לא שולם';
+      var canPay = state.role === 'editor' && psId !== 'paid';
+      var statusEl = canPay
+        ? '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">חבילה: ' + psLabel + ' ✓</button>'
+        : '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
       paymentHtml = '<div class="client-meta">' +
-        '<span class="' + psClass + '">חבילה: ' + psLabel + '</span>' +
-        (c.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(c.paymentDate) + '</span>' : '') +
+        statusEl +
+        (basePay.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(basePay.paymentDate) + '</span>' : '') +
         (c.nextBillingDate ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>' : '') +
         '</div>';
     }
@@ -1507,6 +1565,10 @@
           handleRemoveCharge(chargeId);
         });
       });
+
+      // Wire the monthly "mark current month paid" button (editor only).
+      var payBtn = $('[data-action="mark-month-paid"]', card);
+      if (payBtn) payBtn.addEventListener('click', function () { markCurrentMonthPaid(c); });
 
       var statusSel = document.createElement('select');
       ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
