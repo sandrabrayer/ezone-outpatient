@@ -237,28 +237,51 @@
 
   // Compute renewal info for a client.
   // Returns { renewalDate, daysLeft, status: 'overdue'|'due_soon'|'ok'|'unknown' }
-  // Logic: payment is always paid in advance for the next month.
-  //   - If paymentStatus === 'paid' and paymentDate exists: next renewal = paymentDate + 1 month
-  //   - If paymentStatus is partial/unpaid: client is already in trouble -> overdue immediately if past start
-  //   - If no paymentDate at all: use startDate as fallback
+  // Source of truth for "is the current month settled?" is the actual base
+  // payment row — the SAME lookup the paid/unpaid badge uses — not the
+  // date-only calc or the denormalized paymentStatus flag. Without this the
+  // banner screamed "overdue" on a month that was already paid (the row says
+  // paid, but the renewal date had quietly slipped into the past).
+  //   - If the current month's base row is paid: that month is settled. The
+  //     next renewal is one cycle out from this month's due date, so the banner
+  //     counts toward next cycle (ok/due_soon) and is NEVER overdue.
+  //   - Otherwise: date calc (renewal = anchor + 1 month) + hasBillingProblem.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
     var anchor = c.paymentDate || c.startDate || '';
     if (!anchor) return { status: 'unknown' };
-    var renewal = nextRenewalDueDate(c);
-    var daysLeft = daysBetween(today(), renewal);
     var status;
-    if (hasBillingProblem(c)) {
-      // Explicitly marked partial/unpaid - overdue
-      status = 'overdue';
-    } else if (daysLeft === null) {
-      status = 'unknown';
-    } else if (daysLeft < 0) {
-      status = 'overdue';
-    } else if (daysLeft <= 7) {
-      status = 'due_soon';
+    var renewal;
+    var daysLeft;
+    var curDue = currentMonthBaseDueDate(c);
+    var paidThisMonth = paymentForClientOn(c, curDue).status === 'paid';
+    if (paidThisMonth) {
+      // Current month is settled — renewal is one cycle past this month's due
+      // date. Clamp a negative gap to 0 ("renew today") so stale data can't
+      // produce nonsense like "renew in -5 days", and so paid never => overdue.
+      renewal = addMonth(curDue);
+      daysLeft = daysBetween(today(), renewal);
+      if (daysLeft === null) {
+        status = 'unknown';
+      } else {
+        if (daysLeft < 0) daysLeft = 0;
+        status = daysLeft <= 7 ? 'due_soon' : 'ok';
+      }
     } else {
-      status = 'ok';
+      renewal = nextRenewalDueDate(c);
+      daysLeft = daysBetween(today(), renewal);
+      if (hasBillingProblem(c)) {
+        // Explicitly marked partial/unpaid - overdue
+        status = 'overdue';
+      } else if (daysLeft === null) {
+        status = 'unknown';
+      } else if (daysLeft < 0) {
+        status = 'overdue';
+      } else if (daysLeft <= 7) {
+        status = 'due_soon';
+      } else {
+        status = 'ok';
+      }
     }
     return { renewalDate: renewal, daysLeft: daysLeft, status: status };
   }
