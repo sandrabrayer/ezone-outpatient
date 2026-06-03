@@ -237,18 +237,27 @@
 
   // Compute renewal info for a client.
   // Returns { renewalDate, daysLeft, status: 'overdue'|'due_soon'|'ok'|'unknown' }
-  // Logic: payment is always paid in advance for the next month.
-  //   - If paymentStatus === 'paid' and paymentDate exists: next renewal = paymentDate + 1 month
-  //   - If paymentStatus is partial/unpaid: client is already in trouble -> overdue immediately if past start
-  //   - If no paymentDate at all: use startDate as fallback
+  // Source of truth for "is THIS month paid" is the current-month base payment
+  // row (paymentForClientOn) — the same row the patient-card badge and the
+  // גבייה tab use. A paid current month clears the overdue/stop state, even if
+  // the legacy client-level c.paymentStatus field still says otherwise. When no
+  // row exists the per-month signal is 'unpaid', so behavior falls back to the
+  // previous c.paymentStatus + renewal-date logic unchanged.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
     var anchor = c.paymentDate || c.startDate || '';
     if (!anchor) return { status: 'unknown' };
     var renewal = nextRenewalDueDate(c);
     var daysLeft = daysBetween(today(), renewal);
+    var paidThisMonth = paymentForClientOn(c, currentMonthBaseDueDate(c)).status === 'paid';
     var status;
-    if (hasBillingProblem(c)) {
+    if (paidThisMonth) {
+      // Current month is paid → never overdue. Only surface an upcoming-renewal
+      // hint when the renewal date is genuinely ahead (0..7 days); a stale past
+      // date just resolves to 'ok' rather than a nonsensical countdown.
+      if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 7) status = 'due_soon';
+      else status = 'ok';
+    } else if (hasBillingProblem(c)) {
       // Explicitly marked partial/unpaid - overdue
       status = 'overdue';
     } else if (daysLeft === null) {

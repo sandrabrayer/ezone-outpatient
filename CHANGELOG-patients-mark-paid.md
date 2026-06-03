@@ -64,6 +64,38 @@ prompt. To stay consistent, the card button also does **not** prompt. (There is
 no `showConfirm` helper in the codebase, and adding a confirm only here would
 diverge the two flows.)
 
+## Follow-up: red "עצור טיפול" banner now reads the same per-month row
+
+The first pass switched only the **badge** to the per-month payment row. The
+red overdue/stop banner is driven separately by `renewalInfo(c)`, which decided
+"overdue" from (A) `hasBillingProblem(c)` reading the client-level
+`c.paymentStatus` field, and (B) `daysLeft < 0` from a stale `c.paymentDate`
+anchor. Marking the month paid via the badge writes only the payment row, so the
+banner never learned about it — badge showed `שולם` while the card stayed red.
+
+Fix: `renewalInfo` now consults the **current-month base payment row** first, as
+the single source of truth for "is this month paid":
+
+```js
+var paidThisMonth = paymentForClientOn(c, currentMonthBaseDueDate(c)).status === 'paid';
+if (paidThisMonth) {
+  // never overdue; only a 0..7-day renewal hint, else 'ok'
+  if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 7) status = 'due_soon';
+  else status = 'ok';
+} else if (hasBillingProblem(c)) { ... }   // unchanged fallback
+```
+
+- A paid current month clears the red banner regardless of the legacy
+  `c.paymentStatus`.
+- When **no** payment row exists, `paymentForClientOn` returns a fresh `unpaid`
+  template, so `paidThisMonth` is false and the previous behavior
+  (`hasBillingProblem` + renewal-date) is preserved exactly.
+- The paid branch guards against negative `daysLeft` so a stale renewal date
+  resolves to `ok` instead of a nonsensical "חידוש בעוד -N ימים" countdown.
+
+`hasBillingProblem` itself is unchanged (it is only consumed by `renewalInfo`);
+the per-month row simply takes priority over it.
+
 ## Files touched
 
 - `public/app.js`
@@ -73,6 +105,8 @@ diverge the two flows.)
     `persistPayment`, re-renders the active view).
   - `clientCard()` — the `חבילה: …` chip now reads the per-month payment row and
     renders as a button (editor + unpaid) wired to `markCurrentMonthPaid`.
+  - `renewalInfo(c)` — overdue/stop decision now reads the same current-month
+    payment row first, so a paid month clears the red banner.
 - `public/style.css` — `button.month-pay-btn` (cursor: pointer + hover/active
   affordance).
 
