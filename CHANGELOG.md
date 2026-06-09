@@ -28,6 +28,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - the WhatsApp stop-treatment message button.
 
 ### Added
+- **`getDebtStatus` — read-only cross-app debt endpoint** (Apps Script
+  `Code.gs`). Returns the minimal debtor projection (`clientId`, `name`,
+  `phone`, `amountOwed`) for the E-Zone Therapists app's debt-block. Auth
+  mirrors `getWinbackSource`: optional shared secret via the
+  `DEBT_STATUS_SECRET` Script Property. Billing/payer fields are deliberately
+  excluded. See `CHANGELOG-debt-status-endpoint.md`.
+- `public/debt-status.js` — canonical, framework-free debt rule
+  (`computeDebtors`, `rowOwed`, `amountOwedForRows`), shared single source of
+  truth mirrored inline by `Code.gs` and tested in `test/debt-status.test.js`.
+- `test/debt-status.test.js` + `test/debt-status-forwarding.test.js` —
+  cover the debt reduction (paid/legacy/partial/unpaid, discharge, empty
+  inputs) and the `?secret` forwarding for `getDebtStatus`.
 - `public/billing-status.js` — canonical, framework-free definition of the
   "is this patient a billing problem?" rule (`hasBillingProblem`,
   `resolvePaymentStatus`), usable from both Node and the browser.

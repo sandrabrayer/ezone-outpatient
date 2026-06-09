@@ -68,6 +68,18 @@ npm start
 - `GET /api/sheets` → `{ ok, leads, clients }`
 - `POST /api/sheets` with `{ leads, clients }` → saves everything
 
+### Cross-app read endpoints (shared-secret, read-only)
+
+- `GET /api/sheets?action=getWinbackSource&secret=<WINBACK_SECRET>` → lost
+  leads + discharged clients for the win-back call list. No billing data.
+- `GET /api/sheets?action=getDebtStatus&secret=<DEBT_STATUS_SECRET>` →
+  `{ ok, debtors:[{ clientId, name, phone, amountOwed }] }` for the E-Zone
+  Therapists debt-block. `phone` is `treatmentContactPhone`; only clients with
+  an open balance are returned. Each secret is an optional Apps Script Script
+  Property — if unset, that action is open (URL-obscurity). The Node proxy
+  forwards `?secret=` to Apps Script automatically. See
+  `CHANGELOG-debt-status-endpoint.md`.
+
 ### Debug endpoints
 
 - `GET /api/debug/env` – confirms `SHEETS_URL` is configured (no secret leak).

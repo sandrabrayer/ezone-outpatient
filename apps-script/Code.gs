@@ -402,6 +402,97 @@ function _getWinbackSource() {
   return { ok: true, lostLeads: lostLeads, dischargedClients: dischargedClients };
 }
 
+/* ===== Debt status (read-only cross-app endpoint) =====
+ *
+ * Consumed by the E-Zone Therapists app to block / warn on a patient who has
+ * an open balance in outpatient.
+ *
+ * Returns ONLY a debtor projection: for every client whose Payments rows sum
+ * to an open balance > 0, the minimal fields needed to match + show the block:
+ *   clientId, name, phone (treatmentContactPhone), amountOwed
+ *
+ * Matching contract: the consumer matches on NAME + the phone registered in
+ * the system (treatmentContactPhone). payerPhone, paymentLink, prices, bundle*
+ * and every other billing/payer field are deliberately NOT included.
+ *
+ * Debt rule (kept in lockstep with public/debt-status.js and
+ * public/billing-status.js): per payment row, owed = (status is paid or empty)
+ * ? 0 : max(0, amountDue - amountPaid). A client owes when the sum across all
+ * their rows is > 0. Debtors are included regardless of client status — an
+ * open balance still matters after discharge.
+ *
+ * Auth: optional shared secret, same model as getWinbackSource. If a Script
+ * Property named 'DEBT_STATUS_SECRET' exists, the request must pass
+ * ?secret=<value> that matches. If the property is absent the endpoint is open
+ * (URL-only obscurity — same level as every other action on this script).
+ */
+function _debtAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('DEBT_STATUS_SECRET');
+  if (!expected) return true; // not configured → open
+  var got = (params && params.secret) ? String(params.secret) : '';
+  return got === expected;
+}
+
+var DEBT_PAYMENT_STATUS_ALIASES = {
+  'שולם': 'paid', 'paid': 'paid',
+  'שולם חלקית': 'partial', 'partial': 'partial',
+  'לא שולם': 'unpaid', 'unpaid': 'unpaid'
+};
+
+function _resolvePaymentStatus(v) {
+  var raw = String(v == null ? '' : v).trim();
+  if (!raw) return '';
+  return DEBT_PAYMENT_STATUS_ALIASES[raw] ||
+         DEBT_PAYMENT_STATUS_ALIASES[raw.toLowerCase()] || '';
+}
+
+function _rowOwed(row) {
+  if (!row) return 0;
+  var status = _resolvePaymentStatus(row.status);
+  if (status === 'paid' || status === '') return 0;
+  var due = Number(row.amountDue); if (!isFinite(due)) due = 0;
+  var paid = Number(row.amountPaid); if (!isFinite(paid)) paid = 0;
+  var owed = due - paid;
+  return owed > 0 ? owed : 0;
+}
+
+function _getDebtStatus() {
+  var clientsSh  = _ensureSheet('Clients',  CLIENTS_HEADERS);
+  var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+  var clients    = _readAll(clientsSh,  CLIENTS_HEADERS);
+  var payments   = _readAll(paymentsSh, PAYMENTS_HEADERS);
+
+  var byClient = {};
+  for (var i = 0; i < payments.length; i++) {
+    var p = payments[i];
+    var cid = (p && p.clientId != null) ? String(p.clientId) : '';
+    if (!cid) continue;
+    (byClient[cid] = byClient[cid] || []).push(p);
+  }
+
+  var debtors = [];
+  for (var c = 0; c < clients.length; c++) {
+    var cl = clients[c];
+    var id = (cl && cl.id != null) ? String(cl.id) : '';
+    if (!id) continue;
+    var rows = byClient[id] || [];
+    var sum = 0;
+    for (var r = 0; r < rows.length; r++) sum += _rowOwed(rows[r]);
+    sum = Math.round(sum * 100) / 100;
+    if (sum <= 0) continue;
+    debtors.push({
+      sourceApp:  'ezone-outpatient',
+      clientId:   id,
+      name:       cl.name || '',
+      phone:      cl.treatmentContactPhone || '',
+      amountOwed: sum,
+      kind:       'debtor'
+    });
+  }
+
+  return { ok: true, debtors: debtors };
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -414,6 +505,12 @@ function doGet(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getWinbackSource());
+    }
+    if (action === 'getDebtStatus') {
+      if (!_debtAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getDebtStatus());
     }
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
@@ -456,6 +553,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getWinbackSource());
+    }
+    if (action === 'getDebtStatus') {
+      var debtParams = (e && e.parameter) || {};
+      if (payload && payload.secret) debtParams.secret = payload.secret;
+      if (!_debtAuthOk(debtParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getDebtStatus());
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
