@@ -27,7 +27,7 @@ global.fetch = async (url) => {
   capturedUrl = url;
   return {
     status: 200,
-    text: async () => JSON.stringify({ ok: true, debtors: [] }),
+    text: async () => JSON.stringify({ ok: true, clients: [] }),
   };
 };
 

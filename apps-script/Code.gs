@@ -404,22 +404,27 @@ function _getWinbackSource() {
 
 /* ===== Debt status (read-only cross-app endpoint) =====
  *
- * Consumed by the E-Zone Therapists app to block / warn on a patient who has
- * an open balance in outpatient.
+ * Consumed by the E-Zone Therapists app to gate patient intake on outpatient
+ * debt. Returns EVERY client with a tri-state debt status, so the consumer can
+ * tell "confirmed no debt" apart from "couldn't determine":
+ *   clientId, name, phone (treatmentContactPhone), debtStatus, amountOwed
  *
- * Returns ONLY a debtor projection: for every client whose Payments rows sum
- * to an open balance > 0, the minimal fields needed to match + show the block:
- *   clientId, name, phone (treatmentContactPhone), amountOwed
+ * Never-fail-open: three outcomes, not two.
+ *   - has payment rows, open balance > 0 -> 'debt'    (consumer: block+approval)
+ *   - has payment rows, nothing owing     -> 'clear'   (consumer: allow)
+ *   - ZERO payment rows                   -> 'unknown' (consumer: FLAG — no data
+ *                                                       is NOT proof of payment)
+ * The consumer adds: phone matches no client -> flag; matches >1 -> flag.
  *
  * Matching contract: the consumer matches on NAME + the phone registered in
  * the system (treatmentContactPhone). payerPhone, paymentLink, prices, bundle*
  * and every other billing/payer field are deliberately NOT included.
  *
- * Debt rule (kept in lockstep with public/debt-status.js and
- * public/billing-status.js): per payment row, owed = (status is paid or empty)
- * ? 0 : max(0, amountDue - amountPaid). A client owes when the sum across all
- * their rows is > 0. Debtors are included regardless of client status — an
- * open balance still matters after discharge.
+ * Per-row rule (lockstep with public/debt-status.js and billing-status.js):
+ * for a row that EXISTS, owed = (status paid or blank) ? 0 :
+ * max(0, amountDue - amountPaid). "Don't assume paid" applies at the CLIENT
+ * level (zero rows = 'unknown'), not by reinterpreting an existing blank row.
+ * Included regardless of client status (debt survives discharge).
  *
  * Auth: optional shared secret, same model as getWinbackSource. If a Script
  * Property named 'DEBT_STATUS_SECRET' exists, the request must pass
@@ -470,27 +475,33 @@ function _getDebtStatus() {
     (byClient[cid] = byClient[cid] || []).push(p);
   }
 
-  var debtors = [];
+  var out = [];
   for (var c = 0; c < clients.length; c++) {
     var cl = clients[c];
     var id = (cl && cl.id != null) ? String(cl.id) : '';
     if (!id) continue;
     var rows = byClient[id] || [];
-    var sum = 0;
-    for (var r = 0; r < rows.length; r++) sum += _rowOwed(rows[r]);
-    sum = Math.round(sum * 100) / 100;
-    if (sum <= 0) continue;
-    debtors.push({
+    var debtStatus, amountOwed;
+    if (rows.length === 0) {
+      debtStatus = 'unknown'; amountOwed = 0; // no billing record → flag
+    } else {
+      var sum = 0;
+      for (var r = 0; r < rows.length; r++) sum += _rowOwed(rows[r]);
+      sum = Math.round(sum * 100) / 100;
+      debtStatus = sum > 0 ? 'debt' : 'clear';
+      amountOwed = sum > 0 ? sum : 0;
+    }
+    out.push({
       sourceApp:  'ezone-outpatient',
       clientId:   id,
       name:       cl.name || '',
       phone:      cl.treatmentContactPhone || '',
-      amountOwed: sum,
-      kind:       'debtor'
+      debtStatus: debtStatus,
+      amountOwed: amountOwed
     });
   }
 
-  return { ok: true, debtors: debtors };
+  return { ok: true, clients: out };
 }
 
 function doGet(e) {

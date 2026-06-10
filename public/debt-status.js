@@ -1,34 +1,46 @@
 /**
  * debt-status.js
  * -----------------------------------------------------------------------------
- * Canonical, framework-free definition of "who owes money, and how much".
+ * Canonical, framework-free definition of "who owes money, and how much" —
+ * AND, just as important, "when we cannot tell".
  *
  * WHY THIS FILE EXISTS
  * --------------------
- * A sibling app (ezone-therapists) needs to block / warn on a patient who has
- * an open balance in outpatient. The debt itself is NOT stored on a single
- * field — it is spread across per-month rows in the `Payments` sheet, keyed to
- * a client by `clientId`. Phone lives on the `Clients` sheet
- * (`treatmentContactPhone`), not on the payment rows. So "does this person
- * owe?" is a join + a reduction, and that rule must be identical on both ends.
+ * A sibling app (ezone-therapists) gates patient intake on outpatient debt.
+ * The answer is NOT a single field: it is a join of the `Payments` sheet
+ * (`status`, `amountDue`, `amountPaid`, keyed by `clientId`) onto `Clients`
+ * (where the phone lives, as `treatmentContactPhone`). So the rule must be
+ * identical on both ends, and it must NEVER fail open: a missing record is not
+ * "no debt", it is "couldn't determine → flag for a human".
  *
- * THE RULE (mirrors billing-status.js)
- * ------------------------------------
- * For a single payment row, the amount still owed is:
- *   - status 'paid'            -> 0                (settled)
- *   - status '' / null / legacy-> 0                (legacy row, assumed paid)
+ * THREE OUTCOMES, NOT TWO (never-fail-open for matching)
+ * ------------------------------------------------------
+ * Per client, from that client's payment rows:
+ *   - has rows, open balance > 0   -> 'debt'    (block + approval)
+ *   - has rows, nothing owing      -> 'clear'   (confirmed no debt → allow)
+ *   - ZERO payment rows            -> 'unknown' (no billing record → FLAG)
+ * The consumer adds two more flag cases from the phone match itself:
+ *   - phone matches no client      -> flag (no record)
+ *   - phone matches >1 client      -> flag (ambiguous)
+ * 'unknown' deliberately does NOT collapse to 'clear': absence of a payment
+ * row is absence of evidence, not evidence of payment.
+ *
+ * PER-ROW RULE (mirrors billing-status.js)
+ * ----------------------------------------
+ * The amount still owed on one row that EXISTS is:
+ *   - status 'paid'            -> 0
+ *   - status '' / null         -> 0  (a billed month with a blank status cell
+ *                                     is treated as settled; this is about a
+ *                                     row that exists, not a missing row)
  *   - status 'partial'|'unpaid'-> max(0, amountDue - amountPaid)
- * A client owes when the sum of per-row owed amounts across all their payment
- * rows is > 0. This deliberately matches billing-status.js: only an EXPLICIT
- * partial/unpaid row counts; an empty status is treated as paid so legacy rows
- * never produce phantom debt.
+ * The "don't assume paid" rule applies at the CLIENT level (zero rows =
+ * 'unknown'), not by reinterpreting an existing blank row as a debt.
  *
  * SINGLE SOURCE OF TRUTH
  * ----------------------
  * `apps-script/Code.gs` (`_getDebtStatus`) implements the SAME rule inline (it
- * cannot import this module in the Apps Script runtime). The tests in
- * `test/debt-status.test.js` verify this module; any change to the rule MUST
- * update both places together.
+ * cannot import this module in the Apps Script runtime). `test/debt-status.test.js`
+ * verifies this module; any change to the rule MUST update both places.
  */
 (function (root, factory) {
   var api = factory();
@@ -62,14 +74,14 @@
   }
 
   /**
-   * Amount still owed for a single payment row.
+   * Amount still owed for a single payment row that EXISTS.
    * @param {{status?:*, amountDue?:*, amountPaid?:*}} row
    * @returns {number} >= 0
    */
   function rowOwed(row) {
     if (!row) return 0;
     var status = resolvePaymentStatus(row.status);
-    if (status === 'paid' || status === '') return 0; // settled or legacy=paid
+    if (status === 'paid' || status === '') return 0; // settled (or blank cell on a billed month)
     var owed = toNum(row.amountDue) - toNum(row.amountPaid);
     return owed > 0 ? owed : 0;
   }
@@ -88,22 +100,38 @@
   }
 
   /**
-   * Build the projected debtor list the cross-app endpoint exposes.
+   * Tri-state debt status for one client, from that client's payment rows.
+   * @param {Array} rows payment rows for THIS client only
+   * @returns {{debtStatus:'debt'|'clear'|'unknown', amountOwed:number}}
+   */
+  function clientDebtStatus(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { debtStatus: 'unknown', amountOwed: 0 }; // no billing record → flag
+    }
+    var owed = amountOwedForRows(rows);
+    return owed > 0
+      ? { debtStatus: 'debt', amountOwed: owed }
+      : { debtStatus: 'clear', amountOwed: 0 };
+  }
+
+  /**
+   * Build the projected roster the cross-app endpoint exposes — EVERY client,
+   * each with its tri-state debt status, so the consumer can tell "confirmed
+   * no debt" (clear) apart from "couldn't determine" (unknown / no match).
    *
    * Matching contract (decided with the product owner): a patient is matched on
-   * NAME + the phone registered in the system. On the outpatient side that
-   * phone is `treatmentContactPhone` (the patient/treatment contact), NOT the
-   * payer phone. Only the fields needed for the block are projected — no
-   * prices, payer details, payment links, etc.
+   * NAME + the phone registered in the system, which on the outpatient side is
+   * `treatmentContactPhone` (the patient treated), NOT the payer phone. Only the
+   * fields needed for the gate are projected — no prices, payer details, links.
    *
-   * Debtors are included regardless of client `status`: an open balance still
-   * matters after discharge.
+   * Included regardless of client `status`: an open balance still matters after
+   * discharge, and a discharged client with no rows is still 'unknown'.
    *
    * @param {Array} clients  rows from the Clients sheet
    * @param {Array} payments rows from the Payments sheet
-   * @returns {Array<{clientId:string,name:string,phone:string,amountOwed:number}>}
+   * @returns {Array<{clientId:string,name:string,phone:string,debtStatus:string,amountOwed:number}>}
    */
-  function computeDebtors(clients, payments) {
+  function computeClientDebt(clients, payments) {
     if (!Array.isArray(clients)) return [];
     var byClient = {};
     if (Array.isArray(payments)) {
@@ -120,13 +148,13 @@
       if (!cl) continue;
       var id = cl.id != null ? String(cl.id) : '';
       if (!id) continue;
-      var amountOwed = amountOwedForRows(byClient[id] || []);
-      if (amountOwed <= 0) continue; // only debtors
+      var st = clientDebtStatus(byClient[id] || []);
       out.push({
         clientId: id,
         name: cl.name || '',
         phone: cl.treatmentContactPhone || '',
-        amountOwed: amountOwed
+        debtStatus: st.debtStatus,
+        amountOwed: st.amountOwed
       });
     }
     return out;
@@ -137,6 +165,7 @@
     resolvePaymentStatus: resolvePaymentStatus,
     rowOwed: rowOwed,
     amountOwedForRows: amountOwedForRows,
-    computeDebtors: computeDebtors
+    clientDebtStatus: clientDebtStatus,
+    computeClientDebt: computeClientDebt
   };
 });

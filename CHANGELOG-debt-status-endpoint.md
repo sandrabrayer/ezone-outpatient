@@ -25,54 +25,77 @@ So the endpoint had to be added rather than invented on the consumer side.
 
 Decided with the product owner: a patient is matched on **name + the phone
 registered in the system**. On the outpatient side that phone is
-**`treatmentContactPhone`** (the patient / treatment contact), *not*
-`payerPhone` (which may be a parent or institution). The endpoint therefore
-projects `name` and `treatmentContactPhone` as `phone`; the therapists app
-normalizes and matches on both.
+**`treatmentContactPhone`** (the patient treated), *not* `payerPhone` (which may
+be a parent or institution). The endpoint projects `name` and
+`treatmentContactPhone` as `phone`; the therapists app normalizes and matches on
+both.
+
+## Never-fail-open: three outcomes, not two
+
+A missing record must **not** silently pass as "no debt". The endpoint returns
+**every** client (not just debtors) with a **tri-state** `debtStatus`, so the
+consumer can tell *confirmed no debt* apart from *couldn't determine*:
+
+| situation (per client)               | `debtStatus` | consumer routing       |
+| ------------------------------------ | ------------ | ---------------------- |
+| has payment rows, open balance > 0   | `debt`       | block + approval       |
+| has payment rows, nothing owing      | `clear`      | allow                  |
+| **zero payment rows**                | `unknown`    | **flag** for manual    |
+
+The consumer adds two more flag cases from the phone match itself:
+phone matches **no** client → flag (no record); phone matches **>1** client →
+flag (ambiguous). `unknown` deliberately does **not** collapse to `clear`:
+absence of a payment row is absence of evidence, not evidence of payment.
 
 ## What it returns
 
 ```jsonc
 {
   "ok": true,
-  "debtors": [
-    {
-      "sourceApp":  "ezone-outpatient",
-      "clientId":   "c1",
-      "name":       "אורי",
-      "phone":      "050-1234567",   // treatmentContactPhone
-      "amountOwed": 400,
-      "kind":       "debtor"
-    }
+  "clients": [
+    { "sourceApp": "ezone-outpatient", "clientId": "c1", "name": "אורי",
+      "phone": "050-1234567", "debtStatus": "debt",    "amountOwed": 400 },
+    { "sourceApp": "ezone-outpatient", "clientId": "c2", "name": "דנה",
+      "phone": "052-7654321", "debtStatus": "clear",   "amountOwed": 0 },
+    { "sourceApp": "ezone-outpatient", "clientId": "c3", "name": "מאיה",
+      "phone": "054-1111111", "debtStatus": "unknown", "amountOwed": 0 }
   ]
 }
 ```
 
-Only clients with `amountOwed > 0` are included. Debtors are returned
-**regardless of client status** — an open balance still matters after
-discharge (`סיים טיפול`). Nothing else is exposed: no `payerPhone`,
+`phone` is `treatmentContactPhone`. Clients are returned **regardless of status**
+— an open balance still matters after discharge (`סיים טיפול`), and a discharged
+client with no rows is still `unknown`. Nothing else is exposed: no `payerPhone`,
 `paymentLink`, prices, bundles, or per-month rows.
 
 ## The debt rule (single source of truth)
 
-For one payment row, the amount still owed is:
+Two levels:
 
-| `status` (resolved)      | owed                         |
-| ------------------------ | ---------------------------- |
-| `paid`                   | `0`                          |
-| `''` / null / legacy     | `0` (legacy row, assumed paid) |
-| `partial` / `unpaid`     | `max(0, amountDue - amountPaid)` |
+1. **Per row that EXISTS** — amount still owed:
 
-A client owes when the sum across all their rows is `> 0` (rounded to the
-cent to avoid float dust). This is the **same rule** as `public/billing-status.js`
-— only an explicit `partial`/`unpaid` counts; an empty status is assumed paid,
-so legacy rows never produce phantom debt.
+   | `status` (resolved)      | owed                         |
+   | ------------------------ | ---------------------------- |
+   | `paid`                   | `0`                          |
+   | `''` / null (blank cell) | `0` (a billed month, blank status cell = settled) |
+   | `partial` / `unpaid`     | `max(0, amountDue - amountPaid)` |
 
-The rule lives in **`public/debt-status.js`** (`computeDebtors`) and is
-**mirrored inline** in `apps-script/Code.gs` (`_getDebtStatus`), because Apps
-Script cannot import the module. `test/debt-status.test.js` guards the module;
-any change to the rule must update both places together — exactly the pattern
-already used by `billing-status.js` and its inline twin in `app.js`.
+2. **Per client** — `debt` if the row sum is `> 0` (rounded to the cent);
+   `clear` if rows exist and nothing is owed; `unknown` if there are **no rows
+   at all**.
+
+The "don't assume paid" rule lives at the **client level** (zero rows =
+`unknown`). The per-row blank-cell handling matches `public/billing-status.js`:
+a row that exists with a blank status is a billed month treated as settled, not
+a debt. (Boundary decision, flagged for review: an existing all-blank-status
+client resolves to `clear`; only the *absence* of rows is `unknown`.)
+
+The rule lives in **`public/debt-status.js`** (`clientDebtStatus`,
+`computeClientDebt`) and is **mirrored inline** in `apps-script/Code.gs`
+(`_getDebtStatus`), because Apps Script cannot import the module.
+`test/debt-status.test.js` guards the module; any change to the rule must update
+both places together — exactly the pattern already used by `billing-status.js`
+and its inline twin in `app.js`.
 
 ## Auth
 

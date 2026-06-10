@@ -73,11 +73,13 @@ npm start
 - `GET /api/sheets?action=getWinbackSource&secret=<WINBACK_SECRET>` → lost
   leads + discharged clients for the win-back call list. No billing data.
 - `GET /api/sheets?action=getDebtStatus&secret=<DEBT_STATUS_SECRET>` →
-  `{ ok, debtors:[{ clientId, name, phone, amountOwed }] }` for the E-Zone
-  Therapists debt-block. `phone` is `treatmentContactPhone`; only clients with
-  an open balance are returned. Each secret is an optional Apps Script Script
-  Property — if unset, that action is open (URL-obscurity). The Node proxy
-  forwards `?secret=` to Apps Script automatically. See
+  `{ ok, clients:[{ clientId, name, phone, debtStatus, amountOwed }] }` for the
+  E-Zone Therapists intake gate. `phone` is `treatmentContactPhone`. Every
+  client is returned with a tri-state `debtStatus` (`debt` / `clear` /
+  `unknown`) — never-fail-open: a client with no payment rows is `unknown`, not
+  silently "clear", so the consumer can flag it for manual resolution. Each
+  secret is an optional Apps Script Script Property — if unset, that action is
+  open (URL-obscurity). The Node proxy forwards `?secret=` automatically. See
   `CHANGELOG-debt-status-endpoint.md`.
 
 ### Debug endpoints
