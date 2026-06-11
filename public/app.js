@@ -87,6 +87,9 @@
     }
     return false;
   }
+  // Display-only: map a legacy day-center service string to DAY_CENTER_LABEL.
+  // Does NOT change stored values or compares; other types pass through.
+  function serviceLabel(s) { return hasDayCenter([s]) ? DAY_CENTER_LABEL : s; }
   function wholeSessions(v) { var n = Math.round(toNum(v)); return n < 0 ? 0 : n; }
 
   function parseSessionsBreakdown(v, services) {
@@ -1313,7 +1316,7 @@
     var card = document.createElement('div');
     card.className = 'card';
     var services = parseServices(l.serviceType);
-    var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
+    var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     if (l.location && !hasDayCenter(services)) {
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
     } else if (hasDayCenter(services)) {
@@ -1327,7 +1330,7 @@
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -1471,7 +1474,7 @@
     card.className = 'client-card';
     var rev = monthlyRevenue(c);
     var services = parseServices(c.serviceType);
-    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
+    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
@@ -1479,7 +1482,7 @@
     var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var breakdownChips = Object.keys(breakdown).map(function (k) {
-      return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+      return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
     }).join('');
     var total = totalSessions(c.sessionsPerWeek, c.serviceType);
     var statsHtml =
