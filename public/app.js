@@ -20,13 +20,21 @@
   });
 
   // --- constants ---------------------------------------------------------
+  // Day-center treatment type: stable key + display label + back-compat aliases.
+  // The serviceType column stores the LABEL (it is not keyed), so new writes
+  // persist DAY_CENTER_LABEL; existing "מרכז יום" rows keep matching via
+  // DAY_CENTER_ALIASES. No sheet migration / backfill.
+  var DAY_CENTER_KEY = 'day_center';                 // stable, never changes
+  var DAY_CENTER_LABEL = 'ליווי יומי בקהילה';          // display only
+  var DAY_CENTER_ALIASES = ['מרכז יום', DAY_CENTER_LABEL, DAY_CENTER_KEY];
+
   var SERVICE_TYPES = [
     'פרטני',
     'פרטני CBT',
     'פרטני EMDR',
     'קבוצה',
     'טיפול משפחתי',
-    'מרכז יום',
+    DAY_CENTER_LABEL,
     'מעקב פסיכיאטרי'
   ];
   var LOCATIONS = ['רעננה הפרדס', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
@@ -43,7 +51,6 @@
     return HOUSE_OF_ORIGIN_LABELS[s] || '';
   }
 
-  var DAY_CENTER = 'מרכז יום';
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
 
   var STAGES = [
@@ -73,7 +80,13 @@
     return String(v).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   }
   function formatServices(arr) { return (arr || []).join(', '); }
-  function hasDayCenter(arr) { return parseServices(arr).indexOf(DAY_CENTER) !== -1; }
+  function hasDayCenter(arr) {
+    var svcs = parseServices(arr);
+    for (var i = 0; i < svcs.length; i++) {
+      if (DAY_CENTER_ALIASES.indexOf(svcs[i]) !== -1) return true;
+    }
+    return false;
+  }
   function wholeSessions(v) { var n = Math.round(toNum(v)); return n < 0 ? 0 : n; }
 
   function parseSessionsBreakdown(v, services) {
@@ -1434,8 +1447,11 @@
     var visible = state.clients.filter(function (c) {
       if (c.status === 'סיים טיפול') return false; // finished go to retention
       if (state.clientTab !== 'all') {
-        var svcs = parseServices(c.serviceType);
-        if (svcs.indexOf(state.clientTab) === -1) return false;
+        // Day-center tab carries the new label; match old "מרכז יום" rows too.
+        var matchesTab = state.clientTab === DAY_CENTER_LABEL
+          ? hasDayCenter(c.serviceType)
+          : parseServices(c.serviceType).indexOf(state.clientTab) !== -1;
+        if (!matchesTab) return false;
       }
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
@@ -1709,7 +1725,7 @@
     var fd = new FormData(form);
     var group = $('[data-group="serviceType"]', form);
     var services = readServiceGroup(group);
-    var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
+    var isDayCenter = hasDayCenter(services);
     return {
       name: (fd.get('name') || '').trim(),
       phone: (fd.get('phone') || '').trim(),
@@ -1802,7 +1818,7 @@
     var wrap = formLocationWrap(form);
     if (!wrap) return;
     var picked = readServiceGroup(group);
-    if (picked.indexOf(DAY_CENTER) !== -1) {
+    if (hasDayCenter(picked)) {
       wrap.classList.add('field-hidden');
       var sel = $('select[name="location"]', form);
       if (sel) { sel.required = false; sel.value = DAY_CENTER_LOCATION; }
@@ -1905,7 +1921,7 @@
     var sel = $('select[name="location"]', form);
     if (!group || !wrap || !sel) return;
     var picked = readServiceGroup(group);
-    if (picked.indexOf(DAY_CENTER) !== -1) {
+    if (hasDayCenter(picked)) {
       wrap.classList.add('field-hidden');
       sel.required = false;
       sel.value = DAY_CENTER_LOCATION;
@@ -2286,7 +2302,7 @@
         var group = $('[data-group="serviceType"]', form);
         var services = readServiceGroup(group);
         if (!services.length) { toast('יש לבחור לפחות סוג טיפול אחד', true); submit.disabled = false; return; }
-        var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
+        var isDayCenter = hasDayCenter(services);
         var name = (fd.get('name') || '').trim();
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
         var startDate = fd.get('startDate') || today();
@@ -2419,7 +2435,7 @@
       var breakdown = readSessionsHost(host);
       var cleanBreakdown = {};
       services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
-      var isDayCenter = services.indexOf(DAY_CENTER) !== -1;
+      var isDayCenter = hasDayCenter(services);
       var startDate = fd.get('startDate') || today();
       var payStatus = fd.get('paymentStatus') || 'unpaid';
       var payDate = fd.get('paymentDate') || '';
