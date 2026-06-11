@@ -53,6 +53,29 @@ The `serviceType` column is **not keyed** — it stores the display **label**
 (`'מרכז יום'`, `'ליווי יומי בקהילה'`, `'day_center'`) plus a negative case.
 Run: `npm test`.
 
+## Follow-up: edit-modal checked-state alias gap
+
+`populateServiceGroup` (`public/app.js`) renders the service-type checkboxes
+from `SERVICE_TYPES`, so the day-center checkbox value is now `DAY_CENTER_LABEL`.
+The checked test was strict (`picked.indexOf(s) !== -1`), so a legacy lead
+stored as `"מרכז יום"` rendered the day-center box **unchecked** — and saving
+would have dropped the service (data loss on legacy rows).
+
+Fix: the checked test is now alias-aware **for the day-center option only** —
+`s === DAY_CENTER_LABEL ? hasDayCenter(picked) : picked.indexOf(s) !== -1`. All
+other service types keep strict matching (matching is not broadened elsewhere).
+
+STORE side (confirmed): on save, `readServiceGroup` returns each checked
+checkbox's `value`, which for the day-center option is `DAY_CENTER_LABEL`. So
+editing a legacy `"מרכז יום"` lead with the box checked **heals the row to
+`DAY_CENTER_LABEL` one-way**. No duplicates: there is a single day-center
+checkbox, and the old stored string is not carried separately.
+
+Test coverage added to `test/day-center.test.js`: a picked array containing
+`"מרכז יום"` (and `'day_center'`) yields checked=true for the day-center option;
+the option is unchecked when no day-center service is stored; non-day-center
+options remain strict (a legacy day-center value never checks unrelated types).
+
 ## Not touched
 
 - `apps-script/Code.gs` — **no change** (the string never appeared there). No

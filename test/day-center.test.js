@@ -32,6 +32,11 @@ function hasDayCenter(arr) {
   }
   return false;
 }
+// Mirror of populateServiceGroup's checked test (public/app.js): the
+// day-center option is alias-aware; every other service type stays strict.
+function isServiceChecked(s, picked) {
+  return s === DAY_CENTER_LABEL ? hasDayCenter(picked) : picked.indexOf(s) !== -1;
+}
 // ---------------------------------------------------------------------------
 
 test('hasDayCenter matches the legacy label "מרכז יום"', () => {
@@ -54,4 +59,23 @@ test('hasDayCenter is false for non-day-center services (negative case)', () => 
   assert.equal(hasDayCenter(['קבוצה', 'מעקב פסיכיאטרי']), false);
   assert.equal(hasDayCenter(''), false);
   assert.equal(hasDayCenter(null), false);
+});
+
+test('edit-modal: legacy "מרכז יום" checks the day-center option (alias-aware)', () => {
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, ['מרכז יום']), true);
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, [DAY_CENTER_LABEL]), true);
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, [DAY_CENTER_KEY]), true);
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, ['פרטני', 'מרכז יום']), true);
+});
+
+test('edit-modal: day-center option unchecked when no day-center service is stored', () => {
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, ['פרטני']), false);
+  assert.equal(isServiceChecked(DAY_CENTER_LABEL, []), false);
+});
+
+test('edit-modal: non-day-center options stay strict (matching not broadened)', () => {
+  assert.equal(isServiceChecked('פרטני', ['פרטני']), true);
+  // legacy day-center value must NOT check unrelated options
+  assert.equal(isServiceChecked('פרטני', ['מרכז יום']), false);
+  assert.equal(isServiceChecked('קבוצה', ['מרכז יום']), false);
 });

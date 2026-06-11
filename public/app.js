@@ -1794,7 +1794,10 @@
     SERVICE_TYPES.forEach(function (s) {
       var lab = document.createElement('label');
       var cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.value = s; cb.checked = picked.indexOf(s) !== -1;
+      cb.type = 'checkbox'; cb.value = s;
+      // Day-center option is alias-aware so legacy "מרכז יום" rows render
+      // checked (and heal to DAY_CENTER_LABEL on save). Others stay strict.
+      cb.checked = (s === DAY_CENTER_LABEL) ? hasDayCenter(picked) : picked.indexOf(s) !== -1;
       cb.addEventListener('change', function () { updateLocationVisibility(group.closest('form')); });
       var span = document.createElement('span');
       span.textContent = s;
