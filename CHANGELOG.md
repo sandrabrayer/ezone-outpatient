@@ -28,6 +28,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - the WhatsApp stop-treatment message button.
 
 ### Added
+- **`getDebtStatus` — read-only cross-app debt endpoint** (Apps Script
+  `Code.gs`). Returns the **full client roster** with a **tri-state**
+  `debtStatus` — `debt` / `clear` / `unknown` — plus `clientId`, `name`,
+  `phone`, `amountOwed`, for the E-Zone Therapists intake gate. Never-fail-open:
+  a client with **no payment rows** is `unknown` (→ consumer flags for manual
+  resolution), not silently "clear"; the consumer also flags a phone that
+  matches no client or more than one. Auth mirrors `getWinbackSource`: optional
+  shared secret via the `DEBT_STATUS_SECRET` Script Property. Billing/payer
+  fields are deliberately excluded. See `CHANGELOG-debt-status-endpoint.md`.
+- `public/debt-status.js` — canonical, framework-free debt rule
+  (`computeClientDebt`, `clientDebtStatus`, `rowOwed`, `amountOwedForRows`),
+  shared single source of truth mirrored inline by `Code.gs` and tested in
+  `test/debt-status.test.js`.
+- `test/debt-status.test.js` + `test/debt-status-forwarding.test.js` —
+  cover the tri-state rule (debt/clear/unknown, per-row paid/blank/partial/unpaid,
+  discharge, empty inputs) and the `?secret` forwarding for `getDebtStatus`.
 - `public/billing-status.js` — canonical, framework-free definition of the
   "is this patient a billing problem?" rule (`hasBillingProblem`,
   `resolvePaymentStatus`), usable from both Node and the browser.
