@@ -28,6 +28,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - the WhatsApp stop-treatment message button.
 
 ### Added
+- **`getTreatmentPlans` — read-only cross-app treatment-plan endpoint** (Apps
+  Script `Code.gs`). Returns each client's plan projection — `clientId`,
+  `name`, `phone` (`treatmentContactPhone`), `serviceType`, `sessions`
+  (`sessionsPerWeek`), `status` — for the E-Zone Therapists "מטופלי חוץ —
+  תוכנית טיפול" tab. A minimal, read-only projection: **no**
+  `payerName`/`payerPhone`/`paymentLink`/prices/bundles. Auth mirrors
+  `getWinbackSource`/`getDebtStatus`: optional shared secret via the
+  `TREATMENT_PLANS_SECRET` Script Property (separate from `DEBT_STATUS_SECRET`
+  so the two endpoints rotate independently); if unset the action is open
+  (URL-obscurity). The Node proxy already forwards `?secret=`, so no
+  `server.js` change. See `CHANGELOG-treatment-plans-endpoint.md`.
+- `test/treatment-plans.test.js` — locks the minimal projection contract
+  (phone is `treatmentContactPhone`, no payer/billing leak, missing-id rows
+  skipped, blanks default to empty strings).
 - **`getDebtStatus` — read-only cross-app debt endpoint** (Apps Script
   `Code.gs`). Returns the **full client roster** with a **tri-state**
   `debtStatus` — `debt` / `clear` / `unknown` — plus `clientId`, `name`,

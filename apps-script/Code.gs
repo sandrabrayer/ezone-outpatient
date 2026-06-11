@@ -504,6 +504,43 @@ function _getDebtStatus() {
   return { ok: true, clients: out };
 }
 
+/* ===== Treatment plans (read-only cross-app endpoint) =====
+ *
+ * Consumed by E-Zone Therapists to show each outpatient's treatment plan.
+ * Minimal projection: clientId, name, phone (treatmentContactPhone),
+ * serviceType, sessions (sessionsPerWeek), status. NO billing/payer data.
+ *
+ * Auth: optional shared secret 'TREATMENT_PLANS_SECRET', same model as
+ * getWinbackSource / getDebtStatus.
+ */
+function _treatmentPlansAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('TREATMENT_PLANS_SECRET');
+  if (!expected) return true; // not configured -> open
+  var got = (params && params.secret) ? String(params.secret) : '';
+  return got === expected;
+}
+
+function _getTreatmentPlans() {
+  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+  var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
+  var out = [];
+  for (var c = 0; c < clients.length; c++) {
+    var cl = clients[c];
+    var id = (cl && cl.id != null) ? String(cl.id) : '';
+    if (!id) continue;
+    out.push({
+      sourceApp:   'ezone-outpatient',
+      clientId:    id,
+      name:        cl.name || '',
+      phone:       cl.treatmentContactPhone || '',
+      serviceType: cl.serviceType || '',
+      sessions:    cl.sessionsPerWeek || '',
+      status:      cl.status || ''
+    });
+  }
+  return { ok: true, clients: out };
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -522,6 +559,12 @@ function doGet(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getDebtStatus());
+    }
+    if (action === 'getTreatmentPlans') {
+      if (!_treatmentPlansAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getTreatmentPlans());
     }
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
@@ -572,6 +615,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getDebtStatus());
+    }
+    if (action === 'getTreatmentPlans') {
+      var tpParams = (e && e.parameter) || {};
+      if (payload && payload.secret) tpParams.secret = payload.secret;
+      if (!_treatmentPlansAuthOk(tpParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getTreatmentPlans());
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
