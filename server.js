@@ -206,8 +206,20 @@ app.get('/healthz', (req, res) => res.json({ ok: true }));
 
 app.get('*', (req, res) => sendIndex(res));
 
-app.listen(PORT, () => {
-  console.log(`E-ZONE Outpatient listening on :${PORT}`);
-  console.log(`SHEETS_URL configured: ${!!SHEETS_URL}`);
-  console.log(`Cache TTL: ${CACHE_TTL_MS}ms, stale fallback: ${STALE_FALLBACK_MS}ms`);
-});
+// Start only when run directly (`node server.js`). When required by a test the
+// app is exported instead, so the test owns the server lifecycle and the test
+// runner can exit cleanly instead of hanging on a listening socket.
+function start(port) {
+  return app.listen(port || PORT, () => {
+    console.log(`E-ZONE Outpatient listening on :${port || PORT}`);
+    console.log(`SHEETS_URL configured: ${!!SHEETS_URL}`);
+    console.log(`Cache TTL: ${CACHE_TTL_MS}ms, stale fallback: ${STALE_FALLBACK_MS}ms`);
+  });
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = app;
+module.exports.start = start;

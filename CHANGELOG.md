@@ -8,6 +8,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **GET /api/sheets now forwards the `secret` query parameter to Apps Script,**
   so authenticated endpoints (e.g. `getWinbackSource`) work. `server.js:82`.
+- **`server.js` now exports the Express app and only calls `listen` when run
+  directly** (`require.main === module`), exposing a `start(port)` helper. The
+  `*-forwarding.test.js` tests start their own server in `before` and
+  `server.close()` it in `after`, so the test runner exits cleanly instead of
+  leaking a listening socket (which caused `EADDRINUSE` / hangs across runs).
 
 - **False "stop treatment" alerts for every existing patient.**
   `renewalInfo()` in `public/app.js` treated any patient whose

@@ -31,7 +31,13 @@ global.fetch = async (url) => {
   };
 };
 
-require('../server');
+// Import the app and start a server we control, so the test runner can exit
+// cleanly (the server is closed in the after() hook below) instead of hanging
+// on a listening socket.
+const app = require('../server');
+let server;
+test.before(() => { server = app.start(TEST_PORT); });
+test.after(() => { if (server) server.close(); });
 
 function httpGet(path) {
   return new Promise((resolve, reject) => {
