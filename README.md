@@ -81,6 +81,15 @@ npm start
   secret is an optional Apps Script Script Property — if unset, that action is
   open (URL-obscurity). The Node proxy forwards `?secret=` automatically. See
   `CHANGELOG-debt-status-endpoint.md`.
+- `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
+  `{ ok, clients:[{ clientId, name, phone, serviceType, sessions, status }] }`
+  for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is
+  `treatmentContactPhone`; `sessions` is `sessionsPerWeek`. A minimal,
+  read-only projection — no `payerName`/`payerPhone`/`paymentLink`/prices/
+  bundles. Auth mirrors the above: optional `TREATMENT_PLANS_SECRET` Script
+  Property (separate from `DEBT_STATUS_SECRET` so the two rotate
+  independently); if unset the action is open. The Node proxy forwards
+  `?secret=` automatically. See `CHANGELOG-treatment-plans-endpoint.md`.
 
 ### Debug endpoints
 
