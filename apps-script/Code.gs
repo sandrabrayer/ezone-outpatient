@@ -71,6 +71,38 @@ var REMOVED_LEADS_HEADERS = [
   'originSheet'
 ];
 
+/* Columns that hold phone numbers. Forced to plain-text ('@') format on write
+ * so Google Sheets does not coerce a numeric-looking phone to a number and drop
+ * the leading zero, and recovered on read for already-corrupted rows. */
+var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true };
+
+/* Mirror of recoverPhone() in public/app.js — keep both in sync. Normalizes to
+ * the leading-zero canonical form and restores a leading zero that Sheets
+ * dropped by coercing the phone to a number. Idempotent. */
+function _recoverPhone(raw) {
+  if (raw === null || raw === undefined) return '';
+  var s = String(raw).replace(/[\s\-\(\)]/g, '');
+  if (s.indexOf('+') === 0) s = s.slice(1);
+  if (s.indexOf('00') === 0) s = s.slice(2);
+  s = s.replace(/\D/g, '');
+  if (!s) return '';
+  if (s.indexOf('972') === 0) s = '0' + s.slice(3);   // intl -> local
+  else if (s.charAt(0) !== '0') s = '0' + s;          // Sheets dropped the leading 0
+  return s;
+}
+
+/* Force '@' (plain text) format on any phone columns in this sheet, below the
+ * header row, so future writes preserve leading zeros. */
+function _formatPhoneColumns(sh, headers) {
+  var maxRows = sh.getMaxRows();
+  if (maxRows < 2) return;
+  for (var i = 0; i < headers.length; i++) {
+    if (PHONE_COLUMNS[headers[i]]) {
+      sh.getRange(2, i + 1, maxRows - 1, 1).setNumberFormat('@');
+    }
+  }
+}
+
 function _ss() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
@@ -82,6 +114,7 @@ function _ensureSheet(name, headers) {
     sh = ss.insertSheet(name);
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
+    _formatPhoneColumns(sh, headers);
     return sh;
   }
   var lastCol = Math.max(sh.getLastColumn(), headers.length);
@@ -94,6 +127,7 @@ function _ensureSheet(name, headers) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   }
+  _formatPhoneColumns(sh, headers);
   return sh;
 }
 
@@ -110,6 +144,8 @@ function _readAll(sh, headers) {
       var v = row[c];
       if (v instanceof Date) {
         v = Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+      } else if (PHONE_COLUMNS[headers[c]]) {
+        v = _recoverPhone(v);   // restore leading zero dropped by Sheets coercion
       }
       obj[headers[c]] = v;
     }
@@ -131,6 +167,13 @@ function _writeAll(sh, headers, rows) {
       return v;
     });
   });
+  // Force phone columns to plain text BEFORE writing so leading zeros survive
+  // (Sheets would otherwise coerce a numeric-looking phone to a number).
+  for (var c = 0; c < headers.length; c++) {
+    if (PHONE_COLUMNS[headers[c]]) {
+      sh.getRange(2, c + 1, values.length, 1).setNumberFormat('@');
+    }
+  }
   sh.getRange(2, 1, values.length, headers.length).setValues(values);
 }
 

@@ -76,6 +76,27 @@ Test coverage added to `test/day-center.test.js`: a picked array containing
 the option is unchecked when no day-center service is stored; non-day-center
 options remain strict (a legacy day-center value never checks unrelated types).
 
+## Follow-up: display-time label mapping for chips
+
+Cards render the stored `serviceType` string verbatim, so legacy `"מרכז יום"`
+rows still displayed the old label on the card (the picker/edit are already
+fixed). Added a display-only helper in `public/app.js`:
+
+```js
+function serviceLabel(s) { return hasDayCenter([s]) ? DAY_CENTER_LABEL : s; }
+```
+
+It is applied **only at chip text sites** — lead-card service chips, patient-card
+service chips, and both sessions-breakdown key chips (lead + patient). It does
+**not** change stored values, does **not** touch any compare, and does **not**
+broaden matching to other service types. Legacy `"מרכז יום"` rows now *display*
+`"ליווי יומי בקהילה"` while remaining stored as the legacy string (aliases keep
+matching). No sheet migration / backfill.
+
+Test coverage added to `test/day-center.test.js`: `serviceLabel("מרכז יום")`,
+`serviceLabel("ליווי יומי בקהילה")`, and `serviceLabel("day_center")` all return
+`DAY_CENTER_LABEL`; non-day-center types pass through unchanged.
+
 ## Not touched
 
 - `apps-script/Code.gs` — **no change** (the string never appeared there). No

@@ -37,6 +37,9 @@ function hasDayCenter(arr) {
 function isServiceChecked(s, picked) {
   return s === DAY_CENTER_LABEL ? hasDayCenter(picked) : picked.indexOf(s) !== -1;
 }
+// Mirror of serviceLabel (public/app.js): display-only label mapping for the
+// day-center service string; other types pass through unchanged.
+function serviceLabel(s) { return hasDayCenter([s]) ? DAY_CENTER_LABEL : s; }
 // ---------------------------------------------------------------------------
 
 test('hasDayCenter matches the legacy label "מרכז יום"', () => {
@@ -78,4 +81,12 @@ test('edit-modal: non-day-center options stay strict (matching not broadened)', 
   // legacy day-center value must NOT check unrelated options
   assert.equal(isServiceChecked('פרטני', ['מרכז יום']), false);
   assert.equal(isServiceChecked('קבוצה', ['מרכז יום']), false);
+});
+
+test('serviceLabel maps day-center aliases to the display label, passes others through', () => {
+  assert.equal(serviceLabel('מרכז יום'), DAY_CENTER_LABEL);
+  assert.equal(serviceLabel('ליווי יומי בקהילה'), DAY_CENTER_LABEL);
+  assert.equal(serviceLabel('day_center'), DAY_CENTER_LABEL);
+  assert.equal(serviceLabel('פרטני'), 'פרטני');
+  assert.equal(serviceLabel('מעקב פסיכיאטרי'), 'מעקב פסיכיאטרי');
 });

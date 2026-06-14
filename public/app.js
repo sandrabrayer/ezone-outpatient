@@ -87,6 +87,9 @@
     }
     return false;
   }
+  // Display-only: map a legacy day-center service string to DAY_CENTER_LABEL.
+  // Does NOT change stored values or compares; other types pass through.
+  function serviceLabel(s) { return hasDayCenter([s]) ? DAY_CENTER_LABEL : s; }
   function wholeSessions(v) { var n = Math.round(toNum(v)); return n < 0 ? 0 : n; }
 
   function parseSessionsBreakdown(v, services) {
@@ -343,7 +346,7 @@
     return {
       id: row.id || uid(),
       name: row.name || '',
-      phone: row.phone || '',
+      phone: recoverPhone(row.phone),
       serviceType: services,
       location: row.location || '',
       note: row.note || '',
@@ -365,7 +368,7 @@
     return {
       id: row.id || uid(),
       name: row.name || '',
-      phone: row.phone || '',
+      phone: recoverPhone(row.phone),
       serviceType: services,
       location: row.location || '',
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
@@ -385,9 +388,9 @@
       house_of_origin: row.house_of_origin || '',
       responsiblePerson: row.responsiblePerson || '',
       serviceScope: row.serviceScope || '',
-      treatmentContactPhone: row.treatmentContactPhone || '',
+      treatmentContactPhone: recoverPhone(row.treatmentContactPhone),
       payerName: row.payerName || '',
-      payerPhone: row.payerPhone || '',
+      payerPhone: recoverPhone(row.payerPhone),
       paymentLink: row.paymentLink || ''
     };
   }
@@ -723,15 +726,56 @@
   }
 
   // ---- WhatsApp helpers
-  // Normalize a phone number to international format for wa.me.
-  // Israeli numbers: 050-1234567 -> 972501234567
-  function normalizePhone(raw) {
-    if (!raw) return '';
-    var s = String(raw).replace(/[\s\-\(\)]/g, '');
+  // --- phone handling -----------------------------------------------------
+  // Canonical STORE/compare form is leading-zero, no separators (0501234567).
+  // wa.me needs the 972 form — produced only at link-build time via phoneToWa.
+  function phoneDigits(raw) {
+    var s = String(raw == null ? '' : raw).replace(/[\s\-\(\)]/g, '');
     if (s.indexOf('+') === 0) s = s.slice(1);
     if (s.indexOf('00') === 0) s = s.slice(2);
-    if (s.indexOf('0') === 0) s = '972' + s.slice(1);
     return s.replace(/\D/g, '');
+  }
+  // Entry normalization: strip separators; +972 / 972 / 00972 -> leading 0.
+  // Does NOT invent a missing leading zero (that is a Sheets-recovery concern).
+  function normalizePhone(raw) {
+    var s = phoneDigits(raw);
+    if (!s) return '';
+    if (s.indexOf('972') === 0) s = '0' + s.slice(3);
+    return s;
+  }
+  // Read-side recovery: like normalize, plus restore a leading zero that Google
+  // Sheets dropped by coercing a numeric-looking phone to a number. Idempotent.
+  function recoverPhone(raw) {
+    var s = normalizePhone(raw);
+    if (s && s.charAt(0) !== '0') s = '0' + s;
+    return s;
+  }
+  // Mobile / cross-app matching keys: exactly 10 digits, leading zero.
+  function isValidMobile(p) { return /^0\d{9}$/.test(p); }
+  // payerPhone only: also allow a 9-digit Israeli landline (031234567).
+  function isValidPayerPhone(p) { return /^0\d{8,9}$/.test(p); }
+  // wa.me link form: canonical leading-zero -> 972 international.
+  function phoneToWa(phone) {
+    var p = normalizePhone(phone);
+    return p ? '972' + p.slice(1) : '';
+  }
+  // Entry guard: normalize then validate. Returns the canonical value on
+  // success ('' when empty and not required), or false (after a Hebrew toast)
+  // when the value is non-empty-invalid or required-but-empty.
+  function acceptPhone(raw, label, mode, required) {
+    var norm = normalizePhone(raw);
+    if (!norm) {
+      if (required) { toast('יש להזין ' + label, true); return false; }
+      return '';
+    }
+    var ok = mode === 'payer' ? isValidPayerPhone(norm) : isValidMobile(norm);
+    if (!ok) {
+      toast(label + ' לא תקין — ' + (mode === 'payer'
+        ? 'יש להזין מספר טלפון ישראלי תקין עם אפס בהתחלה (לדוגמה 0501234567 או 031234567)'
+        : 'יש להזין מספר נייד תקין בן 10 ספרות עם אפס בהתחלה (לדוגמה 0501234567)'), true);
+      return false;
+    }
+    return norm;
   }
 
   function bankDetailsLine() {
@@ -771,7 +815,7 @@
   }
 
   function openWhatsApp(phone, message) {
-    var p = normalizePhone(phone);
+    var p = phoneToWa(phone);
     if (!p) { toast('חסר מספר טלפון', true); return; }
     var url = 'https://wa.me/' + p + '?text=' + encodeURIComponent(message);
     window.open(url, '_blank');
@@ -1313,7 +1357,7 @@
     var card = document.createElement('div');
     card.className = 'card';
     var services = parseServices(l.serviceType);
-    var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
+    var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     if (l.location && !hasDayCenter(services)) {
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
     } else if (hasDayCenter(services)) {
@@ -1327,7 +1371,7 @@
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -1471,7 +1515,7 @@
     card.className = 'client-card';
     var rev = monthlyRevenue(c);
     var services = parseServices(c.serviceType);
-    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(s) + '</span>'; }).join('');
+    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
@@ -1479,7 +1523,7 @@
     var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var breakdownChips = Object.keys(breakdown).map(function (k) {
-      return '<span class="chip">' + escapeHtml(k) + ': ' + breakdown[k] + '/שבוע</span>';
+      return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
     }).join('');
     var total = totalSessions(c.sessionsPerWeek, c.serviceType);
     var statsHtml =
@@ -1728,7 +1772,7 @@
     var isDayCenter = hasDayCenter(services);
     return {
       name: (fd.get('name') || '').trim(),
-      phone: (fd.get('phone') || '').trim(),
+      phone: normalizePhone(fd.get('phone') || ''),
       serviceType: formatServices(services),
       location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
       note: (fd.get('note') || '').trim(),
@@ -2308,6 +2352,8 @@
         var isDayCenter = hasDayCenter(services);
         var name = (fd.get('name') || '').trim();
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
+        var directPhone = acceptPhone(fd.get('phone') || '', 'טלפון', 'mobile', false);
+        if (directPhone === false) { submit.disabled = false; return; }
         var startDate = fd.get('startDate') || today();
         var monthlyAmount = toNum(fd.get('monthlyAmount'));
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
@@ -2326,7 +2372,7 @@
         }
         var nextBill = payDate ? addDays(payDate, 30) : (startDate ? addDays(startDate, 30) : '');
         var client = {
-          id: uid(), name: name, phone: (fd.get('phone') || '').trim(),
+          id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
           location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
           sessionsPerWeek: clean, pricePerSession: monthlyAmount,
@@ -2360,6 +2406,7 @@
       var form = e.target;
       var group = $('[data-group="serviceType"]', form);
       if (!readServiceGroup(group).length) { toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
+      if (acceptPhone((form.phone && form.phone.value) || '', 'טלפון', 'mobile', true) === false) return;
       submit.disabled = true;
       function runAddFlow() {
         submit.disabled = true;
@@ -2563,6 +2610,10 @@
       var resp = (fd.get('responsiblePerson') || '').trim();
       if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
       if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
+      var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
+      if (tcPhone === false) { submit.disabled = false; return; }
+      var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
+      if (pyPhone === false) { submit.disabled = false; return; }
       var prev = {
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
         treatmentContactPhone: client.treatmentContactPhone,
@@ -2576,9 +2627,9 @@
       };
       client.serviceScope = scope;
       client.responsiblePerson = resp;
-      client.treatmentContactPhone = (fd.get('treatmentContactPhone') || '').trim();
+      client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
-      client.payerPhone = (fd.get('payerPhone') || '').trim();
+      client.payerPhone = pyPhone;
       client.paymentLink = (fd.get('paymentLink') || '').trim();
       var ps = fd.get('paymentStatus') || '';
       if (ps) client.paymentStatus = ps;
