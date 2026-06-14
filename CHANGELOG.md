@@ -6,6 +6,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Stop-flags showed "no match" for a patient who exists** (e.g. ליעם בריאר,
+  `0543123276`). The patient phone had no durable home — `phone` wasn't a
+  `Clients` column, so it was dropped on save and blank on reload — and both
+  matchers were too strict. Fixed in three parts:
+  - **Patient phone now persists** — `phone` appended to `CLIENTS_HEADERS`
+    (Apps Script `Code.gs`, **last** column, append-only so existing rows are
+    untouched; it's a `PHONE_COLUMN` so it gets the same leading-zero
+    text-format/recovery). Populated from the lead on activation, and existing
+    clients backfill it in memory from their originating lead at load.
+  - **Server write-time match broadened** (`_matchStopFlagClient`) — the
+    reported phone is matched against **any** of `phone` / `treatmentContactPhone`
+    / `payerPhone`; a phone match alone fills `clientId`; the exact name is only
+    a tiebreaker for a shared phone, no longer a hard gate.
+  - **Dashboard re-resolves at render** (`resolveStopFlagClient`, `public/app.js`)
+    — flags written with an empty `clientId` now resolve in the panel by phone
+    across all client phone fields (name soft tiebreaker only), so existing
+    flags match without the therapists app re-sending. **Apps Script redeploy
+    required** (Clients schema + matcher). `test/stop-flag-match.test.js` guards
+    both matchers, the backfill, and the append-only schema.
+
 - **GET /api/sheets now forwards the `secret` query parameter to Apps Script,**
   so authenticated endpoints (e.g. `getWinbackSource`) work. `server.js:82`.
 - **`server.js` now exports the Express app and only calls `listen` when run
