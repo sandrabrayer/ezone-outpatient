@@ -541,6 +541,118 @@ function _getTreatmentPlans() {
   return { ok: true, clients: out };
 }
 
+/* ===== Stop-treatment flags (inbound cross-app WRITE) =====
+ *
+ * The E-Zone Therapists app reports "a therapist says patient X stopped". This
+ * is a PENDING note only — it NEVER changes Clients.status. Vered confirms (or
+ * dismisses) it in the outpatient UI and performs the actual discharge exactly
+ * as today; she remains the sole discharge authority.
+ *
+ * Matching a flag to a client is done in the outpatient UI by name + the
+ * normalized phone (same contract as the read endpoints) — the flag stores the
+ * reported name/phone as-sent; clientId is optional and only a hint.
+ *
+ * Auth: FAIL-CLOSED. Unlike the read endpoints (getWinbackSource /
+ * getDebtStatus / getTreatmentPlans), which fall open when unconfigured, this
+ * is an external WRITE, so a shared secret is REQUIRED. If the Script Property
+ * 'STOP_FLAG_SECRET' is not set, flagStop is refused outright — never open.
+ *
+ * The companion reads (getStopFlags) and the resolve write (resolveStopFlag)
+ * are internal dashboard calls and stay unauthenticated, like getData /
+ * savePayment — same trust level as the rest of the dashboard surface.
+ */
+var STOP_FLAGS_HEADERS = [
+  'id', 'phone', 'name', 'clientId',
+  'reportedBy', 'reportedAt', 'note',
+  'status', 'resolvedBy', 'resolvedAt'
+];
+
+function _stopFlagAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('STOP_FLAG_SECRET');
+  if (!expected) return false; // fail-closed: not configured → refuse the write
+  var got = (params && params.secret) ? String(params.secret) : '';
+  return got === expected;
+}
+
+function _nowIso() {
+  return Utilities.formatDate(
+    new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', "yyyy-MM-dd'T'HH:mm:ss"
+  );
+}
+
+function _flagStop(payload) {
+  payload = payload || {};
+  var phone = payload.phone != null ? String(payload.phone).trim() : '';
+  var name  = payload.name  != null ? String(payload.name).trim()  : '';
+  // Need at least one identifier to match on later; otherwise the note is noise.
+  if (!phone && !name) return { ok: false, error: 'missing_phone_and_name' };
+
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+    var rec = {
+      id:         payload.id ? String(payload.id)
+                             : ('sf_' + Date.now() + '_' + Math.floor(Math.random() * 1e6)),
+      phone:      phone,
+      name:       name,
+      clientId:   payload.clientId != null ? String(payload.clientId) : '',
+      reportedBy: payload.reportedBy != null ? String(payload.reportedBy) : '',
+      reportedAt: payload.reportedAt ? String(payload.reportedAt) : _nowIso(),
+      note:       payload.note != null ? String(payload.note) : '',
+      status:     'pending',
+      resolvedBy: '',
+      resolvedAt: ''
+    };
+    var row = STOP_FLAGS_HEADERS.map(function (h) {
+      var v = rec[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    sh.appendRow(row);
+    return { ok: true, flag: rec };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _getStopFlags() {
+  var sh  = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+  var all = _readAll(sh, STOP_FLAGS_HEADERS);
+  var pending = [];
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i].status || '') === 'pending') pending.push(all[i]);
+  }
+  return { ok: true, flags: pending };
+}
+
+function _resolveStopFlag(id, resolvedBy) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+    var idIdx = STOP_FLAGS_HEADERS.indexOf('id');
+    var lastRow = sh.getLastRow();
+    if (lastRow > 1) {
+      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]) === String(id)) {
+          var rowNum = i + 2;
+          var rowVals = sh.getRange(rowNum, 1, 1, STOP_FLAGS_HEADERS.length).getValues()[0];
+          rowVals[STOP_FLAGS_HEADERS.indexOf('status')]     = 'resolved';
+          rowVals[STOP_FLAGS_HEADERS.indexOf('resolvedBy')] = resolvedBy ? String(resolvedBy) : '';
+          rowVals[STOP_FLAGS_HEADERS.indexOf('resolvedAt')] = _nowIso();
+          sh.getRange(rowNum, 1, 1, STOP_FLAGS_HEADERS.length).setValues([rowVals]);
+          return { ok: true, id: String(id), resolved: true };
+        }
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -566,6 +678,7 @@ function doGet(e) {
       }
       return _json(_getTreatmentPlans());
     }
+    if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -623,6 +736,19 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getTreatmentPlans());
+    }
+    if (action === 'flagStop') {
+      // External write from the therapists app → fail-closed shared secret.
+      var sfParams = (e && e.parameter) || {};
+      if (payload && payload.secret) sfParams.secret = payload.secret;
+      if (!_stopFlagAuthOk(sfParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_flagStop(payload));
+    }
+    if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'resolveStopFlag') {
+      return _json(_resolveStopFlag(payload.id || '', payload.resolvedBy || ''));
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));

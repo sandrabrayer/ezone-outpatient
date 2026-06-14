@@ -124,6 +124,7 @@
     clients: [],
     payments: [],
     charges: [],
+    stopFlags: [],  // pending "therapist reports patient stopped" notes from ezone-therapists
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
@@ -465,6 +466,12 @@
   }
   async function apiGetCharges() {
     var r = await fetch('/api/sheets?action=getCharges', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  async function apiGetStopFlags() {
+    var r = await fetch('/api/sheets?action=getStopFlags', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -1430,7 +1437,130 @@
   }
 
   // ---- Clients
+  // Canonical phone key for cross-app matching: national significant digits,
+  // i.e. strip separators and any 0 / +972 / 00972 prefix so '050-1234567',
+  // '0501234567' and '+972501234567' all collapse to '501234567'. This is the
+  // "10 digits leading zero, no separators" contract reduced to its core so a
+  // therapist-reported phone matches a stored treatmentContactPhone regardless
+  // of how either side was typed.
+  function phoneKey(raw) {
+    if (!raw) return '';
+    var d = String(raw).replace(/\D/g, '');
+    if (d.indexOf('00972') === 0) d = d.slice(5);
+    else if (d.indexOf('972') === 0) d = d.slice(3);
+    if (d.indexOf('0') === 0) d = d.slice(1);
+    return d;
+  }
+
+  // Match a pending stop-flag to a client by phone, then name. Returns
+  // { client, ambiguous, candidates }. The therapist phone is matched against
+  // treatmentContactPhone (the phone registered in the system for the patient).
+  function matchClientForFlag(flag) {
+    var key = phoneKey(flag && flag.phone);
+    var nameQ = ((flag && flag.name) || '').trim().toLowerCase();
+    var byPhone = key ? state.clients.filter(function (c) {
+      return phoneKey(c.treatmentContactPhone) === key;
+    }) : [];
+    if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false, candidates: byPhone };
+    if (byPhone.length > 1) {
+      // Disambiguate by exact name among the phone matches.
+      var narrowed = nameQ ? byPhone.filter(function (c) {
+        return (c.name || '').trim().toLowerCase() === nameQ;
+      }) : [];
+      if (narrowed.length === 1) return { client: narrowed[0], ambiguous: false, candidates: byPhone };
+      return { client: null, ambiguous: true, candidates: byPhone };
+    }
+    // No phone match → fall back to an exact name match (still flag if >1).
+    if (nameQ) {
+      var byName = state.clients.filter(function (c) {
+        return (c.name || '').trim().toLowerCase() === nameQ;
+      });
+      if (byName.length === 1) return { client: byName[0], ambiguous: false, candidates: byName };
+      if (byName.length > 1) return { client: null, ambiguous: true, candidates: byName };
+    }
+    return { client: null, ambiguous: false, candidates: [] };
+  }
+
+  // "המתנה לאישור הפסקה" — pending therapist-reported stop flags. A note only:
+  // Vered confirms (opens the normal exit modal) or dismisses; neither the flag
+  // nor this panel ever changes a client's status on its own.
+  function renderStopFlags() {
+    var panel = $('#stopFlagsPanel');
+    if (!panel) return;
+    var flags = state.stopFlags || [];
+    if (!flags.length) { panel.hidden = true; panel.innerHTML = ''; return; }
+
+    panel.hidden = false;
+    panel.innerHTML = '';
+    var head = document.createElement('div');
+    head.className = 'stopflags-head';
+    head.textContent = 'המתנה לאישור הפסקה (' + flags.length + ')';
+    panel.appendChild(head);
+
+    flags.forEach(function (f) {
+      var m = matchClientForFlag(f);
+      var card = document.createElement('div');
+      card.className = 'stopflag-card';
+
+      var who = f.name || (m.client && m.client.name) || '(ללא שם)';
+      var meta = [];
+      if (f.phone) meta.push(f.phone);
+      if (f.reportedBy) meta.push('דיווח: ' + f.reportedBy);
+      if (f.reportedAt) meta.push(displayDate(String(f.reportedAt).slice(0, 10)));
+
+      var info = document.createElement('div');
+      info.className = 'stopflag-info';
+      var matchLine = m.client
+        ? '<span class="stopflag-match">מותאם: ' + escapeHtml(m.client.name) + '</span>'
+        : (m.ambiguous
+            ? '<span class="stopflag-warn">התאמה מרובה — בחר ידנית</span>'
+            : '<span class="stopflag-warn">לא נמצאה התאמה</span>');
+      info.innerHTML =
+        '<div class="stopflag-name">המטפל מדווח שהמטופל הפסיק: <strong>' + escapeHtml(who) + '</strong></div>' +
+        '<div class="stopflag-meta">' + escapeHtml(meta.join(' · ')) + '</div>' +
+        (f.note ? '<div class="stopflag-note">' + escapeHtml(f.note) + '</div>' : '') +
+        '<div class="stopflag-matchline">' + matchLine + '</div>';
+      card.appendChild(info);
+
+      var actions = document.createElement('div');
+      actions.className = 'stopflag-actions';
+
+      var confirmBtn = document.createElement('button');
+      confirmBtn.className = 'btn btn-danger';
+      confirmBtn.textContent = 'אשר הפסקה';
+      confirmBtn.disabled = !m.client;
+      confirmBtn.onclick = function () { if (m.client) openExitModal(m.client, f.id); };
+      actions.appendChild(confirmBtn);
+
+      var dismissBtn = document.createElement('button');
+      dismissBtn.className = 'btn';
+      dismissBtn.textContent = 'התעלם';
+      dismissBtn.onclick = function () { dismissStopFlag(f.id); };
+      actions.appendChild(dismissBtn);
+
+      card.appendChild(actions);
+      panel.appendChild(card);
+    });
+  }
+
+  // Resolve a flag WITHOUT discharging — Vered judged it not actionable.
+  async function dismissStopFlag(flagId) {
+    if (!flagId) return;
+    var prev = state.stopFlags.slice();
+    state.stopFlags = state.stopFlags.filter(function (f) { return f.id !== flagId; });
+    renderStopFlags();
+    try {
+      await apiPostAction('resolveStopFlag', { id: flagId, resolvedBy: 'outpatient' });
+      toast('סומן כטופל');
+    } catch (e) {
+      state.stopFlags = prev;
+      renderStopFlags();
+      toast('שגיאה: ' + e.message, true);
+    }
+  }
+
   function renderClients() {
+    renderStopFlags();
     var tabsEl = $('#clientTabs');
     tabsEl.innerHTML = '';
     var tabs = [{ id: 'all', label: 'הכול' }].concat(SERVICE_TYPES.map(function (s) { return { id: s, label: s }; }));
@@ -1935,13 +2065,15 @@
   }
 
   var exitClientId = null;
-  function openExitModal(client) {
+  var exitFlagId = null; // set when the exit was opened from a therapist stop-flag
+  function openExitModal(client, flagId) {
     exitClientId = client.id;
+    exitFlagId = flagId || null;
     $('#exitForm').reset();
     $('#exitForm').exitDate.value = today();
     $('#exitModal').hidden = false;
   }
-  function closeExitModal() { $('#exitModal').hidden = true; exitClientId = null; }
+  function closeExitModal() { $('#exitModal').hidden = true; exitClientId = null; exitFlagId = null; }
 
   var editClientId = null;
   function openEditClientModal(client) {
@@ -2100,6 +2232,13 @@
       } catch (ce) {
         console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
         state.charges = [];
+      }
+      try {
+        var sf = await apiGetStopFlags();
+        state.stopFlags = (sf.flags || []).filter(function (f) { return f && f.id; });
+      } catch (sfe) {
+        console.warn('[ezone] getStopFlags failed, assuming none:', sfe.message);
+        state.stopFlags = [];
       }
       try {
         var s = await apiLoadSettings();
@@ -2490,10 +2629,21 @@
       var client = state.clients.find(function (c) { return c.id === exitClientId; });
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
+      var flagId = exitFlagId; // captured before closeExitModal() clears it
       client.status = 'סיים טיפול';
       client.exitDate = fd.get('exitDate') || today();
       persist()
-        .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
+        .then(function () {
+          toast('סיום נשמר');
+          closeExitModal();
+          // If this discharge confirmed a therapist stop-flag, resolve it.
+          if (flagId) {
+            state.stopFlags = state.stopFlags.filter(function (f) { return f.id !== flagId; });
+            apiPostAction('resolveStopFlag', { id: flagId, resolvedBy: 'outpatient' })
+              .catch(function (err) { console.warn('[ezone] resolveStopFlag failed:', err.message); });
+          }
+          render();
+        })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
     });

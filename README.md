@@ -91,6 +91,21 @@ npm start
   independently); if unset the action is open. The Node proxy forwards
   `?secret=` automatically. See `CHANGELOG-treatment-plans-endpoint.md`.
 
+### Cross-app write endpoint (shared-secret, fail-closed)
+
+- `POST /api/sheets { "action":"flagStop", "secret":"<STOP_FLAG_SECRET>",
+  "phone":"…", "name":"…", "reportedBy":"…", "note":"…" }` → records a
+  **pending** "a therapist reports this patient stopped" note for Vered to
+  confirm in the outpatient UI. It **never** changes a client's status — Vered
+  performs the actual discharge as today and remains the sole discharge
+  authority. Unlike the read endpoints this is an external **write**, so auth is
+  **fail-closed**: if the `STOP_FLAG_SECRET` Script Property is unset, `flagStop`
+  is refused outright (no open fallback). Companion dashboard-only actions —
+  `getStopFlags` (read pending) and `resolveStopFlag` (mark handled) — are
+  unauthenticated like the rest of the dashboard surface. The therapists app
+  POSTs `flagStop` directly to the Apps Script Web App. See
+  `CHANGELOG-stop-flags.md`.
+
 ### Debug endpoints
 
 - `GET /api/debug/env` – confirms `SHEETS_URL` is configured (no secret leak).

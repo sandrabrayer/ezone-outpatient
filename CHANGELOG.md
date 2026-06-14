@@ -33,6 +33,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - the WhatsApp stop-treatment message button.
 
 ### Added
+- **`flagStop` — inbound cross-app stop-treatment flag** (Apps Script
+  `Code.gs`, new `StopFlags` sheet). The E-Zone Therapists app POSTs
+  `{ action:'flagStop', secret, phone, name, reportedBy, note }` to record a
+  **pending** "a therapist reports this patient stopped" note. It **never**
+  changes `Clients.status` — Vered confirms it in the outpatient UI and performs
+  the actual discharge as today, remaining the sole discharge authority. Auth is
+  **fail-closed** (the opposite of the read endpoints): if the `STOP_FLAG_SECRET`
+  Script Property is unset, the write is refused outright. Companion dashboard
+  actions `getStopFlags` (list pending) and `resolveStopFlag` (mark handled) are
+  unauthenticated like the rest of the dashboard surface. No `server.js` change —
+  the proxy already forwards the POST body and the GET action. See
+  `CHANGELOG-stop-flags.md`.
+- **Pending stop-flags panel in the clients view** (`public/app.js`,
+  `index.html`, `style.css`). "המתנה לאישור הפסקה" lists each pending flag,
+  matches it to a client by **name + normalized phone** (`treatmentContactPhone`,
+  reduced to national significant digits so `050…` / `+972…` / `00972…` all
+  match), and offers **אשר הפסקה** (opens the existing exit modal for the matched
+  client; on discharge the flag is auto-resolved) or **התעלם** (resolve without
+  discharge). No match / ambiguous match is shown so Vered can act manually.
+- `test/stop-flags.test.js` — locks the fail-closed auth, the
+  identifier-required + pending-by-default flag shape, the pending-only listing,
+  and the `phoneKey`/`matchClientForFlag` matching (format-agnostic phone,
+  name disambiguation, no-match never guesses). `test/stop-flags-forwarding.test.js`
+  — locks the Node proxy pass-through for `flagStop` (POST body incl. secret) and
+  `getStopFlags` (GET action).
 - **`getTreatmentPlans` — read-only cross-app treatment-plan endpoint** (Apps
   Script `Code.gs`). Returns each client's plan projection — `clientId`,
   `name`, `phone` (`treatmentContactPhone`), `serviceType`, `sessions`
