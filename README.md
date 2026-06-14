@@ -103,8 +103,12 @@ npm start
   is refused outright (no open fallback). Companion dashboard-only actions —
   `getStopFlags` (read pending) and `resolveStopFlag` (mark handled) — are
   unauthenticated like the rest of the dashboard surface. The therapists app
-  POSTs `flagStop` directly to the Apps Script Web App. See
-  `CHANGELOG-stop-flags.md`.
+  POSTs `flagStop` directly to the Apps Script Web App. In the UI each pending
+  flag is matched to a client on its normalized phone against **any** of the
+  client's phone fields (`treatmentContactPhone` / `payerPhone` / the patient
+  `phone`) — a phone match alone is enough, name is only a tiebreaker. The
+  patient `phone` is a durable `Clients` column carried from the lead on
+  activation. See `CHANGELOG-stop-flags.md`.
 
 ### Debug endpoints
 

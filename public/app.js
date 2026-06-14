@@ -366,7 +366,7 @@
     return {
       id: row.id || uid(),
       name: row.name || '',
-      phone: row.phone || '',
+      phone: recoverPhone(row.phone),
       serviceType: services,
       location: row.location || '',
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
@@ -1452,14 +1452,43 @@
     return d;
   }
 
+  // Recover a phone to its canonical leading-zero form: strip separators,
+  // convert +972 / 00972 / 972 to a leading 0, and restore a dropped mobile
+  // zero (Google Sheets stores a pure-digit phone as a number, losing the
+  // leading 0 — a 9-digit value starting with 5 is a mobile missing its 0).
+  // Used to canonicalize the stored patient phone; matching itself stays
+  // zero-agnostic via phoneKey, so recovery is about durable storage/display.
+  function recoverPhone(raw) {
+    if (raw == null || raw === '') return '';
+    var d = String(raw).trim();
+    if (d.indexOf('+972') === 0) d = '0' + d.slice(4);
+    else if (d.indexOf('00972') === 0) d = '0' + d.slice(5);
+    else if (d.indexOf('972') === 0) d = '0' + d.slice(3);
+    d = d.replace(/\D/g, '');
+    if (d.length === 9 && d.charAt(0) === '5') d = '0' + d; // dropped mobile zero
+    return d;
+  }
+
+  // Every phone key a client record can be matched on — the patient's own
+  // phone plus the treatment-contact and payer phones — normalized to the
+  // cross-app key. A number stored in ANY of these makes the client matchable.
+  function clientPhoneKeys(c) {
+    if (!c) return [];
+    return [c.treatmentContactPhone, c.payerPhone, c.phone]
+      .map(phoneKey)
+      .filter(function (k) { return !!k; });
+  }
+
   // Match a pending stop-flag to a client by phone, then name. Returns
   // { client, ambiguous, candidates }. The therapist phone is matched against
-  // treatmentContactPhone (the phone registered in the system for the patient).
+  // ANY of the client's phone fields (treatmentContactPhone / payerPhone /
+  // phone). A phone match alone is sufficient — name is only a soft tiebreaker
+  // when more than one client shares the phone, never a hard gate.
   function matchClientForFlag(flag) {
     var key = phoneKey(flag && flag.phone);
     var nameQ = ((flag && flag.name) || '').trim().toLowerCase();
     var byPhone = key ? state.clients.filter(function (c) {
-      return phoneKey(c.treatmentContactPhone) === key;
+      return clientPhoneKeys(c).indexOf(key) !== -1;
     }) : [];
     if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false, candidates: byPhone };
     if (byPhone.length > 1) {
@@ -2214,11 +2243,29 @@
   }
 
   // --- init
+  // Existing clients predate the Clients `phone` column, so their stored phone
+  // is blank. Recover it in memory from the originating lead (Leads keeps its
+  // phone), canonicalized — making them matchable for cross-app flows now,
+  // without a destructive migration; it persists on the next normal save.
+  function backfillClientPhones() {
+    if (!Array.isArray(state.clients) || !Array.isArray(state.leads)) return;
+    var leadById = {};
+    state.leads.forEach(function (l) { if (l && l.id) leadById[l.id] = l; });
+    state.clients.forEach(function (c) {
+      if (!c) return;
+      var own = recoverPhone(c.phone);
+      if (own) { c.phone = own; return; } // already has a stored phone
+      var lead = c.fromLead ? leadById[c.fromLead] : null;
+      if (lead) c.phone = recoverPhone(lead.phone);
+    });
+  }
+
   async function loadAll() {
     try {
       var data = await apiLoad();
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
+      backfillClientPhones();
       try {
         var pr = await apiGetPayments();
         state.payments = (pr.payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
@@ -2465,7 +2512,7 @@
         }
         var nextBill = payDate ? addDays(payDate, 30) : (startDate ? addDays(startDate, 30) : '');
         var client = {
-          id: uid(), name: name, phone: (fd.get('phone') || '').trim(),
+          id: uid(), name: name, phone: recoverPhone(fd.get('phone')),
           serviceType: formatServices(services),
           location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
           sessionsPerWeek: clean, pricePerSession: monthlyAmount,
@@ -2589,7 +2636,7 @@
       var nextBill = payDate ? addDays(payDate, 30) : addDays(startDate, 30);
 
       var client = {
-        id: uid(), name: lead.name, phone: lead.phone || '',
+        id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
         serviceType: formatServices(services),
         location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,

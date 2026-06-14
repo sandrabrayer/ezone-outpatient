@@ -66,11 +66,20 @@ is Vered finishing the exit modal — unchanged from before this feature.
 
 `phoneKey()` reduces a phone to its national significant digits: strip
 separators and any `0` / `+972` / `00972` prefix, so `050-1234567`,
-`0501234567`, and `+972501234567` all collapse to `501234567`. Both the
-therapist-reported phone and the stored `treatmentContactPhone` are reduced the
-same way before comparison. A single phone match wins; duplicate phones are
-disambiguated by exact name; with no phone match a unique exact name match is
-used; anything else is surfaced as no-match / ambiguous rather than guessed.
+`0501234567`, and `+972501234567` all collapse to `501234567`. The
+therapist-reported phone is reduced the same way and compared against **every**
+phone field a client carries — `treatmentContactPhone`, `payerPhone`, and the
+patient's own `phone` — so a number stored in any of them matches. A single
+phone match wins outright; duplicate phones are disambiguated by exact name;
+with no phone match a unique exact name match is used; anything else is surfaced
+as no-match / ambiguous rather than guessed. **A phone match alone is
+sufficient — the name is only a soft tiebreaker, never a hard gate.**
+
+The patient's phone is stored durably in the `Clients` `phone` column (carried
+from the lead on activation, canonicalized by `recoverPhone`, and backfilled in
+memory from the originating lead for clients that predate the column). This is
+what makes a lead-originated patient matchable without anyone re-typing the
+number into the treatment-contact field.
 
 ## Auth — fail-closed (the deliberate difference)
 

@@ -61,10 +61,16 @@ function phoneKey(raw) {
   return d;
 }
 
+// A client is matchable on ANY of its phone fields, not just treatmentContactPhone.
+function clientPhoneKeys(c) {
+  if (!c) return [];
+  return [c.treatmentContactPhone, c.payerPhone, c.phone].map(phoneKey).filter(k => !!k);
+}
+
 function matchClientForFlag(flag, clients) {
   const key = phoneKey(flag && flag.phone);
   const nameQ = ((flag && flag.name) || '').trim().toLowerCase();
-  const byPhone = key ? clients.filter(c => phoneKey(c.treatmentContactPhone) === key) : [];
+  const byPhone = key ? clients.filter(c => clientPhoneKeys(c).indexOf(key) !== -1) : [];
   if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false };
   if (byPhone.length > 1) {
     const narrowed = nameQ ? byPhone.filter(c => (c.name || '').trim().toLowerCase() === nameQ) : [];
@@ -151,4 +157,35 @@ test('matchClientForFlag: no phone match falls back to unique name; no match →
   const none = matchClientForFlag({ phone: '03-9999999', name: 'לא קיים' }, clients);
   assert.equal(none.client, null);
   assert.equal(none.ambiguous, false);
+});
+
+test('matchClientForFlag: phone matches on ANY field — treatmentContactPhone / payerPhone / phone', () => {
+  const clients = [
+    { id: 'tc', name: 'A', treatmentContactPhone: '0541111111' },
+    { id: 'pp', name: 'B', payerPhone: '0542222222' },
+    { id: 'pat', name: 'C', phone: '0543123276' } // patient phone column
+  ];
+  assert.equal(matchClientForFlag({ phone: '054-111-1111' }, clients).client.id, 'tc');
+  assert.equal(matchClientForFlag({ phone: '+972542222222' }, clients).client.id, 'pp');
+  assert.equal(matchClientForFlag({ phone: '0543123276' }, clients).client.id, 'pat');
+});
+
+test('matchClientForFlag: a phone match alone is sufficient even when the name differs (the ליעם בריאר bug)', () => {
+  // Phone lives in the patient `phone` column; the flag name has an extra space
+  // / spelling drift that would fail an exact-name gate. Phone match must win.
+  const clients = [{ id: 'liam', name: 'ליעם בריאר', phone: '0543123276' }];
+  const m = matchClientForFlag({ phone: '0543123276', name: 'ליעם  בריאר ' }, clients);
+  assert.equal(m.client.id, 'liam');
+  assert.equal(m.ambiguous, false);
+});
+
+test('matchClientForFlag: name is only a tiebreaker when two clients share the phone', () => {
+  const clients = [
+    { id: 'c1', name: 'אורי כהן', phone: '0543123276' },
+    { id: 'c2', name: 'אורי לוי', treatmentContactPhone: '0543123276' }
+  ];
+  assert.equal(matchClientForFlag({ phone: '0543123276', name: 'אורי לוי' }, clients).client.id, 'c2');
+  const amb = matchClientForFlag({ phone: '0543123276', name: 'מישהו' }, clients);
+  assert.equal(amb.client, null);
+  assert.equal(amb.ambiguous, true);
 });

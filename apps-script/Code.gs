@@ -22,7 +22,15 @@ var LEADS_HEADERS = [
  * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
  * non-destructively extends existing sheets on next read so no migration
  * is needed — old rows get blank values for the new columns and default
- * to billingType='monthly' on the client. */
+ * to billingType='monthly' on the client.
+ *
+ * `phone` is the patient's own number, carried from the lead on activation.
+ * It is the durable home for the patient phone used by cross-app matching
+ * (debt, stop-flow, future payment write-back). It is appended LAST per the
+ * append-only rule above: _readAll/_writeAll map columns positionally to this
+ * array, so a new column may only be added at the end — inserting it mid-array
+ * would shift every later column on existing rows. Old rows get a blank `phone`
+ * until re-saved; the client backfills it in memory from the originating lead. */
 var CLIENTS_HEADERS = [
   'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
   'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
@@ -30,7 +38,8 @@ var CLIENTS_HEADERS = [
   'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
   'house_of_origin',
   'responsiblePerson', 'serviceScope',
-  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink'
+  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
+  'phone'
 ];
 
 /* Settings sheet: one row per setting, key/value style.

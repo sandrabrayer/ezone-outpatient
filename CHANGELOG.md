@@ -32,6 +32,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - the per-patient red "🛑 עצור טיפול" card banner,
   - the WhatsApp stop-treatment message button.
 
+### Fixed
+- **Stop-flags couldn't match a patient whose phone wasn't in
+  `treatmentContactPhone`.** `matchClientForFlag` (`public/app.js`) compared the
+  flag's phone only against `treatmentContactPhone`, but a lead-originated
+  patient's number lived in the `phone` field — which wasn't even a column on
+  the `Clients` sheet, so it was dropped on save and blank on reload. The flag
+  then fell through to an exact-name match, which is brittle (RTL/spacing), so a
+  real patient (e.g. ליעם בריאר, `0543123276`) showed "no match" and had no
+  discharge button. Two-layer fix:
+  - **Matcher broadened** — a flag now matches a client whose normalized phone
+    equals **any** of `treatmentContactPhone`, `payerPhone`, or `phone`. A phone
+    match alone is sufficient; name is only a tiebreaker when more than one
+    client shares the phone, never a hard gate.
+  - **Patient phone now persists** — `phone` is appended to `CLIENTS_HEADERS`
+    (Apps Script `Code.gs`, **last column**, append-only so existing rows are
+    untouched), so `clientForSheet`'s `phone` is actually stored. It is
+    populated (canonicalized) from the lead on activation, and existing clients
+    backfill it in memory from their originating lead at load — making the
+    patient phone reliably available for **all** cross-app matching (debt,
+    stop-flow, future payment write-back), not just this case.
+- `recoverPhone` (`public/app.js`) — canonical leading-zero recovery (strip
+  separators, `+972`/`00972`/`972` → `0`, restore a dropped mobile zero) applied
+  to the patient phone on read, on activation, and on backfill. Matching stays
+  zero-agnostic via `phoneKey`. **Apps Script redeploy required** (Clients schema
+  + matcher). `test/patient-phone.test.js` + broadened cases in
+  `test/stop-flags.test.js` guard the rule.
+
 ### Added
 - **`flagStop` — inbound cross-app stop-treatment flag** (Apps Script
   `Code.gs`, new `StopFlags` sheet). The E-Zone Therapists app POSTs
