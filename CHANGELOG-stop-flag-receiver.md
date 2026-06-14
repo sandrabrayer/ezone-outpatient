@@ -26,9 +26,13 @@ Created via the `_ensureSheet` append-only pattern. Columns:
     a missing/empty/wrong secret is **rejected** — this is an external write.
   - Validates input (`name` required; phone must normalize to `/^0\d{8,9}$/`),
     normalizes the incoming phone to canonical leading-zero via `_recoverPhone`,
-    matches an existing client by **normalized phone (vs `phone` OR
-    `treatmentContactPhone`) + exact trimmed name** to fill `clientId`, and
-    appends ONE row with `status='pending'`.
+    matches an existing client by **normalized phone against ANY of `phone` /
+    `treatmentContactPhone` / `payerPhone`** to fill `clientId`, and appends ONE
+    row with `status='pending'`. A phone match alone is sufficient; the exact
+    name is only a **soft tiebreaker** when more than one client shares the
+    phone — never a hard gate (Hebrew names drift on spacing/RTL/spelling). If
+    the match is empty or still ambiguous, `clientId` is left blank and the
+    dashboard panel resolves it at render time.
 - **`getStopFlags`** (`doGet`/`doPost`) — returns all flag rows. Internal/open,
   same trust level as `getData`/`getPayments`.
 - **`resolveStopFlag`** (`doPost`) — in-place sets `status='resolved'` +
@@ -39,10 +43,18 @@ Created via the `_ensureSheet` append-only pattern. Columns:
 
 - `state.stopFlags`, `apiGetStopFlags`, `normalizeStopFlagFromSheet`; loaded in
   `loadAll` (best-effort, empty on failure).
-- Dashboard panel **"⏳ המתנה לאישור הפסקה"** lists pending flags. A flag matched
-  to a client shows the client name + phone + a **"סיים טיפול"** button that
-  opens the existing exit/discharge modal (`openExitModal`). An unmatched flag
-  shows the reported name/phone with **"לא נמצא מטופל תואם"** and no button.
+- Dashboard panel **"⏳ המתנה לאישור הפסקה"** lists pending flags. The panel
+  resolves each flag to a client at **render time** via `resolveStopFlagClient`
+  (an explicit `clientId` wins; else the reported phone vs **any** of the
+  client's phone fields — `treatmentContactPhone` / `payerPhone` / patient
+  `phone`; else a unique exact name). This re-resolves flags that were written
+  with an empty `clientId` (e.g. before the patient phone was persisted), so a
+  real patient no longer shows "no match". A matched flag shows the client name
+  + phone + a **"סיים טיפול"** button that opens the existing exit/discharge
+  modal (`openExitModal`); choosing it aligns the flag's `clientId` to the
+  resolved client so the post-discharge cleanup catches it. An unmatched flag
+  shows **"לא נמצא מטופל תואם"** (or **"התאמה מרובה — בחר ידנית"** when several
+  clients share the phone) and no button.
 - **Resolve on discharge:** when Vered completes the exit modal for a client
   (from the panel button OR the normal clients-tab discharge), after the
   discharge persists, every pending flag for that `clientId` is marked resolved

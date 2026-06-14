@@ -22,7 +22,16 @@ var LEADS_HEADERS = [
  * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
  * non-destructively extends existing sheets on next read so no migration
  * is needed — old rows get blank values for the new columns and default
- * to billingType='monthly' on the client. */
+ * to billingType='monthly' on the client.
+ *
+ * `phone` is the patient's own number, carried from the lead on activation.
+ * It is the durable home for the patient phone used by cross-app matching
+ * (debt, stop-flow). It is appended LAST per the append-only rule: _readAll/
+ * _writeAll map columns positionally to this array, so a new column may only be
+ * added at the end — inserting it mid-array would shift every later column on
+ * existing rows. Old rows get a blank `phone` until re-saved; the client
+ * backfills it in memory from the originating lead. It is a PHONE_COLUMN, so it
+ * gets the same Sheets leading-zero text-format/recovery as the other phones. */
 var CLIENTS_HEADERS = [
   'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
   'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
@@ -30,7 +39,8 @@ var CLIENTS_HEADERS = [
   'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
   'house_of_origin',
   'responsiblePerson', 'serviceScope',
-  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink'
+  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
+  'phone'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -618,15 +628,28 @@ function _stopFlagAuthOk(params) {
 }
 
 function _matchStopFlagClient(clients, phone, name) {
+  if (!phone) return '';
   var nm = String(name == null ? '' : name).trim();
-  if (!nm || !phone) return '';
+  // A phone match alone is sufficient — match the reported phone against ANY of
+  // the client's phone fields (patient phone / treatment-contact / payer). Name
+  // is only a soft tiebreaker when more than one client shares the phone, never
+  // a hard gate (Hebrew names drift on spacing/RTL/spelling). 0 or still-
+  // ambiguous → leave clientId empty and let the dashboard panel resolve/ask.
+  var hits = [];
   for (var i = 0; i < clients.length; i++) {
     var c = clients[i];
-    var phoneHit = _recoverPhone(c.phone) === phone ||
-                   _recoverPhone(c.treatmentContactPhone) === phone;
-    if (phoneHit && String(c.name == null ? '' : c.name).trim() === nm) {
-      return String(c.id);
+    if (_recoverPhone(c.phone) === phone ||
+        _recoverPhone(c.treatmentContactPhone) === phone ||
+        _recoverPhone(c.payerPhone) === phone) {
+      hits.push(c);
     }
+  }
+  if (hits.length === 1) return String(hits[0].id);
+  if (hits.length > 1 && nm) {
+    var narrowed = hits.filter(function (c) {
+      return String(c.name == null ? '' : c.name).trim() === nm;
+    });
+    if (narrowed.length === 1) return String(narrowed[0].id);
   }
   return '';
 }

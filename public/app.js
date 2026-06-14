@@ -748,6 +748,41 @@
     renderStopFlags();
   }
 
+  // Resolve a pending flag to a client at RENDER time, so flags already written
+  // with an empty clientId (the server write-time match needs a persisted phone
+  // + exact name) still resolve in the dashboard. Order: an explicit clientId
+  // wins; else the reported phone vs ANY of the client's phone fields
+  // (treatmentContactPhone / payerPhone / patient phone) — a phone match alone
+  // is enough; else a unique exact-name match. Name is only a soft tiebreaker,
+  // never a hard gate. Returns { client, ambiguous }.
+  function clientPhoneMatches(c, key) {
+    if (!c || !key) return false;
+    return [c.treatmentContactPhone, c.payerPhone, c.phone].some(function (p) {
+      return recoverPhone(p) === key;
+    });
+  }
+  function resolveStopFlagClient(flag) {
+    if (flag && flag.clientId) {
+      var byId = state.clients.find(function (c) { return c.id === flag.clientId; });
+      if (byId) return { client: byId, ambiguous: false };
+    }
+    var key = recoverPhone(flag && flag.phone);
+    var byPhone = key ? state.clients.filter(function (c) { return clientPhoneMatches(c, key); }) : [];
+    if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false };
+    var nameQ = ((flag && flag.name) || '').trim().toLowerCase();
+    if (byPhone.length > 1) {
+      var narrowed = nameQ ? byPhone.filter(function (c) { return (c.name || '').trim().toLowerCase() === nameQ; }) : [];
+      if (narrowed.length === 1) return { client: narrowed[0], ambiguous: false };
+      return { client: null, ambiguous: true };
+    }
+    if (nameQ) {
+      var byName = state.clients.filter(function (c) { return (c.name || '').trim().toLowerCase() === nameQ; });
+      if (byName.length === 1) return { client: byName[0], ambiguous: false };
+      if (byName.length > 1) return { client: null, ambiguous: true };
+    }
+    return { client: null, ambiguous: false };
+  }
+
   // Pending stop-treatment flags from the therapists app, awaiting Vered's
   // confirmation. Surfaced only — discharge stays a manual action.
   function renderStopFlags() {
@@ -759,7 +794,8 @@
       return;
     }
     box.innerHTML = pending.map(function (f) {
-      var client = f.clientId ? state.clients.find(function (c) { return c.id === f.clientId; }) : null;
+      var res = resolveStopFlagClient(f);
+      var client = res.client;
       var who = client ? client.name : (f.name || '— ללא שם —');
       var phoneChip = '<span class="chip">' + escapeHtml(f.phone || '—') + '</span>';
       var reportedChips =
@@ -768,7 +804,7 @@
       var noteHtml = f.note ? '<div class="renewal-note">' + escapeHtml(f.note) + '</div>' : '';
       var action = client
         ? '<button class="btn btn-wa-stop" data-action="open-exit" data-flag-id="' + escapeHtml(f.id) + '">סיים טיפול</button>'
-        : '<span class="chip chip-amount">לא נמצא מטופל תואם</span>';
+        : '<span class="chip chip-amount">' + (res.ambiguous ? 'התאמה מרובה — בחר ידנית' : 'לא נמצא מטופל תואם') + '</span>';
       return '<div class="renewal-row renewal-stop" data-flag-id="' + escapeHtml(f.id) + '">' +
         '<div class="renewal-main">' +
           '<div class="renewal-name">' + escapeHtml(who) + '</div>' +
@@ -786,9 +822,13 @@
     if (!btn) return;
     var flagId = btn.getAttribute('data-flag-id');
     var flag = (state.stopFlags || []).find(function (f) { return f.id === flagId; });
-    if (!flag || !flag.clientId) { toast('לא נמצא מטופל תואם', true); return; }
-    var client = state.clients.find(function (c) { return c.id === flag.clientId; });
-    if (!client) { toast('המטופל לא נמצא', true); return; }
+    if (!flag) { toast('לא נמצא מטופל תואם', true); return; }
+    var client = resolveStopFlagClient(flag).client;
+    if (!client) { toast('לא נמצא מטופל תואם', true); return; }
+    // Align the flag to the resolved client so the post-discharge cleanup
+    // (resolveStopFlagsForClient, matched by clientId) picks up a flag that was
+    // resolved by phone rather than by a server-filled clientId.
+    flag.clientId = client.id;
     openExitModal(client);
   }
 
@@ -2210,11 +2250,29 @@
   }
 
   // --- init
+  // Existing clients predate the Clients `phone` column, so their stored phone
+  // is blank. Recover it in memory from the originating lead (Leads keeps its
+  // canonical phone) — making them matchable for cross-app flows now, without a
+  // destructive migration; it persists on the next normal save.
+  function backfillClientPhones() {
+    if (!Array.isArray(state.clients) || !Array.isArray(state.leads)) return;
+    var leadById = {};
+    state.leads.forEach(function (l) { if (l && l.id) leadById[l.id] = l; });
+    state.clients.forEach(function (c) {
+      if (!c) return;
+      var own = recoverPhone(c.phone);
+      if (own) { c.phone = own; return; } // already has a stored phone
+      var lead = c.fromLead ? leadById[c.fromLead] : null;
+      if (lead) c.phone = recoverPhone(lead.phone);
+    });
+  }
+
   async function loadAll() {
     try {
       var data = await apiLoad();
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
+      backfillClientPhones();
       try {
         var pr = await apiGetPayments();
         state.payments = (pr.payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
@@ -2590,7 +2648,7 @@
       var nextBill = payDate ? addDays(payDate, 30) : addDays(startDate, 30);
 
       var client = {
-        id: uid(), name: lead.name, phone: lead.phone || '',
+        id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
         serviceType: formatServices(services),
         location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
