@@ -52,9 +52,12 @@ Created via the `_ensureSheet` append-only pattern. Columns:
   real patient no longer shows "no match". A matched flag shows the client name
   + phone + a **"סיים טיפול"** button that opens the existing exit/discharge
   modal (`openExitModal`); choosing it aligns the flag's `clientId` to the
-  resolved client so the post-discharge cleanup catches it. An unmatched flag
-  shows **"לא נמצא מטופל תואם"** (or **"התאמה מרובה — בחר ידנית"** when several
-  clients share the phone) and no button.
+  resolved client so the post-discharge cleanup catches it. When several clients
+  share the phone, the flag shows a **"בחר מטופל"** picker — one button per
+  candidate (name · status · phone, `data-action="pick-client"`); picking sets
+  the flag's `clientId` and opens the exit modal, so an ambiguous flag can be
+  discharged and cleared from the panel. A genuinely unmatched flag shows
+  **"לא נמצא מטופל תואם"** and no button.
 - **Resolve on discharge:** when Vered completes the exit modal for a client
   (from the panel button OR the normal clients-tab discharge), after the
   discharge persists, every pending flag for that `clientId` is marked resolved
