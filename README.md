@@ -91,6 +91,19 @@ npm start
   independently); if unset the action is open. The Node proxy forwards
   `?secret=` automatically. See `CHANGELOG-treatment-plans-endpoint.md`.
 
+### Stop-treatment flags (inbound, fail-closed write)
+
+- `POST /exec { action:'flagStop', secret:<STOP_FLAG_SECRET>, phone, name, reportedBy?, note? }`
+  — the E-Zone Therapists app flags a patient who appears to have stopped
+  treatment. **Fail-closed:** `STOP_FLAG_SECRET` (Apps Script Script Property)
+  must exist and match, else rejected. Posts directly to Apps Script `/exec`
+  (no `server.js` change). The phone is normalized to canonical and matched to a
+  client by phone + name; one `pending` row is appended to the `StopFlags` tab.
+  **Clients is never modified** — flags are surfaced to Vered on the dashboard
+  ("⏳ המתנה לאישור הפסקה") and resolved only when she manually discharges.
+  `getStopFlags` / `resolveStopFlag` are internal (via the Node proxy). See
+  `CHANGELOG-stop-flag-receiver.md`. **Requires an Apps Script redeploy.**
+
 ### Debug endpoints
 
 - `GET /api/debug/env` – confirms `SHEETS_URL` is configured (no secret leak).

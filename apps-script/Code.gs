@@ -71,6 +71,16 @@ var REMOVED_LEADS_HEADERS = [
   'originSheet'
 ];
 
+/* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
+ * patient appears to have stopped treatment. Append-only; surfaced to Vered for
+ * manual confirmation. This receiver NEVER modifies Clients — Vered remains the
+ * sole authority on actual discharge. */
+var STOP_FLAGS_HEADERS = [
+  'id', 'phone', 'name', 'clientId',
+  'reportedBy', 'reportedAt', 'note',
+  'status', 'resolvedBy', 'resolvedAt'
+];
+
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
@@ -584,6 +594,105 @@ function _getTreatmentPlans() {
   return { ok: true, clients: out };
 }
 
+/* ===== Stop-treatment flags =====
+ *
+ * Inbound: the E-Zone Therapists app POSTs { action:'flagStop', secret, phone,
+ * name, reportedBy?, note? } directly to this /exec. FAIL-CLOSED auth: the
+ * shared secret 'STOP_FLAG_SECRET' Script Property MUST exist and match — unlike
+ * the read endpoints, an unset secret REJECTS (this is an external write).
+ *
+ * _flagStop validates input, normalizes the phone to canonical leading-zero
+ * (reusing _recoverPhone), tries to match an existing client by normalized phone
+ * (vs client.phone OR treatmentContactPhone) + exact trimmed name to fill
+ * clientId, and appends ONE row with status='pending'. Clients is never touched.
+ *
+ * getStopFlags / resolveStopFlag are INTERNAL (Vered's dashboard via the Node
+ * proxy) — open, same trust level as getData/saveAll. resolveStopFlag marks a
+ * flag resolved when Vered completes the discharge; it does not discharge.
+ */
+function _stopFlagAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('STOP_FLAG_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _matchStopFlagClient(clients, phone, name) {
+  var nm = String(name == null ? '' : name).trim();
+  if (!nm || !phone) return '';
+  for (var i = 0; i < clients.length; i++) {
+    var c = clients[i];
+    var phoneHit = _recoverPhone(c.phone) === phone ||
+                   _recoverPhone(c.treatmentContactPhone) === phone;
+    if (phoneHit && String(c.name == null ? '' : c.name).trim() === nm) {
+      return String(c.id);
+    }
+  }
+  return '';
+}
+
+function _flagStop(payload) {
+  var phone = _recoverPhone(payload && payload.phone);
+  var name = String((payload && payload.name) || '').trim();
+  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
+  if (!name) return { ok: false, error: 'missing_name' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+    var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
+    var flag = {
+      id: Utilities.getUuid(),
+      phone: phone,
+      name: name,
+      clientId: _matchStopFlagClient(clients, phone, name),
+      reportedBy: String((payload && payload.reportedBy) || '').trim(),
+      reportedAt: new Date().toISOString(),
+      note: String((payload && payload.note) || '').trim().slice(0, 1000),
+      status: 'pending',
+      resolvedBy: '',
+      resolvedAt: ''
+    };
+    sh.appendRow(STOP_FLAGS_HEADERS.map(function (h) {
+      return flag[h] == null ? '' : flag[h];
+    }));
+    return { ok: true, flag: flag };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _getStopFlags() {
+  var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+  return { ok: true, stopFlags: _readAll(sh, STOP_FLAGS_HEADERS) };
+}
+
+function _resolveStopFlag(id, resolvedBy) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = STOP_FLAGS_HEADERS.indexOf('id');
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(id)) {
+        var rowNum = i + 2;
+        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('status') + 1).setValue('resolved');
+        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('resolvedBy') + 1).setValue(String(resolvedBy || '').trim());
+        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('resolvedAt') + 1).setValue(new Date().toISOString());
+        return { ok: true, resolved: true, id: id };
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -609,6 +718,7 @@ function doGet(e) {
       }
       return _json(_getTreatmentPlans());
     }
+    if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -666,6 +776,18 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getTreatmentPlans());
+    }
+    if (action === 'flagStop') {
+      var sfParams = (e && e.parameter) || {};
+      if (payload && payload.secret) sfParams.secret = payload.secret;
+      if (!_stopFlagAuthOk(sfParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_flagStop(payload));
+    }
+    if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'resolveStopFlag') {
+      return _json(_resolveStopFlag(payload.id, payload.resolvedBy));
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
