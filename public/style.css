@@ -671,3 +671,9 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   padding: 3px 0;
 }
 .dupreport-name { font-weight: 600; min-width: 120px; }
+
+/* Duplicate-merge controls (report panel + confirm modal) */
+.dupreport-keep { font-size: 0.78rem; color: var(--green-2); margin-inline-end: 6px; white-space: nowrap; }
+.dupreport-keep input { margin-inline-end: 3px; vertical-align: middle; }
+.dupreport-actions { margin-top: 6px; }
+.merge-warn { color: var(--amber); font-weight: 600; }

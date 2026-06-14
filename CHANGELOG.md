@@ -17,6 +17,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the flag clears. `public/app.js`, `public/index.html`, `public/style.css`.
 
 ### Added
+- **Duplicate-client merge (`mergeClients`).** A guarded cleanup behind the
+  duplicate report: pick a **survivor** (radio, defaults to the `פעיל` row), and
+  the Apps Script `_mergeClients` action **repoints** every `Payments.clientId` /
+  `ClientCharges.clientId` from the dup rows to the survivor (refreshing
+  `clientName`) **before** removing the dups — so no billing row is ever
+  orphaned — fills only **blank** survivor fields from the dups (never importing
+  `id`/`status`/`exitDate`/`fromLead`, so the active survivor keeps its state),
+  then deletes the dup client rows, all under one script lock. The UI confirms in
+  a modal (survivor, rows to remove, payments/charges to move) — one set at a
+  time, explicit confirm, never a bulk purge — and reloads after. **Requires an
+  Apps Script redeploy.** `test/merge-clients.test.js` covers survivor default,
+  repoint, blank-fill (no status/exitDate import), removal, and validation.
 - **Duplicate-client prevention by canonical phone.** A shared
   `findClientByPhone` (via `recoverPhone`) hard-blocks creating a second client
   with the same **patient-identity** phone at **direct-add**, **activation**, and

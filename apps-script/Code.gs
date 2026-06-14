@@ -716,6 +716,99 @@ function _resolveStopFlag(id, resolvedBy) {
   }
 }
 
+/* ===== Merge duplicate clients =====
+ *
+ * Internal dashboard action (open, same trust level as saveAll). Merges one or
+ * more duplicate client rows into a survivor:
+ *   1. Repoint every Payments.clientId / ClientCharges.clientId from a dup to
+ *      the survivor (and refresh Payments.clientName) — done BEFORE removal so
+ *      no billing row is ever orphaned.
+ *   2. Fill BLANK survivor fields from the dups (first non-blank), excluding
+ *      id/status/exitDate/fromLead so the active survivor never inherits a
+ *      discharge state.
+ *   3. Remove the dup client rows.
+ * All under one script lock, written back atomically. Returns counts.
+ *
+ * NOTE: a repointed payment/charge keeps its original deterministic id (it is a
+ * historical record); only the clientId foreign key the dashboard groups on is
+ * moved. The caller picks the survivor (default: the active row).
+ */
+function _isBlankCell(v) {
+  return v === undefined || v === null || String(v).trim() === '';
+}
+
+function _mergeClients(payload) {
+  var survivorId = (payload && payload.survivorId != null) ? String(payload.survivorId) : '';
+  var dupIds = (payload && Array.isArray(payload.dupIds)) ? payload.dupIds.map(String) : [];
+  if (!survivorId) return { ok: false, error: 'missing_survivor' };
+  var dupSet = {};
+  dupIds.forEach(function (id) { if (id && id !== survivorId) dupSet[id] = true; });
+  dupIds = Object.keys(dupSet);
+  if (!dupIds.length) return { ok: false, error: 'no_dups' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var clientsSh  = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var chargesSh  = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var clients  = _readAll(clientsSh, CLIENTS_HEADERS);
+    var payments = _readAll(paymentsSh, PAYMENTS_HEADERS);
+    var charges  = _readAll(chargesSh, CHARGES_HEADERS);
+
+    var survivor = null, dups = [];
+    for (var i = 0; i < clients.length; i++) {
+      var id = String(clients[i].id);
+      if (id === survivorId) survivor = clients[i];
+      else if (dupSet[id]) dups.push(clients[i]);
+    }
+    if (!survivor) return { ok: false, error: 'survivor_not_found' };
+    if (dups.length !== dupIds.length) return { ok: false, error: 'dup_not_found' };
+
+    // 2. Fill blank survivor fields from dups (first non-blank), skipping fields
+    //    we must not import onto the active survivor.
+    var SKIP = { id: true, status: true, exitDate: true, fromLead: true };
+    for (var h = 0; h < CLIENTS_HEADERS.length; h++) {
+      var key = CLIENTS_HEADERS[h];
+      if (SKIP[key] || !_isBlankCell(survivor[key])) continue;
+      for (var d = 0; d < dups.length; d++) {
+        if (!_isBlankCell(dups[d][key])) { survivor[key] = dups[d][key]; break; }
+      }
+    }
+
+    // 1. Repoint billing rows dup -> survivor (before removal).
+    var repPay = 0, repChg = 0;
+    for (var p = 0; p < payments.length; p++) {
+      if (dupSet[String(payments[p].clientId)]) {
+        payments[p].clientId = survivorId;
+        payments[p].clientName = survivor.name || payments[p].clientName || '';
+        repPay++;
+      }
+    }
+    for (var ch = 0; ch < charges.length; ch++) {
+      if (dupSet[String(charges[ch].clientId)]) {
+        charges[ch].clientId = survivorId;
+        repChg++;
+      }
+    }
+
+    // 3. Remove dup client rows and write everything back.
+    var keptClients = clients.filter(function (c) { return !dupSet[String(c.id)]; });
+    _writeAll(clientsSh, CLIENTS_HEADERS, keptClients);
+    if (repPay) _writeAll(paymentsSh, PAYMENTS_HEADERS, payments);
+    if (repChg) _writeAll(chargesSh, CHARGES_HEADERS, charges);
+
+    return {
+      ok: true,
+      survivorId: survivorId,
+      removed: dupIds,
+      repointed: { payments: repPay, charges: repChg }
+    };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -811,6 +904,9 @@ function doPost(e) {
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'resolveStopFlag') {
       return _json(_resolveStopFlag(payload.id, payload.resolvedBy));
+    }
+    if (action === 'mergeClients') {
+      return _json(_mergeClients(payload));
     }
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));

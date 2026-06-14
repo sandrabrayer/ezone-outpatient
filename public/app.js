@@ -990,21 +990,35 @@
     return out;
   }
 
+  // Default survivor for a group = the (first) active row, else the first row.
+  function defaultSurvivorId(group) {
+    var active = (group.rows || []).find(function (r) { return r.status === 'פעיל'; });
+    return active ? active.id : (group.rows[0] && group.rows[0].id);
+  }
+
+  var dupReportGroups = []; // stashed for the merge handler (index = data-group)
   function renderDuplicateReport() {
     var box = $('#duplicateClientsReport');
     if (!box) return;
-    var groups = duplicateClientReport(state.clients, state.payments, state.charges);
+    dupReportGroups = duplicateClientReport(state.clients, state.payments, state.charges);
+    var groups = dupReportGroups;
     if (!groups.length) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
+    var editor = state.role === 'editor';
     var totalRows = groups.reduce(function (s, g) { return s + g.rows.length; }, 0);
     box.innerHTML =
       '<div class="dupreport-head">⚠️ מטופלים כפולים לפי טלפון (' + groups.length +
-        ' מספרים, ' + totalRows + ' רשומות) — לעיון בלבד</div>' +
-      groups.map(function (g) {
+        ' מספרים, ' + totalRows + ' רשומות)' + (editor ? '' : ' — לעיון בלבד') + '</div>' +
+      groups.map(function (g, gi) {
+        var surv = defaultSurvivorId(g);
         return '<div class="dupreport-group">' +
           '<div class="dupreport-phone">' + escapeHtml(g.phone) + '</div>' +
           g.rows.map(function (r) {
-            return '<div class="dupreport-row">' +
+            var radio = editor
+              ? '<label class="dupreport-keep"><input type="radio" name="dupsurv-' + gi + '" value="' +
+                  escapeHtml(String(r.id)) + '"' + (r.id === surv ? ' checked' : '') + '> שמור</label>'
+              : '';
+            return '<div class="dupreport-row">' + radio +
               '<span class="dupreport-name">' + escapeHtml(r.name || 'ללא שם') + '</span>' +
               '<span class="chip">' + escapeHtml(r.status || '—') + '</span>' +
               '<span class="chip">id: ' + escapeHtml(String(r.id)) + '</span>' +
@@ -1012,8 +1026,71 @@
               '<span class="chip">חיובים: ' + r.charges + '</span>' +
             '</div>';
           }).join('') +
+          (editor
+            ? '<div class="dupreport-actions"><button class="btn btn-danger" data-action="merge-group" data-group="' +
+                gi + '">מזג למטופל שנשמר</button></div>'
+            : '') +
         '</div>';
       }).join('');
+  }
+
+  // Delegated click on the duplicate report → open the merge confirm modal.
+  function handleDuplicateReportClick(e) {
+    var btn = e.target.closest('[data-action="merge-group"]');
+    if (!btn) return;
+    if (state.role !== 'editor') return;
+    var gi = parseInt(btn.getAttribute('data-group'), 10);
+    var group = dupReportGroups[gi];
+    if (!group) return;
+    var picked = $('input[name="dupsurv-' + gi + '"]:checked', $('#duplicateClientsReport'));
+    var survivorId = picked ? picked.value : defaultSurvivorId(group);
+    openMergeClientsModal(group, survivorId);
+  }
+
+  var pendingMerge = null;
+  function openMergeClientsModal(group, survivorId) {
+    var survivor = group.rows.find(function (r) { return String(r.id) === String(survivorId); });
+    if (!survivor) { toast('בחר מטופל לשמירה', true); return; }
+    var dups = group.rows.filter(function (r) { return String(r.id) !== String(survivorId); });
+    if (!dups.length) { toast('אין כפילויות למיזוג', true); return; }
+    var movePay = dups.reduce(function (s, r) { return s + r.payments; }, 0);
+    var moveChg = dups.reduce(function (s, r) { return s + r.charges; }, 0);
+    pendingMerge = { survivorId: String(survivorId), dupIds: dups.map(function (r) { return String(r.id); }) };
+
+    var body = $('#mergeClientsBody');
+    if (body) {
+      body.innerHTML =
+        '<p>לשמור את: <strong>' + escapeHtml(survivor.name || 'ללא שם') + '</strong> ' +
+          '(' + escapeHtml(survivor.status || '—') + ', id ' + escapeHtml(String(survivor.id)) + ')</p>' +
+        '<p>למחוק ' + dups.length + ' רשומות כפולות: ' +
+          escapeHtml(dups.map(function (r) { return r.name + ' (' + (r.status || '—') + ')'; }).join(', ')) + '</p>' +
+        '<p>' + movePay + ' תשלומים ו-' + moveChg + ' חיובים יועברו למטופל שנשמר לפני המחיקה.</p>' +
+        '<p class="merge-warn">פעולה זו אינה הפיכה.</p>';
+    }
+    var m = $('#mergeClientsModal');
+    if (m) m.hidden = false;
+  }
+  function closeMergeClientsModal() {
+    var m = $('#mergeClientsModal');
+    if (m) m.hidden = true;
+    pendingMerge = null;
+  }
+  function performMergeClients() {
+    if (!pendingMerge) return;
+    var req = pendingMerge;
+    var btn = $('#mergeClientsConfirm');
+    if (btn) btn.disabled = true;
+    apiPostAction('mergeClients', { survivorId: req.survivorId, dupIds: req.dupIds })
+      .then(function (res) {
+        closeMergeClientsModal();
+        var moved = res && res.repointed ? res.repointed : { payments: 0, charges: 0 };
+        return loadAll().then(function () {
+          toast('מוזג: הוסרו ' + req.dupIds.length + ' כפילויות, הועברו ' +
+            moved.payments + ' תשלומים ו-' + moved.charges + ' חיובים');
+        });
+      })
+      .catch(function (err) { toast('שגיאה במיזוג: ' + err.message, true); })
+      .finally(function () { if (btn) btn.disabled = false; });
   }
 
   function bankDetailsLine() {
@@ -2466,6 +2543,10 @@
     if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
     var stopFlagsBox = $('#stopFlagsAlerts');
     if (stopFlagsBox) stopFlagsBox.addEventListener('click', handleStopFlagClick);
+    var dupReportBox = $('#duplicateClientsReport');
+    if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
+    var mergeConfirmBtn = $('#mergeClientsConfirm');
+    if (mergeConfirmBtn) mergeConfirmBtn.addEventListener('click', performMergeClients);
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
@@ -2476,7 +2557,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal();
       });
     });
 
