@@ -127,6 +127,7 @@
     clients: [],
     payments: [],
     charges: [],
+    stopFlags: [],  // stop-treatment flags from the therapists app (await confirmation)
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
@@ -472,6 +473,12 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  async function apiGetStopFlags() {
+    var r = await fetch('/api/sheets?action=getStopFlags', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
   async function apiPostAction(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
     var r = await fetch('/api/sheets', {
@@ -483,6 +490,21 @@
     try { data = await r.json(); } catch (_) {}
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
+  }
+
+  function normalizeStopFlagFromSheet(row) {
+    return {
+      id: row.id || '',
+      phone: recoverPhone(row.phone),
+      name: row.name || '',
+      clientId: row.clientId == null ? '' : String(row.clientId),
+      reportedBy: row.reportedBy || '',
+      reportedAt: row.reportedAt || '',
+      note: row.note || '',
+      status: (row.status || 'pending').toString().trim().toLowerCase(),
+      resolvedBy: row.resolvedBy || '',
+      resolvedAt: row.resolvedAt || ''
+    };
   }
 
   function normalizePaymentFromSheet(row) {
@@ -723,6 +745,68 @@
     });
 
     renderRenewalAlerts(activeOnly);
+    renderStopFlags();
+  }
+
+  // Pending stop-treatment flags from the therapists app, awaiting Vered's
+  // confirmation. Surfaced only — discharge stays a manual action.
+  function renderStopFlags() {
+    var box = $('#stopFlagsAlerts');
+    if (!box) return;
+    var pending = (state.stopFlags || []).filter(function (f) { return f.status === 'pending'; });
+    if (!pending.length) {
+      box.innerHTML = '<div class="renewals-empty">✅ אין בקשות הפסקה ממתינות</div>';
+      return;
+    }
+    box.innerHTML = pending.map(function (f) {
+      var client = f.clientId ? state.clients.find(function (c) { return c.id === f.clientId; }) : null;
+      var who = client ? client.name : (f.name || '— ללא שם —');
+      var phoneChip = '<span class="chip">' + escapeHtml(f.phone || '—') + '</span>';
+      var reportedChips =
+        (f.reportedBy ? '<span class="chip">דווח ע״י: ' + escapeHtml(f.reportedBy) + '</span>' : '') +
+        (f.reportedAt ? '<span class="chip">' + escapeHtml(displayDate(f.reportedAt)) + '</span>' : '');
+      var noteHtml = f.note ? '<div class="renewal-note">' + escapeHtml(f.note) + '</div>' : '';
+      var action = client
+        ? '<button class="btn btn-wa-stop" data-action="open-exit" data-flag-id="' + escapeHtml(f.id) + '">סיים טיפול</button>'
+        : '<span class="chip chip-amount">לא נמצא מטופל תואם</span>';
+      return '<div class="renewal-row renewal-stop" data-flag-id="' + escapeHtml(f.id) + '">' +
+        '<div class="renewal-main">' +
+          '<div class="renewal-name">' + escapeHtml(who) + '</div>' +
+          phoneChip + reportedChips +
+        '</div>' +
+        noteHtml +
+        '<div class="renewal-actions">' + action + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Delegated click handler for the pending stop-flags panel.
+  function handleStopFlagClick(e) {
+    var btn = e.target.closest('[data-action="open-exit"]');
+    if (!btn) return;
+    var flagId = btn.getAttribute('data-flag-id');
+    var flag = (state.stopFlags || []).find(function (f) { return f.id === flagId; });
+    if (!flag || !flag.clientId) { toast('לא נמצא מטופל תואם', true); return; }
+    var client = state.clients.find(function (c) { return c.id === flag.clientId; });
+    if (!client) { toast('המטופל לא נמצא', true); return; }
+    openExitModal(client);
+  }
+
+  // Mark every pending stop-flag for a client resolved (called after discharge).
+  // Best-effort: failures are logged, never block the discharge that succeeded.
+  function resolveStopFlagsForClient(clientId) {
+    var pending = (state.stopFlags || []).filter(function (f) {
+      return f.clientId === clientId && f.status === 'pending';
+    });
+    return Promise.all(pending.map(function (f) {
+      return apiPostAction('resolveStopFlag', { id: f.id, resolvedBy: 'Vered' })
+        .then(function () {
+          f.status = 'resolved';
+          f.resolvedBy = 'Vered';
+          f.resolvedAt = new Date().toISOString();
+        })
+        .catch(function (err) { console.warn('[ezone] resolveStopFlag failed', f.id, err.message); });
+    }));
   }
 
   // ---- WhatsApp helpers
@@ -2146,6 +2230,13 @@
         state.charges = [];
       }
       try {
+        var sf = await apiGetStopFlags();
+        state.stopFlags = (sf.stopFlags || []).map(normalizeStopFlagFromSheet).filter(function (f) { return !!f.id; });
+      } catch (sfe) {
+        console.warn('[ezone] getStopFlags failed, assuming empty:', sfe.message);
+        state.stopFlags = [];
+      }
+      try {
         var s = await apiLoadSettings();
         state.settings = {
           bankName: s.bankName || '',
@@ -2200,6 +2291,8 @@
     on('#settingsBtn', 'click', function () { openSettingsModal(); });
     var renewalsBox = $('#renewalsAlerts');
     if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
+    var stopFlagsBox = $('#stopFlagsAlerts');
+    if (stopFlagsBox) stopFlagsBox.addEventListener('click', handleStopFlagClick);
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
@@ -2537,9 +2630,15 @@
       var client = state.clients.find(function (c) { return c.id === exitClientId; });
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
+      var dischargedId = client.id;
       client.status = 'סיים טיפול';
       client.exitDate = fd.get('exitDate') || today();
       persist()
+        .then(function () {
+          // Vered confirmed the discharge → resolve any pending stop-flags for
+          // this client. Best-effort; the discharge itself already succeeded.
+          return resolveStopFlagsForClient(dischargedId);
+        })
         .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
