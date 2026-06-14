@@ -764,23 +764,23 @@
   function resolveStopFlagClient(flag) {
     if (flag && flag.clientId) {
       var byId = state.clients.find(function (c) { return c.id === flag.clientId; });
-      if (byId) return { client: byId, ambiguous: false };
+      if (byId) return { client: byId, ambiguous: false, candidates: [byId] };
     }
     var key = recoverPhone(flag && flag.phone);
     var byPhone = key ? state.clients.filter(function (c) { return clientPhoneMatches(c, key); }) : [];
-    if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false };
+    if (byPhone.length === 1) return { client: byPhone[0], ambiguous: false, candidates: byPhone };
     var nameQ = ((flag && flag.name) || '').trim().toLowerCase();
     if (byPhone.length > 1) {
       var narrowed = nameQ ? byPhone.filter(function (c) { return (c.name || '').trim().toLowerCase() === nameQ; }) : [];
-      if (narrowed.length === 1) return { client: narrowed[0], ambiguous: false };
-      return { client: null, ambiguous: true };
+      if (narrowed.length === 1) return { client: narrowed[0], ambiguous: false, candidates: byPhone };
+      return { client: null, ambiguous: true, candidates: byPhone };
     }
     if (nameQ) {
       var byName = state.clients.filter(function (c) { return (c.name || '').trim().toLowerCase() === nameQ; });
-      if (byName.length === 1) return { client: byName[0], ambiguous: false };
-      if (byName.length > 1) return { client: null, ambiguous: true };
+      if (byName.length === 1) return { client: byName[0], ambiguous: false, candidates: byName };
+      if (byName.length > 1) return { client: null, ambiguous: true, candidates: byName };
     }
-    return { client: null, ambiguous: false };
+    return { client: null, ambiguous: false, candidates: [] };
   }
 
   // Pending stop-treatment flags from the therapists app, awaiting Vered's
@@ -802,9 +802,26 @@
         (f.reportedBy ? '<span class="chip">דווח ע״י: ' + escapeHtml(f.reportedBy) + '</span>' : '') +
         (f.reportedAt ? '<span class="chip">' + escapeHtml(displayDate(f.reportedAt)) + '</span>' : '');
       var noteHtml = f.note ? '<div class="renewal-note">' + escapeHtml(f.note) + '</div>' : '';
-      var action = client
-        ? '<button class="btn btn-wa-stop" data-action="open-exit" data-flag-id="' + escapeHtml(f.id) + '">סיים טיפול</button>'
-        : '<span class="chip chip-amount">' + (res.ambiguous ? 'התאמה מרובה — בחר ידנית' : 'לא נמצא מטופל תואם') + '</span>';
+      var action;
+      if (client) {
+        action = '<button class="btn btn-wa-stop" data-action="open-exit" data-flag-id="' + escapeHtml(f.id) + '">סיים טיפול</button>';
+      } else if (res.ambiguous) {
+        // Real manual-pick control: one button per candidate client. Picking sets
+        // the flag's clientId and opens the exit modal, reusing the discharge +
+        // resolve path so the flag clears on discharge.
+        action = '<div class="stopflag-pick"><span class="stopflag-pick-label">התאמה מרובה — בחר מטופל:</span>' +
+          res.candidates.map(function (c) {
+            var bits = [c.name || 'ללא שם'];
+            if (c.status) bits.push(c.status);
+            if (c.phone) bits.push(c.phone);
+            return '<button class="btn btn-wa-stop" data-action="pick-client" data-flag-id="' +
+              escapeHtml(f.id) + '" data-client-id="' + escapeHtml(c.id) + '">' +
+              escapeHtml(bits.join(' · ')) + '</button>';
+          }).join('') +
+        '</div>';
+      } else {
+        action = '<span class="chip chip-amount">לא נמצא מטופל תואם</span>';
+      }
       return '<div class="renewal-row renewal-stop" data-flag-id="' + escapeHtml(f.id) + '">' +
         '<div class="renewal-main">' +
           '<div class="renewal-name">' + escapeHtml(who) + '</div>' +
@@ -816,18 +833,25 @@
     }).join('');
   }
 
-  // Delegated click handler for the pending stop-flags panel.
+  // Delegated click handler for the pending stop-flags panel. Handles both the
+  // single-match "סיים טיפול" button and the ambiguous-case candidate picker.
   function handleStopFlagClick(e) {
-    var btn = e.target.closest('[data-action="open-exit"]');
+    var btn = e.target.closest('[data-action="open-exit"], [data-action="pick-client"]');
     if (!btn) return;
     var flagId = btn.getAttribute('data-flag-id');
     var flag = (state.stopFlags || []).find(function (f) { return f.id === flagId; });
     if (!flag) { toast('לא נמצא מטופל תואם', true); return; }
-    var client = resolveStopFlagClient(flag).client;
+    var client;
+    if (btn.getAttribute('data-action') === 'pick-client') {
+      var cid = btn.getAttribute('data-client-id');
+      client = state.clients.find(function (c) { return c.id === cid; });
+    } else {
+      client = resolveStopFlagClient(flag).client;
+    }
     if (!client) { toast('לא נמצא מטופל תואם', true); return; }
-    // Align the flag to the resolved client so the post-discharge cleanup
-    // (resolveStopFlagsForClient, matched by clientId) picks up a flag that was
-    // resolved by phone rather than by a server-filled clientId.
+    // Align the flag to the chosen/resolved client so the post-discharge cleanup
+    // (resolveStopFlagsForClient, matched by clientId) clears this flag — this is
+    // what fixes the ambiguous-flag dead-end where clientId was never set.
     flag.clientId = client.id;
     openExitModal(client);
   }
@@ -900,6 +924,96 @@
       return false;
     }
     return norm;
+  }
+
+  // --- duplicate-client prevention --------------------------------------
+  // Patient-IDENTITY phones: the patient's own number and the treatment-contact
+  // phone. payerPhone is deliberately EXCLUDED — a payer (parent / institution)
+  // is legitimately shared across siblings, so a hard block on it would reject
+  // real patients. Identity uniqueness is what stops the same person being
+  // entered twice (the ליעם בריאר / נועם duplicates).
+  function clientIdentityPhones(c) {
+    if (!c) return [];
+    return [c.phone, c.treatmentContactPhone].map(recoverPhone).filter(function (p) { return !!p; });
+  }
+  function findClientByPhone(rawPhone, exceptId) {
+    var key = recoverPhone(rawPhone);
+    if (!key) return null;
+    return state.clients.find(function (c) {
+      if (!c || c.id === exceptId) return false;
+      return clientIdentityPhones(c).indexOf(key) !== -1;
+    }) || null;
+  }
+  // Hard block: if another client already owns this identity phone, toast a
+  // Hebrew message naming them and return true (caller aborts the save).
+  function duplicateClientBlock(rawPhone, exceptId) {
+    var dup = findClientByPhone(rawPhone, exceptId);
+    if (!dup) return false;
+    toast('מטופל עם מספר טלפון זה כבר קיים: «' + (dup.name || 'ללא שם') + '». לא ניתן ליצור כפילות.', true);
+    return true;
+  }
+
+  // Read-only diagnostic: group clients by canonical identity phone and return
+  // groups with more than one client row, each row annotated with how many
+  // Payments and ClientCharges rows reference it (clientId). Used to surface
+  // duplicate patients (ליעם / נועם) before any manual merge — NO writes.
+  function duplicateClientReport(clients, payments, charges) {
+    var byKey = {};
+    (clients || []).forEach(function (c) {
+      if (!c) return;
+      var keys = {};
+      [c.phone, c.treatmentContactPhone].forEach(function (p) {
+        var k = recoverPhone(p);
+        if (k) keys[k] = true;
+      });
+      Object.keys(keys).forEach(function (k) { (byKey[k] = byKey[k] || []).push(c); });
+    });
+    function refCount(rows, id) {
+      var n = 0;
+      (rows || []).forEach(function (r) { if (r && String(r.clientId) === String(id)) n++; });
+      return n;
+    }
+    var out = [];
+    Object.keys(byKey).forEach(function (k) {
+      var rows = byKey[k];
+      if (rows.length < 2) return;
+      out.push({
+        phone: k,
+        rows: rows.map(function (c) {
+          return {
+            id: c.id, name: c.name || '', status: c.status || '', phone: k,
+            payments: refCount(payments, c.id), charges: refCount(charges, c.id)
+          };
+        })
+      });
+    });
+    return out;
+  }
+
+  function renderDuplicateReport() {
+    var box = $('#duplicateClientsReport');
+    if (!box) return;
+    var groups = duplicateClientReport(state.clients, state.payments, state.charges);
+    if (!groups.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    var totalRows = groups.reduce(function (s, g) { return s + g.rows.length; }, 0);
+    box.innerHTML =
+      '<div class="dupreport-head">⚠️ מטופלים כפולים לפי טלפון (' + groups.length +
+        ' מספרים, ' + totalRows + ' רשומות) — לעיון בלבד</div>' +
+      groups.map(function (g) {
+        return '<div class="dupreport-group">' +
+          '<div class="dupreport-phone">' + escapeHtml(g.phone) + '</div>' +
+          g.rows.map(function (r) {
+            return '<div class="dupreport-row">' +
+              '<span class="dupreport-name">' + escapeHtml(r.name || 'ללא שם') + '</span>' +
+              '<span class="chip">' + escapeHtml(r.status || '—') + '</span>' +
+              '<span class="chip">id: ' + escapeHtml(String(r.id)) + '</span>' +
+              '<span class="chip">תשלומים: ' + r.payments + '</span>' +
+              '<span class="chip">חיובים: ' + r.charges + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }).join('');
   }
 
   function bankDetailsLine() {
@@ -1599,6 +1713,7 @@
 
   // ---- Clients
   function renderClients() {
+    renderDuplicateReport();
     var tabsEl = $('#clientTabs');
     tabsEl.innerHTML = '';
     var tabs = [{ id: 'all', label: 'הכול' }].concat(SERVICE_TYPES.map(function (s) { return { id: s, label: s }; }));
@@ -2505,6 +2620,7 @@
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
         var directPhone = acceptPhone(fd.get('phone') || '', 'טלפון', 'mobile', false);
         if (directPhone === false) { submit.disabled = false; return; }
+        if (duplicateClientBlock(directPhone, null)) { submit.disabled = false; return; }
         var startDate = fd.get('startDate') || today();
         var monthlyAmount = toNum(fd.get('monthlyAmount'));
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
@@ -2628,6 +2744,7 @@
       submit.disabled = true;
       var lead = state.leads.find(function (l) { return l.id === activateLeadId; });
       if (!lead) { submit.disabled = false; return; }
+      if (duplicateClientBlock(lead.phone, null)) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
       var group = $('[data-group="serviceType"]', e.target);
       var services = readServiceGroup(group);
@@ -2771,6 +2888,9 @@
       if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
+      // Block only on the patient-identity (treatment-contact) phone, excluding
+      // this client. payerPhone is intentionally not deduped (shared payers).
+      if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
         treatmentContactPhone: client.treatmentContactPhone,

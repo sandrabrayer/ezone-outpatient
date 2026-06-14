@@ -646,3 +646,28 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .charge-status-paid    { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
 .charge-status-partial { background: #3a310f; color: var(--amber); border-color: #5a4818; }
 .charge-status-unpaid  { background: #3a0f10; color: #ef8484; border-color: #5a1818; }
+
+/* Ambiguous stop-flag manual picker (one button per candidate client) */
+.stopflag-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.stopflag-pick-label { font-size: 0.78rem; color: var(--amber); margin-inline-end: 4px; }
+
+/* Read-only duplicate-clients report (clients view) */
+.dupreport {
+  background: #2a1a0f;
+  border: 1px solid #5a3a18;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.dupreport-head { font-weight: 700; color: var(--amber); margin-bottom: 8px; }
+.dupreport-group {
+  border-top: 1px solid #2a3f5a;
+  padding: 8px 0;
+}
+.dupreport-group:first-of-type { border-top: none; }
+.dupreport-phone { font-weight: 600; color: #7a9bbf; margin-bottom: 4px; }
+.dupreport-row {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 3px 0;
+}
+.dupreport-name { font-weight: 600; min-width: 120px; }

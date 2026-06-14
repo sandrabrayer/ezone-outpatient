@@ -6,6 +6,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
+  rendered a non-interactive `<span>` with no control, and the click handler
+  only fired on the single-match button — so Vered could neither pick the right
+  client nor clear the flag (its `clientId` was never set, so a manual discharge
+  didn't resolve it either). Now `resolveStopFlagClient` returns the candidate
+  list, the ambiguous case renders a real **"בחר מטופל"** picker (one button per
+  candidate, `data-action="pick-client"`), and picking sets the flag's
+  `clientId` and opens the exit modal — reusing the discharge + resolve path so
+  the flag clears. `public/app.js`, `public/index.html`, `public/style.css`.
+
+### Added
+- **Duplicate-client prevention by canonical phone.** A shared
+  `findClientByPhone` (via `recoverPhone`) hard-blocks creating a second client
+  with the same **patient-identity** phone at **direct-add**, **activation**, and
+  the **edit-client treatment-contact phone** — with a Hebrew message naming the
+  existing client (`מטופל עם מספר טלפון זה כבר קיים: «…». לא ניתן ליצור כפילות.`).
+  Identity = `phone` + `treatmentContactPhone`; **`payerPhone` is deliberately
+  excluded** so a payer shared across siblings isn't false-blocked. The lead path
+  keeps its existing warn-and-override. Entry-point enforcement only — no
+  server-side `_saveAll` dedup. `public/app.js`.
+- **Read-only duplicate-clients report** in the clients view
+  (`duplicateClientReport` + panel): every canonical phone with more than one
+  client row, each row's `id` / `name` / `status` / `phone` and how many
+  `Payments` and `ClientCharges` reference it — to identify existing duplicates
+  (ליעם / נועם) before any merge. Read-only; **no writes/deletes** this round.
+- `test/duplicate-clients.test.js` — picker candidate list, the identity-phone
+  duplicate guard (matches phone/treatment-contact, excludes self, ignores
+  shared `payerPhone`), and the report grouping with reference counts.
+
+### Fixed
 - **Stop-flags showed "no match" for a patient who exists** (e.g. ליעם בריאר,
   `0543123276`). The patient phone had no durable home — `phone` wasn't a
   `Clients` column, so it was dropped on save and blank on reload — and both
