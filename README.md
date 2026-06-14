@@ -97,6 +97,22 @@ npm start
 - `GET /api/debug/routes` – lists mounted routes.
 - `GET /api/debug/last-load` – status of the most recent Sheets load.
 
+## Phone numbers
+
+- **Canonical form:** leading-zero, no separators (e.g. `0501234567`).
+  Entry is normalized (strip separators; `+972`/`972`/`00972` → leading `0`)
+  then validated; invalid numbers are rejected with a Hebrew message and never
+  stored. Mobile-strict (exactly 10 digits) applies to `phone` and
+  `treatmentContactPhone` (the cross-app matching key); `payerPhone` also
+  accepts a 9-digit Israeli landline.
+- **WhatsApp:** the 972 international form is produced only at wa.me link-build
+  time (`phoneToWa`), so links keep working while storage stays canonical.
+- **Sheets leading-zero fix:** phone columns are forced to plain-text (`@`)
+  format on write, and already-corrupted rows are recovered on read
+  (`_recoverPhone`) so consumers including E-Zone Therapists get healed numbers.
+  No bulk migration — rows heal on read and persist canonical on next save.
+  See `CHANGELOG-phone-normalization.md`. **Requires an Apps Script redeploy.**
+
 ## Notes / lessons baked in
 
 - Frontend only uses **relative** `/api/sheets` URLs — no hardcoded domain.
