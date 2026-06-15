@@ -9,9 +9,10 @@
  * A sibling app (ezone-therapists) gates patient intake on outpatient debt.
  * The answer is NOT a single field: it is a join of the `Payments` sheet
  * (`status`, `amountDue`, `amountPaid`, keyed by `clientId`) onto `Clients`
- * (where the phone lives, as `treatmentContactPhone`). So the rule must be
- * identical on both ends, and it must NEVER fail open: a missing record is not
- * "no debt", it is "couldn't determine → flag for a human".
+ * (where the canonical patient phone lives, as the `phone` column, falling back
+ * to `treatmentContactPhone`). So the rule must be identical on both ends, and
+ * it must NEVER fail open: a missing record is not "no debt", it is "couldn't
+ * determine → flag for a human".
  *
  * THREE OUTCOMES, NOT TWO (never-fail-open for matching)
  * ------------------------------------------------------
@@ -73,6 +74,21 @@
     return isFinite(n) ? n : 0;
   }
 
+  // Mirror of _recoverPhone in apps-script/Code.gs (and recoverPhone in
+  // public/app.js): normalize to the leading-zero canonical form and restore a
+  // leading zero Sheets dropped by coercing a numeric-looking phone. Idempotent.
+  function recoverPhone(raw) {
+    if (raw === null || raw === undefined) return '';
+    var s = String(raw).replace(/[\s\-()]/g, '');
+    if (s.indexOf('+') === 0) s = s.slice(1);
+    if (s.indexOf('00') === 0) s = s.slice(2);
+    s = s.replace(/\D/g, '');
+    if (!s) return '';
+    if (s.indexOf('972') === 0) s = '0' + s.slice(3);   // intl -> local
+    else if (s.charAt(0) !== '0') s = '0' + s;          // Sheets dropped the leading 0
+    return s;
+  }
+
   /**
    * Amount still owed for a single payment row that EXISTS.
    * @param {{status?:*, amountDue?:*, amountPaid?:*}} row
@@ -120,9 +136,12 @@
    * no debt" (clear) apart from "couldn't determine" (unknown / no match).
    *
    * Matching contract (decided with the product owner): a patient is matched on
-   * NAME + the phone registered in the system, which on the outpatient side is
-   * `treatmentContactPhone` (the patient treated), NOT the payer phone. Only the
-   * fields needed for the gate are projected — no prices, payer details, links.
+   * NAME + the phone registered in the system. On the outpatient side that is
+   * the canonical patient phone — the `phone` column, falling back to
+   * `treatmentContactPhone` when blank, leading-zero recovered — NOT the payer
+   * phone. `treatmentContactPhone` is empty for every live client, so projecting
+   * it alone returned a blank join key. Only the fields needed for the gate are
+   * projected — no prices, payer details, links.
    *
    * Included regardless of client `status`: an open balance still matters after
    * discharge, and a discharged client with no rows is still 'unknown'.
@@ -152,7 +171,7 @@
       out.push({
         clientId: id,
         name: cl.name || '',
-        phone: cl.treatmentContactPhone || '',
+        phone: recoverPhone(cl.phone) || recoverPhone(cl.treatmentContactPhone),
         debtStatus: st.debtStatus,
         amountOwed: st.amountOwed
       });
@@ -163,6 +182,7 @@
   return {
     PAYMENT_STATUS_ALIASES: PAYMENT_STATUS_ALIASES,
     resolvePaymentStatus: resolvePaymentStatus,
+    recoverPhone: recoverPhone,
     rowOwed: rowOwed,
     amountOwedForRows: amountOwedForRows,
     clientDebtStatus: clientDebtStatus,

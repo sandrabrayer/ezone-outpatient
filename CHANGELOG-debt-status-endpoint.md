@@ -24,11 +24,19 @@ So the endpoint had to be added rather than invented on the consumer side.
 ## Matching contract
 
 Decided with the product owner: a patient is matched on **name + the phone
-registered in the system**. On the outpatient side that phone is
-**`treatmentContactPhone`** (the patient treated), *not* `payerPhone` (which may
-be a parent or institution). The endpoint projects `name` and
-`treatmentContactPhone` as `phone`; the therapists app normalizes and matches on
-both.
+registered in the system**. On the outpatient side that is the **canonical
+patient phone** — the **`phone`** column, falling back to
+**`treatmentContactPhone`** when blank, leading-zero recovered — *not*
+`payerPhone` (which may be a parent or institution). The endpoint projects
+`name` and that canonical phone as `phone`; the therapists app normalizes and
+matches on both.
+
+> **Phone-column fix (2026-06):** this projection originally read only
+> `treatmentContactPhone`, which is empty for every live client (the real
+> patient number lives in the `phone` column added in the stop-flow work) — so
+> it returned a blank `phone` join key. It now prefers `phone` and falls back to
+> `treatmentContactPhone`, with leading-zero recovery, mirroring the same fix in
+> `getTreatmentPlans`. **Requires an Apps Script redeploy.**
 
 ## Never-fail-open: three outcomes, not two
 
@@ -63,7 +71,8 @@ absence of a payment row is absence of evidence, not evidence of payment.
 }
 ```
 
-`phone` is `treatmentContactPhone`. Clients are returned **regardless of status**
+`phone` is the canonical patient phone (the `phone` column, falling back to
+`treatmentContactPhone`, leading-zero recovered). Clients are returned **regardless of status**
 — an open balance still matters after discharge (`סיים טיפול`), and a discharged
 client with no rows is still `unknown`. Nothing else is exposed: no `payerPhone`,
 `paymentLink`, prices, bundles, or per-month rows.
