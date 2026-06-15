@@ -470,7 +470,7 @@ function _getWinbackSource() {
  * Consumed by the E-Zone Therapists app to gate patient intake on outpatient
  * debt. Returns EVERY client with a tri-state debt status, so the consumer can
  * tell "confirmed no debt" apart from "couldn't determine":
- *   clientId, name, phone (treatmentContactPhone), debtStatus, amountOwed
+ *   clientId, name, phone (canonical patient phone), debtStatus, amountOwed
  *
  * Never-fail-open: three outcomes, not two.
  *   - has payment rows, open balance > 0 -> 'debt'    (consumer: block+approval)
@@ -479,9 +479,10 @@ function _getWinbackSource() {
  *                                                       is NOT proof of payment)
  * The consumer adds: phone matches no client -> flag; matches >1 -> flag.
  *
- * Matching contract: the consumer matches on NAME + the phone registered in
- * the system (treatmentContactPhone). payerPhone, paymentLink, prices, bundle*
- * and every other billing/payer field are deliberately NOT included.
+ * Matching contract: the consumer matches on NAME + the canonical patient
+ * phone (the `phone` column, falling back to `treatmentContactPhone`, leading-
+ * zero recovered). payerPhone, paymentLink, prices, bundle* and every other
+ * billing/payer field are deliberately NOT included.
  *
  * Per-row rule (lockstep with public/debt-status.js and billing-status.js):
  * for a row that EXISTS, owed = (status paid or blank) ? 0 :
@@ -558,7 +559,7 @@ function _getDebtStatus() {
       sourceApp:  'ezone-outpatient',
       clientId:   id,
       name:       cl.name || '',
-      phone:      cl.treatmentContactPhone || '',
+      phone:      _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone),
       debtStatus: debtStatus,
       amountOwed: amountOwed
     });

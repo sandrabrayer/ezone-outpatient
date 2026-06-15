@@ -65,9 +65,9 @@ test('clientDebtStatus: tri-state — debt / clear / unknown', () => {
 
 test('computeClientDebt: returns the FULL roster with tri-state, minimal projection', () => {
   const clients = [
-    { id: 'c1', name: 'אורי', treatmentContactPhone: '050-1234567', payerPhone: '03-0000000', pricePerSession: 300 },
-    { id: 'c2', name: 'דנה', treatmentContactPhone: '052-7654321' },
-    { id: 'c3', name: 'מאיה', treatmentContactPhone: '054-1111111' } // no payment rows
+    { id: 'c1', name: 'אורי', phone: '0501234567', payerPhone: '03-0000000', pricePerSession: 300 },
+    { id: 'c2', name: 'דנה', phone: '0527654321' },
+    { id: 'c3', name: 'מאיה', phone: '0541111111' } // no payment rows
   ];
   const payments = [
     { clientId: 'c1', status: 'unpaid', amountDue: 400, amountPaid: 0 },
@@ -79,13 +79,50 @@ test('computeClientDebt: returns the FULL roster with tri-state, minimal project
   assert.equal(rows.length, 3, 'every client is returned, not only debtors');
 
   const byId = Object.fromEntries(rows.map((r) => [r.clientId, r]));
-  assert.deepEqual(byId.c1, { clientId: 'c1', name: 'אורי', phone: '050-1234567', debtStatus: 'debt', amountOwed: 400 });
-  assert.deepEqual(byId.c2, { clientId: 'c2', name: 'דנה', phone: '052-7654321', debtStatus: 'clear', amountOwed: 0 });
-  assert.deepEqual(byId.c3, { clientId: 'c3', name: 'מאיה', phone: '054-1111111', debtStatus: 'unknown', amountOwed: 0 });
+  assert.deepEqual(byId.c1, { clientId: 'c1', name: 'אורי', phone: '0501234567', debtStatus: 'debt', amountOwed: 400 });
+  assert.deepEqual(byId.c2, { clientId: 'c2', name: 'דנה', phone: '0527654321', debtStatus: 'clear', amountOwed: 0 });
+  assert.deepEqual(byId.c3, { clientId: 'c3', name: 'מאיה', phone: '0541111111', debtStatus: 'unknown', amountOwed: 0 });
 
-  // phone is treatmentContactPhone; payer/billing fields must not leak
+  // phone is the canonical patient phone; payer/billing fields must not leak
   assert.ok(!('payerPhone' in byId.c1));
   assert.ok(!('pricePerSession' in byId.c1));
+});
+
+test('computeClientDebt: phone is the populated `phone` column, not the empty treatmentContactPhone', () => {
+  // The live-data bug: clients carry the number in `phone`; treatmentContactPhone
+  // is blank. The debt projection must NOT return a blank join key.
+  const rows = DebtStatus.computeClientDebt(
+    [{ id: 'c1', name: 'ליעם', phone: '0543123276', treatmentContactPhone: '' }],
+    [{ clientId: 'c1', status: 'unpaid', amountDue: 200, amountPaid: 0 }]
+  );
+  assert.equal(rows[0].phone, '0543123276');
+  assert.notEqual(rows[0].phone, '');
+});
+
+test('computeClientDebt: phone falls back to treatmentContactPhone when `phone` is blank, recovered to canonical', () => {
+  const rows = DebtStatus.computeClientDebt(
+    [{ id: 'c1', name: 'דנה', phone: '', treatmentContactPhone: '052-7654321' }],
+    []
+  );
+  assert.equal(rows[0].phone, '0527654321');
+});
+
+test('computeClientDebt: leading-zero recovery applies; every client with a number gets a non-blank canonical join key', () => {
+  const rows = DebtStatus.computeClientDebt([
+    { id: 'c1', name: 'a', phone: 543123276 },            // numeric, zero dropped
+    { id: 'c2', name: 'b', phone: '972527654321' },        // intl form
+    { id: 'c3', name: 'c', treatmentContactPhone: '054-1111111' } // fallback
+  ], []);
+  const byId = Object.fromEntries(rows.map((r) => [r.clientId, r]));
+  assert.equal(byId.c1.phone, '0543123276');
+  assert.equal(byId.c2.phone, '0527654321');
+  assert.equal(byId.c3.phone, '0541111111');
+  rows.forEach((r) => assert.match(r.phone, /^0\d{8,9}$/));
+});
+
+test('computeClientDebt: a client with no number on either column projects an empty phone', () => {
+  const rows = DebtStatus.computeClientDebt([{ id: 'c1', name: 'x' }], []);
+  assert.equal(rows[0].phone, '');
 });
 
 test('computeClientDebt: a debtor is included even after discharge', () => {

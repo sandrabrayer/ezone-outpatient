@@ -74,7 +74,9 @@ npm start
   leads + discharged clients for the win-back call list. No billing data.
 - `GET /api/sheets?action=getDebtStatus&secret=<DEBT_STATUS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, debtStatus, amountOwed }] }` for the
-  E-Zone Therapists intake gate. `phone` is `treatmentContactPhone`. Every
+  E-Zone Therapists intake gate. `phone` is the canonical patient phone (the
+  `phone` column, falling back to `treatmentContactPhone`, leading-zero
+  recovered) — non-blank for any client with a number. Every
   client is returned with a tri-state `debtStatus` (`debt` / `clear` /
   `unknown`) — never-fail-open: a client with no payment rows is `unknown`, not
   silently "clear", so the consumer can flag it for manual resolution. Each
