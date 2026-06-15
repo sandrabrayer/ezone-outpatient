@@ -591,11 +591,18 @@ function _getTreatmentPlans() {
     var cl = clients[c];
     var id = (cl && cl.id != null) ? String(cl.id) : '';
     if (!id) continue;
+    // Cross-app join key for the therapists app — must be the populated
+    // canonical patient phone. The patient number lives in the `phone` column
+    // (added in the stop-flow work); the legacy `treatmentContactPhone` column
+    // is empty for every live client, so projecting it returned "phone":"" for
+    // all. Prefer `phone`, fall back to `treatmentContactPhone`, and recover the
+    // leading zero either way so consumers get the canonical 10-digit form.
+    var phone = _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone);
     out.push({
       sourceApp:   'ezone-outpatient',
       clientId:    id,
       name:        cl.name || '',
-      phone:       cl.treatmentContactPhone || '',
+      phone:       phone,
       serviceType: cl.serviceType || '',
       sessions:    cl.sessionsPerWeek || '',
       status:      cl.status || ''

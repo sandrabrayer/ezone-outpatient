@@ -33,10 +33,20 @@ than widening an existing one.
 }
 ```
 
-`phone` is `treatmentContactPhone` (the patient treated), matching the
-`getDebtStatus` contract. `sessions` is the raw `sessionsPerWeek` value.
-**No** `payerName`/`payerPhone`/`paymentLink`/prices/bundles are included.
+`phone` is the **canonical patient phone** — the populated `phone` column,
+falling back to `treatmentContactPhone` if `phone` is blank — with leading-zero
+recovery (`_recoverPhone`) applied so consumers get the canonical 10-digit form.
+This is the **cross-app join key** for the therapists app, so it must not be
+blank for a client that has a number. `sessions` is the raw `sessionsPerWeek`
+value. **No** `payerName`/`payerPhone`/`paymentLink`/prices/bundles are included.
 Every client with an `id` is returned; rows without an id are skipped.
+
+> **Phone-column fix (2026-06):** this projection originally read only
+> `treatmentContactPhone`, which is empty for every live client (the real
+> patient number lives in the `phone` column added in the stop-flow work). That
+> returned `"phone":""` for all clients and broke the therapists-app join. It now
+> prefers `phone` and falls back to `treatmentContactPhone`. **Requires an Apps
+> Script redeploy.**
 
 ## Auth
 
