@@ -2304,6 +2304,18 @@
   function closeExitModal() { $('#exitModal').hidden = true; exitClientId = null; }
 
   var editClientId = null;
+  // Render a stored billingDay (day-of-month integer) as a value for a date
+  // input: THIS month with the day clamped to the month's last day (same clamp
+  // the billing logic uses). '' when unset, so the field shows blank.
+  function billingDayInputValue(billingDay) {
+    var bd = billingDay ? toNum(billingDay) : 0;
+    if (!bd) return '';
+    var t = today();
+    var last = lastDayOfMonth(t);
+    var eff = (last && bd > last) ? last : bd;
+    return t.slice(0, 7) + '-' + String(eff).padStart(2, '0');
+  }
+
   function openEditClientModal(client) {
     editClientId = client.id;
     var form = $('#editClientForm');
@@ -2319,6 +2331,7 @@
     form.paymentStatus.value = client.paymentStatus || 'paid';
     form.paymentDate.value = client.paymentDate || '';
     form.monthlyAmount.value = client.pricePerSession || '';
+    if (form.billingDay) form.billingDay.value = billingDayInputValue(client.billingDay);
     if (form.house_of_origin) form.house_of_origin.value = client.house_of_origin || '';
     if (form.notes) form.notes.value = client.notes || '';
     // Treatment plan: service types + sessions per week per treatment
@@ -2980,7 +2993,7 @@
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
         pricePerSession: client.pricePerSession,
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
-        nextBillingDate: client.nextBillingDate,
+        nextBillingDate: client.nextBillingDate, billingDay: client.billingDay,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
       client.serviceScope = scope;
@@ -2995,6 +3008,10 @@
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
+      // Monthly collection day: a date input, but only the day-of-month is kept
+      // (same as direct-add). Empty clears it → falls back to the start-date day.
+      var billingDayVal = fd.get('billingDay');
+      client.billingDay = billingDayVal ? (dayOfMonth(billingDayVal) || '') : '';
       // house_of_origin: allow setting OR clearing (user may correct a wrong value).
       if (fd.has('house_of_origin')) client.house_of_origin = (fd.get('house_of_origin') || '').trim();
       // notes: allow setting OR clearing.
