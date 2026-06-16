@@ -141,3 +141,7 @@ npm start
 - On load failure, the user sees a toast — **no silent empty fallback**.
 - Apps Script `doPost` parses `e.postData.contents` as JSON and `doGet` accepts
   the same payload as a query param fallback.
+- `public/treatment-map.js` is the hardcoded **clinical → billing** vocabulary
+  map + price table (incl. VAT): `clinicalToBilling()` and `billingPrice()`. Not
+  yet wired into the save flow, form, or `getTreatmentPlans`. See
+  `CHANGELOG-clinical-billing-map.md`.
