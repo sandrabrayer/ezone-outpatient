@@ -38,6 +38,12 @@ var CLIENTS_HEADERS = [
   'source', 'notes', 'billingType', 'billingDay',
   'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
   'house_of_origin',
+  // RESERVED / DEAD (task 4.4): the אחראי concept (responsiblePerson + its
+  // serviceScope role) was removed from the app. These two slots are kept ONLY
+  // to preserve column positions — _readAll/_writeAll are positional and
+  // _ensureSheet does not migrate data, so dropping mid-array headers would
+  // shift/corrupt every column after this point (incl. the `phone` join key).
+  // The app no longer reads or writes them; existing cells blank on next save.
   'responsiblePerson', 'serviceScope',
   'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
   'phone'

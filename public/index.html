@@ -222,17 +222,6 @@
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
 
-          <label class="wide">היקף טיפול
-            <select name="serviceScope" required>
-              <option value="">—</option>
-              <option value="individual">טיפול פרטני</option>
-              <option value="program">תוכנית מורחבת</option>
-            </select>
-          </label>
-          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
-            <input name="responsiblePerson" type="text" required />
-          </label>
-
           <!-- Payment fields -->
           <div class="wide form-section-title">פרטי תשלום חבילה</div>
           <label>סטטוס תשלום
@@ -286,17 +275,6 @@
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
 
-          <label class="wide">היקף טיפול
-            <select name="serviceScope" required>
-              <option value="">—</option>
-              <option value="individual">טיפול פרטני</option>
-              <option value="program">תוכנית מורחבת</option>
-            </select>
-          </label>
-          <label class="wide">איש קשר אחראי (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)
-            <input name="responsiblePerson" type="text" required />
-          </label>
-
           <!-- Payment fields -->
           <div class="wide form-section-title">פרטי תשלום חבילה</div>
           <label>סטטוס תשלום
@@ -343,22 +321,13 @@
           <input type="hidden" name="clientId" />
           <div class="wide" id="editClientName" style="font-weight:600;color:#1a2e4a;margin-bottom:4px;"></div>
 
-          <label class="wide">היקף טיפול
-            <select name="serviceScope" required>
-              <option value="">—</option>
-              <option value="individual">טיפול פרטני</option>
-              <option value="program">תוכנית מורחבת</option>
-            </select>
-          </label>
-
           <div class="wide form-section-title">תוכנית טיפול</div>
           <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
             <div class="checkgroup" data-group="serviceType" data-for="editClientForm"></div>
           </label>
           <div class="wide sessions-host" data-host="editClientSessions"></div>
 
-          <div class="wide form-section-title">אחראי טיפול (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)</div>
-          <label>שם אחראי טיפול<input name="responsiblePerson" type="text" required /></label>
+          <div class="wide form-section-title">אחראי טיפול</div>
           <label>טלפון אחראי טיפול<input name="treatmentContactPhone" type="tel" placeholder="050-1234567" /></label>
 
           <div class="wide form-section-title">גורם משלם (קרוב משפחה או המטופל עצמו)</div>

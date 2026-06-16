@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed
+- **The אחראי (responsible/owner) concept.** Removed the `responsiblePerson`
+  name field and its `serviceScope` role selector (individual → "מטפל" /
+  program → "מנהל בית") from the app: every form control, model read/write,
+  prefill, render (the scope/role chips on renewal rows and client cards), and
+  both required-validations. The stop-payment WhatsApp message no longer names
+  the responsible (greeting is now a plain "שלום,"). **`treatmentContactPhone`
+  (the WhatsApp/billing contact phone) is kept and untouched.** The two sheet
+  columns are **deliberately NOT dropped** — `_readAll`/`_writeAll` are
+  positional and `_ensureSheet` doesn't migrate data, so removing the mid-array
+  headers (positions 20–21) would shift/corrupt every later column incl. the
+  `phone` join key. They stay as **reserved, unread slots** in `CLIENTS_HEADERS`
+  (no migration; cells blank on a row's next save). `public/app.js`,
+  `public/index.html`, `public/style.css`, `apps-script/Code.gs` (comment only).
+  `test/responsible-removal.test.js` locks the removal, the reserved-slot
+  layout, and positional safety. **No Apps Script redeploy / schema change.**
+  See `CHANGELOG-remove-responsible-person.md`.
+
 ### Fixed
 - **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
   rendered a non-interactive `<span>` with no control, and the click handler
