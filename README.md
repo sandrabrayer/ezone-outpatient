@@ -150,3 +150,8 @@ npm start
   `CLIENTS_HEADERS` without shifting everything after it. The removed אחראי
   fields (`responsiblePerson`, `serviceScope`) are therefore **kept as reserved,
   unread slots** rather than deleted. See `CHANGELOG-remove-responsible-person.md`.
+- `public/therapist-pay.js` is the hardcoded **therapist pay table** (what
+  E-ZONE pays per session): `therapistPay(name, treatmentType?)`. Rates are
+  **pre-VAT** — VAT is added at payment time via the separate `withVat()` helper,
+  never inside `therapistPay`. Not wired anywhere. See
+  `CHANGELOG-therapist-pay-table.md`.
