@@ -35,6 +35,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the flag clears. `public/app.js`, `public/index.html`, `public/style.css`.
 
 ### Added
+- **Therapist pay table module (`public/therapist-pay.js`).** A standalone,
+  hardcoded source of truth for the **pay** side — what E-ZONE pays each
+  therapist per session (counterpart to `treatment-map.js`, the billing side).
+  All rates are **pre-VAT**: the table stores raw numbers and `therapistPay()`
+  returns them untouched; VAT is added at payment time via a separate
+  `withVat(amount, rate=0.18)` helper, never inside `therapistPay`. Two
+  structures: (1) **flat per-session keyed per therapist** — the rate follows
+  the individual, not a grade, so two grade-A therapists differ (מעיין דלומי
+  ₪250 vs דליה מלמד ₪230); 15 therapists from ₪180–₪250. (2) **psychiatrists
+  pay by type** — ד״ר שפרינץ / ד״ר דנגור: אינטייק ₪900, מעקב פסיכיאטרי ₪700, so
+  a psychiatrist lookup requires a valid treatment type (throws otherwise).
+  `therapistPay(name, treatmentType?)` throws on an unknown therapist.
+  `test/therapist-pay.test.js` (12 cases) locks every rate, per-person (not
+  per-grade) pricing, the psychiatrist by-type rule, VAT staying out, and a
+  loud completeness guard. **Not wired** anywhere — module + tests only. See
+  `CHANGELOG-therapist-pay-table.md`.
 - **Clinical → billing map module (`public/treatment-map.js`).** A standalone,
   hardcoded source of truth that translates the **clinical** treatment
   vocabulary (the therapists app) into the **billing** vocabulary, plus the
