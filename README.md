@@ -145,3 +145,8 @@ npm start
   map + price table (incl. VAT): `clinicalToBilling()` and `billingPrice()`. Not
   yet wired into the save flow, form, or `getTreatmentPlans`. See
   `CHANGELOG-clinical-billing-map.md`.
+- `_readAll`/`_writeAll` map sheet columns **by position**, and `_ensureSheet`
+  does not migrate data — so a column can never be dropped from the middle of
+  `CLIENTS_HEADERS` without shifting everything after it. The removed אחראי
+  fields (`responsiblePerson`, `serviceScope`) are therefore **kept as reserved,
+  unread slots** rather than deleted. See `CHANGELOG-remove-responsible-person.md`.

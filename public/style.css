@@ -573,8 +573,6 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 }
 .client-card-stop { box-shadow: 0 0 0 2px #ff7676 inset, var(--shadow); }
 .client-card-warn { box-shadow: 0 0 0 2px var(--amber) inset, var(--shadow); }
-.chip-scope { background: var(--panel-2); color: var(--green-2); }
-.chip-resp  { background: var(--panel-2); color: var(--text-soft); }
 
 /* ===== WhatsApp action buttons (Step 3) ===== */
 .renewal-actions {

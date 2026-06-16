@@ -387,8 +387,6 @@
       paymentDate: fmtDate(row.paymentDate),
       nextBillingDate: fmtDate(row.nextBillingDate),
       house_of_origin: row.house_of_origin || '',
-      responsiblePerson: row.responsiblePerson || '',
-      serviceScope: row.serviceScope || '',
       treatmentContactPhone: recoverPhone(row.treatmentContactPhone),
       payerName: row.payerName || '',
       payerPhone: recoverPhone(row.payerPhone),
@@ -443,8 +441,6 @@
       paymentDate: c.paymentDate || '',
       nextBillingDate: c.nextBillingDate || '',
       house_of_origin: c.house_of_origin || '',
-      responsiblePerson: c.responsiblePerson || '',
-      serviceScope: c.serviceScope || '',
       treatmentContactPhone: c.treatmentContactPhone || '',
       payerName: c.payerName || '',
       payerPhone: c.payerPhone || '',
@@ -1125,7 +1121,7 @@
   }
 
   function buildStopTreatmentMsg(c) {
-    return 'שלום ' + (c.responsiblePerson || '') + ', המטופל ' + c.name +
+    return 'שלום, המטופל ' + c.name +
       ' טרם הסדיר את התשלום החודשי. נא לא להעניק טיפול עד הסדרת התשלום מול ההנהלה. בתודה, צוות E-ZONE איזון';
   }
 
@@ -1176,11 +1172,6 @@
   }
 
   function renderRenewalRow(c, info, kind) {
-    var responsible = c.responsiblePerson || '— לא הוגדר אחראי —';
-    var scope = c.serviceScope === 'individual' ? 'טיפול פרטני'
-              : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
-    var roleLabel = c.serviceScope === 'individual' ? 'מטפל'
-                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
     var daysText;
     if (kind === 'stop') {
       if (info.daysLeft === null || info.daysLeft === undefined) {
@@ -1198,9 +1189,7 @@
     return '<div class="renewal-row renewal-' + kind + '" data-client-id="' + escapeHtml(c.id) + '">' +
       '<div class="renewal-main">' +
         '<div class="renewal-name">' + escapeHtml(c.name) + '</div>' +
-        (scope ? '<span class="chip">' + scope + '</span>' : '') +
         '<span class="chip">משלם: ' + escapeHtml(c.payerName || '— לא הוגדר —') + '</span>' +
-        '<span class="chip">' + roleLabel + ': ' + escapeHtml(responsible) + '</span>' +
       '</div>' +
       '<div class="renewal-meta">' +
         '<span class="renewal-date">' + (info.renewalDate ? displayDate(info.renewalDate) : '') + '</span>' +
@@ -1884,19 +1873,6 @@
       renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
     }
 
-    // Responsible person + scope chips (always show if filled)
-    var responsibleHtml = '';
-    if (c.responsiblePerson || c.serviceScope) {
-      var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
-                   : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
-      var roleLbl = c.serviceScope === 'individual' ? 'מטפל'
-                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
-      responsibleHtml = '<div class="client-meta">' +
-        (scopeLbl ? '<span class="chip chip-scope">' + scopeLbl + '</span>' : '') +
-        (c.responsiblePerson ? '<span class="chip chip-resp">' + roleLbl + ': ' + escapeHtml(c.responsiblePerson) + '</span>' : '') +
-        '</div>';
-    }
-
     // Extra charges (active only) shown inline as a compact list.
     var activeCharges = state.charges.filter(function (ch) {
       return ch.clientId === c.id && ch.active !== false;
@@ -1932,7 +1908,6 @@
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
       '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
-      responsibleHtml +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       paymentHtml +
@@ -2310,8 +2285,6 @@
     form.reset();
     $('#editClientName').textContent = client.name;
     form.clientId.value = client.id;
-    form.serviceScope.value = client.serviceScope || '';
-    form.responsiblePerson.value = client.responsiblePerson || '';
     form.treatmentContactPhone.value = client.treatmentContactPhone || '';
     form.payerName.value = client.payerName || '';
     form.payerPhone.value = client.payerPhone || '';
@@ -2732,9 +2705,7 @@
           paymentStatus: payStatus,
           paymentDate: payDate,
           nextBillingDate: nextBill,
-          house_of_origin: (fd.get('house_of_origin') || '').trim(),
-          responsiblePerson: (fd.get('responsiblePerson') || '').trim(),
-          serviceScope: fd.get('serviceScope') || ''
+          house_of_origin: (fd.get('house_of_origin') || '').trim()
         };
         state.clients.push(client);
         persist()
@@ -2858,9 +2829,7 @@
         paymentStatus: payStatus,
         paymentDate: payDate,
         nextBillingDate: nextBill,
-        house_of_origin: lead.house_of_origin || '',
-        responsiblePerson: (fd.get('responsiblePerson') || '').trim(),
-        serviceScope: fd.get('serviceScope') || ''
+        house_of_origin: lead.house_of_origin || ''
       };
       state.clients.push(client);
       lead.stage = 'active';
@@ -2961,10 +2930,6 @@
       var client = state.clients.find(function (c) { return c.id === editClientId; });
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
-      var scope = fd.get('serviceScope') || '';
-      var resp = (fd.get('responsiblePerson') || '').trim();
-      if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
-      if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
       var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
       if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
@@ -2973,7 +2938,6 @@
       // this client. payerPhone is intentionally not deduped (shared payers).
       if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
-        serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
         treatmentContactPhone: client.treatmentContactPhone,
         payerName: client.payerName, payerPhone: client.payerPhone,
         paymentLink: client.paymentLink,
@@ -2983,8 +2947,6 @@
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
-      client.serviceScope = scope;
-      client.responsiblePerson = resp;
       client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;
