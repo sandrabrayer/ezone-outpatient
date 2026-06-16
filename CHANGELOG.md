@@ -17,6 +17,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the flag clears. `public/app.js`, `public/index.html`, `public/style.css`.
 
 ### Added
+- **Clinical → billing map module (`public/treatment-map.js`).** A standalone,
+  hardcoded source of truth that translates the **clinical** treatment
+  vocabulary (the therapists app) into the **billing** vocabulary, plus the
+  client-facing price table (incl. VAT). One-to-one over 12 clinical keys; the
+  five previously-unmapped clinical types (פסיכודינמי / פסיכותרפי ממוקד טראומה /
+  עיסוי טיפולי / טיפול ממוקד התמכרויות / טיפול אינטגרטיבי) enter billing under
+  their own names, and two renames are pinned (`פרטני כללי → פרטני`, `מרכז יום →
+  ליווי יומי בקהילה` with the day-center/location rule bound to the new name).
+  Exposes `clinicalToBilling(clinicalType)` and `billingPrice(billingType,
+  frequencyPerWeek?)`: individual + variants ₪500/session, מעקב פסיכיאטרי
+  ₪1,100, אינטייק ₪2,300 (billing-only), ליווי יומי בקהילה per month by
+  frequency (3×→₪15,000, 5×→₪18,000, other frequencies throw); קבוצה / טיפול
+  משפחתי return `null` to flag "no clinic-wide price — set per client" (there is
+  no hardcoded price-by-type in the app). `test/treatment-map.test.js` (15
+  cases) locks completeness, one-to-one integrity, the renames, price lookup,
+  and a loud guard against an unmapped 13th clinical type. **Not wired** into the
+  save flow, form, or `getTreatmentPlans` yet — module + tests only. See
+  `CHANGELOG-clinical-billing-map.md`.
 - **Duplicate-client merge (`mergeClients`).** A guarded cleanup behind the
   duplicate report: pick a **survivor** (radio, defaults to the `פעיל` row), and
   the Apps Script `_mergeClients` action **repoints** every `Payments.clientId` /
