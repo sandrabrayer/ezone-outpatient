@@ -63,11 +63,15 @@ into existing types.
 - **ליווי יומי בקהילה** → priced **per month, by frequency**: 3×/week =
   **₪15,000**, 5×/week = **₪18,000**. This is the **only** type whose price needs
   `frequencyPerWeek`; any other (or missing) frequency **throws**.
-- **קבוצה, טיפול משפחתי** → **no clinic-wide price exists** in outpatient today.
-  Price is free-entry per client (`pricePerSession`; there is no hardcoded
-  price-by-type anywhere in the app). We do **not** invent a number —
-  `billingPrice` returns `null` (`PRICE_FLAG_PER_CLIENT`) to flag "set per
-  client".
+- **קבוצה** → **₪0** — **intentionally free** (bundled inside larger packages;
+  not billed as a standalone line). This is a **decided** price of zero, **not**
+  `null`. `billingPrice('קבוצה')` returns `0` (a number), distinct from `null`
+  (undecided). _(Was previously `null`/flagged-per-client.)_
+- **טיפול משפחתי** → **₪600 / session**. _(Was previously `null`/flagged-per-client.)_
+- `PRICE_FLAG_PER_CLIENT` (`null`) is **retained** as the sentinel for any type
+  whose clinic-wide price is genuinely still undecided. After this change **no**
+  billing type is flagged `null` — every type now resolves to a number (or, for
+  ליווי יומי בקהילה, a frequency-dependent number).
 
 ## Guarantees locked by tests (`test/treatment-map.test.js`)
 
@@ -79,7 +83,8 @@ into existing types.
   still match).
 - **Price lookup** — every per-session type returns its price; ליווי returns
   15000 (freq 3) / 18000 (freq 5) and throws for any other/missing frequency;
-  קבוצה / טיפול משפחתי flag as `null`.
+  קבוצה returns `0` (intentionally free — a number, not `null`), טיפול משפחתי
+  returns `600`; no billing type remains flagged `null`.
 - **Loud guard** — a 13th clinical type added without a valid billing
   target/price makes `assertMapComplete()` throw.
 

@@ -156,7 +156,11 @@ npm start
   the same payload as a query param fallback.
 - `public/treatment-map.js` is the hardcoded **clinical → billing** vocabulary
   map + price table (incl. VAT): `clinicalToBilling()` and `billingPrice()`. Not
-  yet wired into the save flow, form, or `getTreatmentPlans`. See
+  yet wired into the save flow, form, or `getTreatmentPlans`. Prices: individual
+  + variants ₪500, מעקב פסיכיאטרי ₪1,100, אינטייק ₪2,300, ליווי יומי בקהילה by
+  monthly frequency (3×→₪15,000 / 5×→₪18,000), **קבוצה ₪0 (intentionally free —
+  a decided price, not `null`)**, **טיפול משפחתי ₪600**. `PRICE_FLAG_PER_CLIENT`
+  (`null`) stays reserved for any still-undecided type (none today). See
   `CHANGELOG-clinical-billing-map.md`.
 - `_readAll`/`_writeAll` map sheet columns **by position**, and `_ensureSheet`
   does not migrate data — so a column can never be dropped from the middle of

@@ -12,7 +12,7 @@
  *     day-center rule (bound to the NEW name + legacy alias)
  *   - price lookup: each per-session type returns its price; ליווי returns
  *     15000 for freq 3, 18000 for freq 5, and throws for any other frequency;
- *     קבוצה / טיפול משפחתי flag as null (no clinic-wide price)
+ *     קבוצה is 0 (intentionally free — decided, not null), טיפול משפחתי is 600
  *   - guard: a 13th clinical type without a billing target fails loudly
  */
 
@@ -113,10 +113,26 @@ test('ליווי יומי בקהילה: any other / missing frequency throws', (
   assert.throws(() => TM.billingPrice('ליווי יומי בקהילה', 0), /Unsupported/);
 });
 
-test('קבוצה / טיפול משפחתי flag as null (no clinic-wide price — set per client)', () => {
-  assert.equal(TM.billingPrice('קבוצה'), TM.PRICE_FLAG_PER_CLIENT);
-  assert.equal(TM.billingPrice('טיפול משפחתי'), TM.PRICE_FLAG_PER_CLIENT);
+test('קבוצה is ₪0 — intentionally free (a decided price, not null, no throw)', () => {
+  const p = TM.billingPrice('קבוצה');
+  assert.equal(p, 0);
+  assert.notEqual(p, null);              // 0 (decided/free) != null (undecided)
+  assert.equal(typeof p, 'number');
+});
+
+test('טיפול משפחתי is ₪600 / session', () => {
+  assert.equal(TM.billingPrice('טיפול משפחתי'), 600);
+});
+
+test('PRICE_FLAG_PER_CLIENT sentinel is still null (kept for any undecided type)', () => {
   assert.equal(TM.PRICE_FLAG_PER_CLIENT, null);
+});
+
+test('no billing type is left flagged null after pricing קבוצה / טיפול משפחתי', () => {
+  const stillNull = Object.keys(TM.BILLING_PRICES).filter(
+    (k) => TM.BILLING_PRICES[k] === null
+  );
+  assert.deepEqual(stillNull, [], 'unexpected undecided (null) prices: ' + stillNull.join(', '));
 });
 
 test('billingPrice throws on an unknown billing type', () => {

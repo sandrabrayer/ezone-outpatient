@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Priced the two open billing types in `public/treatment-map.js`.** `קבוצה` →
+  **₪0** (**intentionally free** — bundled inside larger packages; a *decided*
+  price of zero, **not** `null`) and `טיפול משפחתי` → **₪600 / session**. Both
+  previously returned `null` (`PRICE_FLAG_PER_CLIENT`) to flag "set per client".
+  A comment now distinguishes `0` (free, decided) from `null` (undecided).
+  `PRICE_FLAG_PER_CLIENT` is **kept** as the sentinel for any genuinely-undecided
+  type — but after this change **no** billing type is flagged `null`. No other
+  price and no map structure changed. The **Code.gs mirror carries only the
+  clinical→billing name map, not prices**, so it is **unchanged** and **no Apps
+  Script redeploy is required**; the mirror sync-guard
+  (`test/clinical-derive.test.js`) compares names only and stays green.
+  `test/treatment-map.test.js` updated (`billingPrice('קבוצה')===0`,
+  `billingPrice('טיפול משפחתי')===600`, plus a "no null prices remain" guard).
+  See `CHANGELOG-clinical-billing-map.md`.
+
 ### Added
 - **Secured `setClinicalType` write endpoint (task 4.5b).** A new fail-closed,
   shared-secret, phone-matched POST action on the Apps Script web app
