@@ -33,10 +33,13 @@
  *       - ליווי יומי בקהילה → per MONTH, by frequency: 3×/wk = ₪15,000,
  *         5×/wk = ₪18,000. This is the ONLY type whose price needs
  *         `frequencyPerWeek`; any other frequency throws.
- *       - קבוצה, טיפול משפחתי → NO clinic-wide price exists in outpatient today
- *         (price is free-entry per client via `pricePerSession`). We do NOT
- *         invent a number — `billingPrice` returns `null` to FLAG "set per
- *         client". See PRICE_FLAG_PER_CLIENT.
+ *       - קבוצה → ₪0 (INTENTIONALLY FREE — bundled inside larger packages, not
+ *         billed as a standalone line). This is a real, decided price of zero,
+ *         NOT `null`. `0` (free, decided) is distinct from `null` (undecided).
+ *       - טיפול משפחתי → ₪600 / session.
+ *         (Both previously returned `null` to FLAG "set per client"; now priced
+ *         clinic-wide. See PRICE_FLAG_PER_CLIENT, still the sentinel for any
+ *         genuinely-undecided type added in future.)
  *  4. GUARDED. A 13th clinical type added without a billing target makes
  *     `assertMapComplete()` (and its test) fail LOUDLY. `clinicalToBilling`
  *     throws on an unknown clinical type; `billingPrice` throws on an unknown
@@ -90,8 +93,9 @@
 
   // --- Billing prices, keyed by BILLING type (incl. VAT) ---------------------
   // Value meanings:
-  //   number                  -> a flat per-session price
-  //   PRICE_FLAG_PER_CLIENT   -> intentionally unset (flag; per-client entry)
+  //   number (incl. 0)        -> a flat per-session price. 0 is a DECIDED price
+  //                              (intentionally free), NOT a "no price" flag.
+  //   PRICE_FLAG_PER_CLIENT   -> intentionally UNDECIDED (null; per-client entry)
   //   DAY_CENTER_BILLING      -> NOT in this table; priced by frequency below
   var BILLING_PRICES = {
     'פרטני':                  INDIVIDUAL_SESSION_PRICE,
@@ -104,8 +108,10 @@
     'טיפול אינטגרטיבי':       INDIVIDUAL_SESSION_PRICE,
     'מעקב פסיכיאטרי':         1100,
     'אינטייק':                2300,     // billing-only type (no clinical source)
-    'קבוצה':                  PRICE_FLAG_PER_CLIENT,
-    'טיפול משפחתי':           PRICE_FLAG_PER_CLIENT
+    // 0 == intentionally free (bundled in larger packages), a DECIDED price.
+    // Distinct from PRICE_FLAG_PER_CLIENT (null == undecided / set per client).
+    'קבוצה':                  0,
+    'טיפול משפחתי':           600
     // DAY_CENTER_BILLING ('ליווי יומי בקהילה') priced by frequency, see below.
   };
 
@@ -138,7 +144,9 @@
    *   - ליווי יומי בקהילה (day center)  -> monthly price for the given frequency
    *                                       (3 -> 15000, 5 -> 18000); REQUIRES a
    *                                       valid frequency, else throws.
-   *   - קבוצה / טיפול משפחתי           -> null (flag: price set per client)
+   *   - קבוצה                          -> 0 (intentionally free; a decided price,
+   *                                       NOT null)
+   *   - טיפול משפחתי                   -> 600 (incl. VAT)
    *   - unknown billing type           -> throws.
    */
   function billingPrice(billingType, frequencyPerWeek) {
