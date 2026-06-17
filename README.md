@@ -107,6 +107,19 @@ npm start
   ("⏳ המתנה לאישור הפסקה") and resolved only when she manually discharges.
   `getStopFlags` / `resolveStopFlag` are internal (via the Node proxy). See
   `CHANGELOG-stop-flag-receiver.md`. **Requires an Apps Script redeploy.**
+- `POST /exec { action:'setClinicalType', secret:<CLINICAL_TYPE_SECRET>, phone, clinicalTreatmentType }`
+  — the E-Zone Therapists app sets a patient's clinical treatment type on the
+  outpatient client. **Fail-closed:** `CLINICAL_TYPE_SECRET` (Apps Script Script
+  Property) must exist and match, else rejected. Posts directly to Apps Script
+  `/exec` (no `server.js` change). The phone is normalized to canonical and
+  matched to a client by phone. **Never fail-open, never guess:** a single match
+  sets `clinicalTreatmentType` and derives + overwrites `serviceType` through the
+  same `_clinicalToBilling` map used on save (`{ ok:true, matched:1 }`); no match
+  → `{ ok:false, reason:'no_match' }`, multiple → `{ ok:false,
+  reason:'multi_match' }`, an unknown clinical type → `{ ok:false,
+  reason:'unknown_type' }` — all three **write nothing**. Only the two fields
+  change on the matched row; every other cell is preserved. See
+  `CHANGELOG-set-clinical-type.md`. **Requires an Apps Script redeploy.**
 
 ### Debug endpoints
 

@@ -5,6 +5,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Secured `setClinicalType` write endpoint (task 4.5b).** A new fail-closed,
+  shared-secret, phone-matched POST action on the Apps Script web app
+  (`apps-script/Code.gs`): the E-Zone Therapists app can set a patient's clinical
+  treatment type on the outpatient client. `POST /exec { action:'setClinicalType',
+  secret, phone, clinicalTreatmentType }`, gated by a new `CLINICAL_TYPE_SECRET`
+  Script Property — **fail-closed** (unset/empty/mismatched secret rejects), the
+  same model as `flagStop`, NOT the fail-open read pattern. Matches a client by
+  canonical phone (reusing `_recoverPhone`, across `phone` /
+  `treatmentContactPhone` / `payerPhone`). **Never fail-open, never guess:** a
+  single match sets `clinicalTreatmentType` and derives + overwrites `serviceType`
+  via the **existing** `_clinicalToBilling` / `_deriveClientServiceType` map from
+  4.5a (no duplicated map), writes the row, returns `{ ok:true, matched:1 }`; no
+  match → `{ ok:false, reason:'no_match' }`, multiple → `{ ok:false,
+  reason:'multi_match' }`, unknown clinical type → `{ ok:false,
+  reason:'unknown_type' }` — all three **write nothing**. Only the two fields
+  change on the matched row; positional column mapping is preserved.
+  `test/set-clinical-type.test.js` locks fail-closed auth, single-match
+  write+derive (incl. the `פרטני כללי→פרטני` and `ליווי יומי בקהילה` renames and a
+  newly-billable type), no-match/multi-match/unknown-type write-nothing, and
+  positional safety on a legacy row. **Requires an Apps Script redeploy and the
+  `CLINICAL_TYPE_SECRET` Script Property.** See `CHANGELOG-set-clinical-type.md`.
+
 ### Removed
 - **The אחראי (responsible/owner) concept.** Removed the `responsiblePerson`
   name field and its `serviceScope` role selector (individual → "מטפל" /

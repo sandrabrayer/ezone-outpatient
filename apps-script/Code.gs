@@ -759,6 +759,79 @@ function _getStopFlags() {
   return { ok: true, stopFlags: _readAll(sh, STOP_FLAGS_HEADERS) };
 }
 
+/* ===== Set clinical treatment type (secured cross-app write) =====
+ *
+ * Inbound: the E-Zone Therapists app POSTs { action:'setClinicalType', secret,
+ * phone, clinicalTreatmentType } directly to this /exec. FAIL-CLOSED auth: the
+ * shared secret 'CLINICAL_TYPE_SECRET' Script Property MUST exist and match —
+ * same model as flagStop, NOT the fail-open read pattern. An unset/empty/wrong
+ * secret REJECTS (this is an external write to Clients).
+ *
+ * Behaviour (never fail-open, never guess):
+ *   single phone match   -> set that client's clinicalTreatmentType, derive +
+ *                           overwrite serviceType via the SAME _clinicalToBilling
+ *                           / _deriveClientServiceType used on save, write the
+ *                           row, return { ok:true, matched:1 }.
+ *   no match             -> { ok:false, reason:'no_match' },    write nothing.
+ *   multiple matches     -> { ok:false, reason:'multi_match' }, write nothing.
+ *   unknown clinical type-> { ok:false, reason:'unknown_type' },write nothing.
+ *
+ * Only the two fields (clinicalTreatmentType + derived serviceType) change on the
+ * matched row; every other cell is written back exactly as read. _writeAll maps
+ * positionally so the full Clients array is rewritten — untouched rows are
+ * byte-identical, preserving the append-only column layout.
+ */
+function _clinicalTypeAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('CLINICAL_TYPE_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _setClinicalType(payload) {
+  var phone = _recoverPhone(payload && payload.phone);
+  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
+
+  var clinical = String((payload && payload.clinicalTreatmentType) || '').trim();
+  if (!clinical) return { ok: false, reason: 'unknown_type' };
+  // Validate against the SAME map used on save — reject (write nothing) before
+  // touching the sheet rather than letting the derive throw mid-write.
+  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, clinical)) {
+    return { ok: false, reason: 'unknown_type' };
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var clients = _readAll(sh, CLIENTS_HEADERS);
+
+    // Match by canonical phone across the same phone fields _matchStopFlagClient
+    // checks (patient phone / treatment-contact / payer). Never guess: a single
+    // hit writes, anything else writes nothing.
+    var hits = [];
+    for (var i = 0; i < clients.length; i++) {
+      var c = clients[i];
+      if (_recoverPhone(c.phone) === phone ||
+          _recoverPhone(c.treatmentContactPhone) === phone ||
+          _recoverPhone(c.payerPhone) === phone) {
+        hits.push(c);
+      }
+    }
+    if (hits.length === 0) return { ok: false, reason: 'no_match' };
+    if (hits.length > 1) return { ok: false, reason: 'multi_match' };
+
+    var client = hits[0];
+    client.clinicalTreatmentType = clinical;
+    _deriveClientServiceType(client); // overwrites serviceType via _clinicalToBilling
+
+    _writeAll(sh, CLIENTS_HEADERS, clients);
+    return { ok: true, matched: 1 };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _resolveStopFlag(id, resolvedBy) {
   if (!id) return { ok: false, error: 'missing_id' };
   var lock = LockService.getScriptLock();
@@ -968,6 +1041,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_flagStop(payload));
+    }
+    if (action === 'setClinicalType') {
+      var ctParams = (e && e.parameter) || {};
+      if (payload && payload.secret) ctParams.secret = payload.secret;
+      if (!_clinicalTypeAuthOk(ctParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_setClinicalType(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'resolveStopFlag') {
