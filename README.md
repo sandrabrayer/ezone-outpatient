@@ -155,3 +155,9 @@ npm start
   **pre-VAT** — VAT is added at payment time via the separate `withVat()` helper,
   never inside `therapistPay`. Not wired anywhere. See
   `CHANGELOG-therapist-pay-table.md`.
+- `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
+  type as recorded by the therapists app. On save, `_saveAll` derives
+  `serviceType` from it via an inline mirror of `treatment-map.js`
+  (`_clinicalToBilling`); absent/empty leaves `serviceType` as-is, unknown
+  throws. Receiver only — no sender/form yet. See
+  `CHANGELOG-clinical-treatment-type-receiver.md`.

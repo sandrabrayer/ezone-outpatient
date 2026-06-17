@@ -46,7 +46,14 @@ var CLIENTS_HEADERS = [
   // The app no longer reads or writes them; existing cells blank on next save.
   'responsiblePerson', 'serviceScope',
   'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-  'phone'
+  'phone',
+  // APPEND-ONLY (task 4.5a): clinical treatment type as recorded by the E-Zone
+  // Therapists app. When present on save, _deriveClientServiceType() runs it
+  // through the clinical→billing map and overwrites `serviceType` (clinical is
+  // the source of truth). Appended at the END so existing rows are untouched
+  // and positional mapping is preserved (same lesson as `phone` / the reserved
+  // slots). Absent/empty -> serviceType left as-is (back-compat).
+  'clinicalTreatmentType'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -213,11 +220,58 @@ function _getData() {
   };
 }
 
+/* ===== Clinical → billing derive (task 4.5a receiver) =====
+ *
+ * MIRROR of public/treatment-map.js `CLINICAL_TO_BILLING`. The Apps Script
+ * runtime cannot import that module, so the map is duplicated here, exactly as
+ * the debt/phone rules are. test/clinical-derive.test.js parses this literal and
+ * asserts it deep-equals the module — any drift fails the suite. Keep in sync.
+ *
+ * One-to-one over 12 clinical keys; two renames are pinned (פרטני כללי→פרטני and
+ * מרכז יום→ליווי יומי בקהילה, here keyed under the NEW name); the five
+ * newly-billable types map to their own names.
+ */
+var CLINICAL_TO_BILLING = {
+  'פרטני כללי':             'פרטני',
+  'פרטני CBT':              'פרטני CBT',
+  'פרטני EMDR':             'פרטני EMDR',
+  'קבוצה':                  'קבוצה',
+  'טיפול משפחתי':           'טיפול משפחתי',
+  'מעקב פסיכיאטרי':         'מעקב פסיכיאטרי',
+  'ליווי יומי בקהילה':      'ליווי יומי בקהילה',
+  'פסיכודינמי':             'פסיכודינמי',
+  'פסיכותרפי ממוקד טראומה': 'פסיכותרפי ממוקד טראומה',
+  'עיסוי טיפולי':           'עיסוי טיפולי',
+  'טיפול ממוקד התמכרויות':  'טיפול ממוקד התמכרויות',
+  'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי'
+};
+
+function _clinicalToBilling(clinicalType) {
+  var key = String(clinicalType == null ? '' : clinicalType).trim();
+  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, key)) {
+    throw new Error('Unknown clinical treatment type: "' + key + '"');
+  }
+  return CLINICAL_TO_BILLING[key];
+}
+
+/* If a client row carries a clinicalTreatmentType, derive serviceType from it
+ * (clinical is authoritative) and overwrite. Absent/empty -> leave serviceType
+ * untouched (back-compat for legacy / not-yet-migrated rows). Throws on an
+ * unknown clinical value rather than silently blanking. Mutates + returns. */
+function _deriveClientServiceType(client) {
+  if (!client) return client;
+  var clinical = String(client.clinicalTreatmentType == null ? '' : client.clinicalTreatmentType).trim();
+  if (!clinical) return client;
+  client.serviceType = _clinicalToBilling(clinical);
+  return client;
+}
+
 function _saveAll(payload) {
   var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
   var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
   var leads = (payload && payload.leads) || [];
   var clients = (payload && payload.clients) || [];
+  for (var i = 0; i < clients.length; i++) _deriveClientServiceType(clients[i]);
   _writeAll(leadsSh, LEADS_HEADERS, leads);
   _writeAll(clientsSh, CLIENTS_HEADERS, clients);
   return { ok: true, savedLeads: leads.length, savedClients: clients.length };

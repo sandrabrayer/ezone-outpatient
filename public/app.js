@@ -390,7 +390,10 @@
       treatmentContactPhone: recoverPhone(row.treatmentContactPhone),
       payerName: row.payerName || '',
       payerPhone: recoverPhone(row.payerPhone),
-      paymentLink: row.paymentLink || ''
+      paymentLink: row.paymentLink || '',
+      // data-layer passthrough (task 4.5a): preserve the clinical type so a
+      // dashboard save round-trips it (the server derives serviceType from it).
+      clinicalTreatmentType: row.clinicalTreatmentType || ''
     };
   }
 
@@ -444,7 +447,11 @@
       treatmentContactPhone: c.treatmentContactPhone || '',
       payerName: c.payerName || '',
       payerPhone: c.payerPhone || '',
-      paymentLink: c.paymentLink || ''
+      paymentLink: c.paymentLink || '',
+      // data-layer passthrough (task 4.5a): preserve the clinical type so it is
+      // not blanked on save; the server (_deriveClientServiceType) is the
+      // authority that turns it into serviceType.
+      clinicalTreatmentType: c.clinicalTreatmentType || ''
     };
   }
 
