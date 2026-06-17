@@ -73,16 +73,16 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
   // the dead concept is still reserved...
   assert.ok(H.includes('responsiblePerson'), 'responsiblePerson slot was dropped (positional risk!)');
   assert.ok(H.includes('serviceScope'), 'serviceScope slot was dropped (positional risk!)');
-  // ...sitting exactly between house_of_origin and the kept contact phone, with
-  // the phone join key still LAST — i.e. nothing after them shifted.
+  // ...sitting exactly between house_of_origin and the kept contact phone —
+  // i.e. nothing after them shifted. (clinicalTreatmentType was later appended
+  // after `phone` in task 4.5a; `phone` is no longer the final column.)
   const tail = H.slice(H.indexOf('house_of_origin'));
   assert.deepEqual(tail, [
     'house_of_origin',
     'responsiblePerson', 'serviceScope',
     'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-    'phone'
+    'phone', 'clinicalTreatmentType'
   ]);
-  assert.equal(H[H.length - 1], 'phone');
 });
 
 // --- 2. POSITIONAL SAFETY (mirror of Code.gs _writeAll / _readAll) ----------

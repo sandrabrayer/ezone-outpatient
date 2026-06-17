@@ -35,6 +35,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the flag clears. `public/app.js`, `public/index.html`, `public/style.css`.
 
 ### Added
+- **Clinical-treatment-type receiver (`clinicalTreatmentType` + on-save derive).**
+  New `clinicalTreatmentType` column on the Clients sheet (Apps Script
+  `Code.gs`, **appended LAST** after `phone`, append-only so existing rows are
+  untouched and positional mapping is preserved). On save, `_saveAll` runs each
+  client's `clinicalTreatmentType` through a clinical→billing map
+  (`_clinicalToBilling`, an inline **mirror** of `public/treatment-map.js`) and
+  **overwrites `serviceType`** — clinical is the source of truth. Absent/empty
+  clinical leaves `serviceType` untouched (back-compat for legacy / not-yet-
+  migrated rows); an **unknown** clinical value **throws** rather than silently
+  blanking. `public/app.js` preserves the field through `normalizeClientFromSheet`
+  / `clientForSheet` (data-layer passthrough only — **no form control, no
+  therapists-side sender** in this step). `test/clinical-derive.test.js` parses
+  the Code.gs map + headers and locks: every clinical value derives correctly
+  (incl. the 2 renames and the 5 newly-billable types), the mirror deep-equals
+  `treatment-map.js`, empty leaves serviceType, unknown throws, and the column
+  is last with `phone` intact. **Requires an Apps Script redeploy.** See
+  `CHANGELOG-clinical-treatment-type-receiver.md`.
 - **Therapist pay table module (`public/therapist-pay.js`).** A standalone,
   hardcoded source of truth for the **pay** side — what E-ZONE pays each
   therapist per session (counterpart to `treatment-map.js`, the billing side).

@@ -137,12 +137,18 @@ test('backfill: existing client with no stored phone inherits it from its lead',
   assert.equal(resolveStopFlagClient({ phone: '0543123276' }, clients).client.id, 'C1');
 });
 
-test('schema guard: Clients `phone` column exists and is appended LAST', () => {
+test('schema guard: Clients `phone` column exists, appended after paymentLink', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const m = src.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'CLIENTS_HEADERS not found');
-  const cols = m[1].match(/'[^']+'/g).map(s => s.slice(1, -1));
+  const cols = m[1]
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n') // strip comments
+    .match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  assert.equal(cols[cols.length - 1], 'phone', 'phone must be LAST (append-only)');
-  assert.equal(cols[cols.length - 2], 'paymentLink');
+  // phone was appended right after paymentLink (append-only). clinicalTreatmentType
+  // was later appended after phone (task 4.5a), so phone is now second-to-last.
+  const pi = cols.indexOf('phone');
+  assert.equal(cols[pi - 1], 'paymentLink');
+  assert.equal(cols[cols.length - 1], 'clinicalTreatmentType', 'clinicalTreatmentType must be LAST');
+  assert.equal(cols[cols.length - 2], 'phone');
 });
