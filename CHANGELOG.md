@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Editable monthly collection day** (`יום גבייה חודשי`) on the patient edit
+  form — a calendar date-picker (`type="date"`), matching the direct-add form.
+  Previously the collection day could only be set at creation. Only the
+  **day-of-month** is stored (`client.billingDay`, integer) via `dayOfMonth()`,
+  so renewal/billing logic is unchanged; clearing it falls back to the
+  start-date day. The field prefills to the current month with the stored day,
+  clamped to the month's last day (`billingDayInputValue`). Front-end only — no
+  Apps Script/schema change (the `billingDay` column already exists).
+  `test/billing-day-picker.test.js` covers the day extraction, the 29–31 clamp,
+  and the prefill round-trip.
+
 ### Fixed
 - **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
   rendered a non-interactive `<span>` with no control, and the click handler
