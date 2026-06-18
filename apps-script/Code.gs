@@ -266,6 +266,109 @@ function _deriveClientServiceType(client) {
   return client;
 }
 
+/* ===== Pay + price mirrors (task 4.8-step3-out) =============================
+ *
+ * MIRRORS of public/therapist-pay.js (the PAY side) and the price half of
+ * public/treatment-map.js (the client-facing BILLING side). The Apps Script
+ * runtime cannot import those modules, so — exactly like CLINICAL_TO_BILLING
+ * above — the tables are duplicated here. test/session-outcome.test.js parses
+ * each literal out of Code.gs and asserts it deep-equals the canonical module,
+ * so the mirror can never silently drift. Keep in sync; ALL RATES ARE PRE-VAT on
+ * the pay side and INCL. VAT on the billing side, untouched here.
+ */
+
+// --- Pay: flat per-therapist (pre-VAT). Mirror of FLAT_RATES. ----------------
+var THERAPIST_FLAT_RATES = {
+  'מעיין דלומי': 250,
+  'ניר אורן':    250,
+  'תמר גנץ':     250,
+  'דליה מלמד':   230,
+  'אלה שפירא':   230,
+  'ליאת חגאבי':  230,
+  'נועה דואק':   230,
+  'חנן וייל':    230,
+  'יפעת רומנו':  220,
+  'כנרת זיידן':  220,
+  'איתן דשה':    210,
+  'נועה זיפמן':  210,
+  'רעות חוצה':   200,
+  'דניאל סייג':  200,
+  'אסתר':        180
+};
+
+// --- Pay: psychiatrists by treatment type (pre-VAT). Mirror of PSYCHIATRIST_RATES.
+var PSYCHIATRIST_RATES = {
+  'ד״ר שפרינץ': { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 },
+  'ד״ר דנגור':  { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 }
+};
+
+// --- Billing: flat client-facing prices (incl. VAT). Mirror of BILLING_PRICES.
+// 0 is a DECIDED price (קבוצה intentionally free), not a "no price" flag.
+var BILLING_PRICES = {
+  'פרטני':                  500,
+  'פרטני CBT':              500,
+  'פרטני EMDR':             500,
+  'פסיכודינמי':             500,
+  'פסיכותרפי ממוקד טראומה': 500,
+  'עיסוי טיפולי':           500,
+  'טיפול ממוקד התמכרויות':  500,
+  'טיפול אינטגרטיבי':       500,
+  'מעקב פסיכיאטרי':         1100,
+  'אינטייק':                2300,
+  'קבוצה':                  0,
+  'טיפול משפחתי':           600
+};
+
+// Day-center is priced by weekly frequency, not in BILLING_PRICES. Mirror of
+// DAY_CENTER_BILLING / DAY_CENTER_MONTHLY_BY_FREQ.
+var DAY_CENTER_BILLING = 'ליווי יומי בקהילה';
+var DAY_CENTER_MONTHLY_BY_FREQ = { 3: 15000, 5: 18000 };
+var GROUP_BILLING = 'קבוצה';
+
+function _hasOwn(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); }
+
+/* _therapistPay(name, treatmentType?) -> pre-VAT rate. Mirror of therapistPay():
+ * flat therapist ignores type; psychiatrist REQUIRES a valid type; unknown
+ * therapist / bad psych type throws. */
+function _therapistPay(therapistName, treatmentType) {
+  var name = String(therapistName == null ? '' : therapistName).trim();
+  if (_hasOwn(THERAPIST_FLAT_RATES, name)) return THERAPIST_FLAT_RATES[name];
+  if (_hasOwn(PSYCHIATRIST_RATES, name)) {
+    var type = String(treatmentType == null ? '' : treatmentType).trim();
+    var table = PSYCHIATRIST_RATES[name];
+    if (!type || !_hasOwn(table, type)) {
+      throw new Error('Psychiatrist "' + name + '" requires a valid treatmentType (אינטייק or מעקב פסיכיאטרי)');
+    }
+    return table[type];
+  }
+  throw new Error('Unknown therapist: "' + name + '"');
+}
+
+function _isDayCenterBilling(billingType) {
+  return String(billingType == null ? '' : billingType).trim() === DAY_CENTER_BILLING;
+}
+
+/* _billingPrice(billingType, freqPerWeek?) -> price. Mirror of billingPrice():
+ * day-center REQUIRES a valid frequency (3/5); flat types return the number;
+ * unknown billing type throws. */
+function _billingPrice(billingType, freqPerWeek) {
+  var key = String(billingType == null ? '' : billingType).trim();
+  if (_isDayCenterBilling(key)) {
+    if (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '') {
+      throw new Error('ליווי יומי בקהילה requires frequencyPerWeek (3 or 5)');
+    }
+    var freq = Number(freqPerWeek);
+    if (!_hasOwn(DAY_CENTER_MONTHLY_BY_FREQ, freq)) {
+      throw new Error('Unsupported ליווי יומי בקהילה frequency: ' + freqPerWeek + ' (expected 3 or 5)');
+    }
+    return DAY_CENTER_MONTHLY_BY_FREQ[freq];
+  }
+  if (!_hasOwn(BILLING_PRICES, key)) {
+    throw new Error('Unknown billing type: "' + key + '"');
+  }
+  return BILLING_PRICES[key];
+}
+
 function _saveAll(payload) {
   var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
   var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
@@ -832,6 +935,188 @@ function _setClinicalType(payload) {
   }
 }
 
+/* ===== Record session outcome (secured cross-app write — task 4.8-step3-out) =
+ *
+ * Inbound: the E-Zone Therapists app POSTs a session-outcome event:
+ *   { action:'recordSessionOutcome', secret, sessionId, phone, therapist,
+ *     clinicalTreatmentType, date, outcome, patientName?, freqPerWeek? }
+ * FAIL-CLOSED auth ('SESSION_OUTCOME_SECRET' Script Property must exist + match —
+ * same model as flagStop / setClinicalType, NOT the fail-open read pattern).
+ *
+ * Computes the therapist pay + client session value for the session and logs ONE
+ * reconciliation row to the SessionLog tab, UPSERTED by sessionId (a corrected
+ * outcome re-sent with the same sessionId overwrites the row and recomputes pay —
+ * never a duplicate, never stale pay). Clients is NEVER modified.
+ *
+ *   outcome:        happened | therapist_cancelled | patient_no_show (any other
+ *                   value rejects, writes nothing)
+ *   sessionStatus:  happened->consumed, therapist_cancelled->credited,
+ *                   patient_no_show->forfeited
+ *   therapistPay:   happened / patient_no_show -> _therapistPay (therapist showed
+ *                   up, so a no-show still pays); therapist_cancelled -> 0 (never
+ *                   delivered); group (קבוצה) -> 0
+ *   clientSessionValue: _billingPrice(billingType, freq). קבוצה -> 0 (decided
+ *                   free). ליווי with NO freq in the event -> null (blank cell —
+ *                   flagged, never guessed; distinct from a real 0).
+ *
+ * Unknown clinical type / unknown outcome / (for paid non-group outcomes) unknown
+ * therapist all REJECT and write nothing. The log is keyed by session, so it
+ * always writes regardless of client match: matchStatus records matched (single
+ * phone hit, fills clientId+patientName) / no_match / multi_match.
+ */
+var SESSION_LOG_HEADERS = [
+  'sessionId', 'phone', 'patientName', 'clientId',
+  'therapist', 'clinicalTreatmentType', 'billingType', 'date',
+  'outcome', 'therapistPay', 'clientSessionValue', 'sessionStatus',
+  'matchStatus', 'recordedAt'
+];
+
+var SESSION_STATUS_BY_OUTCOME = {
+  happened:            'consumed',
+  therapist_cancelled: 'credited',
+  patient_no_show:     'forfeited'
+};
+
+function _sessionOutcomeAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('SESSION_OUTCOME_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+/* Pay rule by outcome. therapist_cancelled and group never call _therapistPay,
+ * so they log fine even for an unknown therapist; only a PAID non-group outcome
+ * (happened / patient_no_show) looks up the therapist and may throw. */
+function _computeSessionPay(outcome, therapist, clinicalTreatmentType, billingType) {
+  if (outcome === 'therapist_cancelled') return 0; // never delivered -> never paid
+  if (billingType === GROUP_BILLING) return 0;      // group -> 0 pay
+  return _therapistPay(therapist, clinicalTreatmentType); // showed up -> paid
+}
+
+/* Value rule. Day-center needs a frequency; if the event carries none, return
+ * null (flag) rather than guessing. Everything else (incl. group -> 0) prices
+ * straight from the billing table. */
+function _computeSessionValue(billingType, freqPerWeek) {
+  if (_isDayCenterBilling(billingType) &&
+      (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '')) {
+    return null;
+  }
+  return _billingPrice(billingType, freqPerWeek);
+}
+
+function _recordSessionOutcome(payload) {
+  var sessionId = String((payload && payload.sessionId) || '').trim();
+  if (!sessionId) return { ok: false, reason: 'missing_session_id' };
+
+  var outcome = String((payload && payload.outcome) || '').trim();
+  if (!_hasOwn(SESSION_STATUS_BY_OUTCOME, outcome)) {
+    return { ok: false, reason: 'unknown_outcome' };
+  }
+
+  var clinical = String((payload && payload.clinicalTreatmentType) || '').trim();
+  if (!clinical || !_hasOwn(CLINICAL_TO_BILLING, clinical)) {
+    return { ok: false, reason: 'unknown_type' };
+  }
+  var billingType = _clinicalToBilling(clinical);
+  var therapist = String((payload && payload.therapist) || '').trim();
+
+  // Frequency only matters for ליווי; absent everywhere else. Accept either key.
+  var freq;
+  if (payload && payload.freqPerWeek != null && payload.freqPerWeek !== '') freq = payload.freqPerWeek;
+  else if (payload && payload.frequencyPerWeek != null && payload.frequencyPerWeek !== '') freq = payload.frequencyPerWeek;
+
+  var therapistPay, clientSessionValue;
+  try {
+    therapistPay = _computeSessionPay(outcome, therapist, clinical, billingType);
+  } catch (err) {
+    return { ok: false, reason: 'unknown_therapist' };
+  }
+  try {
+    clientSessionValue = _computeSessionValue(billingType, freq);
+  } catch (err) {
+    return { ok: false, reason: 'invalid_frequency' };
+  }
+
+  var sessionStatus = SESSION_STATUS_BY_OUTCOME[outcome];
+  var phone = _recoverPhone(payload && payload.phone);
+  var patientName = String((payload && payload.patientName) || '').trim();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // Optional client match for enrichment — never gates the log (keyed by session).
+    var clientId = '', matchStatus = 'no_match';
+    if (phone && /^0\d{8,9}$/.test(phone)) {
+      var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
+      var hits = [];
+      for (var i = 0; i < clients.length; i++) {
+        var c = clients[i];
+        if (_recoverPhone(c.phone) === phone ||
+            _recoverPhone(c.treatmentContactPhone) === phone ||
+            _recoverPhone(c.payerPhone) === phone) {
+          hits.push(c);
+        }
+      }
+      if (hits.length === 1) {
+        clientId = String(hits[0].id);
+        matchStatus = 'matched';
+        if (!patientName) patientName = String(hits[0].name == null ? '' : hits[0].name).trim();
+      } else if (hits.length > 1) {
+        matchStatus = 'multi_match';
+      }
+    }
+
+    var rowObj = {
+      sessionId:          sessionId,
+      phone:              phone,
+      patientName:        patientName,
+      clientId:           clientId,
+      therapist:          therapist,
+      clinicalTreatmentType: clinical,
+      billingType:        billingType,
+      date:               String((payload && payload.date) || '').trim(),
+      outcome:            outcome,
+      therapistPay:       therapistPay,
+      clientSessionValue: clientSessionValue,   // null -> blank cell (flag)
+      sessionStatus:      sessionStatus,
+      matchStatus:        matchStatus,
+      recordedAt:         new Date().toISOString()
+    };
+
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var rowArr = SESSION_LOG_HEADERS.map(function (h) {
+      var v = rowObj[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
+    var lastRow = sh.getLastRow();
+    var upserted = false;
+    if (lastRow > 1) {
+      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+      for (var r = 0; r < ids.length; r++) {
+        if (String(ids[r][0]) === sessionId) {
+          sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
+          upserted = true;
+          break;
+        }
+      }
+    }
+    if (!upserted) sh.appendRow(rowArr);
+
+    var result = {
+      ok: true,
+      sessionId: sessionId,
+      therapistPay: therapistPay,
+      clientSessionValue: clientSessionValue,
+      sessionStatus: sessionStatus
+    };
+    if (upserted) result.upserted = true; else result.appended = true;
+    return result;
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _resolveStopFlag(id, resolvedBy) {
   if (!id) return { ok: false, error: 'missing_id' };
   var lock = LockService.getScriptLock();
@@ -1049,6 +1334,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_setClinicalType(payload));
+    }
+    if (action === 'recordSessionOutcome') {
+      var soParams = (e && e.parameter) || {};
+      if (payload && payload.secret) soParams.secret = payload.secret;
+      if (!_sessionOutcomeAuthOk(soParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_recordSessionOutcome(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'resolveStopFlag') {

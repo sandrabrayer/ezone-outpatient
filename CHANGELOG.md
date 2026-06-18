@@ -22,6 +22,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   See `CHANGELOG-clinical-billing-map.md`.
 
 ### Added
+- **Session-outcome receiver + pay/value compute (task 4.8-step3-out).** A new
+  fail-closed, shared-secret POST action on the Apps Script web app
+  (`apps-script/Code.gs`): the E-Zone Therapists app reports a session outcome and
+  the receiver computes the **therapist pay** + **client session value**, then logs
+  one reconciliation row to a new **`SessionLog`** tab, **upserted by `sessionId`**
+  (a corrected outcome re-sent with the same id overwrites the row and recomputes
+  pay — never a duplicate, never stale pay). `POST /exec { action:
+  'recordSessionOutcome', secret, sessionId, phone, therapist,
+  clinicalTreatmentType, date, outcome }`, gated by a new `SESSION_OUTCOME_SECRET`
+  Script Property — **fail-closed** (unset/empty/mismatched secret rejects), same
+  model as `flagStop`/`setClinicalType`, **not** the fail-open read pattern.
+  `outcome ∈ happened | therapist_cancelled | patient_no_show` (any other value
+  rejects, writes nothing). Pay: `happened`/`patient_no_show` → therapist showed
+  up, **paid** (`_therapistPay`); `therapist_cancelled` → **0** (never delivered);
+  `קבוצה` (group) → **0** pay and **0** value. `sessionStatus`:
+  `consumed`/`credited`/`forfeited`. `clientSessionValue` = `_billingPrice(billing,
+  freq?)`; `ליווי יומי בקהילה` with no frequency in the event stores **null**
+  (flagged, never guessed — distinct from a real `0`). Unknown clinical type /
+  unknown outcome / (for paid non-group outcomes) unknown therapist all **write
+  nothing**. The log is keyed by session, so it always writes regardless of client
+  match (`matchStatus` = matched/no_match/multi_match; a single phone hit fills
+  `clientId`+`patientName`). **Clients is never modified.** Pay rates and billing
+  prices are now **mirrored server-side** (`THERAPIST_FLAT_RATES` /
+  `PSYCHIATRIST_RATES` / `BILLING_PRICES` / `DAY_CENTER_MONTHLY_BY_FREQ`), each with
+  a parse-and-deep-equal **sync-guard** in `test/session-outcome.test.js` so they
+  can't drift from `public/therapist-pay.js` / `public/treatment-map.js` (same
+  discipline as the clinical-map mirror). **Receiver + compute only — no
+  therapists-side sender** (next task). See `CHANGELOG-session-outcome.md`.
+  **Requires an Apps Script redeploy + a new `SESSION_OUTCOME_SECRET` Script
+  Property.**
 - **Secured `setClinicalType` write endpoint (task 4.5b).** A new fail-closed,
   shared-secret, phone-matched POST action on the Apps Script web app
   (`apps-script/Code.gs`): the E-Zone Therapists app can set a patient's clinical
