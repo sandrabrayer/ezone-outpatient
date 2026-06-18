@@ -120,6 +120,24 @@ npm start
   reason:'unknown_type' }` — all three **write nothing**. Only the two fields
   change on the matched row; every other cell is preserved. See
   `CHANGELOG-set-clinical-type.md`. **Requires an Apps Script redeploy.**
+- `POST /exec { action:'recordSessionOutcome', secret:<SESSION_OUTCOME_SECRET>,
+  sessionId, phone, therapist, clinicalTreatmentType, date, outcome }`
+  — the E-Zone Therapists app reports a session outcome; the receiver computes the
+  **therapist pay** + **client session value** and logs one reconciliation row to
+  the `SessionLog` tab, **upserted by `sessionId`** (a corrected outcome re-sent
+  with the same id overwrites the row and recomputes pay — never a duplicate,
+  never stale pay). **Fail-closed:** `SESSION_OUTCOME_SECRET` (Apps Script Script
+  Property) must exist and match. `outcome ∈ happened | therapist_cancelled |
+  patient_no_show` (any other rejects). Pay: `happened`/`patient_no_show` →
+  therapist showed up, **paid**; `therapist_cancelled` → **0**; `קבוצה` (group)
+  → **0** pay and **0** value. `sessionStatus`: `consumed` / `credited` /
+  `forfeited`. `ליווי יומי בקהילה` with no frequency in the event stores
+  `clientSessionValue` **null** (flagged, never guessed). An unknown clinical type
+  or unknown outcome **writes nothing**; the log is keyed by session so it always
+  writes regardless of client match (`matchStatus` = matched/no_match/multi_match).
+  **Clients is never modified.** Posts directly to Apps Script `/exec` (no
+  `server.js` change). This is the **receiver + compute only** — no therapists-side
+  sender. See `CHANGELOG-session-outcome.md`. **Requires an Apps Script redeploy.**
 
 ### Debug endpoints
 
