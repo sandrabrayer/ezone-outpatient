@@ -19,23 +19,24 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const TP = require('../public/therapist-pay');
 
-// Expected flat rates — literal mirror of the table (15 therapists).
+// Expected flat rates — literal mirror of the table (16 therapists).
 const FLAT_EXPECTED = {
-  'מעיין דלומי': 250,
-  'ניר אורן':    250,
-  'תמר גנץ':     250,
-  'דליה מלמד':   230,
-  'אלה שפירא':   230,
-  'ליאת חגאבי':  230,
-  'נועה דואק':   230,
-  'חנן וייל':    230,
-  'יפעת רומנו':  220,
-  'כנרת זיידן':  220,
-  'איתן דשה':    210,
-  'נועה זיפמן':  210,
-  'רעות חוצה':   200,
-  'דניאל סייג':  200,
-  'אסתר':        180
+  'מעיין דלומי':  250,
+  'תמר גנץ':      250,
+  'אורן כביר':    250,
+  'אביב מלכה':    250,
+  'רמי':          250,
+  'כנרת':         250,
+  'הילה':         250,
+  'עידו בוזגלו':  250,
+  'אלה':          250,
+  'שירן':         250,
+  'דנה':          250,
+  'יפעת':         250,
+  'איתן דשה':     250,
+  'דליה מלמד':    230,
+  'נועה זיפמן':   210,
+  'אסתר':         180
 };
 
 // --- flat therapists --------------------------------------------------------
@@ -45,9 +46,9 @@ test('every flat therapist returns their correct pre-VAT rate', () => {
   });
 });
 
-test('roster is exactly 15 flat therapists + 2 psychiatrists', () => {
-  assert.equal(Object.keys(TP.FLAT_RATES).length, 15);
-  assert.equal(Object.keys(TP.PSYCHIATRIST_RATES).length, 2);
+test('roster is exactly 16 flat therapists + 3 psychiatrists', () => {
+  assert.equal(Object.keys(TP.FLAT_RATES).length, 16);
+  assert.equal(Object.keys(TP.PSYCHIATRIST_RATES).length, 3);
 });
 
 test('flat rate is PER PERSON, not per grade (₪250 vs ₪230, same grade A)', () => {
@@ -58,9 +59,9 @@ test('flat rate is PER PERSON, not per grade (₪250 vs ₪230, same grade A)', 
 });
 
 test('flat therapist ignores any treatmentType argument', () => {
-  assert.equal(TP.therapistPay('ניר אורן', 'אינטייק'), 250);
-  assert.equal(TP.therapistPay('ניר אורן', 'whatever'), 250);
-  assert.equal(TP.therapistPay('ניר אורן'), 250);
+  assert.equal(TP.therapistPay('תמר גנץ', 'אינטייק'), 250);
+  assert.equal(TP.therapistPay('תמר גנץ', 'whatever'), 250);
+  assert.equal(TP.therapistPay('תמר גנץ'), 250);
 });
 
 // --- psychiatrists ----------------------------------------------------------

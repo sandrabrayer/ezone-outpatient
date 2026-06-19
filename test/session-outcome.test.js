@@ -203,11 +203,11 @@ function readRow(headers, row) { const o = {}; for (let c = 0; c < headers.lengt
 // ============================================================================
 test('THERAPIST_FLAT_RATES mirror equals public/therapist-pay.js', () => {
   assert.deepEqual(FLAT, TP.FLAT_RATES);
-  assert.equal(Object.keys(FLAT).length, 15);
+  assert.equal(Object.keys(FLAT).length, 16);
 });
 test('PSYCHIATRIST_RATES mirror equals public/therapist-pay.js', () => {
   assert.deepEqual(PSYCH, TP.PSYCHIATRIST_RATES);
-  assert.equal(Object.keys(PSYCH).length, 2);
+  assert.equal(Object.keys(PSYCH).length, 3);
 });
 test('BILLING_PRICES mirror equals public/treatment-map.js', () => {
   assert.deepEqual(BILLING, TreatmentMap.BILLING_PRICES);
@@ -295,7 +295,7 @@ test('group (קבוצה) -> 0 pay AND 0 value, regardless of (paid) outcome', ()
 test('correction: happened -> therapist_cancelled flips pay to 0 on the SAME row', () => {
   let rows = [];
   let r = recordSessionOutcome(
-    { sessionId: 'fix1', therapist: 'ניר אורן', clinicalTreatmentType: 'פרטני כללי', outcome: 'happened' }, rows
+    { sessionId: 'fix1', therapist: 'אורן כביר', clinicalTreatmentType: 'פרטני כללי', outcome: 'happened' }, rows
   );
   rows = r.rows;
   assert.equal(r.res.therapistPay, 250);
@@ -304,7 +304,7 @@ test('correction: happened -> therapist_cancelled flips pay to 0 on the SAME row
 
   // corrected outcome, same sessionId
   r = recordSessionOutcome(
-    { sessionId: 'fix1', therapist: 'ניר אורן', clinicalTreatmentType: 'פרטני כללי', outcome: 'therapist_cancelled' }, rows
+    { sessionId: 'fix1', therapist: 'אורן כביר', clinicalTreatmentType: 'פרטני כללי', outcome: 'therapist_cancelled' }, rows
   );
   rows = r.rows;
   assert.equal(rows.length, 1, 'no duplicate row');

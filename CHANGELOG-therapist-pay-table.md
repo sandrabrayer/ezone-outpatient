@@ -15,30 +15,31 @@ rate=0.18)` helper, which is **never** called inside `therapistPay()`.
 
 1. **Flat per-session, keyed per therapist.** The rate is tied to the
    **individual**, not to a grade — grade is a label only and is intentionally
-   not modeled. Two "grade-A" therapists can sit at different rates (e.g.
-   מעיין דלומי ₪250 vs דליה מלמד ₪230). 15 therapists:
+   not modeled. Two therapists can sit at different rates (e.g.
+   מעיין דלומי ₪250 vs דליה מלמד ₪230). 16 therapists:
 
    | Therapist | Rate (₪, pre-VAT) |
    |---|---|
    | מעיין דלומי | 250 |
-   | ניר אורן | 250 |
    | תמר גנץ | 250 |
+   | אורן כביר | 250 |
+   | אביב מלכה | 250 |
+   | רמי | 250 |
+   | כנרת | 250 |
+   | הילה | 250 |
+   | עידו בוזגלו | 250 |
+   | אלה | 250 |
+   | שירן | 250 |
+   | דנה | 250 |
+   | יפעת | 250 |
+   | איתן דשה | 250 |
    | דליה מלמד | 230 |
-   | אלה שפירא | 230 |
-   | ליאת חגאבי | 230 |
-   | נועה דואק | 230 |
-   | חנן וייל | 230 |
-   | יפעת רומנו | 220 |
-   | כנרת זיידן | 220 |
-   | איתן דשה | 210 |
    | נועה זיפמן | 210 |
-   | רעות חוצה | 200 |
-   | דניאל סייג | 200 |
    | אסתר | 180 |
 
-2. **Psychiatrists pay BY treatment type, not flat.** ד״ר שפרינץ and ד״ר דנגור
-   perform only two types: **אינטייק → ₪900**, **מעקב פסיכיאטרי → ₪700**. A
-   psychiatrist lookup therefore **requires** a valid `treatmentType`.
+2. **Psychiatrists pay BY treatment type, not flat.** ד״ר שפרינץ, ד״ר נטליה and
+   ד״ר דנגור perform only two types: **אינטייק → ₪900**, **מעקב פסיכיאטרי → ₪700**.
+   A psychiatrist lookup therefore **requires** a valid `treatmentType`.
 
 ## API
 
@@ -57,7 +58,7 @@ Also exposed for inspection/tests: `FLAT_RATES`, `PSYCHIATRIST_RATES`,
 
 ## Tests (`test/therapist-pay.test.js`, 12 cases)
 
-Every therapist returns the correct rate · roster is exactly 15 flat + 2
+Every therapist returns the correct rate · roster is exactly 16 flat + 3
 psychiatrists · the ₪250 vs ₪230 pair proves **per-person, not per-grade** ·
 flat therapists ignore `treatmentType` · psychiatrists return 900/700 by type
 and throw on missing/invalid type · unknown therapist throws · `therapistPay`
@@ -66,6 +67,33 @@ completeness guard that fails loudly if a therapist is added without a valid
 rate (flat or psychiatrist).
 
 `node --test test/therapist-pay.test.js` → **12/12 pass**.
+
+## 2026-06-19 — roster replaced with the final Therapists-tab roster
+
+The placeholder roster was replaced **character-for-character** with the live
+roster from the Therapists app's *Therapists* tab: **16 flat + 3 psychiatrists**.
+
+- **Removed:** ניר אורן, אלה שפירא, ליאת חגאבי, נועה דואק, חנן וייל, יפעת רומנו,
+  כנרת זיידן, רעות חוצה, דניאל סייג (placeholder/old-form names).
+- **Added (₪250):** אורן כביר, אביב מלכה, רמי, כנרת, הילה, עידו בוזגלו, אלה,
+  שירן, דנה, יפעת.
+- **Rate change:** איתן דשה 210 → **250** (per the roster).
+- **Kept:** מעיין דלומי 250, תמר גנץ 250, דליה מלמד 230, נועה זיפמן 210, אסתר 180.
+- **Psychiatrist added:** ד״ר נטליה (₪900 intake / ₪700 follow-up), alongside
+  ד״ר שפרינץ and ד״ר דנגור.
+
+The `apps-script/Code.gs` mirror (`THERAPIST_FLAT_RATES` / `PSYCHIATRIST_RATES`)
+was updated in lockstep; the `test/session-outcome.test.js` sync-guard stays
+green.
+
+### Deploy (required — the mirror changed)
+
+`Code.gs` changed, so `recordSessionOutcome` will keep computing the **old**
+rates until the web app is redeployed. **Redeploy the existing deployment
+(`…FOwWYIw`):** Apps Script editor → **Deploy → Manage deployments → ✏️ →
+Version: New version → Deploy**. No Script Property or `server.js` change is
+needed. Until then, e.g. דליה מלמד's outcome still can't compute against the new
+roster.
 
 ## Files
 

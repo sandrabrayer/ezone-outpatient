@@ -6,6 +6,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Replaced the therapist pay roster with the final Therapists-tab roster
+  (`public/therapist-pay.js` + `Code.gs` mirror).** The placeholder roster was
+  swapped, **character-for-character**, for the live roster from the Therapists
+  app's *Therapists* tab: **16 flat therapists + 3 psychiatrists** (was 15 + 2).
+  Removed ניר אורן, אלה שפירא, ליאת חגאבי, נועה דואק, חנן וייל, יפעת רומנו,
+  כנרת זיידן, רעות חוצה, דניאל סייג; added (₪250) אורן כביר, אביב מלכה, רמי,
+  כנרת, הילה, עידו בוזגלו, אלה, שירן, דנה, יפעת; **איתן דשה moved 210 → 250**;
+  kept מעיין דלומי 250, תמר גנץ 250, דליה מלמד 230, נועה זיפמן 210, אסתר 180.
+  Psychiatrists are now ד״ר שפרינץ / **ד״ר נטליה** / ד״ר דנגור (each אינטייק ₪900,
+  מעקב פסיכיאטרי ₪700). The `apps-script/Code.gs` mirror
+  (`THERAPIST_FLAT_RATES` / `PSYCHIATRIST_RATES`) was updated in lockstep and the
+  `test/session-outcome.test.js` sync-guard stays green; `test/therapist-pay.test.js`
+  rate/count assertions were updated and tests referencing removed names
+  (ניר אורן) were reassigned to surviving names. **The mirror changed → an Apps
+  Script redeploy of `…FOwWYIw` is required** before `recordSessionOutcome`
+  computes the new rates (e.g. דליה מלמד's outcome). See
+  `CHANGELOG-therapist-pay-table.md`.
 - **Priced the two open billing types in `public/treatment-map.js`.** `קבוצה` →
   **₪0** (**intentionally free** — bundled inside larger packages; a *decided*
   price of zero, **not** `null`) and `טיפול משפחתי` → **₪600 / session**. Both
