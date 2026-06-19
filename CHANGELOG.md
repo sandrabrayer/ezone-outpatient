@@ -5,6 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Therapist-payout read view (step 1 of 4) — `public/therapist-payout.js` +
+  תשלומי מטפלים tab.** A **read-only** per-therapist monthly payout summary
+  computed from the `SessionLog` tab. A pure module
+  `monthlyPayoutSummary(rows, 'YYYY-MM')` groups rows by therapist for the
+  selected month (filtered on the **session `date`**, not `recordedAt`), sums the
+  pay for outcomes that pay — `happened` + `patient_no_show` — into a **pre-VAT**
+  total, derives the **+VAT** total via `TherapistPay.withVat` (0.18), and surfaces
+  the **excluded** `therapist_cancelled` count (pay 0) plus a per-session
+  breakdown (date, patient, type, outcome, pay). A new **open** `getSessionLog`
+  read action in `apps-script/Code.gs` (same trust level as `getPayments`;
+  forwarded transparently by the Node proxy, no server change) feeds a new Hebrew
+  RTL dark-theme tab with a month picker (defaults to current month), KPI strip,
+  and expandable per-therapist cards. **Display only** — no corrections, export,
+  or forward-marking (steps 2–4). `test/therapist-payout.test.js` locks the sum
+  rule, grouping, session-date filter, pre-VAT and +VAT totals, mixed outcomes, and
+  empty-month safety. **Requires an Apps Script redeploy** (`…FOwWYIw`) for the
+  new read action. See `CHANGELOG-therapist-payout-view.md`.
+
 ### Changed
 - **Replaced the therapist pay roster with the final list** (from the therapists
   app's Therapists tab; names match character-for-character). `FLAT_RATES` in

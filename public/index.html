@@ -28,6 +28,7 @@
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="retention">שימור לידים</button>
+        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
       </nav>
       <div class="topbar-right">
         <span id="roleBadge" class="role-badge">צופה</span>
@@ -133,6 +134,23 @@
           <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">שימור לידים — לא רלוונטים וסיימו טיפול</h2>
         </div>
         <div id="retentionList"></div>
+      </section>
+
+      <!-- Therapist payouts (read-only, step 1 of 4) -->
+      <section id="view-payouts" class="view">
+        <div class="toolbar">
+          <label class="billing-date-label">חודש
+            <input id="payoutMonth" type="month" />
+          </label>
+          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">תשלומי מטפלים — סיכום חודשי (לתצוגה בלבד)</h2>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטפלים</div><div id="payoutTherapistCount" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">סשנים משולמים</div><div id="payoutPaidCount" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">סה״כ לפני מע״מ</div><div id="payoutPreVat" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">סה״כ כולל מע״מ</div><div id="payoutWithVat" class="kpi-value">₪0</div></div>
+        </div>
+        <div id="payoutList" class="payout-list"></div>
       </section>
     </main>
 
@@ -487,6 +505,8 @@
     </div>
   </div>
 
+  <script src="therapist-pay.js?v=__BUILD__" defer></script>
+  <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="app.js?v=__BUILD__" defer></script>
 </body>
 </html>
