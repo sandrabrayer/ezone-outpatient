@@ -188,8 +188,15 @@ npm start
 - `public/therapist-pay.js` is the hardcoded **therapist pay table** (what
   E-ZONE pays per session): `therapistPay(name, treatmentType?)`. Rates are
   **pre-VAT** — VAT is added at payment time via the separate `withVat()` helper,
-  never inside `therapistPay`. Not wired anywhere. See
-  `CHANGELOG-therapist-pay-table.md`.
+  never inside `therapistPay`. See `CHANGELOG-therapist-pay-table.md`.
+- `public/therapist-payout.js` is a **read-only** monthly payout summary:
+  `monthlyPayoutSummary(sessionLogRows, 'YYYY-MM')` groups `SessionLog` rows per
+  therapist, sums the pay for paying outcomes (`happened` + `patient_no_show`)
+  into a pre-VAT total, derives the +VAT total via `withVat`, and reports the
+  excluded `therapist_cancelled` count plus a per-session breakdown. It feeds the
+  **תשלומי מטפלים** tab (via the open `getSessionLog` read action). Display only —
+  corrections/export/forward-marking are later steps. See
+  `CHANGELOG-therapist-payout-view.md`.
 - `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
   type as recorded by the therapists app. On save, `_saveAll` derives
   `serviceType` from it via an inline mirror of `treatment-map.js`

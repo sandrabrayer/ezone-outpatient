@@ -864,6 +864,16 @@ function _getStopFlags() {
   return { ok: true, stopFlags: _readAll(sh, STOP_FLAGS_HEADERS) };
 }
 
+/* Read-only SessionLog projection for the internal therapist-payout view (read
+ * step 1 of 4). Returns every reconciliation row written by recordSessionOutcome.
+ * Open, same trust level as getStopFlags / getPayments (an internal dashboard
+ * read, NOT a cross-app endpoint). The dashboard computes the monthly per-
+ * therapist payout client-side from these rows; this endpoint never writes. */
+function _getSessionLog() {
+  var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+  return { ok: true, sessionLog: _readAll(sh, SESSION_LOG_HEADERS) };
+}
+
 /* ===== Set clinical treatment type (secured cross-app write) =====
  *
  * Inbound: the E-Zone Therapists app POSTs { action:'setClinicalType', secret,
@@ -1263,6 +1273,7 @@ function doGet(e) {
       return _json(_getTreatmentPlans());
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -1346,6 +1357,7 @@ function doPost(e) {
       return _json(_recordSessionOutcome(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'resolveStopFlag') {
       return _json(_resolveStopFlag(payload.id, payload.resolvedBy));
     }

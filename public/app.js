@@ -135,6 +135,11 @@
     billingSearch: '',
     clientTab: 'all',
     billingDate: '',
+    sessionLog: null,    // SessionLog rows for the payout view; null = not yet fetched
+    sessionLogLoading: false,
+    sessionLogError: '',
+    payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
+    payoutExpanded: {},  // therapist name -> expanded session detail (bool)
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
   };
@@ -482,6 +487,12 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  async function apiGetSessionLog() {
+    var r = await fetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
   async function apiPostAction(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
     var r = await fetch('/api/sheets', {
@@ -704,6 +715,7 @@
     else if (state.view === 'clients') renderClients();
     else if (state.view === 'billing') renderBilling();
     else if (state.view === 'retention') renderRetention();
+    else if (state.view === 'payouts') renderPayouts();
   }
 
   // ---- Dashboard
@@ -1640,6 +1652,136 @@
     }
   }
 
+  // ---- Therapist payouts (read-only, step 1 of 4) ----
+  // Per-therapist monthly payout summary computed client-side from SessionLog
+  // rows via the shared pure module (window.TherapistPayout). Display only — no
+  // corrections, no export, no forward-marking (those are steps 2–4).
+  var OUTCOME_LABELS = {
+    happened: 'התקיים',
+    patient_no_show: 'מטופל לא הגיע',
+    therapist_cancelled: 'בוטל ע״י מטפל'
+  };
+
+  function currentMonthStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  // Lazy first-load of SessionLog rows (only when the payout tab is first opened).
+  function ensureSessionLogLoaded() {
+    if (state.sessionLog !== null || state.sessionLogLoading) return;
+    state.sessionLogLoading = true;
+    apiGetSessionLog().then(function (data) {
+      state.sessionLog = Array.isArray(data.sessionLog) ? data.sessionLog : [];
+      state.sessionLogError = '';
+    }).catch(function (e) {
+      state.sessionLog = [];
+      state.sessionLogError = e.message || String(e);
+    }).then(function () {
+      state.sessionLogLoading = false;
+      if (state.view === 'payouts') renderPayouts();
+    });
+  }
+
+  function setPayoutKpis(therapists, paid, preVat, withVatTotal) {
+    var a = $('#payoutTherapistCount'); if (a) a.textContent = therapists;
+    var b = $('#payoutPaidCount'); if (b) b.textContent = paid;
+    var c = $('#payoutPreVat'); if (c) c.textContent = money(preVat);
+    var d = $('#payoutWithVat'); if (d) d.textContent = money(withVatTotal);
+  }
+
+  function payoutStat(label, value) {
+    return '<div><div style="font-size:0.75rem;color:#7d93b0;">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:1.05rem;font-weight:700;color:#eaf2ff;">' + escapeHtml(String(value)) + '</div></div>';
+  }
+
+  function renderPayouts() {
+    var listEl = $('#payoutList');
+    if (!listEl) return;
+    if (!state.payoutMonth) state.payoutMonth = currentMonthStr();
+    var monthInput = $('#payoutMonth');
+    if (monthInput && monthInput.value !== state.payoutMonth) monthInput.value = state.payoutMonth;
+
+    if (state.sessionLog === null) {
+      ensureSessionLogLoaded();
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">טוען נתוני סשנים…</p></div>';
+      setPayoutKpis(0, 0, 0, 0);
+      return;
+    }
+    if (state.sessionLogError) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">שגיאה בטעינת יומן הסשנים: ' +
+        escapeHtml(state.sessionLogError) + '</p></div>';
+      setPayoutKpis(0, 0, 0, 0);
+      return;
+    }
+
+    var TPay = (typeof window !== 'undefined' && window.TherapistPayout) || null;
+    if (!TPay) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">מודול החישוב לא נטען</p></div>';
+      return;
+    }
+
+    var summary = TPay.monthlyPayoutSummary(state.sessionLog, state.payoutMonth);
+    setPayoutKpis(summary.therapists.length, summary.totals.paidCount,
+      summary.totals.preVatTotal, summary.totals.vatTotal);
+
+    listEl.innerHTML = '';
+    if (!summary.therapists.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין סשנים לחודש זה</p></div>';
+      return;
+    }
+
+    summary.therapists.forEach(function (t) {
+      var expanded = !!state.payoutExpanded[t.therapist];
+      var card = document.createElement('div');
+      card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;';
+
+      var head =
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+          '<div style="font-size:1.05rem;font-weight:700;color:#9fcfcf;">' + escapeHtml(t.therapist || '—') + '</div>' +
+          '<button type="button" class="btn" data-action="payout-toggle" data-therapist="' + escapeHtml(t.therapist) + '">' +
+            (expanded ? 'הסתר פירוט' : 'הצג פירוט (' + t.sessionCount + ')') + '</button>' +
+        '</div>';
+
+      var stats =
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
+          payoutStat('סשנים משולמים', t.paidCount) +
+          payoutStat('לפני מע״מ', money(t.preVatTotal)) +
+          payoutStat('כולל מע״מ', money(t.vatTotal)) +
+          payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
+        '</div>';
+
+      var detail = '';
+      if (expanded) {
+        var rows = t.sessions.map(function (s) {
+          var dimmed = s.paid ? '' : 'opacity:0.55;';
+          return '<tr style="' + dimmed + '">' +
+            '<td style="padding:6px 10px;">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
+            '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
+            '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
+            '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
+            '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
+          '</tr>';
+        }).join('');
+        detail =
+          '<div style="margin-top:14px;overflow-x:auto;">' +
+            '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;color:#cfe3f5;">' +
+              '<thead><tr style="color:#9fcfcf;text-align:right;border-bottom:1px solid #2a3f5a;">' +
+                '<th style="padding:6px 10px;font-weight:600;">תאריך</th>' +
+                '<th style="padding:6px 10px;font-weight:600;">מטופל</th>' +
+                '<th style="padding:6px 10px;font-weight:600;">סוג טיפול</th>' +
+                '<th style="padding:6px 10px;font-weight:600;">תוצאה</th>' +
+                '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום</th>' +
+              '</tr></thead><tbody>' + rows + '</tbody>' +
+            '</table>' +
+          '</div>';
+      }
+
+      card.innerHTML = head + stats + detail;
+      listEl.appendChild(card);
+    });
+  }
+
   // ---- Leads kanban
   function renderLeads() {
     var kanban = $('#kanban');
@@ -2534,6 +2676,19 @@
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
+
+    // Therapist payouts: month picker + per-therapist detail toggle (read-only).
+    on('#payoutMonth', 'change', function (e) {
+      state.payoutMonth = e.target.value || currentMonthStr();
+      renderPayouts();
+    });
+    on('#payoutList', 'click', function (e) {
+      var btn = e.target.closest('[data-action="payout-toggle"]');
+      if (!btn) return;
+      var name = btn.getAttribute('data-therapist') || '';
+      state.payoutExpanded[name] = !state.payoutExpanded[name];
+      renderPayouts();
+    });
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
