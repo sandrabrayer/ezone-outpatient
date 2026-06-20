@@ -26,12 +26,19 @@ const vat = (n) => Math.round(TP.withVat(n) * 100) / 100;
 // A small SessionLog fixture spanning two months and two therapists. `date` is
 // the session date; `recordedAt` is deliberately a DIFFERENT month to prove the
 // filter keys on `date`.
+//
+// IMPORTANT: `date` deliberately mixes BOTH formats seen in real data:
+//   - ISO 'YYYY-MM-DD' (how Sheets normalizes dates / what the month picker uses)
+//   - a raw JS Date.toString() like 'Wed Jun 10 2026 00:00:00 GMT+0300' — what
+//     recordSessionOutcome actually stores from the Therapists app payload.
+// s2 and s5 use the JS Date.toString() format so production data is exercised
+// here and the YYYY-MM-DD-only parse bug (rows silently dropped) can't regress.
 const ROWS = [
   // --- מעיין דלומי, 2026-06 ---
   { sessionId: 's1', therapist: 'מעיין דלומי', patientName: 'אורי', clinicalTreatmentType: 'פרטני CBT',
     date: '2026-06-03', outcome: 'happened', therapistPay: 250, recordedAt: '2026-07-01T00:00:00.000Z' },
   { sessionId: 's2', therapist: 'מעיין דלומי', patientName: 'דנה', clinicalTreatmentType: 'פרטני CBT',
-    date: '2026-06-10', outcome: 'patient_no_show', therapistPay: 250, recordedAt: '2026-06-10T00:00:00.000Z' },
+    date: 'Wed Jun 10 2026 00:00:00 GMT+0300', outcome: 'patient_no_show', therapistPay: 250, recordedAt: '2026-06-10T00:00:00.000Z' },
   { sessionId: 's3', therapist: 'מעיין דלומי', patientName: 'רון', clinicalTreatmentType: 'פרטני CBT',
     date: '2026-06-12', outcome: 'therapist_cancelled', therapistPay: 0, recordedAt: '2026-06-12T00:00:00.000Z' },
   // --- דליה מלמד, 2026-06 ---
@@ -39,7 +46,7 @@ const ROWS = [
     date: '2026-06-05', outcome: 'happened', therapistPay: 230, recordedAt: '2026-06-05T00:00:00.000Z' },
   // --- מעיין דלומי, 2026-07 (different month, must NOT count for June) ---
   { sessionId: 's5', therapist: 'מעיין דלומי', patientName: 'יעל', clinicalTreatmentType: 'פרטני CBT',
-    date: '2026-07-02', outcome: 'happened', therapistPay: 250, recordedAt: '2026-07-02T00:00:00.000Z' }
+    date: 'Thu Jul 02 2026 00:00:00 GMT+0300', outcome: 'happened', therapistPay: 250, recordedAt: '2026-07-02T00:00:00.000Z' }
 ];
 
 test('sums only happened + patient_no_show; therapist_cancelled excluded from total', () => {
@@ -130,6 +137,41 @@ test('month arg accepts a full YYYY-MM-DD as well as YYYY-MM', () => {
   const b = Payout.monthlyPayoutSummary(ROWS, '2026-06-30');
   assert.equal(b.month, '2026-06');
   assert.deepEqual(b.totals, a.totals);
+});
+
+test('a raw JS Date.toString() date buckets into the right month (regression: not dropped)', () => {
+  // The EXACT shape recordSessionOutcome stores from the Therapists app payload —
+  // the bug report row: דליה מלמד, Thu Jun 18 2026, happened, 230. Before the
+  // tolerant parse this was silently dropped (monthOf returned '') and the payout
+  // view showed "אין סשנים לחודש זה" / all zeros.
+  const rows = [
+    { sessionId: 'j1', therapist: 'דליה מלמד', patientName: 'נועה', clinicalTreatmentType: 'פרטני כללי',
+      date: 'Thu Jun 18 2026 00:00:00 GMT+0300', outcome: 'happened', therapistPay: 230 },
+    // a therapist_cancelled in the same month, same format (count surfaced, pay 0)
+    { sessionId: 'j2', therapist: 'דליה מלמד', patientName: 'גיא', clinicalTreatmentType: 'פרטני כללי',
+      date: 'Fri Jun 19 2026 00:00:00 GMT+0300', outcome: 'therapist_cancelled', therapistPay: 0 }
+  ];
+  // monthOf parses the JS Date string straight to 'YYYY-MM'
+  assert.equal(Payout.monthOf('Thu Jun 18 2026 00:00:00 GMT+0300'), '2026-06');
+
+  const s = Payout.monthlyPayoutSummary(rows, '2026-06');
+  const dalia = s.therapists.find((t) => t.therapist === 'דליה מלמד');
+  assert.ok(dalia, 'June row must NOT be dropped');
+  assert.equal(dalia.paidCount, 1);
+  assert.equal(dalia.excludedCancelledCount, 1);
+  assert.equal(dalia.sessionCount, 2);
+  assert.equal(dalia.preVatTotal, 230);
+  // and it must NOT leak into an adjacent month
+  assert.deepEqual(Payout.monthlyPayoutSummary(rows, '2026-05').therapists, []);
+  assert.deepEqual(Payout.monthlyPayoutSummary(rows, '2026-07').therapists, []);
+});
+
+test('monthOf returns empty for unparseable / Invalid Date input', () => {
+  assert.equal(Payout.monthOf(''), '');
+  assert.equal(Payout.monthOf('   '), '');
+  assert.equal(Payout.monthOf('not a date'), '');
+  assert.equal(Payout.monthOf(null), '');
+  assert.equal(Payout.monthOf(undefined), '');
 });
 
 test('therapistPay stored as a numeric string is coerced (Sheets cell safety)', () => {
