@@ -956,6 +956,13 @@
     if (s && s.charAt(0) !== '0') s = '0' + s;
     return s;
   }
+  // Patient's primary phone for display/edit: the populated `phone` column,
+  // falling back to the legacy (usually-empty for active clients)
+  // treatmentContactPhone. Leading-zero recovery is applied so a Sheets-coerced
+  // 9-digit number still shows the full 10-digit canonical form.
+  function clientPhone(c) {
+    return recoverPhone(c && c.phone) || recoverPhone(c && c.treatmentContactPhone);
+  }
   // Mobile / cross-app matching keys: exactly 10 digits, leading zero.
   function isValidMobile(p) { return /^0\d{9}$/.test(p); }
   // payerPhone only: also allow a 9-digit Israeli landline (031234567).
@@ -2011,6 +2018,7 @@
     var card = document.createElement('div');
     card.className = 'client-card';
     var rev = monthlyRevenue(c);
+    var phoneDisp = clientPhone(c);
     var services = parseServices(c.serviceType);
     var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     var locationChip = hasDayCenter(services)
@@ -2103,6 +2111,7 @@
         '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
+      (phoneDisp ? '<div class="client-meta">טלפון: ' + escapeHtml(phoneDisp) + '</div>' : '') +
       '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
@@ -2481,6 +2490,9 @@
     form.reset();
     $('#editClientName').textContent = client.name;
     form.clientId.value = client.id;
+    // Patient's primary phone (the populated `phone` column, with fallback +
+    // leading-zero recovery). treatmentContactPhone is edited separately below.
+    if (form.phone) form.phone.value = clientPhone(client);
     form.treatmentContactPhone.value = client.treatmentContactPhone || '';
     form.payerName.value = client.payerName || '';
     form.payerPhone.value = client.payerPhone || '';
@@ -3139,14 +3151,19 @@
       var client = state.clients.find(function (c) { return c.id === editClientId; });
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
+      var ptPhone = acceptPhone(fd.get('phone') || '', 'טלפון מטופל', 'mobile', false);
+      if (ptPhone === false) { submit.disabled = false; return; }
       var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
       if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
-      // Block only on the patient-identity (treatment-contact) phone, excluding
-      // this client. payerPhone is intentionally not deduped (shared payers).
+      // Block on the patient-identity phones (the patient's own number and the
+      // treatment-contact phone), excluding this client. payerPhone is
+      // intentionally not deduped (shared payers).
+      if (duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
       if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
+        phone: client.phone,
         treatmentContactPhone: client.treatmentContactPhone,
         payerName: client.payerName, payerPhone: client.payerPhone,
         paymentLink: client.paymentLink,
@@ -3156,6 +3173,7 @@
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
+      client.phone = ptPhone;
       client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;

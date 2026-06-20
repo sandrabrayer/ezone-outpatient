@@ -14,7 +14,9 @@ through an Apps Script Web App.
    modal (service type, location, sessions/week, price/session, start date).
 3. **Clients (מטופלים)** – tabbed by service type; status `פעיל / הפסקה זמנית /
    סיים טיפול`. `סיים טיפול` captures exit date and grays out the card. `✕`
-   deletes permanently.
+   deletes permanently. Each card shows the patient phone (the `phone` column,
+   falling back to `treatmentContactPhone`, leading-zero recovered), and the
+   edit modal edits it via the **טלפון מטופל** field.
 
 ## Access
 
