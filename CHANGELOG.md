@@ -6,6 +6,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **"מחק" dismiss button on Vered's stop-flags panel (`public/app.js`).** Every
+  row of **"⏳ המתנה לאישור הפסקה"** now has an editor-only, confirm-guarded
+  dismiss control that clears the flag **without discharging** — the only action
+  for an **orphaned** flag showing **"לא נמצא מטופל תואם"** (no matching client,
+  e.g. a made-up test phone like `0782374928`), which previously had no exit.
+  `dismissStopFlag` optimistically marks the flag `resolved` (so the row drops
+  from the `pending` filter immediately) and persists via the **existing
+  internal** `resolveStopFlag` action **by id** — which works for orphans (they
+  have an id, just no `clientId`) and is **already deployed**, so this is
+  **frontend-only, no Apps Script redeploy required** (Railway auto-deploys on
+  merge). A failed write rolls the row back. `Clients` is never touched. The
+  secured **phone**-based receiver (PR #37) remains the cross-app *therapists*
+  path. `test/stop-flag-dismiss.test.js` locks matched + orphaned dismiss, the
+  empty-panel case, no-op on unknown id, rollback, and the by-id wiring guard.
+  See `CHANGELOG-stop-flag-dismiss.md`.
 - **Secured `resolveStopFlag` receiver — the therapists app can clear a flag by
   phone.** Complements `flagStop` (raise) with a matching **resolve** over the
   same fail-closed contract: `{ action:'resolveStopFlag', secret, phone }` reuses
