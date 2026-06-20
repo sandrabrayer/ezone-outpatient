@@ -105,8 +105,18 @@ npm start
   client by phone + name; one `pending` row is appended to the `StopFlags` tab.
   **Clients is never modified** — flags are surfaced to Vered on the dashboard
   ("⏳ המתנה לאישור הפסקה") and resolved only when she manually discharges.
-  `getStopFlags` / `resolveStopFlag` are internal (via the Node proxy). See
+  `getStopFlags` / `resolveStopFlag(id)` are internal (via the Node proxy). See
   `CHANGELOG-stop-flag-receiver.md`. **Requires an Apps Script redeploy.**
+- `POST /exec { action:'resolveStopFlag', secret:<STOP_FLAG_SECRET>, phone }`
+  — the E-Zone Therapists app clears a flag it previously raised (patient
+  resumed). **Fail-closed**, reusing the **same** `STOP_FLAG_SECRET` as
+  `flagStop`. Matches `StopFlags` rows by **canonical phone alone (no `Clients`
+  join)** — so it also clears orphaned flags whose `clientId` is blank — and
+  marks every still-pending match `resolved`. Returns `{ ok:true, resolved:N }`
+  (N=0 = no match, still ok); idempotent on retry. `doPost` routes by the
+  presence of a `secret`, so the internal id-based `resolveStopFlag(id)` above is
+  unchanged. See `CHANGELOG-resolve-stop-flag-receiver.md`. **Requires an Apps
+  Script redeploy.**
 - `POST /exec { action:'setClinicalType', secret:<CLINICAL_TYPE_SECRET>, phone, clinicalTreatmentType }`
   — the E-Zone Therapists app sets a patient's clinical treatment type on the
   outpatient client. **Fail-closed:** `CLINICAL_TYPE_SECRET` (Apps Script Script

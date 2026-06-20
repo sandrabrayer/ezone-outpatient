@@ -789,9 +789,15 @@ function _getTreatmentPlans() {
  * (vs client.phone OR treatmentContactPhone) + exact trimmed name to fill
  * clientId, and appends ONE row with status='pending'. Clients is never touched.
  *
- * getStopFlags / resolveStopFlag are INTERNAL (Vered's dashboard via the Node
- * proxy) — open, same trust level as getData/saveAll. resolveStopFlag marks a
+ * getStopFlags / resolveStopFlag(id) are INTERNAL (Vered's dashboard via the Node
+ * proxy) — open, same trust level as getData/saveAll. resolveStopFlag(id) marks a
  * flag resolved when Vered completes the discharge; it does not discharge.
+ *
+ * resolveStopFlag can ALSO be called by the therapists app as a SECURED receiver
+ * — { action:'resolveStopFlag', secret, phone } (fail-closed, reuses
+ * STOP_FLAG_SECRET) clears the StopFlags row(s) for a canonical phone by phone
+ * ALONE (no Clients join), so it resolves orphaned flags too. doPost routes by
+ * the presence of `secret`; see _resolveStopFlagByPhone.
  */
 function _stopFlagAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('STOP_FLAG_SECRET');
@@ -1154,6 +1160,53 @@ function _resolveStopFlag(id, resolvedBy) {
   }
 }
 
+/* Secured receiver: the E-Zone Therapists app POSTs
+ * { action:'resolveStopFlag', secret, phone } to clear a stop flag it previously
+ * raised — e.g. the patient resumed treatment. FAIL-CLOSED auth: reuses
+ * STOP_FLAG_SECRET, the SAME secret as flagStop (unset/empty/wrong REJECTS).
+ *
+ * Unlike the internal id-based _resolveStopFlag (Vered's dashboard), this matches
+ * by canonical phone ALONE — NO Clients join — so it also clears ORPHANED flags
+ * (e.g. 'יעל') whose phone never matched a client row. Mirrors _flagStop: one
+ * script lock, _ensureSheet, positional writes by header index. Marks EVERY
+ * matching still-pending row status='resolved' (idempotent: already-resolved rows
+ * are skipped). Returns { ok:true, resolved:N } — N=0 is a successful no-match,
+ * not an error. Clients is never touched. */
+function _resolveStopFlagByPhone(payload) {
+  if (!_stopFlagAuthOk(payload)) return { ok: false, reason: 'unauthorized' };
+  var phone = _recoverPhone(payload && payload.phone);
+  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
+  var resolvedBy = String((payload && payload.resolvedBy) || 'therapists-app').trim();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, resolved: 0 };
+    var phoneIdx     = STOP_FLAGS_HEADERS.indexOf('phone');
+    var statusIdx    = STOP_FLAGS_HEADERS.indexOf('status');
+    var resolvedByIdx = STOP_FLAGS_HEADERS.indexOf('resolvedBy');
+    var resolvedAtIdx = STOP_FLAGS_HEADERS.indexOf('resolvedAt');
+    var rows = sh.getRange(2, 1, lastRow - 1, STOP_FLAGS_HEADERS.length).getValues();
+    var resolvedAt = new Date().toISOString();
+    var resolved = 0;
+    for (var i = 0; i < rows.length; i++) {
+      // Canonical-phone match handles a leading zero Sheets dropped on store.
+      if (_recoverPhone(rows[i][phoneIdx]) !== phone) continue;
+      if (String(rows[i][statusIdx]) === 'resolved') continue; // already cleared
+      var rowNum = i + 2;
+      sh.getRange(rowNum, statusIdx + 1).setValue('resolved');
+      sh.getRange(rowNum, resolvedByIdx + 1).setValue(resolvedBy);
+      sh.getRange(rowNum, resolvedAtIdx + 1).setValue(resolvedAt);
+      resolved++;
+    }
+    return { ok: true, resolved: resolved };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Merge duplicate clients =====
  *
  * Internal dashboard action (open, same trust level as saveAll). Merges one or
@@ -1359,6 +1412,12 @@ function doPost(e) {
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'resolveStopFlag') {
+      // A request carrying a secret is the secured therapists-app receiver
+      // (resolve by canonical phone, fail-closed). Without a secret it is the
+      // internal dashboard path (resolve one row by id, open) — unchanged.
+      if (payload && payload.secret != null) {
+        return _json(_resolveStopFlagByPhone(payload));
+      }
       return _json(_resolveStopFlag(payload.id, payload.resolvedBy));
     }
     if (action === 'mergeClients') {
