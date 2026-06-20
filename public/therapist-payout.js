@@ -46,12 +46,21 @@
     return Number(amount) * 1.18;
   }
 
-  // Extract 'YYYY-MM' from a date cell ('YYYY-MM-DD' as Sheets normalizes dates,
-  // or a longer ISO string). Returns '' when there is no parseable year-month.
+  // Extract 'YYYY-MM' from a date cell. Handles BOTH formats seen in real data:
+  //   1. ISO 'YYYY-MM-DD' (or longer ISO) — how Sheets normalizes dates, and what
+  //      the month picker / tests pass.
+  //   2. A raw JS Date.toString() like 'Thu Jun 18 2026 00:00:00 GMT+0300' — what
+  //      recordSessionOutcome actually stores from the Therapists app payload.
+  // Try the cheap ISO regex first; otherwise fall back to new Date(s) and read the
+  // LOCAL year/month. Returns '' for empty / unparseable input (Invalid Date).
   function monthOf(dateCell) {
     var s = str(dateCell);
+    if (!s) return '';
     var m = s.match(/^(\d{4})-(\d{2})/);
-    return m ? (m[1] + '-' + m[2]) : '';
+    if (m) return m[1] + '-' + m[2];
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   }
 
   /**
