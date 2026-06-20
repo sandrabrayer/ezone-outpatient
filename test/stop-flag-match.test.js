@@ -145,10 +145,12 @@ test('schema guard: Clients `phone` column exists, appended after paymentLink', 
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n') // strip comments
     .match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  // phone was appended right after paymentLink (append-only). clinicalTreatmentType
-  // was later appended after phone (task 4.5a), so phone is now second-to-last.
+  // Append-only chain: phone after paymentLink (stop-flow); clinicalTreatmentType
+  // after phone (task 4.5a); creditsOwed after that (session accounting). So the
+  // tail is ... phone, clinicalTreatmentType, creditsOwed.
   const pi = cols.indexOf('phone');
   assert.equal(cols[pi - 1], 'paymentLink');
-  assert.equal(cols[cols.length - 1], 'clinicalTreatmentType', 'clinicalTreatmentType must be LAST');
-  assert.equal(cols[cols.length - 2], 'phone');
+  assert.equal(cols[cols.length - 1], 'creditsOwed', 'creditsOwed must be LAST');
+  assert.equal(cols[cols.length - 2], 'clinicalTreatmentType');
+  assert.equal(cols[cols.length - 3], 'phone');
 });

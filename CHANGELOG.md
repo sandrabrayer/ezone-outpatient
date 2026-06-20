@@ -6,6 +6,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Session accounting + credits (auto-draw) — `Clients.creditsOwed` +
+  `SessionLog.creditStatus`.** A per-patient monthly **credit ledger** in
+  `apps-script/Code.gs`'s `recordSessionOutcome`: a `therapist_cancelled` session
+  banks **+1 credit**; a `happened` session **beyond the monthly quota** (weekly
+  frequency × 4, from the plan's `sessionsPerWeek`) **auto-draws** a credit when
+  one is available — that session becomes **free to the patient**
+  (`clientSessionValue` 0) while the **therapist is still paid normally**. Credits
+  **carry forward** across months; the delivered count is recounted per month by
+  **session date**. Because the balance is a stateful running total, the
+  sessionId upsert **reverses the prior row's credit effect before applying the
+  new one**, so a correction (e.g. happened→cancelled undoes a draw *and* adds a
+  credit) is exact and an identical re-send is idempotent. No plan frequency / no
+  date → **no draw, row flagged** (`quota_unknown`); group/0-value sessions never
+  waste a credit. The balance is **server-managed**: `_saveAll` preserves
+  `creditsOwed` by id (ignoring a stale dashboard value) so a save can't revert
+  earned credits. Both columns are **append-only** (positions preserved). The
+  patient card shows **קרדיט מפגשים: N**. `test/session-credits.test.js` (16)
+  locks the model + a source-scan guard; existing "last column" guards updated.
+  **Requires an Apps Script redeploy** (`…FOwWYIw`). See
+  `CHANGELOG-session-credits.md`.
 - **"מחק" dismiss button on Vered's stop-flags panel (`public/app.js`).** Every
   row of **"⏳ המתנה לאישור הפסקה"** now has an editor-only, confirm-guarded
   dismiss control that clears the flag **without discharging** — the only action

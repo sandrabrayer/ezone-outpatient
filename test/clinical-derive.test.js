@@ -136,11 +136,14 @@ test('unknown clinical value throws and does not blank serviceType', () => {
   assert.equal(c.serviceType, 'פרטני'); // unchanged — threw before overwrite
 });
 
-// --- column is appended LAST (positional safety) ----------------------------
-test('clinicalTreatmentType is the LAST CLIENTS_HEADERS column, phone before it', () => {
+// --- columns are appended LAST (positional safety) --------------------------
+test('creditsOwed is the LAST CLIENTS_HEADERS column; clinicalTreatmentType then phone before it', () => {
   const H = clientsHeaders();
-  assert.equal(H[H.length - 1], 'clinicalTreatmentType');
-  assert.equal(H[H.length - 2], 'phone');
+  // creditsOwed (session accounting) was appended after clinicalTreatmentType,
+  // which was itself appended after phone — so each keeps its position.
+  assert.equal(H[H.length - 1], 'creditsOwed');
+  assert.equal(H[H.length - 2], 'clinicalTreatmentType');
+  assert.equal(H[H.length - 3], 'phone');
 });
 
 // Mirror of Code.gs _writeAll / _readAll positional mapping.
@@ -158,12 +161,13 @@ function readRow(headers, row) {
 
 test('a legacy row lacking the new column reads back without misaligning phone', () => {
   const H = clientsHeaders();
-  // legacy sheet row has one fewer physical cell (no clinicalTreatmentType);
-  // _readAll reads headers.length cells, the trailing one comes back ''.
+  // legacy sheet row has one fewer physical cell (no creditsOwed — the newest
+  // trailing column); _readAll reads headers.length cells, the trailing '' back.
   const legacy = H.slice(0, -1).map((h) => {
     if (h === 'phone') return '0509998888';
     if (h === 'treatmentContactPhone') return '0501234567';
     if (h === 'serviceType') return 'פרטני';
+    if (h === 'clinicalTreatmentType') return 'פרטני CBT';
     return '';
   });
   legacy.push(''); // the absent trailing cell Sheets returns as empty
@@ -171,17 +175,20 @@ test('a legacy row lacking the new column reads back without misaligning phone',
   assert.equal(back.phone, '0509998888');
   assert.equal(back.treatmentContactPhone, '0501234567');
   assert.equal(back.serviceType, 'פרטני');
-  assert.equal(back.clinicalTreatmentType, ''); // new column reads blank
+  assert.equal(back.clinicalTreatmentType, 'פרטני CBT'); // not misaligned by the append
+  assert.equal(back.creditsOwed, '');                    // new column reads blank
 });
 
-test('writing a client without clinicalTreatmentType blanks only the last column', () => {
+test('writing a client without creditsOwed blanks only the last column', () => {
   const H = clientsHeaders();
   const client = {
     id: 'c1', name: 'אורי', serviceType: 'פרטני', phone: '0509998888',
-    treatmentContactPhone: '0501234567', payerName: 'דנה', paymentLink: 'https://pay/x'
+    treatmentContactPhone: '0501234567', payerName: 'דנה', paymentLink: 'https://pay/x',
+    clinicalTreatmentType: 'פרטני CBT'
   };
   const row = writeRow(H, client);
-  assert.equal(row[H.indexOf('clinicalTreatmentType')], '');
+  assert.equal(row[H.indexOf('creditsOwed')], '');         // new last column blank
+  assert.equal(row[H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // still aligned
   assert.equal(row[H.indexOf('phone')], '0509998888');     // still aligned
   assert.equal(row[H.indexOf('paymentLink')], 'https://pay/x');
   assert.equal(row[H.indexOf('serviceType')], 'פרטני');

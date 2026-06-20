@@ -398,7 +398,10 @@
       paymentLink: row.paymentLink || '',
       // data-layer passthrough (task 4.5a): preserve the clinical type so a
       // dashboard save round-trips it (the server derives serviceType from it).
-      clinicalTreatmentType: row.clinicalTreatmentType || ''
+      clinicalTreatmentType: row.clinicalTreatmentType || '',
+      // Server-managed monthly credit balance (session accounting). Read-only on
+      // the card; the server owns it and ignores the value on saveAll.
+      creditsOwed: toNum(row.creditsOwed) || 0
     };
   }
 
@@ -456,7 +459,10 @@
       // data-layer passthrough (task 4.5a): preserve the clinical type so it is
       // not blanked on save; the server (_deriveClientServiceType) is the
       // authority that turns it into serviceType.
-      clinicalTreatmentType: c.clinicalTreatmentType || ''
+      clinicalTreatmentType: c.clinicalTreatmentType || '',
+      // Send the last-known credit balance to keep the column aligned; the server
+      // treats creditsOwed as authoritative and preserves its own value by id.
+      creditsOwed: c.creditsOwed == null || c.creditsOwed === '' ? 0 : toNum(c.creditsOwed)
     };
   }
 
@@ -2017,10 +2023,14 @@
       return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
     }).join('');
     var total = totalSessions(c.sessionsPerWeek, c.serviceType);
+    var credits = toNum(c.creditsOwed) || 0;
     var statsHtml =
       '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
       '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
-      '<span>הכנסה: <b>' + money(rev) + '</b></span>';
+      '<span>הכנסה: <b>' + money(rev) + '</b></span>' +
+      // Monthly session-credit balance (server-managed): cancelled-by-therapist
+      // sessions bank a credit; a session beyond the monthly quota spends one.
+      '<span>קרדיט מפגשים: <b' + (credits > 0 ? ' class="credit-pos"' : '') + '>' + credits + '</b></span>';
 
     // Monthly base-payment status for the CURRENT month. Driven by the same
     // per-month payment row the גבייה tab uses (paymentForClientOn) so both
