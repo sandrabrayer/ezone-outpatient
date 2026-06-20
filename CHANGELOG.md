@@ -6,6 +6,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Secured `resolveStopFlag` receiver — the therapists app can clear a flag by
+  phone.** Complements `flagStop` (raise) with a matching **resolve** over the
+  same fail-closed contract: `{ action:'resolveStopFlag', secret, phone }` reuses
+  the existing `STOP_FLAG_SECRET` (unset/empty/wrong → `unauthorized`), so the
+  therapists app can withdraw a stop-treatment flag when the patient resumes. It
+  matches `StopFlags` rows by **canonical phone ALONE — no `Clients` join** (using
+  `_recoverPhone`, so a Sheets-dropped leading zero still matches), which lets it
+  clear **orphaned** flags (e.g. `יעל`) whose `clientId` is blank. Marks every
+  still-pending matching row `status='resolved'` (+ `resolvedBy`/`resolvedAt`),
+  returns `{ ok:true, resolved:N }` (N=0 is a successful no-match), and is
+  idempotent on retry. `doPost` routes by the presence of a `secret`, so the
+  **internal** id-based `resolveStopFlag(id)` (Vered's dashboard, on discharge)
+  is unchanged. Mirrors `_flagStop` (script lock, `_ensureSheet`, positional
+  writes); `Clients` is never touched. `test/resolve-stop-flag.test.js` locks
+  phone resolve, orphaned-flag resolve, dropped-leading-zero match, fail-closed
+  auth, invalid phone, no-match→0, and idempotency. **Requires an Apps Script
+  redeploy** (`…FOwWYIw`) for the new path. See
+  `CHANGELOG-resolve-stop-flag-receiver.md`.
 - **Therapist-payout read view (step 1 of 4) — `public/therapist-payout.js` +
   תשלומי מטפלים tab.** A **read-only** per-therapist monthly payout summary
   computed from the `SessionLog` tab. A pure module
