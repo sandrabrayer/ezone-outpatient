@@ -837,13 +837,19 @@
       } else {
         action = '<span class="chip chip-amount">לא נמצא מטופל תואם</span>';
       }
+      // Dismiss/remove control on EVERY row — the only action for an orphaned
+      // flag ("לא נמצא מטופל תואם", e.g. a test phone with no client), and a
+      // "this was a mistake" escape on matched rows. Resolves the flag by id
+      // (existing internal resolveStopFlag) WITHOUT discharging; editor-only.
+      var dismiss = '<button class="btn btn-danger edit-only" data-action="dismiss-flag" ' +
+        'data-flag-id="' + escapeHtml(f.id) + '" title="הסר את בקשת ההפסקה מהרשימה (ללא סיום טיפול)">מחק</button>';
       return '<div class="renewal-row renewal-stop" data-flag-id="' + escapeHtml(f.id) + '">' +
         '<div class="renewal-main">' +
           '<div class="renewal-name">' + escapeHtml(who) + '</div>' +
           phoneChip + reportedChips +
         '</div>' +
         noteHtml +
-        '<div class="renewal-actions">' + action + '</div>' +
+        '<div class="renewal-actions">' + action + dismiss + '</div>' +
       '</div>';
     }).join('');
   }
@@ -851,6 +857,8 @@
   // Delegated click handler for the pending stop-flags panel. Handles both the
   // single-match "סיים טיפול" button and the ambiguous-case candidate picker.
   function handleStopFlagClick(e) {
+    var dismissBtn = e.target.closest('[data-action="dismiss-flag"]');
+    if (dismissBtn) { dismissStopFlag(dismissBtn.getAttribute('data-flag-id')); return; }
     var btn = e.target.closest('[data-action="open-exit"], [data-action="pick-client"]');
     if (!btn) return;
     var flagId = btn.getAttribute('data-flag-id');
@@ -869,6 +877,35 @@
     // what fixes the ambiguous-flag dead-end where clientId was never set.
     flag.clientId = client.id;
     openExitModal(client);
+  }
+
+  // Remove a single stop-flag from the panel WITHOUT discharging — Vered's
+  // dismiss for a false report or an orphaned flag (no matching client, e.g. a
+  // test phone). Resolves by id via the existing internal resolveStopFlag, which
+  // works for orphaned flags too (they have an id, just no clientId). After a
+  // confirm, the flag is marked resolved locally so the pending filter drops the
+  // row immediately; a failed write is rolled back and re-rendered.
+  function dismissStopFlag(flagId) {
+    if (state.role !== 'editor') return;
+    var flag = (state.stopFlags || []).find(function (f) { return f.id === flagId; });
+    if (!flag) { toast('בקשת ההפסקה לא נמצאה', true); return; }
+    var who = flag.name || flag.phone || '';
+    if (!confirm('להסיר את בקשת ההפסקה' + (who ? ' של ' + who : '') + ' מהרשימה?\n' +
+                 'הפעולה אינה מסמנת סיום טיפול — רק מסירה את ההתראה.')) return;
+    var prev = { status: flag.status, resolvedBy: flag.resolvedBy, resolvedAt: flag.resolvedAt };
+    flag.status = 'resolved';
+    flag.resolvedBy = 'Vered';
+    flag.resolvedAt = new Date().toISOString();
+    renderStopFlags();
+    apiPostAction('resolveStopFlag', { id: flag.id, resolvedBy: 'Vered' })
+      .then(function () { toast('בקשת ההפסקה הוסרה'); })
+      .catch(function (err) {
+        flag.status = prev.status;
+        flag.resolvedBy = prev.resolvedBy;
+        flag.resolvedAt = prev.resolvedAt;
+        renderStopFlags();
+        toast('שגיאה: ' + err.message, true);
+      });
   }
 
   // Mark every pending stop-flag for a client resolved (called after discharge).
