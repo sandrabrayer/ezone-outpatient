@@ -53,7 +53,14 @@ var CLIENTS_HEADERS = [
   // the source of truth). Appended at the END so existing rows are untouched
   // and positional mapping is preserved (same lesson as `phone` / the reserved
   // slots). Absent/empty -> serviceType left as-is (back-compat).
-  'clinicalTreatmentType'
+  'clinicalTreatmentType',
+  // APPEND-ONLY (session accounting + credits): running monthly-credit balance
+  // for the patient. SERVER-MANAGED — mutated only by recordSessionOutcome
+  // (therapist_cancelled -> +1; a happened session beyond the monthly quota
+  // auto-draws -1). _saveAll preserves it by id so a dashboard save never reverts
+  // it. Default 0. Appended at the very END so clinicalTreatmentType and every
+  // earlier column keep their positions.
+  'creditsOwed'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -371,12 +378,72 @@ function _billingPrice(billingType, freqPerWeek) {
   return BILLING_PRICES[key];
 }
 
+/* ===== Session accounting + credits helpers ================================
+ *
+ * Monthly model (locked): a patient's paid quota = weekly frequency × 4, renewed
+ * in full each month. A `happened` session beyond that month's quota auto-draws a
+ * credit when one is available (the session is then free to the patient —
+ * clientSessionValue 0 — but the therapist is still paid normally). A
+ * therapist_cancelled session grants +1 credit. Credits carry forward across
+ * months; the delivered (happened) count is implicitly per-month (we recount the
+ * current month each time). creditsOwed lives on the Clients row, server-managed.
+ */
+
+/* A non-negative integer credit balance from any cell value (blank -> 0). */
+function _toCredits(v) {
+  var n = parseInt(v, 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+
+/* Weekly session frequency from the client's PLAN. sessionsPerWeek is stored as
+ * a JSON breakdown ({"פרטני":2}) — sum the values; a bare number also works.
+ * Returns a non-negative integer (0 = undeterminable). */
+function _planWeeklyFrequency(client) {
+  if (!client) return 0;
+  var s = String(client.sessionsPerWeek == null ? '' : client.sessionsPerWeek).trim();
+  if (!s) return 0;
+  var total = 0;
+  if (s.charAt(0) === '{') {
+    try {
+      var o = JSON.parse(s);
+      Object.keys(o).forEach(function (k) { var n = parseInt(o[k], 10); if (!isNaN(n) && n > 0) total += n; });
+    } catch (_) { return 0; }
+  } else {
+    var n = parseInt(s, 10);
+    if (!isNaN(n) && n > 0) total = n;
+  }
+  return total;
+}
+
+/* Calendar-month key (YYYY-MM) of a yyyy-MM-dd date string, or '' if absent /
+ * unparseable (no month bucket -> quota cannot be applied). */
+function _monthKey(dateStr) {
+  var s = String(dateStr == null ? '' : dateStr).trim();
+  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
+}
+
 function _saveAll(payload) {
   var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
   var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
   var leads = (payload && payload.leads) || [];
   var clients = (payload && payload.clients) || [];
-  for (var i = 0; i < clients.length; i++) _deriveClientServiceType(clients[i]);
+  // creditsOwed is SERVER-MANAGED (mutated only by recordSessionOutcome). A
+  // dashboard save carries the balance the client tab last loaded, which may be
+  // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
+  // and only default a brand-new client (no existing row) to its payload/0.
+  var existingCredits = {};
+  var existing = _readAll(clientsSh, CLIENTS_HEADERS);
+  for (var e = 0; e < existing.length; e++) {
+    var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
+    if (eid) existingCredits[eid] = _toCredits(existing[e].creditsOwed);
+  }
+  for (var i = 0; i < clients.length; i++) {
+    _deriveClientServiceType(clients[i]);
+    var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
+    clients[i].creditsOwed = _hasOwn(existingCredits, cid)
+      ? existingCredits[cid]
+      : _toCredits(clients[i].creditsOwed);
+  }
   _writeAll(leadsSh, LEADS_HEADERS, leads);
   _writeAll(clientsSh, CLIENTS_HEADERS, clients);
   return { ok: true, savedLeads: leads.length, savedClients: clients.length };
@@ -964,7 +1031,16 @@ function _setClinicalType(payload) {
  * Computes the therapist pay + client session value for the session and logs ONE
  * reconciliation row to the SessionLog tab, UPSERTED by sessionId (a corrected
  * outcome re-sent with the same sessionId overwrites the row and recomputes pay —
- * never a duplicate, never stale pay). Clients is NEVER modified.
+ * never a duplicate, never stale pay).
+ *
+ * Clients is modified ONLY for the credit balance (creditsOwed) when a single
+ * client matches: therapist_cancelled grants +1; a happened session beyond the
+ * patient's monthly quota (weekly frequency × 4) auto-draws a credit when one is
+ * available, zeroing that session's clientSessionValue (therapist pay unchanged).
+ * Because creditsOwed is a stateful running total, an upsert first REVERSES the
+ * existing row's credit effect, then applies the new outcome's — so a correction
+ * undoes the old draw/grant. No plan frequency or no session date -> NO draw, the
+ * row is flagged (creditStatus). See the credit engine below + _planWeeklyFrequency.
  *
  *   outcome:        happened | therapist_cancelled | patient_no_show (any other
  *                   value rejects, writes nothing)
@@ -986,7 +1062,16 @@ var SESSION_LOG_HEADERS = [
   'sessionId', 'phone', 'patientName', 'clientId',
   'therapist', 'clinicalTreatmentType', 'billingType', 'date',
   'outcome', 'therapistPay', 'clientSessionValue', 'sessionStatus',
-  'matchStatus', 'recordedAt'
+  'matchStatus', 'recordedAt',
+  // APPEND-ONLY (session accounting + credits): how the credit engine treated
+  // this row. '' = N/A (no-show / unmatched non-credit); 'credit_added' =
+  // therapist_cancelled gave +1; 'within_quota' = happened inside the monthly
+  // quota (normal value); 'covered' = happened beyond quota, a credit was drawn
+  // (clientSessionValue forced to 0); 'beyond_no_credit' = beyond quota but no
+  // credit available (normal value); 'quota_unknown' = quota undeterminable
+  // (no plan frequency / no session date) so NO draw — flagged; 'no_client' =
+  // no single client match, so the patient balance could not be touched.
+  'creditStatus'
 ];
 
 var SESSION_STATUS_BY_OUTCOME = {
@@ -1063,9 +1148,12 @@ function _recordSessionOutcome(payload) {
   lock.waitLock(10000);
   try {
     // Optional client match for enrichment — never gates the log (keyed by session).
-    var clientId = '', matchStatus = 'no_match';
+    // A SINGLE phone hit also unlocks the credit engine (we can read+write that
+    // client's creditsOwed); 0 or >1 hits leave the patient balance untouched.
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    var clientId = '', matchStatus = 'no_match', matchedClient = null;
     if (phone && /^0\d{8,9}$/.test(phone)) {
-      var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
       var hits = [];
       for (var i = 0; i < clients.length; i++) {
         var c = clients[i];
@@ -1076,9 +1164,10 @@ function _recordSessionOutcome(payload) {
         }
       }
       if (hits.length === 1) {
-        clientId = String(hits[0].id);
+        matchedClient = hits[0];
+        clientId = String(matchedClient.id);
         matchStatus = 'matched';
-        if (!patientName) patientName = String(hits[0].name == null ? '' : hits[0].name).trim();
+        if (!patientName) patientName = String(matchedClient.name == null ? '' : matchedClient.name).trim();
       } else if (hits.length > 1) {
         matchStatus = 'multi_match';
       }
@@ -1098,10 +1187,83 @@ function _recordSessionOutcome(payload) {
       clientSessionValue: clientSessionValue,   // null -> blank cell (flag)
       sessionStatus:      sessionStatus,
       matchStatus:        matchStatus,
-      recordedAt:         new Date().toISOString()
+      recordedAt:         new Date().toISOString(),
+      creditStatus:       ''
     };
 
     var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+
+    // ---- Credit engine -----------------------------------------------------
+    // creditsOwed is a stateful running balance, so an UPSERT must first REVERSE
+    // the effect the existing row for this sessionId had, then apply the new
+    // outcome's effect (idempotent re-send nets zero; a real correction undoes
+    // the old and applies the new — e.g. happened-covered -> cancelled gives the
+    // drawn credit back AND adds the cancellation credit). We do NOT re-simulate
+    // sibling rows: reversing one row's own effect is locally correct; the
+    // month's other draws keep whatever they resolved to (documented).
+    var logRows = _readAll(sh, SESSION_LOG_HEADERS);
+    var oldRow = null;
+    for (var lr = 0; lr < logRows.length; lr++) {
+      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+    }
+
+    if (matchedClient) {
+      var origCredits = _toCredits(matchedClient.creditsOwed);
+      var balance = origCredits;
+      // 1) reverse the old row's effect on this client's balance
+      if (oldRow) {
+        if (oldRow.outcome === 'therapist_cancelled') balance -= 1;       // undo the +1
+        if (String(oldRow.creditStatus) === 'covered')  balance += 1;       // undo the draw (give it back)
+      }
+      if (balance < 0) balance = 0;
+      // 2) apply the new outcome's effect
+      if (outcome === 'therapist_cancelled') {
+        balance += 1;
+        rowObj.creditStatus = 'credit_added';
+      } else if (outcome === 'happened') {
+        var quotaFreq = _planWeeklyFrequency(matchedClient);
+        if (!quotaFreq && freq != null && freq !== '') {           // fall back to the event frequency
+          var ef = parseInt(freq, 10);
+          if (!isNaN(ef) && ef > 0) quotaFreq = ef;
+        }
+        var month = _monthKey(rowObj.date);
+        if (!quotaFreq || !month) {
+          rowObj.creditStatus = 'quota_unknown';                   // can't bucket -> never draw
+        } else {
+          var quota = quotaFreq * 4;
+          var priorHappened = 0;                                   // delivered this month, excluding self
+          for (var hh = 0; hh < logRows.length; hh++) {
+            var lrow = logRows[hh];
+            if (String(lrow.sessionId) === sessionId) continue;
+            if (String(lrow.clientId) === clientId &&
+                lrow.outcome === 'happened' &&
+                _monthKey(lrow.date) === month) priorHappened++;
+          }
+          var beyondQuota = priorHappened >= quota;
+          if (!beyondQuota) {
+            rowObj.creditStatus = 'within_quota';
+          } else if (balance > 0 && typeof clientSessionValue === 'number' && clientSessionValue > 0) {
+            clientSessionValue = 0;                                // credit covers this session
+            rowObj.clientSessionValue = 0;
+            balance -= 1;
+            rowObj.creditStatus = 'covered';
+          } else {
+            rowObj.creditStatus = 'beyond_no_credit';              // beyond quota, no credit to draw
+          }
+        }
+      }
+      // 3) persist the balance only if it actually changed (whole-sheet write)
+      if (balance !== origCredits) {
+        matchedClient.creditsOwed = balance;
+        _writeAll(clientsSh, CLIENTS_HEADERS, clients);
+      }
+      rowObj.creditsOwed = balance;
+    } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
+      // No single client to credit/debit — flag, change no balance.
+      rowObj.creditStatus = 'no_client';
+    }
+    // ------------------------------------------------------------------------
+
     var rowArr = SESSION_LOG_HEADERS.map(function (h) {
       var v = rowObj[h];
       return (v === undefined || v === null) ? '' : v;
@@ -1126,8 +1288,10 @@ function _recordSessionOutcome(payload) {
       sessionId: sessionId,
       therapistPay: therapistPay,
       clientSessionValue: clientSessionValue,
-      sessionStatus: sessionStatus
+      sessionStatus: sessionStatus,
+      creditStatus: rowObj.creditStatus
     };
+    if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
   } finally {

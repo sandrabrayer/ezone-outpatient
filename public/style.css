@@ -52,6 +52,8 @@ button, input, select, textarea {
 .btn-ghost { background: transparent; }
 .btn-danger { background: transparent; border-color: #6b2a2a; color: #ff9b9b; }
 .btn-danger:hover { background: #2a1515; }
+/* positive session-credit balance accent on the patient card */
+.credit-pos { color: var(--green-2); }
 
 /* PIN screen */
 .pin-screen {

@@ -433,14 +433,16 @@ test('multiple phone matches log flagged multi_match', () => {
 // ============================================================================
 // Positional safety on the new tab.
 // ============================================================================
-test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, recordedAt last', () => {
+test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, creditStatus last', () => {
   assert.equal(H[0], 'sessionId');
   assert.ok(H.indexOf('phone') !== -1);
-  assert.equal(H[H.length - 1], 'recordedAt');
+  // creditStatus (session accounting) was appended after recordedAt.
+  assert.equal(H[H.length - 1], 'creditStatus');
+  assert.equal(H[H.length - 2], 'recordedAt');
   // every field the receiver writes has a column
   ['sessionId', 'phone', 'patientName', 'clientId', 'therapist', 'clinicalTreatmentType',
    'billingType', 'date', 'outcome', 'therapistPay', 'clientSessionValue',
-   'sessionStatus', 'matchStatus', 'recordedAt'].forEach((k) => {
+   'sessionStatus', 'matchStatus', 'recordedAt', 'creditStatus'].forEach((k) => {
     assert.ok(H.indexOf(k) !== -1, 'missing column ' + k);
   });
 });
