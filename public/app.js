@@ -1783,6 +1783,93 @@
       '<div style="font-size:1.05rem;font-weight:700;color:#eaf2ff;">' + escapeHtml(String(value)) + '</div></div>';
   }
 
+  // Last summary computed by renderPayouts — reused by the Excel export so it
+  // exports EXACTLY what is on screen (same month, same forwarding state).
+  var lastPayoutSummary = null;
+
+  // One therapist card. `opts.isDiff` flips it to a הפרש card (no mark-forwarded
+  // button — those are caught up by re-forwarding the prior month — and the
+  // detail table shows the originating month). Correct buttons stay available so
+  // a mis-logged late session can still be fixed.
+  function payoutTherapistCard(t, opts) {
+    opts = opts || {};
+    var expanded = !!state.payoutExpanded[(opts.isDiff ? 'diff:' : '') + t.therapist];
+    var toggleKey = (opts.isDiff ? 'diff:' : '') + t.therapist;
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;';
+
+    var forwardBtn = '';
+    if (!opts.isDiff && state.role === 'editor') {
+      forwardBtn =
+        '<button type="button" class="btn edit-only" data-action="payout-forward" data-therapist="' +
+          escapeHtml(t.therapist) + '" title="סמן את החודש של מטפל זה כהועבר לחשבת שכר">הועבר לחשבת שכר</button>';
+    }
+
+    var head =
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:#9fcfcf;">' + escapeHtml(t.therapist || '—') + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+          forwardBtn +
+          '<button type="button" class="btn" data-action="payout-toggle" data-key="' + escapeHtml(toggleKey) + '">' +
+            (expanded ? 'הסתר פירוט' : 'הצג פירוט (' + t.sessionCount + ')') + '</button>' +
+        '</div>' +
+      '</div>';
+
+    var stats =
+      '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
+        payoutStat('סשנים משולמים', t.paidCount) +
+        payoutStat('לפני מע״מ', money(t.preVatTotal)) +
+        payoutStat('כולל מע״מ', money(t.vatTotal)) +
+        payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
+        (opts.isDiff ? payoutStat('חודשים', (t.months || []).join(', ') || '—') : '') +
+      '</div>';
+
+    var detail = '';
+    if (expanded) {
+      var canEdit = state.role === 'editor';
+      var monthCol = opts.isDiff;
+      var rows = t.sessions.map(function (s) {
+        var dimmed = s.paid ? '' : 'opacity:0.55;';
+        // Stash the session payload on the correct button so the handler can
+        // re-send the identity fields (server recomputes pay + reverses credit).
+        var correctBtn = canEdit
+          ? '<button type="button" class="btn" data-action="payout-correct" ' +
+              'data-session=\'' + escapeHtml(JSON.stringify({
+                sessionId: s.sessionId, therapist: t.therapist,
+                clinicalTreatmentType: s.type, date: fmtDate(s.date),
+                outcome: s.outcome, patientName: s.patient, phone: s.phone
+              })) + '\' style="padding:2px 10px;font-size:0.8rem;">תקן</button>'
+          : '';
+        return '<tr style="' + dimmed + '">' +
+          (monthCol ? '<td style="padding:6px 10px;">' + escapeHtml(s.month || '—') + '</td>' : '') +
+          '<td style="padding:6px 10px;">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
+          '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
+          (canEdit ? '<td style="padding:6px 10px;text-align:left;">' + correctBtn + '</td>' : '') +
+        '</tr>';
+      }).join('');
+      detail =
+        '<div style="margin-top:14px;overflow-x:auto;">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;color:#cfe3f5;">' +
+            '<thead><tr style="color:#9fcfcf;text-align:right;border-bottom:1px solid #2a3f5a;">' +
+              (monthCol ? '<th style="padding:6px 10px;font-weight:600;">חודש</th>' : '') +
+              '<th style="padding:6px 10px;font-weight:600;">תאריך</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">מטופל</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">סוג טיפול</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">תוצאה</th>' +
+              '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום</th>' +
+              (state.role === 'editor' ? '<th style="padding:6px 10px;font-weight:600;text-align:left;">תיקון</th>' : '') +
+            '</tr></thead><tbody>' + rows + '</tbody>' +
+          '</table>' +
+        '</div>';
+    }
+
+    card.innerHTML = head + stats + detail;
+    return card;
+  }
+
   function renderPayouts() {
     var listEl = $('#payoutList');
     if (!listEl) return;
@@ -1810,64 +1897,205 @@
     }
 
     var summary = TPay.monthlyPayoutSummary(state.sessionLog, state.payoutMonth);
+    lastPayoutSummary = summary;
     setPayoutKpis(summary.therapists.length, summary.totals.paidCount,
       summary.totals.preVatTotal, summary.totals.vatTotal);
 
     listEl.innerHTML = '';
-    if (!summary.therapists.length) {
+    var diffs = (summary.differences && summary.differences.therapists) || [];
+
+    if (!summary.therapists.length && !diffs.length) {
       listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין סשנים לחודש זה</p></div>';
       return;
     }
 
     summary.therapists.forEach(function (t) {
-      var expanded = !!state.payoutExpanded[t.therapist];
-      var card = document.createElement('div');
-      card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;';
-
-      var head =
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
-          '<div style="font-size:1.05rem;font-weight:700;color:#9fcfcf;">' + escapeHtml(t.therapist || '—') + '</div>' +
-          '<button type="button" class="btn" data-action="payout-toggle" data-therapist="' + escapeHtml(t.therapist) + '">' +
-            (expanded ? 'הסתר פירוט' : 'הצג פירוט (' + t.sessionCount + ')') + '</button>' +
-        '</div>';
-
-      var stats =
-        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
-          payoutStat('סשנים משולמים', t.paidCount) +
-          payoutStat('לפני מע״מ', money(t.preVatTotal)) +
-          payoutStat('כולל מע״מ', money(t.vatTotal)) +
-          payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
-        '</div>';
-
-      var detail = '';
-      if (expanded) {
-        var rows = t.sessions.map(function (s) {
-          var dimmed = s.paid ? '' : 'opacity:0.55;';
-          return '<tr style="' + dimmed + '">' +
-            '<td style="padding:6px 10px;">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
-            '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
-            '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
-            '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
-            '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
-          '</tr>';
-        }).join('');
-        detail =
-          '<div style="margin-top:14px;overflow-x:auto;">' +
-            '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;color:#cfe3f5;">' +
-              '<thead><tr style="color:#9fcfcf;text-align:right;border-bottom:1px solid #2a3f5a;">' +
-                '<th style="padding:6px 10px;font-weight:600;">תאריך</th>' +
-                '<th style="padding:6px 10px;font-weight:600;">מטופל</th>' +
-                '<th style="padding:6px 10px;font-weight:600;">סוג טיפול</th>' +
-                '<th style="padding:6px 10px;font-weight:600;">תוצאה</th>' +
-                '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום</th>' +
-              '</tr></thead><tbody>' + rows + '</tbody>' +
-            '</table>' +
-          '</div>';
-      }
-
-      card.innerHTML = head + stats + detail;
-      listEl.appendChild(card);
+      listEl.appendChild(payoutTherapistCard(t, { isDiff: false }));
     });
+
+    if (diffs.length) {
+      var header = document.createElement('div');
+      header.style.cssText = 'margin:22px 0 10px;display:flex;align-items:baseline;gap:10px;';
+      header.innerHTML =
+        '<span style="font-size:1.05rem;font-weight:700;color:#e0b15a;">הפרשים</span>' +
+        '<span style="font-size:0.85rem;color:#7d93b0;">סשנים מחודשים שכבר הועברו לחשבת שכר (תשלום משלים)</span>';
+      listEl.appendChild(header);
+      diffs.forEach(function (t) {
+        listEl.appendChild(payoutTherapistCard(t, { isDiff: true }));
+      });
+    }
+  }
+
+  // Re-fetch SessionLog after a write (correct / add / forward) and re-render.
+  function reloadSessionLog() {
+    state.sessionLog = null;
+    state.sessionLogLoading = false;
+    ensureSessionLogLoaded();
+  }
+
+  // --- Session correct / add-missing modal -----------------------------------
+  function populateSessionDropdowns() {
+    var tSel = $('#sessionTherapist');
+    if (tSel && !tSel.dataset.filled) {
+      var names = [];
+      var TPay = window.TherapistPay;
+      if (TPay) {
+        names = Object.keys(TPay.FLAT_RATES || {}).concat(Object.keys(TPay.PSYCHIATRIST_RATES || {}));
+      }
+      names.sort(function (a, b) { return a.localeCompare(b, 'he'); });
+      tSel.innerHTML = names.map(function (n) {
+        return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>';
+      }).join('');
+      tSel.dataset.filled = '1';
+    }
+    var cSel = $('#sessionClinicalType');
+    if (cSel && !cSel.dataset.filled) {
+      var types = [];
+      var TMap = window.TreatmentMap;
+      if (TMap && TMap.CLINICAL_TO_BILLING) types = Object.keys(TMap.CLINICAL_TO_BILLING);
+      cSel.innerHTML = types.map(function (n) {
+        return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>';
+      }).join('');
+      cSel.dataset.filled = '1';
+    }
+  }
+
+  function updateSessionFreqVisibility() {
+    var cSel = $('#sessionClinicalType');
+    var wrap = $('#sessionFreqWrap');
+    if (!cSel || !wrap) return;
+    var TMap = window.TreatmentMap;
+    var billing = TMap && TMap.CLINICAL_TO_BILLING ? TMap.CLINICAL_TO_BILLING[cSel.value] : '';
+    var isDay = TMap && TMap.isDayCenterBilling ? TMap.isDayCenterBilling(billing) : false;
+    wrap.hidden = !isDay;
+  }
+
+  // sessionId === null -> add a missing session (server appends a new row).
+  // sessionId set       -> correct an existing one (server upserts, recomputes).
+  function openSessionModal(prefill) {
+    var form = $('#sessionForm');
+    if (!form) return;
+    populateSessionDropdowns();
+    form.reset();
+    prefill = prefill || {};
+    form.dataset.sessionId = prefill.sessionId || '';
+    var isCorrect = !!prefill.sessionId;
+    $('#sessionModalTitle').textContent = isCorrect ? 'תיקון סשן' : 'הוספת סשן חסר';
+    $('#sessionModalSub').textContent = isCorrect
+      ? 'התיקון מריץ מחדש את חישוב התשלום והקרדיט'
+      : 'יירשם כסשן חדש; תשלום וקרדיט יחושבו לפי הכללים';
+    if (prefill.therapist) form.therapist.value = prefill.therapist;
+    if (prefill.clinicalTreatmentType) form.clinicalTreatmentType.value = prefill.clinicalTreatmentType;
+    form.date.value = fmtDate(prefill.date) || today();
+    if (prefill.outcome) form.outcome.value = prefill.outcome;
+    form.patientName.value = prefill.patientName || '';
+    form.phone.value = prefill.phone || '';
+    updateSessionFreqVisibility();
+    $('#sessionModal').hidden = false;
+  }
+  function closeSessionModal() {
+    var m = $('#sessionModal');
+    if (m) m.hidden = true;
+  }
+
+  function handlePayoutListClick(e) {
+    var toggle = e.target.closest('[data-action="payout-toggle"]');
+    if (toggle) {
+      var key = toggle.getAttribute('data-key') || '';
+      state.payoutExpanded[key] = !state.payoutExpanded[key];
+      renderPayouts();
+      return;
+    }
+    var correct = e.target.closest('[data-action="payout-correct"]');
+    if (correct) {
+      var raw = correct.getAttribute('data-session') || '{}';
+      var data = {};
+      try { data = JSON.parse(raw); } catch (_) {}
+      openSessionModal(data);
+      return;
+    }
+    var forward = e.target.closest('[data-action="payout-forward"]');
+    if (forward) {
+      var therapist = forward.getAttribute('data-therapist') || '';
+      markTherapistForwarded(therapist, forward);
+    }
+  }
+
+  function markTherapistForwarded(therapist, btn) {
+    if (!therapist) return;
+    var month = state.payoutMonth || currentMonthStr();
+    if (!window.confirm('לסמן את ' + therapist + ' לחודש ' + month + ' כהועבר לחשבת שכר?\nהסשנים יוסרו מהתצוגה ולא יופיעו שוב.')) return;
+    if (btn) btn.disabled = true;
+    apiPostAction('markForwarded', { therapist: therapist, month: month })
+      .then(function (r) {
+        toast('הועבר: ' + (r.forwarded || 0) + ' סשנים');
+        reloadSessionLog();
+      })
+      .catch(function (err) {
+        toast('שגיאה: ' + err.message, true);
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  // Build a UTF-8-BOM CSV (so Excel renders Hebrew correctly) and download it.
+  function exportPayoutCsv() {
+    var PE = window.PayoutExport;
+    if (!PE || !lastPayoutSummary) { toast('אין נתונים לייצוא', true); return; }
+    var csv = PE.buildPayoutCsv(lastPayoutSummary);
+    var BOM = '﻿';   // so Excel detects UTF-8 and renders Hebrew correctly
+    var blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'payout-' + (lastPayoutSummary.month || state.payoutMonth || '') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // Submit the correct / add-missing form. Both routes POST correctSessionOutcome
+  // (the internal dashboard path into the recordSessionOutcome rules engine): a
+  // new sessionId appends; an existing one upserts and recomputes pay + credit.
+  // No amount field — the server prices it from the rules.
+  function submitSessionForm(e) {
+    e.preventDefault();
+    var submit = $('#sessionSubmit');
+    if (submit && submit.disabled) return;
+    var form = e.target;
+    var fd = new FormData(form);
+    var therapist = (fd.get('therapist') || '').toString().trim();
+    var clinical = (fd.get('clinicalTreatmentType') || '').toString().trim();
+    var date = (fd.get('date') || '').toString().trim();
+    var outcome = (fd.get('outcome') || '').toString().trim();
+    if (!therapist) { toast('יש לבחור מטפל', true); return; }
+    if (!clinical) { toast('יש לבחור סוג טיפול', true); return; }
+    if (!date) { toast('יש להזין תאריך', true); return; }
+    if (!outcome) { toast('יש לבחור תוצאה', true); return; }
+
+    var existingId = (form.dataset.sessionId || '').trim();
+    var payload = {
+      action: 'correctSessionOutcome',
+      sessionId: existingId || uid(),
+      therapist: therapist,
+      clinicalTreatmentType: clinical,
+      date: date,
+      outcome: outcome,
+      patientName: (fd.get('patientName') || '').toString().trim(),
+      phone: (fd.get('phone') || '').toString().trim()
+    };
+    var freq = (fd.get('freqPerWeek') || '').toString().trim();
+    if (freq) payload.freqPerWeek = toNum(freq);
+
+    if (submit) submit.disabled = true;
+    apiPostAction('correctSessionOutcome', payload)
+      .then(function () {
+        toast(existingId ? 'הסשן תוקן' : 'הסשן נוסף');
+        closeSessionModal();
+        reloadSessionLog();
+      })
+      .catch(function (err) { toast('שגיאה: ' + err.message, true); })
+      .finally(function () { if (submit) submit.disabled = false; });
   }
 
   // ---- Leads kanban
@@ -2774,22 +3002,23 @@
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
 
-    // Therapist payouts: month picker + per-therapist detail toggle (read-only).
+    // Therapist payouts: month picker, detail toggle, correct, mark-forwarded,
+    // add-missing-session, and Excel export.
     on('#payoutMonth', 'change', function (e) {
       state.payoutMonth = e.target.value || currentMonthStr();
       renderPayouts();
     });
-    on('#payoutList', 'click', function (e) {
-      var btn = e.target.closest('[data-action="payout-toggle"]');
-      if (!btn) return;
-      var name = btn.getAttribute('data-therapist') || '';
-      state.payoutExpanded[name] = !state.payoutExpanded[name];
-      renderPayouts();
-    });
+    on('#payoutList', 'click', handlePayoutListClick);
+    on('#payoutExportBtn', 'click', exportPayoutCsv);
+    on('#payoutAddSessionBtn', 'click', function () { openSessionModal(null); });
+    var clinicalSel = $('#sessionClinicalType');
+    if (clinicalSel) clinicalSel.addEventListener('change', updateSessionFreqVisibility);
+    var sessionForm = $('#sessionForm');
+    if (sessionForm) sessionForm.addEventListener('submit', submitSessionForm);
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal();
       });
     });
 

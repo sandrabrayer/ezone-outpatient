@@ -305,8 +305,9 @@ test('Clients.creditsOwed is LAST and round-trips positionally; legacy blank -> 
   assert.equal(toCredits(readRow(CLIENTS_H, legacy).creditsOwed), 0);
 });
 
-test('SessionLog.creditStatus is LAST and round-trips positionally', () => {
-  assert.equal(LOG_H[LOG_H.length - 1], 'creditStatus');
+test('SessionLog.creditStatus round-trips positionally (now second-to-last, before forwardedToPayroll)', () => {
+  assert.equal(LOG_H[LOG_H.length - 1], 'forwardedToPayroll');
+  assert.equal(LOG_H[LOG_H.length - 2], 'creditStatus');
   const clients = [client2pw()]; clients[0].creditsOwed = 1; const log = [];
   for (let i = 1; i <= 8; i++) record(HAPPENED('s' + i, '2026-06-' + String(i).padStart(2, '0')), clients, log);
   record(HAPPENED('s9', '2026-06-20'), clients, log);

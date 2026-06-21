@@ -201,14 +201,26 @@ npm start
   E-ZONE pays per session): `therapistPay(name, treatmentType?)`. Rates are
   **pre-VAT** — VAT is added at payment time via the separate `withVat()` helper,
   never inside `therapistPay`. See `CHANGELOG-therapist-pay-table.md`.
-- `public/therapist-payout.js` is a **read-only** monthly payout summary:
+- `public/therapist-payout.js` is the monthly payout summary:
   `monthlyPayoutSummary(sessionLogRows, 'YYYY-MM')` groups `SessionLog` rows per
   therapist, sums the pay for paying outcomes (`happened` + `patient_no_show`)
   into a pre-VAT total, derives the +VAT total via `withVat`, and reports the
-  excluded `therapist_cancelled` count plus a per-session breakdown. It feeds the
-  **תשלומי מטפלים** tab (via the open `getSessionLog` read action). Display only —
-  corrections/export/forward-marking are later steps. See
-  `CHANGELOG-therapist-payout-view.md`.
+  excluded `therapist_cancelled` count plus a per-session breakdown. It is
+  **forwarding-aware**: rows stamped `forwardedToPayroll` are excluded forever,
+  and a session logged late for an already-forwarded month surfaces under
+  `differences` (**הפרשים**). It feeds the **תשלומי מטפלים** tab (via the open
+  `getSessionLog` read action). See `CHANGELOG-therapist-payout-view.md`.
+- The **תשלומי מטפלים** tab is a full payout workflow for מורן:
+  **(1) Correct** — fix a logged outcome or add a missing session via the
+  internal `correctSessionOutcome` action, which runs the **same
+  `_recordSessionOutcome` rules engine** (recomputes pay + reverses credit by
+  `sessionId`; no raw-amount override). **(2) Excel export** —
+  `public/payout-export.js` (`PayoutExport.buildPayoutCsv`) builds a UTF-8-BOM
+  CSV (per-therapist totals + a הפרשים section) for חשבת שכר. **(3) Mark-forwarded**
+  — `markForwarded` / `_markForwarded` stamps a therapist's month
+  (`forwardedToPayroll = 'YYYY-MM'`, the append-only `SessionLog` column) so those
+  sessions never reappear; per-therapist independent. See
+  `CHANGELOG-payout-correct-export-forward.md`.
 - `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
   type as recorded by the therapists app. On save, `_saveAll` derives
   `serviceType` from it via an inline mirror of `treatment-map.js`
