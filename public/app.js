@@ -223,6 +223,10 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
+  // 1 week before the treatment-month ends — collect the next monthly payment.
+  // Mirrors RENEWAL_WINDOW_DAYS in public/vered-alerts.js — keep both in sync.
+  var RENEWAL_WINDOW_DAYS = 7;
+
   // Add 1 calendar month to an ISO date string
   function addMonth(isoDate) {
     if (!isoDate) return '';
@@ -287,7 +291,7 @@
         status = 'unknown';
       } else {
         if (daysLeft < 0) daysLeft = 0;
-        status = daysLeft <= 7 ? 'due_soon' : 'ok';
+        status = daysLeft <= RENEWAL_WINDOW_DAYS ? 'due_soon' : 'ok';
       }
     } else {
       renewal = nextRenewalDueDate(c);
@@ -299,7 +303,7 @@
         status = 'unknown';
       } else if (daysLeft < 0) {
         status = 'overdue';
-      } else if (daysLeft <= 7) {
+      } else if (daysLeft <= RENEWAL_WINDOW_DAYS) {
         status = 'due_soon';
       } else {
         status = 'ok';
@@ -765,8 +769,42 @@
       pipeline.appendChild(div);
     });
 
+    renderCreditAlerts(activeOnly);
     renderRenewalAlerts(activeOnly);
     renderStopFlags();
+  }
+
+  // Credit alert: active patients who owe a make-up session (creditsOwed > 0),
+  // so Vered knows a make-up is owed. Display-only — the balance is
+  // server-managed (recordSessionOutcome); the dashboard never writes it.
+  // Inline mirror of VeredAlerts.creditAlerts in public/vered-alerts.js — keep
+  // both in sync (the browser has no build step to import the module).
+  function renderCreditAlerts(activeClients) {
+    var box = $('#creditAlerts');
+    if (!box) return;
+    var owing = (activeClients || [])
+      .filter(function (c) { return (toNum(c.creditsOwed) || 0) > 0; })
+      .sort(function (a, b) { return (toNum(b.creditsOwed) || 0) - (toNum(a.creditsOwed) || 0); });
+    if (!owing.length) {
+      box.innerHTML = '<div class="renewals-empty">✅ אין מטופלים עם קרדיט מפגשים פתוח</div>';
+      return;
+    }
+    var rows = owing.map(function (c) {
+      var credits = toNum(c.creditsOwed) || 0;
+      var unit = credits === 1 ? 'מפגש' : 'מפגשים';
+      return '<div class="renewal-row renewal-warn" data-client-id="' + escapeHtml(c.id) + '">' +
+        '<div class="renewal-main">' +
+          '<div class="renewal-name">' + escapeHtml(c.name) + '</div>' +
+        '</div>' +
+        '<div class="renewal-meta">' +
+          '<span class="chip chip-amount">קרדיט: ' + credits + ' ' + unit + '</span>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    box.innerHTML = '<div class="renewals-section renewals-warn">' +
+      '<div class="renewals-section-title">🎟️ קרדיט מפגשים — יש להשלים מפגש</div>' +
+      rows +
+    '</div>';
   }
 
   // Resolve a pending flag to a client at RENDER time, so flags already written

@@ -24,6 +24,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   leading-zero recovery, and the edit round-trip.
 
 ### Added
+- **Vered dashboard alerts — credit owed + renewal due (`public/vered-alerts.js`,
+  `public/app.js`, `public/index.html`).** Two display-only OUT-dashboard
+  notices on the existing panel pattern. **(a) Credit alert**
+  (`🎟️ קרדיט מפגשים להשלמה`) lists **active** patients with `creditsOwed > 0`
+  (name + count) so Vered knows a make-up is owed — previously visible only on
+  the individual patient card. **(b) Renewal alert**: the existing
+  `⏰ חידושים השבוע` banner's 7-day window is now the named constant
+  **`RENEWAL_WINDOW_DAYS = 7`** (no duplicate list). The **treatment-month end**
+  date is the renewal anchor + 1 month, anchor = `paymentDate` (last payment)
+  else `startDate`; a patient with **no cycle date** is **flagged, not crashed**.
+  Pure logic lives in `public/vered-alerts.js` (UMD, same pattern as
+  `charges-logic.js`; `app.js` keeps an inline mirror). **Frontend-only — no
+  Apps Script redeploy required** (Railway auto-deploys on merge).
+  `test/vered-alerts.test.js` (10) locks the credit filter, the 7-day window
+  edges, and graceful no-cycle-date handling. See `CHANGELOG-vered-alerts.md`.
 - **Session accounting + credits (auto-draw) — `Clients.creditsOwed` +
   `SessionLog.creditStatus`.** A per-patient monthly **credit ledger** in
   `apps-script/Code.gs`'s `recordSessionOutcome`: a `therapist_cancelled` session
