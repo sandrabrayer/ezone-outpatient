@@ -6,6 +6,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`deactivateClient` cross-app receiver (delete-propagation).** A new
+  fail-closed, shared-secret POST action on the Apps Script web app
+  (`apps-script/Code.gs`) that pairs with the E-Zone Therapists delete-propagation
+  sender (ezone-therapists PR #24, `_postDeactivateClient`): when a patient is
+  **deleted in the therapists app**, it POSTs `{ action:'deactivateClient', secret,
+  phone }` here so the patient stops appearing in outpatient's roster (the
+  therapists roster unions `getTreatmentPlans` / `getDebtStatus` as base sources,
+  so a still-active outpatient Client would be re-added). Gated by a **dedicated,
+  new `DEACTIVATE_CLIENT_SECRET`** Script Property — **fail-closed**
+  (unset/empty/mismatched rejects), and deliberately **its own secret, NOT reused
+  from `STOP_FLAG_SECRET`** (least authority; the sender provisions the same value
+  on both Apps Scripts). **Deactivate, not hard-delete** (reversible — the row plus
+  billing/session history are preserved): every Client matching the **canonical
+  phone** (`_recoverPhone`, leading-zero recovered, across `phone` /
+  `treatmentContactPhone` / `payerPhone`) has its `status` set to a new dedicated
+  value **`לא פעיל`** (`DEACTIVATED_CLIENT_STATUS_HE`), which `_getTreatmentPlans`
+  and `_getDebtStatus` now **exclude** — so the patient leaves the roster union.
+  This status is **distinct from `סיים טיפול`** (Vered's manual discharge), which
+  is still included in `getDebtStatus` (**debt survives discharge**) and the
+  win-back list — only the explicit deactivation status is dropped. **Orphan-safe:**
+  no match → `{ ok:true, deactivated:0 }` (a successful no-op, never a crash, so the
+  sender's local delete still proceeds); idempotent (an already-deactivated row is
+  skipped). Returns `{ ok:true, deactivated:N }`. Matches by canonical phone alone
+  (mirrors `_resolveStopFlagByPhone`); **no `server.js` / Railway change** (Apps
+  Script → Apps Script). `test/deactivate-client.test.js` (16 cases) parses
+  `CLIENTS_HEADERS` + the status value out of Code.gs and locks the sender contract,
+  fail-closed dedicated-secret auth, phone + dropped-leading-zero matching,
+  orphan-safety, idempotency, and exclusion from **both** projections (discharged
+  clients NOT excluded). **Requires an Apps Script redeploy + a new
+  `DEACTIVATE_CLIENT_SECRET` Script Property (same value on both Apps Scripts).**
+  See `CHANGELOG-deactivate-client.md`.
 - **Therapist-payout steps 2–4 — correct, Excel export, mark-forwarded
   (`public/therapist-payout.js`, `public/payout-export.js`, `public/app.js`,
   `public/index.html`, `apps-script/Code.gs`).** The תשלומי מטפלים screen grows
