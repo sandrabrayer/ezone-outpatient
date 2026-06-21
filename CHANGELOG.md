@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Therapist-payout steps 2–4 — correct, Excel export, mark-forwarded
+  (`public/therapist-payout.js`, `public/payout-export.js`, `public/app.js`,
+  `public/index.html`, `apps-script/Code.gs`).** The תשלומי מטפלים screen grows
+  from read-only into מורן's full monthly payout workflow.
+  **(1) Correct** — מורן can fix a logged session's outcome
+  (`happened ↔ therapist_cancelled ↔ patient_no_show`) or add a session that was
+  never logged, from a single modal. Both POST the internal (no-secret)
+  `correctSessionOutcome` action into the **existing `_recordSessionOutcome`
+  rules engine**: pay + credit are **recomputed** and the prior effect reversed
+  (upsert by `sessionId`); a new id appends. **No raw amount override** — the
+  server prices every correction from the rate/billing tables.
+  **(2) Excel export** — the **ייצוא לאקסל** button downloads a UTF-8-BOM CSV
+  (Excel-native) of the selected month: per-therapist rows (name, paid session
+  count, pre-VAT, VAT, total incl VAT), a totals row, and a **הפרשים** section
+  for late prior-month sessions. Built by the new pure `PayoutExport` module from
+  the same on-screen summary.
+  **(3) Mark-forwarded** — a per-therapist **הועבר לחשבת שכר** button stamps every
+  that-therapist/that-month `SessionLog` row with a new append-only
+  `forwardedToPayroll = 'YYYY-MM'` column (via the internal `markForwarded`
+  action / `_markForwarded`). Forwarded rows drop out of the view permanently;
+  forwarding is **per-therapist independent**. A session logged **late** for an
+  already-forwarded month surfaces as a **הפרש** in the next cycle until מורן
+  forwards that month again. **Requires an Apps Script redeploy** (new
+  `forwardedToPayroll` column + `correctSessionOutcome` / `markForwarded`
+  actions). `test/payout-forwarding.test.js` (12), `test/payout-export.test.js`
+  (7), plus the add-session + header coverage extended in
+  `test/session-outcome.test.js`. See `CHANGELOG-payout-correct-export-forward.md`.
+
 ### Fixed
 - **Patient phone now shows on OUT client cards + is editable (`public/app.js`,
   `public/index.html`).** Active client cards previously displayed **no phone**

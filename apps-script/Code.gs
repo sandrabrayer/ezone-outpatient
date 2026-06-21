@@ -1071,7 +1071,13 @@ var SESSION_LOG_HEADERS = [
   // credit available (normal value); 'quota_unknown' = quota undeterminable
   // (no plan frequency / no session date) so NO draw — flagged; 'no_client' =
   // no single client match, so the patient balance could not be touched.
-  'creditStatus'
+  'creditStatus',
+  // APPEND-ONLY (payout forwarding): the 'YYYY-MM' payroll cycle this session was
+  // forwarded to חשבת שכר in. '' = not yet forwarded (still in the open payout
+  // view). Once stamped the row is SETTLED and is filtered out of the payout view;
+  // a session logged late for an already-stamped month surfaces as a הפרש.
+  // Set ONLY by _markForwarded; preserved (never cleared) across outcome upserts.
+  'forwardedToPayroll'
 ];
 
 var SESSION_STATUS_BY_OUTCOME = {
@@ -1188,7 +1194,10 @@ function _recordSessionOutcome(payload) {
       sessionStatus:      sessionStatus,
       matchStatus:        matchStatus,
       recordedAt:         new Date().toISOString(),
-      creditStatus:       ''
+      creditStatus:       '',
+      // Preserved below from the existing row on an upsert — a re-sent / corrected
+      // outcome must NOT lose an already-forwarded stamp (only _markForwarded sets it).
+      forwardedToPayroll: ''
     };
 
     var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
@@ -1205,6 +1214,11 @@ function _recordSessionOutcome(payload) {
     var oldRow = null;
     for (var lr = 0; lr < logRows.length; lr++) {
       if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+    }
+    // Preserve an already-forwarded stamp across the upsert: a correction re-runs
+    // pay/credit but must not silently un-forward a session payroll already received.
+    if (oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '') {
+      rowObj.forwardedToPayroll = String(oldRow.forwardedToPayroll).trim();
     }
 
     if (matchedClient) {
@@ -1294,6 +1308,68 @@ function _recordSessionOutcome(payload) {
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Tolerant 'YYYY-MM' extraction for the payout forwarding match — MUST mirror
+ * public/therapist-payout.js monthOf so _markForwarded stamps exactly the rows
+ * the dashboard view groups into that month. Handles both shapes seen in
+ * SessionLog: ISO 'YYYY-MM-DD' (Sheets normalizes Date cells to this) AND a raw
+ * JS Date.toString() like 'Thu Jun 18 2026 …' (what recordSessionOutcome stores
+ * verbatim from the Therapists payload). Returns '' for empty/unparseable input.
+ * (_monthKey is ISO-only and intentionally left as-is for the credit engine.) */
+function _payoutMonthOf(dateCell) {
+  var s = String(dateCell == null ? '' : dateCell).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2];
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+}
+
+/* ===== Mark a therapist's month as forwarded to payroll (internal write) =====
+ *
+ * Inbound (internal dashboard, NO secret — same trust level as the by-id
+ * resolveStopFlag / savePayment path; this is מורן acting inside the dashboard,
+ * not a cross-app receiver):
+ *   { action:'markForwarded', therapist, month:'YYYY-MM' }
+ *
+ * Stamps `forwardedToPayroll = month` on EVERY still-unstamped SessionLog row for
+ * that (therapist, month) — matched on the SESSION date via _payoutMonthOf so it
+ * tracks the view exactly. Stamped rows drop out of the payout view permanently;
+ * a session logged late for the same month after this runs stays unstamped and
+ * surfaces as a הפרש, until מורן forwards that month again (this can be re-run, it
+ * only ever touches rows that aren't already stamped).
+ *
+ * Per-therapist + per-month: a forward for one therapist never touches another's
+ * rows, and never touches a different month. Idempotent: a second call with no new
+ * rows stamps 0 and reports forwarded:0.
+ */
+function _markForwarded(payload) {
+  var therapist = String((payload && payload.therapist) || '').trim();
+  if (!therapist) return { ok: false, reason: 'missing_therapist' };
+  var month = _payoutMonthOf((payload && payload.month) || '');
+  if (!month) return { ok: false, reason: 'invalid_month' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var rows = _readAll(sh, SESSION_LOG_HEADERS);
+    var forwarded = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (String(row.therapist || '').trim() !== therapist) continue;
+      if (_payoutMonthOf(row.date) !== month) continue;
+      if (String(row.forwardedToPayroll || '').trim() !== '') continue; // already settled
+      row.forwardedToPayroll = month;
+      forwarded++;
+    }
+    if (forwarded) _writeAll(sh, SESSION_LOG_HEADERS, rows);
+    return { ok: true, therapist: therapist, month: month, forwarded: forwarded };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -1572,6 +1648,20 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_recordSessionOutcome(payload));
+    }
+    if (action === 'correctSessionOutcome') {
+      // Internal dashboard correction / add-missing-session path — מורן fixes an
+      // outcome (or logs a session that was never recorded) from the payout
+      // screen. Open, like the by-id resolveStopFlag / savePayment dashboard
+      // writes (NOT the secured cross-app receiver). It runs the SAME
+      // _recordSessionOutcome rules engine: pay + credit are RECOMPUTED and the
+      // prior effect reversed (upsert by sessionId) — there is no raw amount
+      // override. A new sessionId appends a fresh row; an existing one corrects in
+      // place. forwardedToPayroll is preserved across the upsert.
+      return _json(_recordSessionOutcome(payload));
+    }
+    if (action === 'markForwarded') {
+      return _json(_markForwarded(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'getSessionLog') return _json(_getSessionLog());

@@ -142,13 +142,17 @@
         <div id="retentionList"></div>
       </section>
 
-      <!-- Therapist payouts (read-only, step 1 of 4) -->
+      <!-- Therapist payouts -->
       <section id="view-payouts" class="view">
         <div class="toolbar">
           <label class="billing-date-label">חודש
             <input id="payoutMonth" type="month" />
           </label>
-          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">תשלומי מטפלים — סיכום חודשי (לתצוגה בלבד)</h2>
+          <h2 style="font-size:1rem;font-weight:600;color:#1a2e4a">תשלומי מטפלים — סיכום חודשי</h2>
+          <div style="margin-inline-start:auto;display:flex;gap:8px;">
+            <button type="button" class="btn edit-only" id="payoutAddSessionBtn">+ הוסף סשן חסר</button>
+            <button type="button" class="btn btn-primary" id="payoutExportBtn">ייצוא לאקסל</button>
+          </div>
         </div>
         <div class="kpis">
           <div class="kpi"><div class="kpi-label">מטפלים</div><div id="payoutTherapistCount" class="kpi-value">0</div></div>
@@ -499,6 +503,42 @@
       </div>
     </div>
 
+    <!-- Session correct / add-missing modal (payout screen) -->
+    <div id="sessionModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title" id="sessionModalTitle">תיקון סשן</div>
+        <div class="modal-sub" id="sessionModalSub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;"></div>
+        <form id="sessionForm" class="form-grid">
+          <label>מטפל
+            <select name="therapist" id="sessionTherapist" required></select>
+          </label>
+          <label>סוג טיפול
+            <select name="clinicalTreatmentType" id="sessionClinicalType" required></select>
+          </label>
+          <label>תאריך<input name="date" type="date" required /></label>
+          <label>תוצאה
+            <select name="outcome" required>
+              <option value="happened">התקיים</option>
+              <option value="patient_no_show">מטופל לא הגיע</option>
+              <option value="therapist_cancelled">בוטל ע״י מטפל</option>
+            </select>
+          </label>
+          <label>שם מטופל<input name="patientName" type="text" placeholder="לא חובה" /></label>
+          <label>טלפון מטופל<input name="phone" type="text" placeholder="לזיהוי + קרדיטים" /></label>
+          <label id="sessionFreqWrap" hidden>תדירות שבועית (ליווי)
+            <input name="freqPerWeek" type="number" min="1" max="7" placeholder="3 או 5" />
+          </label>
+          <p class="modal-sub wide" style="color:#7d93b0;font-weight:400;">
+            התשלום והקרדיט מחושבים אוטומטית לפי הכללים — אין הזנת סכום ידנית.
+          </p>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="sessionSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="duplicateLeadModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">ליד עם טלפון זה כבר קיים</div>
@@ -514,8 +554,10 @@
     </div>
   </div>
 
+  <script src="treatment-map.js?v=__BUILD__" defer></script>
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
+  <script src="payout-export.js?v=__BUILD__" defer></script>
   <script src="app.js?v=__BUILD__" defer></script>
 </body>
 </html>

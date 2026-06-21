@@ -314,6 +314,24 @@ test('correction: happened -> therapist_cancelled flips pay to 0 on the SAME row
   assert.equal(rows[0].sessionStatus, 'credited');
 });
 
+test('add missing session: a brand-new sessionId APPENDS a row + computes pay/value (no override)', () => {
+  // מורן logs a session that was never recorded by the Therapists app. Same rules
+  // engine as a correction — it just appends because the sessionId is new.
+  let rows = [{ sessionId: 'existing', therapist: 'רמי', clinicalTreatmentType: 'פרטני CBT', outcome: 'happened', therapistPay: 250 }];
+  const r = recordSessionOutcome(
+    { sessionId: 'manual-1', therapist: 'דליה מלמד', clinicalTreatmentType: 'פרטני כללי', date: '2026-06-22', outcome: 'happened' }, rows
+  );
+  rows = r.rows;
+  assert.equal(r.res.ok, true);
+  assert.equal(r.res.appended, true, 'new sessionId appends, never overwrites');
+  assert.equal(rows.length, 2);
+  const added = rows.find((x) => x.sessionId === 'manual-1');
+  assert.equal(added.therapistPay, 230);          // computed from the rules
+  assert.equal(added.clientSessionValue, 500);
+  assert.equal(added.sessionStatus, 'consumed');
+  assert.equal(added.date, '2026-06-22');
+});
+
 test('correction the other way: therapist_cancelled -> happened restores pay', () => {
   let rows = [];
   rows = recordSessionOutcome({ sessionId: 'fix2', therapist: 'תמר גנץ', clinicalTreatmentType: 'פרטני CBT', outcome: 'therapist_cancelled' }, rows).rows;
@@ -433,12 +451,14 @@ test('multiple phone matches log flagged multi_match', () => {
 // ============================================================================
 // Positional safety on the new tab.
 // ============================================================================
-test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, creditStatus last', () => {
+test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, forwardedToPayroll last', () => {
   assert.equal(H[0], 'sessionId');
   assert.ok(H.indexOf('phone') !== -1);
-  // creditStatus (session accounting) was appended after recordedAt.
-  assert.equal(H[H.length - 1], 'creditStatus');
-  assert.equal(H[H.length - 2], 'recordedAt');
+  // forwardedToPayroll (payout forwarding) was appended after creditStatus, which
+  // itself was appended after recordedAt.
+  assert.equal(H[H.length - 1], 'forwardedToPayroll');
+  assert.equal(H[H.length - 2], 'creditStatus');
+  assert.equal(H[H.length - 3], 'recordedAt');
   // every field the receiver writes has a column
   ['sessionId', 'phone', 'patientName', 'clientId', 'therapist', 'clinicalTreatmentType',
    'billingType', 'date', 'outcome', 'therapistPay', 'clientSessionValue',
