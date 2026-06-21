@@ -647,6 +647,17 @@ function _json(obj) {
 var LOST_LEAD_STAGE_HE = 'לא רלוונטי';
 var DISCHARGED_CLIENT_STATUS_HE = 'סיים טיפול';
 
+/* Cross-app deactivation status (task: deactivateClient receiver). When the
+ * E-Zone Therapists app deletes a patient there, it POSTs deactivateClient and
+ * this receiver sets the matching outpatient Client's `status` to this value —
+ * a soft, reversible deactivation (the row, billing and session history are
+ * kept). It is DISTINCT from `סיים טיפול` (Vered's manual discharge): a
+ * discharged client still flows through getDebtStatus (debt survives discharge)
+ * and the win-back list, whereas a cross-app-deactivated client is EXCLUDED from
+ * both getTreatmentPlans and getDebtStatus so it leaves the therapists roster
+ * union (which unions those two as base sources). Currently unused elsewhere. */
+var DEACTIVATED_CLIENT_STATUS_HE = 'לא פעיל';
+
 function _winbackAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('WINBACK_SECRET');
   if (!expected) return true; // not configured → open
@@ -776,6 +787,11 @@ function _getDebtStatus() {
     var cl = clients[c];
     var id = (cl && cl.id != null) ? String(cl.id) : '';
     if (!id) continue;
+    // Cross-app-deactivated clients (deleted in the therapists app) are dropped
+    // from the roster union — they must not be re-added via this base source.
+    // NOTE: discharged (`סיים טיפול`) clients are still INCLUDED here; debt
+    // survives discharge. Only the explicit deactivation status is excluded.
+    if (cl.status === DEACTIVATED_CLIENT_STATUS_HE) continue;
     var rows = byClient[id] || [];
     var debtStatus, amountOwed;
     if (rows.length === 0) {
@@ -824,6 +840,9 @@ function _getTreatmentPlans() {
     var cl = clients[c];
     var id = (cl && cl.id != null) ? String(cl.id) : '';
     if (!id) continue;
+    // Cross-app-deactivated clients (deleted in the therapists app) leave the
+    // roster — exclude them so the therapists roster union does not re-add them.
+    if (cl.status === DEACTIVATED_CLIENT_STATUS_HE) continue;
     // Cross-app join key for the therapists app — must be the populated
     // canonical patient phone. The patient number lives in the `phone` column
     // (added in the stop-flow work); the legacy `treatmentContactPhone` column
@@ -1447,6 +1466,67 @@ function _resolveStopFlagByPhone(payload) {
   }
 }
 
+/* ===== Deactivate client (secured cross-app receiver) =======================
+ *
+ * Pairs with the E-Zone Therapists delete-propagation sender (ezone-therapists
+ * PR #24, `_postDeactivateClient`): when a patient is DELETED in the therapists
+ * app, it POSTs { action:'deactivateClient', secret, phone } here so the patient
+ * stops appearing in outpatient's roster (the therapists roster unions
+ * getTreatmentPlans / getDebtStatus as base sources, so a still-active outpatient
+ * Client would otherwise be re-added).
+ *
+ * FAIL-CLOSED auth on a DEDICATED secret 'DEACTIVATE_CLIENT_SECRET' — its OWN
+ * secret, NOT reused from STOP_FLAG_SECRET (least authority; matches the sender,
+ * which provisions the same value on both Apps Scripts). Unset/empty/wrong
+ * REJECTS, exactly like flagStop / resolveStopFlag-by-phone.
+ *
+ * DEACTIVATE, not hard-delete (reversible; the row + billing/session history are
+ * kept): every Client matching the canonical phone has its `status` set to
+ * DEACTIVATED_CLIENT_STATUS_HE ('לא פעיל'), which both projections now exclude.
+ * Match is by canonical phone ALONE (handles a leading zero Sheets dropped), the
+ * same phone fields the other receivers check (phone / treatmentContactPhone /
+ * payerPhone). ORPHAN-SAFE: no match -> { ok:true, deactivated:0 } (a successful
+ * no-op, never a crash). Returns { ok:true, deactivated:N }. Idempotent: a row
+ * already deactivated is skipped (not re-counted). Mirrors _resolveStopFlagByPhone:
+ * one script lock, positional writes by header index. */
+function _deactivateAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('DEACTIVATE_CLIENT_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _deactivateClient(payload) {
+  if (!_deactivateAuthOk(payload)) return { ok: false, reason: 'unauthorized' };
+  var phone = _recoverPhone(payload && payload.phone);
+  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, deactivated: 0 }; // orphan-safe: no rows
+    var phoneIdx   = CLIENTS_HEADERS.indexOf('phone');
+    var contactIdx = CLIENTS_HEADERS.indexOf('treatmentContactPhone');
+    var payerIdx   = CLIENTS_HEADERS.indexOf('payerPhone');
+    var statusIdx  = CLIENTS_HEADERS.indexOf('status');
+    var rows = sh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
+    var deactivated = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (_recoverPhone(rows[i][phoneIdx]) !== phone &&
+          _recoverPhone(rows[i][contactIdx]) !== phone &&
+          _recoverPhone(rows[i][payerIdx]) !== phone) continue;
+      if (String(rows[i][statusIdx]) === DEACTIVATED_CLIENT_STATUS_HE) continue; // already
+      sh.getRange(i + 2, statusIdx + 1).setValue(DEACTIVATED_CLIENT_STATUS_HE);
+      deactivated++;
+    }
+    return { ok: true, deactivated: deactivated };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Merge duplicate clients =====
  *
  * Internal dashboard action (open, same trust level as saveAll). Merges one or
@@ -1640,6 +1720,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_setClinicalType(payload));
+    }
+    if (action === 'deactivateClient') {
+      var dcParams = (e && e.parameter) || {};
+      if (payload && payload.secret) dcParams.secret = payload.secret;
+      if (!_deactivateAuthOk(dcParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_deactivateClient(payload));
     }
     if (action === 'recordSessionOutcome') {
       var soParams = (e && e.parameter) || {};

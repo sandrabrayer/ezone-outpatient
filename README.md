@@ -150,6 +150,24 @@ npm start
   **Clients is never modified.** Posts directly to Apps Script `/exec` (no
   `server.js` change). This is the **receiver + compute only** — no therapists-side
   sender. See `CHANGELOG-session-outcome.md`. **Requires an Apps Script redeploy.**
+- `POST /exec { action:'deactivateClient', secret:<DEACTIVATE_CLIENT_SECRET>, phone }`
+  — the E-Zone Therapists app calls this when a patient is **deleted there**, so
+  the patient stops appearing in outpatient's roster (the therapists roster unions
+  `getTreatmentPlans` / `getDebtStatus` as base sources). **Fail-closed** on a
+  **dedicated, new** `DEACTIVATE_CLIENT_SECRET` (its own secret, **not** reused
+  from `STOP_FLAG_SECRET` — least authority; provision the **same value** on both
+  Apps Scripts). **Deactivate, not hard-delete** (reversible; row + billing/
+  session history kept): every Client matching the **canonical phone**
+  (`_recoverPhone`, leading-zero recovered, across `phone`/`treatmentContactPhone`/
+  `payerPhone`) has its `status` set to **`לא פעיל`**, which both projections now
+  exclude — so the patient leaves the roster union. `סיים טיפול` (Vered's manual
+  discharge) is **distinct** and stays in `getDebtStatus` (debt survives
+  discharge). **Orphan-safe:** no match → `{ ok:true, deactivated:0 }` (never a
+  crash; the sender's local delete still proceeds). Returns `{ ok:true,
+  deactivated:N }`; idempotent. Posts directly to Apps Script `/exec` (no
+  `server.js` / Railway change). Pairs with ezone-therapists PR #24's
+  delete-propagation sender. See `CHANGELOG-deactivate-client.md`. **Requires an
+  Apps Script redeploy.**
 
 ### Debug endpoints
 
