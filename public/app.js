@@ -3320,6 +3320,33 @@
         house_of_origin: lead.house_of_origin || ''
       };
       state.clients.push(client);
+      var intakePaymentToPersist = null;
+      // When the patient is added already paid/partial, mirror that into a
+      // current-month payment ROW — the paid/unpaid badge on the patient page is
+      // computed from payment rows, not from client.paymentStatus. Without this
+      // the intake «שולם» didn't surface and Vered had to re-mark it manually.
+      // Same row shape as setCurrentMonthPaid; the button stays editable after.
+      if (payStatus === 'paid' || payStatus === 'partial') {
+        var intakeDue = currentMonthBaseDueDate(client);
+        var intakeAmount = clientAmountDue(client) || 0;
+        var intakePayment = {
+          id: paymentId(client, intakeDue, 'base'),
+          clientId: client.id,
+          clientName: client.name || '',
+          billingType: 'monthly',
+          dueDate: intakeDue,
+          amountDue: intakeAmount,
+          amountPaid: payStatus === 'paid' ? intakeAmount : 0,
+          status: payStatus,
+          paymentDate: payDate || today(),
+          method: '', notes: '',
+          bundleSize: 0, sessionsUsed: 0
+        };
+        var exIdx = state.payments.findIndex(function (p) { return p.id === intakePayment.id; });
+        if (exIdx >= 0) state.payments[exIdx] = intakePayment;
+        else state.payments.push(intakePayment);
+        intakePaymentToPersist = intakePayment;
+      }
       lead.stage = 'active';
       lead.serviceType = client.serviceType;
       lead.location = client.location;
@@ -3330,6 +3357,15 @@
       lead.paymentDate = payDate;
       lead.nextBillingDate = nextBill;
       persist()
+        .then(function () {
+          // Save the intake payment row through its own path (persist() doesn't
+          // cover payments). Non-fatal if it fails — the client is already saved.
+          if (intakePaymentToPersist) {
+            return persistPayment(intakePaymentToPersist).catch(function (e) {
+              toast('המטופל נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
+            });
+          }
+        })
         .then(function () { toast('המטופל נוסף'); closeActivateModal(); setView('clients'); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
