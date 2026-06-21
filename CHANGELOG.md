@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Patient phone now shows on OUT client cards + is editable (`public/app.js`,
+  `public/index.html`).** Active client cards previously displayed **no phone**
+  even though the `phone` column was populated by the create / activate flows —
+  the card render had no phone line at all, and the edit modal read/wrote only
+  the **legacy `treatmentContactPhone`** field (usually empty for active
+  clients). Now a `clientPhone(c)` helper resolves the patient's number as
+  `recoverPhone(phone) || recoverPhone(treatmentContactPhone)` (leading-zero
+  recovery applied, so a Sheets-coerced 9-digit number shows the full canonical
+  10-digit form), the client card renders a **טלפון** line, and the edit modal
+  gained a **טלפון מטופל** field that reads and writes `phone`. The
+  `treatmentContactPhone` field stays intact and separately editable (it remains
+  the WhatsApp / cross-app matching key), and both identity phones are still
+  deduped on save. `phone` was already serialized in `clientForSheet`, so this is
+  **frontend-only — no Apps Script redeploy required** (Railway auto-deploys on
+  merge). `test/patient-phone-display.test.js` (7) locks display, fallback,
+  leading-zero recovery, and the edit round-trip.
+
 ### Added
 - **Session accounting + credits (auto-draw) — `Clients.creditsOwed` +
   `SessionLog.creditStatus`.** A per-patient monthly **credit ledger** in
