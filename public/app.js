@@ -3196,7 +3196,40 @@
           house_of_origin: (fd.get('house_of_origin') || '').trim()
         };
         state.clients.push(client);
+        // Mirror an already-paid/partial intake into a current-month payment ROW
+        // so the patient-card badge shows paid automatically (it reads payment
+        // rows, not client.paymentStatus). Same shape as setCurrentMonthPaid.
+        var directIntakePayment = null;
+        if (payStatus === 'paid' || payStatus === 'partial') {
+          var dDue = currentMonthBaseDueDate(client);
+          var dAmount = clientAmountDue(client) || 0;
+          directIntakePayment = {
+            id: paymentId(client, dDue, 'base'),
+            clientId: client.id,
+            clientName: client.name || '',
+            billingType: 'monthly',
+            dueDate: dDue,
+            amountDue: dAmount,
+            amountPaid: payStatus === 'paid' ? dAmount : 0,
+            status: payStatus,
+            paymentDate: payDate || today(),
+            method: '', notes: '',
+            bundleSize: 0, sessionsUsed: 0
+          };
+          var dIdx = state.payments.findIndex(function (p) { return p.id === directIntakePayment.id; });
+          if (dIdx >= 0) state.payments[dIdx] = directIntakePayment;
+          else state.payments.push(directIntakePayment);
+        }
         persist()
+          .then(function () {
+            // Save the payment row through its own path (persist() saves only
+            // leads+clients). Non-fatal — client is already saved.
+            if (directIntakePayment) {
+              return persistPayment(directIntakePayment).catch(function () {
+                toast('המטופל נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
+              });
+            }
+          })
           .then(function () { toast('המטופל נוסף'); closeDirectClientModal(); render(); })
           .catch(function (err) {
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
