@@ -128,6 +128,7 @@
     payments: [],
     charges: [],
     stopFlags: [],  // stop-treatment flags from the therapists app (await confirmation)
+    extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
     clientSearch: '',
@@ -497,6 +498,21 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  async function apiGetExtraRequests() {
+    var r = await fetch('/api/sheets?action=getExtraSessionRequests', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  async function apiApproveExtra(id, approvedBy) {
+    var r = await fetch('/api/sheets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approveExtraSession', id: id, approvedBy: approvedBy })
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
   async function apiGetSessionLog() {
     var r = await fetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
@@ -582,7 +598,9 @@
       billingDay: row.billingDay === '' || row.billingDay == null ? '' : toNum(row.billingDay),
       active: activeBool,
       notes: row.notes || '',
-      created: fmtDate(row.created)
+      created: fmtDate(row.created),
+      treatmentType: row.treatmentType || '',
+      frequencyPerWeek: row.frequencyPerWeek === '' || row.frequencyPerWeek == null ? '' : toNum(row.frequencyPerWeek)
     };
   }
   function chargeForSheet(c) {
@@ -596,7 +614,9 @@
       billingDay: (c.billingDay === '' || c.billingDay == null) ? '' : toNum(c.billingDay),
       active: c.active === false ? 'false' : 'true',
       notes: c.notes || '',
-      created: c.created || today()
+      created: c.created || today(),
+      treatmentType: c.treatmentType || '',
+      frequencyPerWeek: (c.frequencyPerWeek === '' || c.frequencyPerWeek == null) ? '' : toNum(c.frequencyPerWeek)
     };
   }
   async function persistCharge(charge) {
@@ -772,6 +792,7 @@
     renderCreditAlerts(activeOnly);
     renderRenewalAlerts(activeOnly);
     renderStopFlags();
+    renderExtraRequests();
   }
 
   // Credit alert: active patients who owe a make-up session (creditsOwed > 0),
@@ -897,6 +918,65 @@
       '</div>';
     }).join('');
   }
+
+  // ===== Over-package extra-session requests (Vered approval) =====
+  // The therapists app posts a request when Yarden books beyond a patient's
+  // monthly package. Vered sees pending ones here and approves; approving stamps
+  // approvedBy/At server-side. Mirrors the stop-flags panel.
+  function renderExtraRequests() {
+    var box = $('#extraRequestsAlerts');
+    if (!box) return;
+    var pending = (state.extraRequests || []).filter(function (r) { return String(r.status) === 'pending'; });
+    if (!pending.length) {
+      box.innerHTML = '<div class="renewals-empty">✅ אין בקשות לטיפול נוסף הממתינות לאישור</div>';
+      return;
+    }
+    box.innerHTML = pending.map(function (r) {
+      var who = r.patientName || '— ללא שם —';
+      var chips =
+        '<span class="chip">' + escapeHtml(r.phone || '—') + '</span>' +
+        (r.treatmentType ? '<span class="chip chip-next">' + escapeHtml(displayServiceTypeSafe(r.treatmentType)) + '</span>' : '') +
+        (r.therapist ? '<span class="chip">מטפל: ' + escapeHtml(r.therapist) + '</span>' : '') +
+        ((r.quota || r.used) ? '<span class="chip chip-amount">נוצלו ' + (r.used || 0) + ' מתוך ' + (r.quota || 0) + '</span>' : '') +
+        (r.monthKey ? '<span class="chip">' + escapeHtml(r.monthKey) + '</span>' : '');
+      var noteHtml = r.note ? '<div class="renewal-note">' + escapeHtml(r.note) + '</div>' : '';
+      var approve = '<button class="btn btn-primary edit-only" data-action="approve-extra" ' +
+        'data-extra-id="' + escapeHtml(r.id) + '">אשר טיפול נוסף</button>';
+      return '<div class="renewal-row renewal-warn" data-extra-id="' + escapeHtml(r.id) + '">' +
+        '<div class="renewal-main">' +
+          '<div class="renewal-name">' + escapeHtml(who) + '</div>' + chips +
+        '</div>' + noteHtml +
+        '<div class="renewal-actions">' + approve + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Safe label for a treatment type on Vered's side (outpatient has no Hebrew
+  // relabel map for therapists' types; show the raw value, just escaped).
+  function displayServiceTypeSafe(v) { return String(v == null ? '' : v); }
+
+  function handleExtraRequestClick(e) {
+    var btn = e.target.closest('[data-action="approve-extra"]');
+    if (!btn) return;
+    if (state.role !== 'editor') return;
+    var id = btn.getAttribute('data-extra-id');
+    var req = (state.extraRequests || []).find(function (r) { return r.id === id; });
+    if (!req) { toast('הבקשה לא נמצאה', true); return; }
+    if (!confirm('לאשר טיפול נוסף עבור ' + (req.patientName || req.phone || '') + ' מעבר לחבילה החודשית?')) return;
+    var prev = { status: req.status, approvedBy: req.approvedBy, approvedAt: req.approvedAt };
+    req.status = 'approved';
+    req.approvedBy = 'Vered';
+    req.approvedAt = new Date().toISOString();
+    renderExtraRequests();
+    apiApproveExtra(id, 'Vered')
+      .then(function () { toast('הטיפול הנוסף אושר'); })
+      .catch(function (err) {
+        req.status = prev.status; req.approvedBy = prev.approvedBy; req.approvedAt = prev.approvedAt;
+        renderExtraRequests();
+        toast('האישור לא נשמר: ' + err.message, true);
+      });
+  }
+
 
   // Delegated click handler for the pending stop-flags panel. Handles both the
   // single-match "סיים טיפול" button and the ambiguous-case candidate picker.
@@ -1587,6 +1667,46 @@
       .catch(function (e) {
         if (prev) state.payments[idx] = prev;
         else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        render();
+        toast('שמירה נכשלה: ' + e.message, true);
+      });
+  }
+
+  // Toggle a specific EXTRA CHARGE's paid status. A charge's status lives in its
+  // own payment row (id = paymentId(client, today(), 'extra', charge.id)), the
+  // same row chargeStatusFor reads. Mirrors setCurrentMonthPaid: optimistic
+  // update + persist, rollback on failure. Lets Vered mark an added treatment
+  // paid on the spot when money is collected the same day.
+  function setChargePaid(c, charge, makePaid) {
+    if (state.role !== 'editor') return;
+    var id = paymentId(c, today(), 'extra', charge.id);
+    var existing = findPaymentById(id);
+    var newStatus = makePaid ? 'paid' : 'unpaid';
+    if (existing && existing.status === newStatus) return;
+    var amount = (existing && existing.amountDue) || charge.amount || 0;
+    var updated = {
+      id: id,
+      clientId: c.id,
+      clientName: c.name || '',
+      billingType: 'extra',
+      dueDate: (existing && existing.dueDate) || today(),
+      amountDue: amount,
+      amountPaid: makePaid ? amount : 0,
+      status: newStatus,
+      paymentDate: makePaid ? today() : ((existing && existing.paymentDate) || ''),
+      method: (existing && existing.method) || '', notes: (existing && existing.notes) || '',
+      bundleSize: 0, sessionsUsed: 0
+    };
+    var idx = state.payments.findIndex(function (p) { return p.id === id; });
+    var prev = idx >= 0 ? state.payments[idx] : null;
+    if (idx >= 0) state.payments[idx] = updated;
+    else state.payments.push(updated);
+    render();
+    persistPayment(updated)
+      .then(function () { toast(makePaid ? 'החיוב סומן כשולם' : 'בוטל סימון התשלום'); })
+      .catch(function (e) {
+        if (prev) state.payments[idx] = prev;
+        else state.payments = state.payments.filter(function (p) { return p.id !== id; });
         render();
         toast('שמירה נכשלה: ' + e.message, true);
       });
@@ -2361,7 +2481,13 @@
         }
         var status = chargeStatusFor(c, ch);
         var statusLabel = status === 'paid' ? 'שולם' : status === 'partial' ? 'שולם חלקית' : 'לא שולם';
-        var statusBadge = '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
+        // Editors get a clickable toggle (mark paid / revert); viewers see a
+        // static badge. Clicking flips this charge's own payment row.
+        var statusBadge = (state.role === 'editor')
+          ? '<button type="button" class="charge-status charge-status-' + status + ' charge-status-btn edit-only" ' +
+              'data-charge-paid="' + escapeHtml(ch.id) + '" data-charge-makepaid="' + (status === 'paid' ? '0' : '1') + '" ' +
+              'title="' + (status === 'paid' ? 'בטל סימון תשלום' : 'סמן כשולם') + '">' + statusLabel + '</button>'
+          : '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
         return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
           '<span class="charge-label">' + label + '</span>' +
           statusBadge +
@@ -2417,6 +2543,17 @@
         btn.addEventListener('click', function () {
           var chargeId = btn.getAttribute('data-charge-remove');
           handleRemoveCharge(chargeId);
+        });
+      });
+
+      // Wire the per-charge paid toggle (editor only): mark a single charge
+      // paid/unpaid on the spot (e.g. an added treatment paid the same day).
+      $$('[data-charge-paid]', card).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var chargeId = btn.getAttribute('data-charge-paid');
+          var makePaid = btn.getAttribute('data-charge-makepaid') === '1';
+          var charge = (state.charges || []).find(function (ch) { return ch.id === chargeId; });
+          if (charge) setChargePaid(c, charge, makePaid);
         });
       });
 
@@ -2795,6 +2932,14 @@
     $('#addChargeClientName').textContent = client.name || '';
     if (form.chargeDate) form.chargeDate.value = today();
     if (form.billingType) form.billingType.value = 'one_time';
+    // Populate the treatment-type dropdown from the canonical service list.
+    var typeSel = $('#addChargeTreatmentType');
+    if (typeSel) {
+      typeSel.innerHTML = '<option value="">—</option>' +
+        SERVICE_TYPES.map(function (s) {
+          return '<option value="' + escapeHtml(s) + '">' + escapeHtml(serviceLabel(s)) + '</option>';
+        }).join('');
+    }
     updateAddChargeBillingDayVisibility(form);
     $('#addChargeModal').hidden = false;
   }
@@ -2831,9 +2976,17 @@
     if (!form) return;
     var type = form.billingType && form.billingType.value;
     var wrap = $('#addChargeBillingDayWrap');
-    if (!wrap) return;
-    if (type === 'monthly') wrap.classList.remove('field-hidden');
-    else wrap.classList.add('field-hidden');
+    var freqWrap = $('#addChargeFreqWrap');
+    if (wrap) {
+      if (type === 'monthly') wrap.classList.remove('field-hidden');
+      else wrap.classList.add('field-hidden');
+    }
+    // Days/week only makes sense for a recurring (monthly) treatment, not a
+    // one-time charge.
+    if (freqWrap) {
+      if (type === 'monthly') freqWrap.classList.remove('field-hidden');
+      else freqWrap.classList.add('field-hidden');
+    }
   }
 
   function handleRemoveCharge(chargeId) {
@@ -2934,6 +3087,13 @@
         state.stopFlags = [];
       }
       try {
+        var er = await apiGetExtraRequests();
+        state.extraRequests = (er.requests || []).filter(function (r) { return !!r.id; });
+      } catch (ere) {
+        console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
+        state.extraRequests = [];
+      }
+      try {
         var s = await apiLoadSettings();
         state.settings = {
           bankName: s.bankName || '',
@@ -2990,6 +3150,8 @@
     if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
     var stopFlagsBox = $('#stopFlagsAlerts');
     if (stopFlagsBox) stopFlagsBox.addEventListener('click', handleStopFlagClick);
+    var extraBox = $('#extraRequestsAlerts');
+    if (extraBox) extraBox.addEventListener('click', handleExtraRequestClick);
     var dupReportBox = $('#duplicateClientsReport');
     if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
     var mergeConfirmBtn = $('#mergeClientsConfirm');
@@ -3042,6 +3204,9 @@
       var chargeDate = fd.get('chargeDate') || '';
       var billingDay = fd.get('billingDay');
       var notes = (fd.get('notes') || '').trim();
+      var treatmentType = (fd.get('treatmentType') || '').toString().trim();
+      var frequencyPerWeek = fd.get('frequencyPerWeek');
+      var chargePaid = !!fd.get('chargePaid');
       if (!description) { toast('חסר תיאור', true); return; }
       if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
       if (!chargeDate) { toast('יש להזין תאריך', true); return; }
@@ -3052,6 +3217,8 @@
         description: description,
         amount: amount,
         billingType: billingType === 'monthly' ? 'monthly' : 'one_time',
+        treatmentType: treatmentType,
+        frequencyPerWeek: (billingType === 'monthly' && frequencyPerWeek) ? toNum(frequencyPerWeek) : '',
         chargeDate: chargeDate,
         billingDay: billingType === 'monthly' && billingDay ? toNum(billingDay) : '',
         active: true,
@@ -3059,11 +3226,31 @@
         created: today()
       };
       state.charges.push(charge);
+      // If marked paid, create the charge's payment row up front (same row
+      // chargeStatusFor reads), so it shows שולם immediately — no extra click.
+      var paidRow = null;
+      if (chargePaid) {
+        var pid = paymentId(client, today(), 'extra', charge.id);
+        paidRow = {
+          id: pid, clientId: client.id, clientName: client.name || '',
+          billingType: 'extra', dueDate: today(),
+          amountDue: amount, amountPaid: amount, status: 'paid',
+          paymentDate: today(), method: '', notes: '',
+          bundleSize: 0, sessionsUsed: 0
+        };
+        state.payments.push(paidRow);
+      }
       render();
       persistCharge(charge)
+        .then(function () {
+          if (paidRow) return persistPayment(paidRow).catch(function () {
+            toast('הטיפול נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
+          });
+        })
         .then(function () { toast('הטיפול נוסף'); closeAddChargeModal(); })
         .catch(function (err) {
           state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
+          if (paidRow) state.payments = state.payments.filter(function (p) { return p.id !== paidRow.id; });
           render();
           toast('שגיאה: ' + err.message, true);
         })
