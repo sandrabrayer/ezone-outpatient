@@ -1,147 +1,128 @@
 /**
- * E-ZONE Outpatient — Apps Script backend
+ * E-ZONE Therapists — Apps Script backend (iteration 2: scheduling)
+ *
+ * Therapists self-schedule follow-up treatments for active outpatients
+ * (treatment type + location + date) and later mark whether each happened.
+ * This is the THERAPISTS app's OWN sheet. The cross-app debt status that gates
+ * scheduling lives in the ezone-outpatient script and is proxied by the Node
+ * server (and re-read server-side here for authoritative enforcement).
+ *
+ * Sheets in this workbook:
+ *   - Schedule        one row PER PATIENT PER SESSION (group sessions share a
+ *                     sessionId; each row keeps its own gate + attendance).
+ *   - Approvals       append-only audit of every debtor approval (Ron/Sandra).
+ *   - Patients        per-patient intake record keyed by phone: identity +
+ *                     origin (where the patient came from + optional still-
+ *                     admitted house). The active-outpatient roster itself comes
+ *                     from the outpatient sibling; this sheet only layers local
+ *                     extras on top.
+ *   - Assignments     one row per (patient, therapist, plan). A patient may have
+ *                     MULTIPLE parallel treatments/therapists; therapist + plan
+ *                     (type + weekly frequency) stay editable.
+ *   - Therapists      editable list {name, active} — feeds the dropdown.
+ *   - TreatmentTypes  editable list {name, active, isGroup} — feeds the dropdown.
+ *
+ * The Therapists / TreatmentTypes lists are ADMIN-EDITABLE with an active flag:
+ * retiring a row removes it from the dropdown going forward but NEVER rewrites a
+ * Schedule row that already references it by string.
  *
  * Setup:
- *  1. Create a new Google Sheet named "E-ZONE Outpatient".
- *  2. Extensions → Apps Script → paste this file as Code.gs.
- *  3. Deploy → New deployment → Web app
- *       - Execute as: Me
- *       - Who has access: Anyone (with link)
- *  4. Copy the /exec URL and set it as SHEETS_URL in the Node server env.
+ *  1. Create a Google Sheet named "E-ZONE Therapists".
+ *  2. Extensions → Apps Script → paste this as Code.gs.
+ *  3. Project Settings → Script Properties:
+ *       OUTPATIENT_SHEETS_URL  = the ezone-outpatient /exec URL
+ *       DEBT_STATUS_SECRET     = the shared getDebtStatus secret (debt re-check)
+ *       TREATMENT_GIVEN_SECRET = the shared recordTreatmentGiven secret — the
+ *                                did-it-happen WRITE-BACK to outpatient. Until set
+ *                                (and the outpatient endpoint deployed), marks are
+ *                                saved locally and left syncStatus='pending'.
+ *       DEACTIVATE_CLIENT_SECRET = the shared deactivateClient secret — on patient
+ *                                delete here, DEACTIVATES the matching outpatient
+ *                                Client so it leaves the roster union. FAIL-CLOSED:
+ *                                until set (and the outpatient receiver deployed),
+ *                                deleting a patient changes nothing locally.
+ *  4. Deploy → New deployment → Web app (Execute as: Me; Access: Anyone w/ link).
+ *  5. Copy the /exec URL and set it as SHEETS_URL in the Node server env.
  */
 
-var LEADS_HEADERS = [
-  'id', 'name', 'phone', 'serviceType', 'location', 'note',
-  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
-  'house_of_origin',
-  'not_relevant_reason',
-  'not_relevant_note'
+/* One row per scheduled treatment, PER PATIENT. `id` is generated on the client
+ * and is the upsert key. `sessionId` is shared by every patient row of the same
+ * (group) session. Approval columns populate only when a debtor row was approved
+ * by Ron/Sandra (gateStatus='approved'). Append-only column rule via _ensureSheet. */
+var SCHEDULE_HEADERS = [
+  'id', 'sessionId', 'therapist', 'treatmentType', 'location', 'scheduledDate',
+  'patientName', 'patientPhone',
+  'attendance', 'attendanceMarkedAt',
+  'gateStatus', 'gateReason', 'amountOwed',
+  'approverId', 'approverName', 'approvalNote', 'approvedAt',
+  'created',
+  'syncStatus', 'syncedAt',
+  'time', 'reason',         // iteration 7 — appended (time-of-day; not-done reason)
+  'outcome', 'outcomeAt'    // iteration 18 step 2 — appended (3-state session outcome + stamp)
 ];
 
-/* Extra columns (source, notes, billingType, billingDay, bundleSize,
- * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
- * non-destructively extends existing sheets on next read so no migration
- * is needed — old rows get blank values for the new columns and default
- * to billingType='monthly' on the client.
- *
- * `phone` is the patient's own number, carried from the lead on activation.
- * It is the durable home for the patient phone used by cross-app matching
- * (debt, stop-flow). It is appended LAST per the append-only rule: _readAll/
- * _writeAll map columns positionally to this array, so a new column may only be
- * added at the end — inserting it mid-array would shift every later column on
- * existing rows. Old rows get a blank `phone` until re-saved; the client
- * backfills it in memory from the originating lead. It is a PHONE_COLUMN, so it
- * gets the same Sheets leading-zero text-format/recovery as the other phones. */
-var CLIENTS_HEADERS = [
-  'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
-  'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
-  'source', 'notes', 'billingType', 'billingDay',
-  'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
-  'house_of_origin',
-  // RESERVED / DEAD (task 4.4): the אחראי concept (responsiblePerson + its
-  // serviceScope role) was removed from the app. These two slots are kept ONLY
-  // to preserve column positions — _readAll/_writeAll are positional and
-  // _ensureSheet does not migrate data, so dropping mid-array headers would
-  // shift/corrupt every column after this point (incl. the `phone` join key).
-  // The app no longer reads or writes them; existing cells blank on next save.
-  'responsiblePerson', 'serviceScope',
-  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-  'phone',
-  // APPEND-ONLY (task 4.5a): clinical treatment type as recorded by the E-Zone
-  // Therapists app. When present on save, _deriveClientServiceType() runs it
-  // through the clinical→billing map and overwrites `serviceType` (clinical is
-  // the source of truth). Appended at the END so existing rows are untouched
-  // and positional mapping is preserved (same lesson as `phone` / the reserved
-  // slots). Absent/empty -> serviceType left as-is (back-compat).
-  'clinicalTreatmentType',
-  // APPEND-ONLY (session accounting + credits): running monthly-credit balance
-  // for the patient. SERVER-MANAGED — mutated only by recordSessionOutcome
-  // (therapist_cancelled -> +1; a happened session beyond the monthly quota
-  // auto-draws -1). _saveAll preserves it by id so a dashboard save never reverts
-  // it. Default 0. Appended at the very END so clinicalTreatmentType and every
-  // earlier column keep their positions.
-  'creditsOwed'
+/* Append-only audit trail of every debtor approval. */
+var APPROVALS_HEADERS = [
+  'id', 'treatmentId', 'approverId', 'approverName',
+  'patientName', 'patientPhone', 'therapist',
+  'note', 'amountOwed', 'approvedAt'
 ];
 
-/* Settings sheet: one row per setting, key/value style.
- * Currently used for bank transfer details. */
-var SETTINGS_HEADERS = ['key', 'value'];
-
-var PAYMENTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'billingType', 'dueDate',
-  'amountDue', 'amountPaid', 'status', 'paymentDate', 'method',
-  'notes', 'bundleSize', 'sessionsUsed'
+/* Per-patient intake record keyed by canonical phone: identity + origin (where
+ * the patient came from, with an optional "still admitted" + which house). The
+ * therapist assignment(s) and treatment plan(s) live in the Assignments sheet —
+ * a patient can have MULTIPLE parallel treatments/therapists, all editable.
+ * The `stopped*` columns (appended) hold a LOCAL stop flag: set when a stop
+ * request was sent to outpatient (flagStop) and pending Vered's confirmation. */
+var PATIENTS_HEADERS = [
+  'phone', 'name',
+  'origin', 'stillAdmitted', 'admittedHouse',
+  'active', 'updatedBy', 'updated',
+  'stopped', 'stoppedBy', 'stoppedAt', 'stopNote'   // local stop flag (append-only)
 ];
 
-/* Extra charges per client (חיובים נוספים). One row per ad-hoc treatment,
- * layered on top of the base monthly subscription. billingType is either
- * 'one_time' (chargeDate is the single due date) or 'monthly' (chargeDate
- * is the start date; billingDay overrides dayOfMonth(chargeDate) for the
- * recurring day). active='false' soft-disables a charge without delete. */
-var CHARGES_HEADERS = [
-  'id', 'clientId', 'description', 'amount',
-  'billingType',
-  'chargeDate',
-  'billingDay',
-  'active',
-  'notes', 'created'
+/* One row per (patient, therapist, treatment plan). A patient may have several
+ * active rows — multiple parallel treatments with multiple therapists. `id` is
+ * the client-generated upsert key; `patientPhone` links to Patients/roster.
+ * Retiring a plan sets active=false (the row stays for history). `slots` (appended)
+ * is the weekly recurring pattern: JSON [{weekday,time,location}], N = frequencyPerWeek. */
+var ASSIGNMENTS_HEADERS = [
+  'id', 'patientPhone', 'therapist', 'treatmentType', 'frequencyPerWeek',
+  'active', 'updatedBy', 'updated',
+  'slots'                                  // weekly recurring pattern (append-only)
 ];
 
-/* Removed leads sheet: soft-deleted leads moved out of Leads.
- * Same columns as LEADS_HEADERS plus removedAt timestamp and
- * originSheet for restore-by-hand. New headers added at the end
- * per the _ensureSheet append-only rule. */
-var REMOVED_LEADS_HEADERS = [
-  'id', 'name', 'phone', 'serviceType', 'location', 'note',
-  'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
-  'house_of_origin',
-  'not_relevant_reason',
-  'not_relevant_note',
-  'removedAt',
-  'originSheet'
+/* Editable, active-flagged lists. */
+var THERAPISTS_HEADERS = ['name', 'active'];
+var TREATMENT_TYPES_HEADERS = ['name', 'active', 'isGroup'];
+
+/* Seed values. A fresh sheet is seeded with the full list; an existing sheet has
+ * any MISSING seed names appended (by name) so additions here reach live sheets
+ * too. Retiring an entry sets active=false (the row stays), so a retired name is
+ * still "present" and never re-added — only a hard row delete would resurrect a
+ * seed name. THERAPISTS_SEED is the FINAL 19-name FULL-name roster — the old SHORT
+ * names (עידו, דליה, חנן, מעיין, איתן, מרים, תמר, שחר, יסמין) were removed so a
+ * hard delete stays deleted. Mirror of public/therapist-migration.js
+ * FINAL_THERAPISTS — keep both in sync. */
+var THERAPISTS_SEED = [
+  'מעיין דלומי', 'תמר גנץ', 'אורן כביר', 'אביב מלכה', 'רמי', 'כנרת', 'הילה',
+  'עידו בוזגלו', 'אלה', 'שירן', 'דנה', 'יפעת', 'איתן דשה', 'דליה מלמד',
+  'נועה זיפמן', 'אסתר', 'ד״ר שפרינץ', 'ד״ר נטליה', 'ד״ר דנגור'
 ];
-
-/* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
- * patient appears to have stopped treatment. Append-only; surfaced to Vered for
- * manual confirmation. This receiver NEVER modifies Clients — Vered remains the
- * sole authority on actual discharge. */
-var STOP_FLAGS_HEADERS = [
-  'id', 'phone', 'name', 'clientId',
-  'reportedBy', 'reportedAt', 'note',
-  'status', 'resolvedBy', 'resolvedAt'
+var TREATMENT_TYPES_SEED = [
+  { name: 'פרטני כללי', active: 'true', isGroup: 'false' },
+  { name: 'פרטני CBT',  active: 'true', isGroup: 'false' },
+  { name: 'פרטני EMDR', active: 'true', isGroup: 'false' },
+  { name: 'טיפול משפחתי', active: 'true', isGroup: 'false' },
+  { name: 'קבוצה',      active: 'true', isGroup: 'true' },
+  { name: 'ליווי יומי בקהילה', active: 'true', isGroup: 'false' },
+  { name: 'פסיכודינמי', active: 'true', isGroup: 'false' },
+  { name: 'פסיכותרפי ממוקד טראומה', active: 'true', isGroup: 'false' },
+  { name: 'עיסוי טיפולי', active: 'true', isGroup: 'false' },
+  { name: 'מעקב פסיכיאטרי', active: 'true', isGroup: 'false' },
+  { name: 'טיפול ממוקד התמכרויות', active: 'true', isGroup: 'false' },
+  { name: 'טיפול אינטגרטיבי', active: 'true', isGroup: 'false' }
 ];
-
-/* Columns that hold phone numbers. Forced to plain-text ('@') format on write
- * so Google Sheets does not coerce a numeric-looking phone to a number and drop
- * the leading zero, and recovered on read for already-corrupted rows. */
-var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true };
-
-/* Mirror of recoverPhone() in public/app.js — keep both in sync. Normalizes to
- * the leading-zero canonical form and restores a leading zero that Sheets
- * dropped by coercing the phone to a number. Idempotent. */
-function _recoverPhone(raw) {
-  if (raw === null || raw === undefined) return '';
-  var s = String(raw).replace(/[\s\-\(\)]/g, '');
-  if (s.indexOf('+') === 0) s = s.slice(1);
-  if (s.indexOf('00') === 0) s = s.slice(2);
-  s = s.replace(/\D/g, '');
-  if (!s) return '';
-  if (s.indexOf('972') === 0) s = '0' + s.slice(3);   // intl -> local
-  else if (s.charAt(0) !== '0') s = '0' + s;          // Sheets dropped the leading 0
-  return s;
-}
-
-/* Force '@' (plain text) format on any phone columns in this sheet, below the
- * header row, so future writes preserve leading zeros. */
-function _formatPhoneColumns(sh, headers) {
-  var maxRows = sh.getMaxRows();
-  if (maxRows < 2) return;
-  for (var i = 0; i < headers.length; i++) {
-    if (PHONE_COLUMNS[headers[i]]) {
-      sh.getRange(2, i + 1, maxRows - 1, 1).setNumberFormat('@');
-    }
-  }
-}
 
 function _ss() {
   return SpreadsheetApp.getActiveSpreadsheet();
@@ -154,7 +135,7 @@ function _ensureSheet(name, headers) {
     sh = ss.insertSheet(name);
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
-    _formatPhoneColumns(sh, headers);
+    _forcePhoneColumnsText(sh, headers);
     return sh;
   }
   var lastCol = Math.max(sh.getLastColumn(), headers.length);
@@ -167,7 +148,50 @@ function _ensureSheet(name, headers) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   }
-  _formatPhoneColumns(sh, headers);
+  _forcePhoneColumnsText(sh, headers);
+  return sh;
+}
+
+// Pin every phone column to the '@' (plain text) number format so future saves
+// keep the leading zero instead of being coerced to a number. Covers the whole
+// column (all current + future rows). This protects NEW writes; rows already
+// mangled into numbers are repaired on read by _recoverStoredPhone.
+function _forcePhoneColumnsText(sh, headers) {
+  for (var i = 0; i < headers.length; i++) {
+    if (_isPhoneHeader(headers[i])) {
+      sh.getRange(1, i + 1, sh.getMaxRows(), 1).setNumberFormat('@');
+    }
+  }
+}
+
+/* Ensure an editable list sheet exists and APPEND any missing seed names. A
+ * fresh sheet gets the full seed; an existing sheet gets only the seed names it
+ * doesn't already have (matched case-insensitively by name), so additions to the
+ * seed reach live sheets. Existing rows are never modified — an admin's
+ * add/retire/reactivate edits always win, and a retired (active=false) name is
+ * still "present" so it is never re-added. */
+function _ensureSeededList(name, headers, seedRows) {
+  var sh = _ensureSheet(name, headers);
+  if (!seedRows || !seedRows.length) return sh;
+  var have = {};
+  _readAll(sh, headers).forEach(function (r) {
+    var n = String(r.name == null ? '' : r.name).trim().toLowerCase();
+    if (n) have[n] = true;
+  });
+  var toAdd = [];
+  seedRows.forEach(function (r) {
+    var n = String(r.name == null ? '' : r.name).trim().toLowerCase();
+    if (n && !have[n]) { have[n] = true; toAdd.push(r); }
+  });
+  if (toAdd.length) {
+    var values = toAdd.map(function (r) {
+      return headers.map(function (h) {
+        var v = r[h];
+        return (v === undefined || v === null) ? '' : v;
+      });
+    });
+    sh.getRange(sh.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  }
   return sh;
 }
 
@@ -183,9 +207,17 @@ function _readAll(sh, headers) {
     for (var c = 0; c < headers.length; c++) {
       var v = row[c];
       if (v instanceof Date) {
-        v = Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
-      } else if (PHONE_COLUMNS[headers[c]]) {
-        v = _recoverPhone(v);   // restore leading zero dropped by Sheets coercion
+        // Mirror of public/sheetdate.js formatCell: a time-only cell is stored
+        // by Sheets on the epoch day (1899-12-30); format it as HH:mm, not as a
+        // date (that produced the bogus "1899-12-30" next to bookings). Real
+        // dates → yyyy-MM-dd.
+        var tz = Session.getScriptTimeZone() || 'Asia/Jerusalem';
+        v = (v.getFullYear() < 1900)
+          ? Utilities.formatDate(v, tz, 'HH:mm')
+          : Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+      } else if (_isPhoneHeader(headers[c])) {
+        // Repair a phone whose leading zero Sheets dropped on storage.
+        v = _recoverStoredPhone(v);
       }
       obj[headers[c]] = v;
     }
@@ -194,351 +226,1237 @@ function _readAll(sh, headers) {
   return out;
 }
 
-function _writeAll(sh, headers, rows) {
+function _upsertByKey(sh, headers, keyName, obj) {
+  var keyIdx = headers.indexOf(keyName);
   var lastRow = sh.getLastRow();
-  if (lastRow > 1) {
-    sh.getRange(2, 1, lastRow - 1, headers.length).clearContent();
-  }
-  if (!rows || !rows.length) return;
-  var values = rows.map(function (row) {
-    return headers.map(function (h) {
-      var v = row[h];
-      if (v === undefined || v === null) return '';
-      return v;
-    });
+  var row = headers.map(function (h) {
+    var v = obj[h];
+    return (v === undefined || v === null) ? '' : v;
   });
-  // Force phone columns to plain text BEFORE writing so leading zeros survive
-  // (Sheets would otherwise coerce a numeric-looking phone to a number).
-  for (var c = 0; c < headers.length; c++) {
-    if (PHONE_COLUMNS[headers[c]]) {
-      sh.getRange(2, c + 1, values.length, 1).setNumberFormat('@');
+  if (lastRow > 1) {
+    var keys = sh.getRange(2, keyIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      if (String(keys[i][0]) === String(obj[keyName])) {
+        sh.getRange(i + 2, 1, 1, headers.length).setValues([row]);
+        return { updated: true };
+      }
     }
   }
-  sh.getRange(2, 1, values.length, headers.length).setValues(values);
+  sh.appendRow(row);
+  return { created: true };
 }
 
 function _getData() {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+  var schSh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+  var aSh = _ensureSheet('Approvals', APPROVALS_HEADERS);
+  var pSh = _ensureSheet('Patients', PATIENTS_HEADERS);
+  var asSh = _ensureSheet('Assignments', ASSIGNMENTS_HEADERS);
+  var thSh = _ensureSeededList('Therapists', THERAPISTS_HEADERS,
+    THERAPISTS_SEED.map(function (n) { return { name: n, active: 'true' }; }));
+  var ttSh = _ensureSeededList('TreatmentTypes', TREATMENT_TYPES_HEADERS, TREATMENT_TYPES_SEED);
   return {
     ok: true,
-    leads: _readAll(leadsSh, LEADS_HEADERS),
-    clients: _readAll(clientsSh, CLIENTS_HEADERS)
+    schedule: _readAll(schSh, SCHEDULE_HEADERS),
+    approvals: _readAll(aSh, APPROVALS_HEADERS),
+    patients: _readAll(pSh, PATIENTS_HEADERS),
+    assignments: _readAll(asSh, ASSIGNMENTS_HEADERS),
+    therapists: _readAll(thSh, THERAPISTS_HEADERS),
+    treatmentTypes: _readAll(ttSh, TREATMENT_TYPES_HEADERS)
   };
 }
 
-/* ===== Clinical → billing derive (task 4.5a receiver) =====
+/* ===== Server-authoritative gate enforcement =====
+ * Inline mirror of public/treatment-guard.js + public/debt-gate.js +
+ * public/phone.js. Apps Script can't import those modules; any change to the
+ * policy or the matching rule MUST update both sides. Unit-tested via
+ * test/treatment-guard.test.js / test/debt-gate.test.js (the pure modules).
  *
- * MIRROR of public/treatment-map.js `CLINICAL_TO_BILLING`. The Apps Script
- * runtime cannot import that module, so the map is duplicated here, exactly as
- * the debt/phone rules are. test/clinical-derive.test.js parses this literal and
- * asserts it deep-equals the module — any drift fails the suite. Keep in sync.
- *
- * One-to-one over 12 clinical keys; two renames are pinned (פרטני כללי→פרטני and
- * מרכז יום→ליווי יומי בקהילה, here keyed under the NEW name); the five
- * newly-billable types map to their own names.
- */
-var CLINICAL_TO_BILLING = {
-  'פרטני כללי':             'פרטני',
-  'פרטני CBT':              'פרטני CBT',
-  'פרטני EMDR':             'פרטני EMDR',
-  'קבוצה':                  'קבוצה',
-  'טיפול משפחתי':           'טיפול משפחתי',
-  'מעקב פסיכיאטרי':         'מעקב פסיכיאטרי',
-  'ליווי יומי בקהילה':      'ליווי יומי בקהילה',
-  'פסיכודינמי':             'פסיכודינמי',
-  'פסיכותרפי ממוקד טראומה': 'פסיכותרפי ממוקד טראומה',
-  'עיסוי טיפולי':           'עיסוי טיפולי',
-  'טיפול ממוקד התמכרויות':  'טיפול ממוקד התמכרויות',
-  'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי'
-};
-
-function _clinicalToBilling(clinicalType) {
-  var key = String(clinicalType == null ? '' : clinicalType).trim();
-  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, key)) {
-    throw new Error('Unknown clinical treatment type: "' + key + '"');
-  }
-  return CLINICAL_TO_BILLING[key];
-}
-
-/* If a client row carries a clinicalTreatmentType, derive serviceType from it
- * (clinical is authoritative) and overwrite. Absent/empty -> leave serviceType
- * untouched (back-compat for legacy / not-yet-migrated rows). Throws on an
- * unknown clinical value rather than silently blanking. Mutates + returns. */
-function _deriveClientServiceType(client) {
-  if (!client) return client;
-  var clinical = String(client.clinicalTreatmentType == null ? '' : client.clinicalTreatmentType).trim();
-  if (!clinical) return client;
-  client.serviceType = _clinicalToBilling(clinical);
-  return client;
-}
-
-/* ===== Pay + price mirrors (task 4.8-step3-out) =============================
- *
- * MIRRORS of public/therapist-pay.js (the PAY side) and the price half of
- * public/treatment-map.js (the client-facing BILLING side). The Apps Script
- * runtime cannot import those modules, so — exactly like CLINICAL_TO_BILLING
- * above — the tables are duplicated here. test/session-outcome.test.js parses
- * each literal out of Code.gs and asserts it deep-equals the canonical module,
- * so the mirror can never silently drift. Keep in sync; ALL RATES ARE PRE-VAT on
- * the pay side and INCL. VAT on the billing side, untouched here.
+ * Runs PER PATIENT ROW: a group session is a set of independent gate decisions,
+ * so a forged 'clear' for one debtor is rejected without affecting the others.
  */
 
-// --- Pay: flat per-therapist (pre-VAT). Mirror of FLAT_RATES. ----------------
-var THERAPIST_FLAT_RATES = {
-  'מעיין דלומי': 250,
-  'תמר גנץ':     250,
-  'אורן כביר':   250,
-  'אביב מלכה':   250,
-  'רמי':         250,
-  'כנרת':        250,
-  'הילה':        250,
-  'עידו בוזגלו': 250,
-  'אלה':         250,
-  'שירן':        250,
-  'דנה':         250,
-  'יפעת':        250,
-  'איתן דשה':    250,
-  'דליה מלמד':   230,
-  'נועה זיפמן':  210,
-  'אסתר':        180
-};
+var ALLOWED_APPROVERS = { ron: 'רון', sandra: 'סנדרה' };
+function _resolveApproverId(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (ALLOWED_APPROVERS[s.toLowerCase()]) return s.toLowerCase();
+  for (var id in ALLOWED_APPROVERS) { if (ALLOWED_APPROVERS[id] === s) return id; }
+  return '';
+}
+function _isAllowedApprover(v) { return !!_resolveApproverId(v); }
 
-// --- Pay: psychiatrists by treatment type (pre-VAT). Mirror of PSYCHIATRIST_RATES.
-var PSYCHIATRIST_RATES = {
-  'ד״ר שפרינץ': { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 },
-  'ד״ר נטליה':  { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 },
-  'ד״ר דנגור':  { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 }
-};
+// Mirror of TreatmentGuard.decideSave — see that file for the full contract.
+function _decideSave(input) {
+  input = input || {};
+  var gateStatus = String(input.gateStatus || '').toLowerCase();
+  var v = String(input.verification || 'unconfigured').toLowerCase();
+  if (gateStatus === 'flagged') return { ok: true };
+  if (gateStatus === 'approved') {
+    if (!_isAllowedApprover(input.approverId)) return { ok: false, error: 'invalid_approver' };
+    if (v === 'block') return { ok: true };
+    if (v === 'allow') return { ok: true };
+    if (v === 'unconfigured') return { ok: false, error: 'debt_verification_unconfigured' };
+    if (v === 'unavailable') return { ok: false, error: 'debt_verification_unavailable' };
+    return { ok: false, error: 'debt_verification_failed' };
+  }
+  if (gateStatus === 'clear' || gateStatus === '') {
+    if (v === 'allow') return { ok: true };
+    if (v === 'unconfigured') return { ok: false, error: 'debt_verification_unconfigured' };
+    if (v === 'unavailable') return { ok: false, error: 'debt_verification_unavailable' };
+    return { ok: false, error: 'debt_verification_failed' };
+  }
+  return { ok: false, error: 'invalid_gate_status' };
+}
 
-// --- Billing: flat client-facing prices (incl. VAT). Mirror of BILLING_PRICES.
-// 0 is a DECIDED price (קבוצה intentionally free), not a "no price" flag.
-var BILLING_PRICES = {
-  'פרטני':                  500,
-  'פרטני CBT':              500,
-  'פרטני EMDR':             500,
-  'פסיכודינמי':             500,
-  'פסיכותרפי ממוקד טראומה': 500,
-  'עיסוי טיפולי':           500,
-  'טיפול ממוקד התמכרויות':  500,
-  'טיפול אינטגרטיבי':       500,
-  'מעקב פסיכיאטרי':         1100,
-  'אינטייק':                2300,
-  'קבוצה':                  0,
-  'טיפול משפחתי':           600
-};
+// Mirror of public/phone.js normalizeForMatch.
+function _normalizePhoneForMatch(raw) {
+  if (raw == null) return '';
+  var digits = String(raw).replace(/[^\d]/g, '');
+  if (!digits) return '';
+  if (digits.indexOf('972') === 0) digits = '0' + digits.slice(3);
+  return digits;
+}
 
-// Day-center is priced by weekly frequency, not in BILLING_PRICES. Mirror of
-// DAY_CENTER_BILLING / DAY_CENTER_MONTHLY_BY_FREQ.
-var DAY_CENTER_BILLING = 'ליווי יומי בקהילה';
-var DAY_CENTER_MONTHLY_BY_FREQ = { 3: 15000, 5: 18000 };
-var GROUP_BILLING = 'קבוצה';
+// Mirror of public/phone.js toCanonical: normalize then validate. Returns the
+// canonical 10-digit (leading-zero) phone, or '' when it can't be made canonical.
+// Server-side enforcement so no badly-formatted number is ever stored.
+var _CANONICAL_PHONE_RE = /^0\d{9}$/;
+function _toCanonicalPhone(raw) {
+  var norm = _normalizePhoneForMatch(raw);
+  return _CANONICAL_PHONE_RE.test(norm) ? norm : '';
+}
 
-function _hasOwn(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); }
+// Mirror of public/phone.js recoverStored: READ-side repair of a phone whose
+// leading zero Sheets dropped when it stored a canonical number on a numeric
+// cell (e.g. the number 501234567 for "0501234567"). A 9-digit run not starting
+// with 0 gets its leading 0 restored; everything else is returned as a trimmed
+// string, untouched. NOT an entry path — human input is still strictly validated.
+function _recoverStoredPhone(raw) {
+  if (raw == null) return '';
+  var s = String(raw).trim();
+  if (!s) return '';
+  var digits = s.replace(/[^\d]/g, '');
+  if (digits.length === 9 && digits.charAt(0) !== '0') return '0' + digits;
+  return s;
+}
 
-/* _therapistPay(name, treatmentType?) -> pre-VAT rate. Mirror of therapistPay():
- * flat therapist ignores type; psychiatrist REQUIRES a valid type; unknown
- * therapist / bad psych type throws. */
-function _therapistPay(therapistName, treatmentType) {
-  var name = String(therapistName == null ? '' : therapistName).trim();
-  if (_hasOwn(THERAPIST_FLAT_RATES, name)) return THERAPIST_FLAT_RATES[name];
-  if (_hasOwn(PSYCHIATRIST_RATES, name)) {
-    var type = String(treatmentType == null ? '' : treatmentType).trim();
-    var table = PSYCHIATRIST_RATES[name];
-    if (!type || !_hasOwn(table, type)) {
-      throw new Error('Psychiatrist "' + name + '" requires a valid treatmentType (אינטייק or מעקב פסיכיאטרי)');
+// Mirror of public/phone.js duplicateOf: the create-time duplicate guard.
+// Returns the first existing patient row that already owns `phone` (matched
+// tolerantly), or null. Inactive patients still own their phone key.
+function _duplicatePatient(phone, patients) {
+  var key = _normalizePhoneForMatch(phone);
+  if (!key || !patients || !patients.length) return null;
+  for (var i = 0; i < patients.length; i++) {
+    var p = patients[i];
+    if (p && _normalizePhoneForMatch(p.phone) === key) return p;
+  }
+  return null;
+}
+
+// Columns that MUST stay plain text so a leading-zero phone is never coerced to a
+// number (the bug that drops the zero). Matched by header name across all sheets.
+function _isPhoneHeader(h) { return h === 'phone' || h === 'patientPhone'; }
+
+// Match key for a phone read from a RAW grid cell: REPAIR a leading zero Sheets
+// dropped (mirror of _recoverStoredPhone), THEN normalize. _readAll already
+// recovers on read, but raw-grid scans (the stop flow's row matchers) do not — so
+// without this a canonical key never matches a mangled stored phone (501234567).
+function _matchPhone(raw) { return _normalizePhoneForMatch(_recoverStoredPhone(raw)); }
+
+// Mirror of public/debt-gate.js evaluate(), returning only 'allow'|'block'|'flag'.
+function _authoritativeGate(phone, roster) {
+  var key = _normalizePhoneForMatch(phone);
+  if (!key || !roster || !roster.length) return 'flag';
+  var hits = [];
+  for (var i = 0; i < roster.length; i++) {
+    var c = roster[i];
+    if (c && _normalizePhoneForMatch(c.phone) === key) hits.push(c);
+  }
+  if (hits.length !== 1) return 'flag';
+  var status = String(hits[0].debtStatus || '').toLowerCase();
+  if (status === 'debt') return 'block';
+  if (status === 'clear') return 'allow';
+  return 'flag';
+}
+
+// One live fetch of the outpatient debt roster, cached per execution so a group
+// save re-checks every patient against the SAME live snapshot with one network
+// call. Returns { status:'ok', clients:[...] } or { status:'unconfigured' } /
+// { status:'unavailable' } (fail closed).
+var _debtRosterCache = null;
+function _liveDebtRoster() {
+  if (_debtRosterCache) return _debtRosterCache;
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('DEBT_STATUS_SECRET');
+  if (!url) { _debtRosterCache = { status: 'unconfigured' }; return _debtRosterCache; }
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') + 'action=getDebtStatus' +
+      (secret ? '&secret=' + encodeURIComponent(secret) : '');
+    var resp = UrlFetchApp.fetch(full, { muteHttpExceptions: true, followRedirects: true });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) { _debtRosterCache = { status: 'unavailable' }; return _debtRosterCache; }
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false || !Array.isArray(data.clients)) {
+      _debtRosterCache = { status: 'unavailable' }; return _debtRosterCache;
     }
-    return table[type];
+    _debtRosterCache = { status: 'ok', clients: data.clients };
+    return _debtRosterCache;
+  } catch (e) {
+    _debtRosterCache = { status: 'unavailable' };
+    return _debtRosterCache;
   }
-  throw new Error('Unknown therapist: "' + name + '"');
 }
 
-function _isDayCenterBilling(billingType) {
-  return String(billingType == null ? '' : billingType).trim() === DAY_CENTER_BILLING;
+// Authoritative verification string for one patient row: 'unconfigured',
+// 'unavailable', or the gate ('allow'|'block'|'flag').
+function _verifyPatientDebt(phone) {
+  var roster = _liveDebtRoster();
+  if (roster.status !== 'ok') return roster.status;   // unconfigured | unavailable
+  return _authoritativeGate(phone, roster.clients);
 }
 
-/* _billingPrice(billingType, freqPerWeek?) -> price. Mirror of billingPrice():
- * day-center REQUIRES a valid frequency (3/5); flat types return the number;
- * unknown billing type throws. */
-function _billingPrice(billingType, freqPerWeek) {
-  var key = String(billingType == null ? '' : billingType).trim();
-  if (_isDayCenterBilling(key)) {
-    if (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '') {
-      throw new Error('ליווי יומי בקהילה requires frequencyPerWeek (3 or 5)');
-    }
-    var freq = Number(freqPerWeek);
-    if (!_hasOwn(DAY_CENTER_MONTHLY_BY_FREQ, freq)) {
-      throw new Error('Unsupported ליווי יומי בקהילה frequency: ' + freqPerWeek + ' (expected 3 or 5)');
-    }
-    return DAY_CENTER_MONTHLY_BY_FREQ[freq];
+// Save ONE schedule row with server-authoritative per-patient gate enforcement.
+// A 'clear'/'approved'/'' claim is re-verified against live debt and fails
+// CLOSED; 'flagged' rows persist as-is for manual resolution.
+function _saveScheduleRow(t, schSh, aSh) {
+  if (!t || typeof t !== 'object') return { ok: false, error: 'missing_row' };
+  if (!t.id) return { ok: false, error: 'missing_id' };
+
+  // Normalize + validate the phone; never store a non-canonical number.
+  var canon = _toCanonicalPhone(t.patientPhone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+  t.patientPhone = canon;
+
+  var verification = 'unconfigured';
+  var needsVerify = (t.gateStatus === 'clear' || t.gateStatus === 'approved' || !t.gateStatus);
+  if (needsVerify) verification = _verifyPatientDebt(t.patientPhone);
+  var guard = _decideSave({
+    gateStatus: t.gateStatus,
+    approverId: t.approverId,
+    verification: verification
+  });
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  var res = _upsertByKey(schSh, SCHEDULE_HEADERS, 'id', t);
+
+  if (t.gateStatus === 'approved' && t.approverId) {
+    _upsertByKey(aSh, APPROVALS_HEADERS, 'id', {
+      id: t.id,
+      treatmentId: t.id,
+      approverId: t.approverId,
+      approverName: t.approverName || '',
+      patientName: t.patientName || '',
+      patientPhone: t.patientPhone || '',
+      therapist: t.therapist || '',
+      note: t.approvalNote || '',
+      amountOwed: t.amountOwed || 0,
+      approvedAt: t.approvedAt || ''
+    });
   }
-  if (!_hasOwn(BILLING_PRICES, key)) {
-    throw new Error('Unknown billing type: "' + key + '"');
-  }
-  return BILLING_PRICES[key];
+  return { ok: true, id: t.id, created: !!res.created, updated: !!res.updated };
 }
 
-/* ===== Session accounting + credits helpers ================================
- *
- * Monthly model (locked): a patient's paid quota = weekly frequency × 4, renewed
- * in full each month. A `happened` session beyond that month's quota auto-draws a
- * credit when one is available (the session is then free to the patient —
- * clientSessionValue 0 — but the therapist is still paid normally). A
- * therapist_cancelled session grants +1 credit. Credits carry forward across
- * months; the delivered (happened) count is implicitly per-month (we recount the
- * current month each time). creditsOwed lives on the Clients row, server-managed.
- */
-
-/* A non-negative integer credit balance from any cell value (blank -> 0). */
-function _toCredits(v) {
-  var n = parseInt(v, 10);
-  return (isNaN(n) || n < 0) ? 0 : n;
-}
-
-/* Weekly session frequency from the client's PLAN. sessionsPerWeek is stored as
- * a JSON breakdown ({"פרטני":2}) — sum the values; a bare number also works.
- * Returns a non-negative integer (0 = undeterminable). */
-function _planWeeklyFrequency(client) {
-  if (!client) return 0;
-  var s = String(client.sessionsPerWeek == null ? '' : client.sessionsPerWeek).trim();
-  if (!s) return 0;
-  var total = 0;
-  if (s.charAt(0) === '{') {
-    try {
-      var o = JSON.parse(s);
-      Object.keys(o).forEach(function (k) { var n = parseInt(o[k], 10); if (!isNaN(n) && n > 0) total += n; });
-    } catch (_) { return 0; }
-  } else {
-    var n = parseInt(s, 10);
-    if (!isNaN(n) && n > 0) total = n;
-  }
-  return total;
-}
-
-/* Calendar-month key (YYYY-MM) of a yyyy-MM-dd date string, or '' if absent /
- * unparseable (no month bucket -> quota cannot be applied). */
-function _monthKey(dateStr) {
-  var s = String(dateStr == null ? '' : dateStr).trim();
-  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
-}
-
-function _saveAll(payload) {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var leads = (payload && payload.leads) || [];
-  var clients = (payload && payload.clients) || [];
-  // creditsOwed is SERVER-MANAGED (mutated only by recordSessionOutcome). A
-  // dashboard save carries the balance the client tab last loaded, which may be
-  // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
-  // and only default a brand-new client (no existing row) to its payload/0.
-  var existingCredits = {};
-  var existing = _readAll(clientsSh, CLIENTS_HEADERS);
-  for (var e = 0; e < existing.length; e++) {
-    var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
-    if (eid) existingCredits[eid] = _toCredits(existing[e].creditsOwed);
-  }
-  for (var i = 0; i < clients.length; i++) {
-    _deriveClientServiceType(clients[i]);
-    var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
-    clients[i].creditsOwed = _hasOwn(existingCredits, cid)
-      ? existingCredits[cid]
-      : _toCredits(clients[i].creditsOwed);
-  }
-  _writeAll(leadsSh, LEADS_HEADERS, leads);
-  _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-  return { ok: true, savedLeads: leads.length, savedClients: clients.length };
-}
-
-/* ===== Payments =====
- * id is deterministic (built on the client) so the same monthly /
- * single / bundle bill always upserts into the same row. */
-function _getPayments() {
-  var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-  return { ok: true, payments: _readAll(sh, PAYMENTS_HEADERS) };
-}
-
-function _upsertPayment(payment) {
-  if (!payment || typeof payment !== 'object') {
-    return { ok: false, error: 'missing_payment' };
-  }
-  if (!payment.id) return { ok: false, error: 'missing_id' };
+// Save a whole session: 1+ patient rows that share a sessionId. Each row is
+// verified and saved INDEPENDENTLY; a per-row failure (e.g. a forged debtor
+// claim) rejects that row only, leaving the rest of the group saved. Overall
+// ok is true when every row saved.
+function _saveSession(payload) {
+  var rows = payload && (payload.rows || (payload.row ? [payload.row] : null));
+  if (!Array.isArray(rows) || !rows.length) return { ok: false, error: 'missing_rows' };
+  _debtRosterCache = null;            // fresh live snapshot per session save
   var lock = LockService.getScriptLock();
   lock.tryLock(10000);
   try {
-    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-    var idIdx = PAYMENTS_HEADERS.indexOf('id');
-    var lastRow = sh.getLastRow();
-    var row = PAYMENTS_HEADERS.map(function (h) {
-      var v = payment[h];
-      return (v === undefined || v === null) ? '' : v;
+    var schSh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    var aSh = _ensureSheet('Approvals', APPROVALS_HEADERS);
+    var results = rows.map(function (t) {
+      var r = _saveScheduleRow(t, schSh, aSh);
+      return { id: t && t.id, ok: r.ok, error: r.error || '', created: !!r.created, updated: !!r.updated };
     });
-    if (lastRow > 1) {
-      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < ids.length; i++) {
-        if (String(ids[i][0]) === String(payment.id)) {
-          sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
-          return { ok: true, payment: payment, updated: true };
-        }
-      }
-    }
-    sh.appendRow(row);
-    return { ok: true, payment: payment, created: true };
+    var allOk = results.every(function (r) { return r.ok; });
+    return { ok: allOk, results: results };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
 }
 
-/* ===== Client charges ===== */
-function _getCharges() {
-  var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
-  return { ok: true, charges: _readAll(sh, CHARGES_HEADERS) };
-}
-
-function _upsertCharge(charge) {
-  if (!charge || typeof charge !== 'object') {
-    return { ok: false, error: 'missing_charge' };
-  }
-  if (!charge.id) return { ok: false, error: 'missing_id' };
-  var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
-  try {
-    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
-    var idIdx = CHARGES_HEADERS.indexOf('id');
-    var lastRow = sh.getLastRow();
-    var row = CHARGES_HEADERS.map(function (h) {
-      var v = charge[h];
-      return (v === undefined || v === null) ? '' : v;
-    });
-    if (lastRow > 1) {
-      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < ids.length; i++) {
-        if (String(ids[i][0]) === String(charge.id)) {
-          sh.getRange(i + 2, 1, 1, CHARGES_HEADERS.length).setValues([row]);
-          return { ok: true, charge: charge, updated: true };
-        }
-      }
+// Materialize a VIRTUAL recurring occurrence into a real Schedule booking row.
+// CREATE-ONLY + idempotent by the deterministic occurrence id: if a row with that
+// id already exists (already reported/materialized) it is left untouched, so a
+// stale occurrence payload can never wipe a reported row. Ungated — the debt gate
+// runs at report time in _markAttendance.
+function _materializeOccurrenceRow(sh, occ) {
+  var id = String((occ && occ.id) || '');
+  if (!id) return;
+  var idIdx = SCHEDULE_HEADERS.indexOf('id');
+  var lastRow = sh.getLastRow();
+  if (lastRow > 1) {
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === id) return;   // already a real row — never overwrite
     }
-    sh.appendRow(row);
-    return { ok: true, charge: charge, created: true };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
   }
+  var canon = _toCanonicalPhone(occ.patientPhone);
+  _upsertByKey(sh, SCHEDULE_HEADERS, 'id', {
+    id: id,
+    sessionId: occ.sessionId || id,
+    therapist: occ.therapist || '',
+    treatmentType: occ.treatmentType || '',
+    location: occ.location || '',
+    scheduledDate: occ.scheduledDate || '',
+    patientName: occ.patientName || '',
+    patientPhone: canon || String(occ.patientPhone == null ? '' : occ.patientPhone),
+    attendance: '',
+    time: occ.time || '',
+    created: new Date().toISOString()
+  });
 }
 
-function _removeCharge(chargeId) {
-  if (!chargeId) return { ok: false, error: 'missing_id' };
+// Post-treatment report (per patient row). 'missed' records a reason. 'happened'
+// is DEBT-GATED, authoritatively (server re-reads live debt): a CONFIRMED debtor
+// is BLOCKED unless Ron/Sandra approve inline (audit-stamped). When debt can't be
+// determined (endpoint unconfigured/unavailable, or no/ambiguous match) the
+// report is recorded but FLAGGED for manual resolution — never silently 'clear'.
+function _markAttendance(payload) {
+  var id = payload && payload.id;
+  if (!id) return { ok: false, error: 'missing_id' };
+  var attendance = String(payload.attendance == null ? '' : payload.attendance);
+  if (attendance !== '' && attendance !== 'occurred' && attendance !== 'missed') {
+    return { ok: false, error: 'invalid_attendance' };
+  }
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var sh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    // A recurring occurrence is VIRTUAL until reported — materialize its booking
+    // row now (create-only, idempotent by the deterministic id) so the rest of
+    // this function reports it exactly like any other booking. The debt gate below
+    // is the authoritative check; materialization itself is ungated.
+    if (payload.occurrence && String(payload.occurrence.id) === String(id)) {
+      _materializeOccurrenceRow(sh, payload.occurrence);
+    }
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
-    var idIdx = CHARGES_HEADERS.indexOf('id');
+    var idIdx = SCHEDULE_HEADERS.indexOf('id');
+    var sidIdx = SCHEDULE_HEADERS.indexOf('sessionId');
+    var phoneIdx = SCHEDULE_HEADERS.indexOf('patientPhone');
+    var grid = sh.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+    var found = -1;
+    for (var i = 0; i < grid.length; i++) {
+      if (String(grid[i][idIdx]) === String(id)) { found = i; break; }
+    }
+    if (found < 0) return { ok: false, error: 'not_found' };
+
+    // Default gate fields for this report.
+    var gateStatus = '', gateReason = '', amountOwed = 0;
+    var appr = payload.approval || null;
+
+    // happened → authoritative debt re-check (the payment-driving action).
+    if (attendance === 'occurred') {
+      // Raw grid read — recover the leading zero a numeric-stored cell dropped
+      // (mirror of _readAll/_matchPhone) so the debt-roster match doesn't fail and
+      // silently mis-gate a legitimate patient to 'flagged'/'unverified'.
+      var phone = _recoverStoredPhone(grid[found][phoneIdx]);
+      var verification = _verifyPatientDebt(phone);   // allow|block|flag|unconfigured|unavailable
+      if (verification === 'allow') {
+        gateStatus = 'clear';
+      } else if (verification === 'block') {
+        if (!appr || !_isAllowedApprover(appr.approverId)) {
+          return { ok: false, error: 'debt_block' };   // BLOCK — needs Ron/Sandra
+        }
+        gateStatus = 'approved';
+        amountOwed = Number(appr.amountOwed) || 0;
+      } else {
+        // flag / unconfigured / unavailable — record but FLAG (never 'clear').
+        gateStatus = 'flagged';
+        gateReason = String(payload.gateReason || verification || 'unverified');
+      }
+    }
+
+    // LOCAL SAVE IS THE SOURCE OF TRUTH — persist the report fields.
+    function setCol(name, val) {
+      var idx = SCHEDULE_HEADERS.indexOf(name);
+      if (idx > -1) sh.getRange(found + 2, idx + 1, 1, 1).setValues([[val]]);
+    }
+    setCol('attendance', attendance);
+    setCol('attendanceMarkedAt', payload.markedAt || new Date().toISOString());
+    setCol('reason', attendance === 'missed' ? String(payload.reason || '') : '');
+    setCol('gateStatus', gateStatus);
+    setCol('gateReason', gateReason);
+    if (gateStatus === 'approved') {
+      setCol('amountOwed', amountOwed);
+      setCol('approverId', appr.approverId || '');
+      setCol('approverName', appr.approverName || '');
+      setCol('approvalNote', appr.note || '');
+      setCol('approvedAt', appr.approvedAt || new Date().toISOString());
+      // Append to the debtor-approval audit trail.
+      _upsertByKey(_ensureSheet('Approvals', APPROVALS_HEADERS), APPROVALS_HEADERS, 'id', {
+        id: 'rep_' + id, treatmentId: id, approverId: appr.approverId || '',
+        approverName: appr.approverName || '',
+        patientName: String(grid[found][SCHEDULE_HEADERS.indexOf('patientName')] || ''),
+        // Raw grid read — recover the dropped leading zero so the audit row keeps
+        // the canonical phone, not a mangled 9-digit number.
+        patientPhone: _recoverStoredPhone(grid[found][phoneIdx]),
+        therapist: String(grid[found][SCHEDULE_HEADERS.indexOf('therapist')] || ''),
+        note: appr.note || '', amountOwed: amountOwed, approvedAt: appr.approvedAt || new Date().toISOString()
+      });
+    }
+
+    // Then sync the whole session to outpatient (best-effort). Any failure
+    // leaves the row(s) 'pending' for a later retry — never dropped.
+    var sessionId = String(grid[found][sidIdx] || id);
+    var status = _syncSession(sh, sessionId);
+    return { ok: true, id: id, attendance: attendance, gateStatus: gateStatus, syncStatus: status };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== Session outcome (iteration 18, step 2) =====
+ * The therapist marks what actually happened to a scheduled session as exactly
+ * ONE of three mutually-exclusive outcomes. STORAGE-ONLY: this records the
+ * stamped outcome on the Schedule row and does NOTHING else — no debt gate, no
+ * pay computation, no outpatient write-back (that is step 3). The legacy binary
+ * `attendance` field + its writeback (_markAttendance / _syncSession) are left
+ * deliberately untouched. The token set is CLOSED — mirror of public/outcome.js. */
+var OUTCOME_VALUES = ['happened', 'therapist_cancelled', 'patient_no_show'];
+
+function _setSessionOutcome(payload) {
+  var id = payload && payload.id;
+  if (!id) return { ok: false, error: 'missing_id' };
+  var outcome = String(payload.outcome == null ? '' : payload.outcome);
+  if (OUTCOME_VALUES.indexOf(outcome) === -1) return { ok: false, error: 'invalid_outcome' };
+  var result;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    // A recurring occurrence is VIRTUAL until acted on — materialize its booking
+    // row now (create-only, idempotent by id) so we stamp a real row, exactly as
+    // the report flow does. Materialization itself is ungated.
+    if (payload.occurrence && String(payload.occurrence.id) === String(id)) {
+      _materializeOccurrenceRow(sh, payload.occurrence);
+    }
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = SCHEDULE_HEADERS.indexOf('id');
+    var grid = sh.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+    var found = -1;
+    for (var i = 0; i < grid.length; i++) {
+      if (String(grid[i][idIdx]) === String(id)) { found = i; break; }
+    }
+    if (found < 0) return { ok: false, error: 'not_found' };
+
+    function col(name) { return String(grid[found][SCHEDULE_HEADERS.indexOf(name)] || ''); }
+    // Phone cells stored numeric (legacy rows pre-dating the '@' text-format pin)
+    // come back from this raw grid with their leading zero already dropped. A raw
+    // grid read does NOT pass through _readAll, so recover the zero here — exactly
+    // as _readAll/_matchPhone do — before the value feeds the canonical-key push
+    // (otherwise _toCanonicalPhone rightly rejects the 9-digit number).
+    function phoneCol(name) { return _recoverStoredPhone(grid[found][SCHEDULE_HEADERS.indexOf(name)]); }
+    function setCol(name, val) {
+      var idx = SCHEDULE_HEADERS.indexOf(name);
+      if (idx > -1) sh.getRange(found + 2, idx + 1, 1, 1).setValues([[val]]);
+    }
+    var stampedAt = payload.outcomeAt || new Date().toISOString();
+    setCol('outcome', outcome);
+    setCol('outcomeAt', stampedAt);
+    // The local stamp is now committed. Capture the self-describing row fields so
+    // the outpatient pay-sync push can run AFTER the lock releases (below).
+    result = {
+      ok: true, id: id, outcome: outcome, outcomeAt: stampedAt,
+      sessionId: col('sessionId') || id,
+      patientName: col('patientName'), patientPhone: phoneCol('patientPhone'),
+      therapist: col('therapist'), treatmentType: col('treatmentType'),
+      scheduledDate: col('scheduledDate')
+    };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+  // Push the outcome to outpatient recordSessionOutcome AFTER the local save and
+  // OUTSIDE the lock (no network round-trip held under lock). Fail-open: the
+  // outcome is saved regardless; we attach the sync result so the UI can warn
+  // when the pay-sync didn't land (never silently swallowed). Fires on all three
+  // outcomes — outpatient computes pay/status per outcome. `frequency` is not on
+  // the Schedule row; outpatient handles its absence (e.g. for ליווי).
+  result.outcomeSync = _postSetSessionOutcome({
+    sessionId: result.sessionId,
+    phone: result.patientPhone,
+    therapist: result.therapist,
+    clinicalTreatmentType: result.treatmentType,
+    date: result.scheduledDate,
+    outcome: result.outcome
+  });
+  return result;
+}
+
+/* ===== Outpatient write-back (TreatmentsGiven) =====
+ * When attendance changes, sync the ENTIRE session to outpatient so the
+ * idempotent records reflect the current truth. Mirrors public/writeback.js
+ * (buildSessionWriteback); any change MUST update both. Therapist pay: one
+ * record per non-group patient, but ONE record at the group rate for a קבוצה
+ * session (keyed by sessionId), with per-patient attendance still captured. */
+
+function _isGroupTypeName(typeName) {
+  var name = String(typeName == null ? '' : typeName).trim();
+  if (!name) return false;
+  var ttSh = _ensureSeededList('TreatmentTypes', TREATMENT_TYPES_HEADERS, TREATMENT_TYPES_SEED);
+  var rows = _readAll(ttSh, TREATMENT_TYPES_HEADERS);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].name == null ? '' : rows[i].name).trim() === name) {
+      var f = rows[i].isGroup;
+      if (f !== undefined && f !== null && f !== '') {
+        var s = String(f).trim().toLowerCase();
+        return s === 'true' || s === '1' || s === 'yes' || s === 'כן';
+      }
+      return name === 'קבוצה';
+    }
+  }
+  return name === 'קבוצה';
+}
+
+// Mirror of public/writeback.js buildSessionWriteback.
+function _buildSessionWriteback(rows, isGroup) {
+  rows = (rows || []).filter(function (r) { return r; });
+  if (!rows.length) return null;
+  var head = rows[0];
+  var sessionId = head.sessionId || head.id;
+  var anyGiven = rows.some(function (r) { return String(r.attendance || '') === 'occurred'; });
+  var records = rows.map(function (r) {
+    return {
+      treatmentId: r.id, sessionId: sessionId, therapist: head.therapist,
+      patientName: r.patientName, patientPhone: r.patientPhone, date: r.scheduledDate,
+      treatmentType: head.treatmentType, location: head.location,
+      attendance: String(r.attendance || ''), given: String(r.attendance || '') === 'occurred',
+      isGroup: isGroup, isPayment: !isGroup, rate: isGroup ? 'group_member' : 'individual'
+    };
+  });
+  if (isGroup) {
+    records.push({
+      treatmentId: sessionId, sessionId: sessionId, therapist: head.therapist,
+      patientName: '', patientPhone: '', date: head.scheduledDate,
+      treatmentType: head.treatmentType, location: head.location,
+      attendance: anyGiven ? 'occurred' : '', given: anyGiven,
+      isGroup: true, isPayment: true, rate: 'group'
+    });
+  }
+  return { sessionId: sessionId, isGroup: isGroup, records: records };
+}
+
+// POST the records to the outpatient recordTreatmentGiven endpoint with the
+// shared secret. Idempotent on the outpatient side (upsert by treatmentId).
+// Returns 'synced' or 'pending' (never throws). Fails to 'pending' when the
+// endpoint is unconfigured or unreachable so the local mark is never lost.
+function _postTreatmentsGiven(records) {
+  if (!records || !records.length) return 'synced';
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('TREATMENT_GIVEN_SECRET');
+  if (!url || !secret) return 'pending';
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=recordTreatmentGiven&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ records: records }),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return 'pending';
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false) return 'pending';
+    return 'synced';
+  } catch (e) {
+    return 'pending';
+  }
+}
+
+// Build + send the write-back for one session and stamp syncStatus/syncedAt on
+// every row of that session. Returns the status. `sh` is the open Schedule sheet.
+function _syncSession(sh, sessionId) {
+  var rows = _readAll(sh, SCHEDULE_HEADERS).filter(function (r) {
+    return String(r.sessionId || r.id) === String(sessionId);
+  });
+  if (!rows.length) return 'synced';
+  var isGroup = _isGroupTypeName(rows[0].treatmentType);
+  var wb = _buildSessionWriteback(rows, isGroup);
+  var status = _postTreatmentsGiven(wb ? wb.records : []);
+  _stampSessionSync(sh, sessionId, status);
+  return status;
+}
+
+// Set syncStatus + syncedAt on every Schedule row of the session.
+function _stampSessionSync(sh, sessionId, status) {
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return;
+  var sidIdx = SCHEDULE_HEADERS.indexOf('sessionId');
+  var idIdx = SCHEDULE_HEADERS.indexOf('id');
+  var ssIdx = SCHEDULE_HEADERS.indexOf('syncStatus');
+  var saIdx = SCHEDULE_HEADERS.indexOf('syncedAt');
+  var grid = sh.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+  var now = new Date().toISOString();
+  for (var i = 0; i < grid.length; i++) {
+    var sid = String(grid[i][sidIdx] || grid[i][idIdx]);
+    if (sid === String(sessionId)) {
+      sh.getRange(i + 2, ssIdx + 1, 1, 1).setValues([[status]]);
+      if (status === 'synced') sh.getRange(i + 2, saIdx + 1, 1, 1).setValues([[now]]);
+    }
+  }
+}
+
+// Retry every session that still has a 'pending' row. Idempotent.
+function _syncPending() {
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    var rows = _readAll(sh, SCHEDULE_HEADERS);
+    var seen = {};
+    var sessions = [];
+    rows.forEach(function (r) {
+      if (String(r.syncStatus || '') === 'pending') {
+        var sid = String(r.sessionId || r.id);
+        if (!seen[sid]) { seen[sid] = true; sessions.push(sid); }
+      }
+    });
+    var results = sessions.map(function (sid) { return { sessionId: sid, status: _syncSession(sh, sid) }; });
+    var stillPending = results.filter(function (r) { return r.status === 'pending'; }).length;
+    return { ok: true, attempted: sessions.length, stillPending: stillPending, results: results };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Upsert a patient intake record, keyed by canonical phone: identity + origin.
+// The therapist assignment(s) + treatment plan(s) live in Assignments, so this
+// no longer carries a single assignedTherapist/plan. Not debt-gated.
+function _savePatient(payload) {
+  var p = payload && payload.patient;
+  if (!p || typeof p !== 'object') return { ok: false, error: 'missing_patient' };
+  if (String(p.phone == null ? '' : p.phone).trim() === '') return { ok: false, error: 'missing_phone' };
+  var phone = _toCanonicalPhone(p.phone);   // normalize + validate; never store non-canonical
+  if (!phone) return { ok: false, error: 'invalid_phone' };
+  // 'create' mode rejects a phone that already belongs to a patient (no silent
+  // overwrite of someone else's record). 'edit' (default) still upserts by phone.
+  var isCreate = String((payload && payload.mode) || '').toLowerCase() === 'create';
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('Patients', PATIENTS_HEADERS);
+    var existing = _readAll(sh, PATIENTS_HEADERS);
+    var prior = _duplicatePatient(phone, existing);   // same-phone row, if any
+    if (isCreate && prior) {
+      var nm = String(prior.name || '').trim();
+      return {
+        ok: false,
+        error: 'duplicate_phone',
+        existingName: nm,
+        message: nm
+          ? ('כבר קיים/ת מטופל/ת עם מספר הטלפון הזה: ' + nm)
+          : 'כבר קיים/ת מטופל/ת עם מספר הטלפון הזה'
+      };
+    }
+    var rec = {
+      phone: phone,
+      name: p.name || '',
+      origin: p.origin || '',
+      stillAdmitted: p.stillAdmitted ? 'true' : '',
+      admittedHouse: p.stillAdmitted ? (p.admittedHouse || '') : '',
+      active: (p.active === false || p.active === 'false') ? 'false' : 'true',
+      updatedBy: p.updatedBy || '',
+      updated: p.updated || new Date().toISOString(),
+      // PRESERVE the local stop flag — an identity/origin edit must never clear
+      // it (the whole row is rebuilt on upsert, so carry the prior values).
+      stopped: prior ? (prior.stopped || '') : '',
+      stoppedBy: prior ? (prior.stoppedBy || '') : '',
+      stoppedAt: prior ? (prior.stoppedAt || '') : '',
+      stopNote: prior ? (prior.stopNote || '') : ''
+    };
+    var res = _upsertByKey(sh, PATIENTS_HEADERS, 'phone', rec);
+    return { ok: true, patient: rec, created: !!res.created, updated: !!res.updated };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== Patient stop / discharge flow (SENDER) =====
+ * Mirror of public/stopflow.js + the recordTreatmentGiven write-back pattern.
+ * "Mark patient stopped" does NOT discharge directly: it POSTs flagStop to
+ * outpatient (a pending request Vered confirms there). FAIL-CLOSED — if the flag
+ * doesn't reach outpatient, nothing changes locally. On success we set the local
+ * stop flag and cancel the patient's future, unreported bookings (past + already
+ * reported bookings are kept for the record).
+ */
+
+// Today's date as 'yyyy-MM-dd' in the script timezone (mirror of the client's today()).
+function _todayStr() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Jerusalem';
+  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+}
+
+// POST flagStop to outpatient with the shared secret (server-to-server, secret
+// never reaches the browser). Returns { ok:true } or { ok:false, error }.
+// FAIL-CLOSED: unconfigured URL/secret, non-2xx, or ok:false all return ok:false.
+function _postFlagStop(body) {
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('STOP_FLAG_SECRET');
+  if (!url || !secret) return { ok: false, error: 'stop_flag_unconfigured' };
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=flagStop&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, error: 'flag_http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false) return { ok: false, error: (data && data.error) || 'flag_rejected' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: 'flag_unreachable' };
+  }
+}
+
+// POST resolveStopFlag to outpatient — the UNDO of flagStop. Removes the StopFlag
+// matching this phone (even an ORPHANED one with no Client match), so a stuck
+// flag always clears. Same server-to-server, fail-closed pattern + secret as
+// _postFlagStop. Idempotent: resolving a non-existent flag returns ok. Returns
+// { ok:true } or { ok:false, error }.
+function _postResolveStopFlag(body) {
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('STOP_FLAG_SECRET');
+  if (!url || !secret) return { ok: false, error: 'stop_flag_unconfigured' };
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=resolveStopFlag&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+     payload: JSON.stringify(Object.assign({ action: 'resolveStopFlag', secret: secret }, body || {})),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, error: 'resolve_http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false) return { ok: false, error: (data && data.error) || 'resolve_rejected' };
+    return { ok: true, resolved: data.resolved };
+  } catch (e) {
+    return { ok: false, error: 'resolve_unreachable' };
+  }
+}
+
+/* ===== Cross-app patient delete propagation (SENDER) =====
+ * When a patient is deleted here (_removePatient), the matching outpatient Client
+ * must stop appearing in the roster union — otherwise getTreatmentPlans /
+ * getDebtStatus keep returning them and roster.js re-adds the "deleted" patient
+ * (a base source, not just an overlay). We DEACTIVATE rather than hard-delete on
+ * the outpatient side: it is reversible and preserves billing/session history,
+ * and getTreatmentPlans already filters by status — so a deactivated Client drops
+ * out of the active roster without losing the record.
+ *
+ * Server-to-server like _postFlagStop / _postResolveStopFlag: UrlFetchApp + the
+ * OUTPATIENT_SHEETS_URL and a dedicated shared secret (DEACTIVATE_CLIENT_SECRET,
+ * its OWN secret — deactivating a client is more destructive than clearing a stop
+ * flag, so least-authority keeps it off the stop-flag secret). The secret NEVER
+ * reaches the browser.
+ *
+ * FAIL-CLOSED on transport/config/auth (returns ok:false → the caller aborts the
+ * local delete), but ORPHAN-SAFE: a phone matching no Client comes back
+ * { ok:true, deactivated:0 } (idempotent, nothing to crash on), so deleting a
+ * patient who was never an outpatient still succeeds and removes the local row.
+ * Canonical phone is sent so it matches outpatient's phone matching.
+ */
+function _postDeactivateClient(body) {
+  var canon = _toCanonicalPhone(body && body.phone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('DEACTIVATE_CLIENT_SECRET');
+  if (!url || !secret) return { ok: false, error: 'deactivate_unconfigured' };
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=deactivateClient&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'deactivateClient',
+        secret: secret,
+        phone: canon,
+        deactivatedBy: String(body && body.deactivatedBy == null ? '' : body.deactivatedBy).trim(),
+        reason: String(body && body.reason == null ? '' : body.reason).trim() || 'patient_deleted'
+      }),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, error: 'deactivate_http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false) return { ok: false, error: (data && data.error) || 'deactivate_rejected' };
+    return { ok: true, deactivated: data.deactivated };
+  } catch (e) {
+    return { ok: false, error: 'deactivate_unreachable' };
+  }
+}
+
+/* ===== Over-package extra-session request (SENDER) =====
+ * When Yarden schedules beyond a patient's monthly package (soft-warn), the
+ * therapists app records an approval request on the outpatient side so Vered
+ * sees it and can approve. Server-to-server, same secured shared-secret pattern
+ * as _postDeactivateClient: action + secret carried in the JSON body. */
+function _postRequestExtraSession(body) {
+  var canon = _toCanonicalPhone(body && body.phone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('EXTRA_SESSION_SECRET');
+  if (!url || !secret) return { ok: false, error: 'extra_session_unconfigured' };
+  try {
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=requestExtraSession&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'requestExtraSession',
+        secret: secret,
+        phone: canon,
+        patientName: String(body && body.patientName == null ? '' : body.patientName).trim(),
+        treatmentType: String(body && body.treatmentType == null ? '' : body.treatmentType).trim(),
+        therapist: String(body && body.therapist == null ? '' : body.therapist).trim(),
+        monthKey: String(body && body.monthKey == null ? '' : body.monthKey).trim(),
+        quota: Number(body && body.quota) || 0,
+        used: Number(body && body.used) || 0,
+        requestedBy: String(body && body.requestedBy == null ? '' : body.requestedBy).trim(),
+        note: String(body && body.note == null ? '' : body.note).trim()
+      }),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, error: 'extra_session_http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok === false) return { ok: false, error: (data && data.error) || 'extra_session_rejected' };
+    return { ok: true, requestId: data.requestId };
+  } catch (e) {
+    return { ok: false, error: 'extra_session_unreachable' };
+  }
+}
+ * On assignment save, push the patient's clinical treatment type to outpatient
+ * so its per-patient billing rate follows the clinical plan chosen here. Mirror
+ * of public/clinical-sync.js (buildPayload + interpretResponse). Same server-to-
+ * server pattern as _postFlagStop / _postTreatmentsGiven: UrlFetchApp
+ * + the OUTPATIENT_SHEETS_URL and a shared secret read from Script Properties
+ * (CLINICAL_TYPE_SECRET) — the secret NEVER reaches the browser.
+ *
+ * FAIL-OPEN-WITH-FLAG (deliberately NOT fail-closed like the stop flow): the
+ * assignment is already saved locally by the time we call this, so the push
+ * never throws and never blocks the save. Instead it returns a structured
+ * outcome the caller attaches to the response, so the UI can WARN the user when
+ * the billing-type sync didn't land — we never silently swallow a mismatch.
+ *   { ok:true,  matched:1 }                                  → synced silently
+ *   { ok:false, reason:'no_match' | 'multi_match' |
+ *               'unknown_type' | 'unconfigured' |
+ *               'invalid_phone' | 'http_<code>' |
+ *               'non_ok' | 'unreachable' }                   → surfaced to user
+ *
+ * The outpatient endpoint is the authority on which types are billable clinical
+ * types; a non-clinical type (e.g. a group session) comes back as 'unknown_type'
+ * and is flagged rather than guessed at here.
+ */
+function _postSetClinicalType(phone, clinicalTreatmentType) {
+  // Push the canonical key so it matches outpatient's phone matching.
+  var canon = _toCanonicalPhone(phone);
+  if (!canon) return { ok: false, reason: 'invalid_phone' };
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('CLINICAL_TYPE_SECRET');
+  if (!url || !secret) return { ok: false, reason: 'unconfigured' };
+  var type = String(clinicalTreatmentType == null ? '' : clinicalTreatmentType).trim();
+  try {
+    // action + secret on the query string mirrors the existing outbound calls;
+    // the full {action,secret,phone,clinicalTreatmentType} object is ALSO sent in
+    // the JSON body per the setClinicalType contract, so the receiver can read
+    // either. The secret stays server-to-server (never echoed to the browser).
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=setClinicalType&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'setClinicalType',
+        secret: secret,
+        phone: canon,
+        clinicalTreatmentType: type
+      }),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, reason: 'http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (data && data.ok === true && (data.matched === 1 || data.matched === '1')) {
+      return { ok: true, matched: 1 };
+    }
+    // Surface the outpatient-supplied reason verbatim (no_match / multi_match /
+    // unknown_type) so the user sees WHY; fall back to a generic non_ok.
+    var reason = (data && (data.reason || data.error)) ? String(data.reason || data.error) : 'non_ok';
+    return { ok: false, reason: reason };
+  } catch (e) {
+    return { ok: false, reason: 'unreachable' };
+  }
+}
+
+/* ===== Session-outcome push (SENDER) — iteration 18, step 3 =====
+ * On a successful outcome save (_setSessionOutcome), push the marked outcome to
+ * outpatient's recordSessionOutcome endpoint so it computes therapist pay /
+ * session status per outcome. Mirror of public/outcome-sync.js (buildPayload +
+ * interpretResponse). Same server-to-server pattern as _postSetClinicalType /
+ * _postFlagStop: UrlFetchApp + the OUTPATIENT_SHEETS_URL and a shared secret read
+ * from Script Properties (SESSION_OUTCOME_SECRET) — the secret NEVER reaches the
+ * browser.
+ *
+ * FAIL-OPEN-WITH-FLAG (like the clinical-type sender, NOT fail-closed like the
+ * stop flow): the outcome is already saved locally by the time we call this, so
+ * the push never throws and never blocks the save. It returns a structured
+ * outcome the caller attaches to the response (outcomeSync) so the UI can WARN
+ * when the pay-sync didn't land — the outcome stands locally either way; only the
+ * pay-sync is flagged.
+ *   { ok:true }                                              → synced silently
+ *   { ok:false, reason:'unknown_therapist' | 'unknown_type' |
+ *               'unauthorized' | 'unconfigured' |
+ *               'invalid_phone' | 'http_<code>' |
+ *               'non_ok' | 'unreachable' }                   → surfaced to user
+ *
+ * Fires on all THREE outcomes (happened / therapist_cancelled / patient_no_show)
+ * — outpatient computes pay/status per outcome. `frequency` is NOT sent (the
+ * Schedule row doesn't carry it; outpatient handles its absence, e.g. for ליווי).
+ * Idempotent by design: re-marking re-sends the same sessionId; outpatient
+ * upserts on it (no therapists-side dedupe).
+ */
+function _postSetSessionOutcome(o) {
+  o = o || {};
+  // Push the canonical key so it matches outpatient's phone matching.
+  var canon = _toCanonicalPhone(o.phone);
+  if (!canon) return { ok: false, reason: 'invalid_phone' };
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OUTPATIENT_SHEETS_URL');
+  var secret = props.getProperty('SESSION_OUTCOME_SECRET');
+  if (!url || !secret) return { ok: false, reason: 'unconfigured' };
+  try {
+    // action + secret on the query string mirrors the existing outbound calls;
+    // the full object is ALSO sent in the JSON body per the recordSessionOutcome
+    // contract, so the receiver can read either. The secret stays server-to-
+    // server (never echoed to the browser).
+    var full = url + (url.indexOf('?') > -1 ? '&' : '?') +
+      'action=recordSessionOutcome&secret=' + encodeURIComponent(secret);
+    var resp = UrlFetchApp.fetch(full, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'recordSessionOutcome',
+        secret: secret,
+        sessionId: String(o.sessionId == null ? '' : o.sessionId),
+        phone: canon,
+        therapist: String(o.therapist == null ? '' : o.therapist),
+        clinicalTreatmentType: String(o.clinicalTreatmentType == null ? '' : o.clinicalTreatmentType),
+        date: String(o.date == null ? '' : o.date),
+        outcome: String(o.outcome == null ? '' : o.outcome)
+      }),
+      muteHttpExceptions: true, followRedirects: true
+    });
+    var code = resp.getResponseCode();
+    if (code < 200 || code >= 300) return { ok: false, reason: 'http_' + code };
+    var data = JSON.parse(resp.getContentText());
+    if (data && data.ok === true) return { ok: true };
+    // Surface the outpatient-supplied reason verbatim (unknown_therapist /
+    // unknown_type / unauthorized …) so the user sees WHY; fall back to non_ok.
+    var reason = (data && (data.reason || data.error)) ? String(data.reason || data.error) : 'non_ok';
+    return { ok: false, reason: reason };
+  } catch (e) {
+    return { ok: false, reason: 'unreachable' };
+  }
+}
+
+// Persist the LOCAL stop flag on the Patients row (create a minimal row if the
+// patient is only in the outpatient roster). Phone matched tolerantly.
+function _markLocalPatientStopped(sh, canonPhone, name, reportedBy, note) {
+  var now = new Date().toISOString();
+  var key = _matchPhone(canonPhone);
+  var phoneIdx = PATIENTS_HEADERS.indexOf('phone');
+  var nameIdx = PATIENTS_HEADERS.indexOf('name');
+  var lastRow = sh.getLastRow();
+  if (lastRow > 1) {
+    var grid = sh.getRange(2, 1, lastRow - 1, PATIENTS_HEADERS.length).getValues();
+    for (var i = 0; i < grid.length; i++) {
+      if (_matchPhone(grid[i][phoneIdx]) !== key) continue;
+      // Found the existing row — update its stop columns IN PLACE (no duplicate).
+      var rowNum = i + 2;
+      var keepName = name && !String(grid[i][nameIdx] || '').trim() ? name : grid[i][nameIdx];
+      var update = {};
+      update.stopped = 'true';
+      update.stoppedBy = reportedBy || '';
+      update.stoppedAt = now;
+      update.stopNote = note || '';
+      update.name = keepName;
+      for (var h = 0; h < PATIENTS_HEADERS.length; h++) {
+        var col = PATIENTS_HEADERS[h];
+        if (update.hasOwnProperty(col)) sh.getRange(rowNum, h + 1, 1, 1).setValues([[update[col]]]);
+      }
+      return;
+    }
+  }
+  // No local row yet — append a minimal stopped record.
+  _upsertByKey(sh, PATIENTS_HEADERS, 'phone', {
+    phone: canonPhone, name: name || '', origin: '', stillAdmitted: '', admittedHouse: '',
+    active: 'true', updatedBy: reportedBy || '', updated: now,
+    stopped: 'true', stoppedBy: reportedBy || '', stoppedAt: now, stopNote: note || ''
+  });
+}
+
+// Delete the patient's FUTURE, unreported bookings (today forward). Past and
+// already-reported rows are kept. Mirror of stopflow.js futureBookingsToCancel.
+// Returns the number of cancelled rows.
+function _cancelFutureBookings(sh, canonPhone) {
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return 0;
+  var tz = Session.getScriptTimeZone() || 'Asia/Jerusalem';
+  var today = _todayStr();
+  var key = _matchPhone(canonPhone);
+  var phoneIdx = SCHEDULE_HEADERS.indexOf('patientPhone');
+  var attIdx = SCHEDULE_HEADERS.indexOf('attendance');
+  var dateIdx = SCHEDULE_HEADERS.indexOf('scheduledDate');
+  var grid = sh.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+  var toDelete = [];
+  for (var i = 0; i < grid.length; i++) {
+    if (_matchPhone(grid[i][phoneIdx]) !== key) continue;
+    if (String(grid[i][attIdx] || '') !== '') continue;        // reported → keep
+    var dcell = grid[i][dateIdx];
+    var d = (dcell instanceof Date)
+      ? Utilities.formatDate(dcell, tz, 'yyyy-MM-dd')
+      : String(dcell || '');
+    if (d.indexOf('T') !== -1) d = d.split('T')[0];
+    if (d && d >= today) toDelete.push(i + 2);                  // sheet row number
+  }
+  for (var j = toDelete.length - 1; j >= 0; j--) sh.deleteRow(toDelete[j]);  // bottom-up
+  return toDelete.length;
+}
+
+// Mark a patient stopped: flag outpatient (fail-closed) → local flag + cancel
+// future bookings. Does NOT discharge the patient directly.
+function _markPatientStopped(payload) {
+  var p = payload || {};
+  var canon = _toCanonicalPhone(p.phone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+
+  // 1) Send the stop flag FIRST. If it doesn't reach Vered, change nothing.
+  var flag = _postFlagStop({
+    phone: canon,
+    name: String(p.name == null ? '' : p.name).trim(),
+    reportedBy: String(p.reportedBy == null ? '' : p.reportedBy).trim(),
+    note: String(p.note == null ? '' : p.note).trim()
+  });
+  if (!flag.ok) return { ok: false, error: flag.error || 'flag_failed' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // 2) Persist the local stop flag.
+    var pSh = _ensureSheet('Patients', PATIENTS_HEADERS);
+    _markLocalPatientStopped(pSh, canon,
+      String(p.name == null ? '' : p.name).trim(),
+      String(p.reportedBy == null ? '' : p.reportedBy).trim(),
+      String(p.note == null ? '' : p.note).trim());
+    // 3) Cancel future, unreported bookings (keep past + reported).
+    var schSh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    var cancelled = _cancelFutureBookings(schSh, canon);
+    return { ok: true, flagged: true, phone: canon, cancelled: cancelled };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Clear the LOCAL stop flag on the Patients row matching canonPhone (the inverse
+// of _markLocalPatientStopped). Phone matched tolerantly (recovers a dropped
+// zero). Returns true if a row was found and cleared. A patient with no local row
+// (an outpatient-only / orphaned flag) is simply a no-op here — the outpatient
+// resolve is what clears that case.
+function _clearLocalPatientStop(sh, canonPhone) {
+  var key = _matchPhone(canonPhone);
+  var phoneIdx = PATIENTS_HEADERS.indexOf('phone');
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return false;
+  var grid = sh.getRange(2, 1, lastRow - 1, PATIENTS_HEADERS.length).getValues();
+  var cleared = { stopped: '', stoppedBy: '', stoppedAt: '', stopNote: '' };
+  for (var i = 0; i < grid.length; i++) {
+    if (_matchPhone(grid[i][phoneIdx]) !== key) continue;
+    for (var h = 0; h < PATIENTS_HEADERS.length; h++) {
+      var col = PATIENTS_HEADERS[h];
+      if (cleared.hasOwnProperty(col)) sh.getRange(i + 2, h + 1, 1, 1).setValues([[cleared[col]]]);
+    }
+    return true;
+  }
+  return false;
+}
+
+// Delete the Patients row(s) matching canonPhone outright (test cleanup). Phone
+// matched tolerantly. Returns the number of rows removed. Bottom-up so row
+// indices stay valid.
+function _deleteLocalPatient(sh, canonPhone) {
+  var key = _matchPhone(canonPhone);
+  var phoneIdx = PATIENTS_HEADERS.indexOf('phone');
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return 0;
+  var grid = sh.getRange(2, 1, lastRow - 1, PATIENTS_HEADERS.length).getValues();
+  var toDelete = [];
+  for (var i = 0; i < grid.length; i++) {
+    if (_matchPhone(grid[i][phoneIdx]) === key) toDelete.push(i + 2);
+  }
+  for (var j = toDelete.length - 1; j >= 0; j--) sh.deleteRow(toDelete[j]);
+  return toDelete.length;
+}
+
+/* ===== Undo a stop request — restore a patient to ACTIVE =====
+ * The inverse of _markPatientStopped. FAIL-CLOSED like the stop itself: resolve
+ * the outpatient StopFlag FIRST (server-to-server) and only on success clear the
+ * local flag — so the two sides never desync (a patient is never shown active
+ * here while Vered still holds a pending flag). Resolving is idempotent and
+ * orphan-safe: a flag with no Client match still clears by phone, and a patient
+ * with no outpatient flag (resolved:0) still returns ok. Does NOT resurrect the
+ * future bookings cancelled at stop time — the therapist re-schedules as needed. */
+function _restorePatient(payload) {
+  var p = payload || {};
+  var canon = _toCanonicalPhone(p.phone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+
+  // 1) Resolve (remove) the outpatient StopFlag FIRST. If it can't reach Vered,
+  //    change nothing locally.
+  var resolve = _postResolveStopFlag({
+    phone: canon,
+    resolvedBy: String(p.reportedBy == null ? '' : p.reportedBy).trim(),
+    reason: String(p.note == null ? '' : p.note).trim()
+  });
+  if (!resolve.ok) return { ok: false, error: resolve.error || 'resolve_failed' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var pSh = _ensureSheet('Patients', PATIENTS_HEADERS);
+    var cleared = _clearLocalPatientStop(pSh, canon);
+    return { ok: true, restored: true, phone: canon, clearedLocal: cleared, resolved: resolve.resolved };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== Delete a patient entirely (test cleanup) =====
+ * Removes this app's local Patients record AND (1) resolves any outpatient StopFlag
+ * for the phone (so no orphaned flag is left pointing at a deleted patient) and
+ * (2) DEACTIVATES the matching outpatient Client, so getTreatmentPlans /
+ * getDebtStatus stop returning them and the roster union (roster.js) can't re-add
+ * the deleted patient as a base source. FAIL-CLOSED on BOTH cross-app calls, same
+ * discipline as restore: if either can't reach Vered's side, the local record is
+ * NOT deleted (no half-state). Both are orphan-safe — a phone matching no flag /
+ * no Client still succeeds (resolved:0 / deactivated:0). Assignments and past
+ * bookings are left as-is (remove them via removeAssignment / removeSchedule if
+ * needed). */
+function _removePatient(payload) {
+  var p = payload || {};
+  var canon = _toCanonicalPhone(p.phone);
+  if (!canon) return { ok: false, error: 'invalid_phone' };
+
+  var resolve = _postResolveStopFlag({
+    phone: canon,
+    resolvedBy: String(p.reportedBy == null ? '' : p.reportedBy).trim(),
+    reason: String(p.note == null ? '' : p.note).trim() || 'patient_deleted'
+  });
+  if (!resolve.ok) return { ok: false, error: resolve.error || 'resolve_failed' };
+
+  // Propagate the delete to outpatient: DEACTIVATE the matching Client so it drops
+  // out of the roster union (getTreatmentPlans / getDebtStatus) and roster.js can't
+  // re-add the deleted patient. FAIL-CLOSED, same discipline as the resolve above —
+  // if outpatient can't be reached/authed, change NOTHING locally (no half-state
+  // where the patient is gone here but still active on Vered's side). Orphan-safe:
+  // no matching Client returns ok with deactivated:0, so the local delete proceeds.
+  var deactivate = _postDeactivateClient({
+    phone: canon,
+    deactivatedBy: String(p.reportedBy == null ? '' : p.reportedBy).trim(),
+    reason: String(p.note == null ? '' : p.note).trim() || 'patient_deleted'
+  });
+  if (!deactivate.ok) return { ok: false, error: deactivate.error || 'deactivate_failed' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var pSh = _ensureSheet('Patients', PATIENTS_HEADERS);
+    var removed = _deleteLocalPatient(pSh, canon);
+    return { ok: true, removed: removed, phone: canon, resolved: resolve.resolved, deactivated: deactivate.deactivated };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Upsert one assignment (patient ↔ therapist ↔ plan), keyed by id. A patient can
+// have several active assignments — multiple parallel treatments/therapists.
+// Both the therapist and the plan (type + weekly frequency) stay editable.
+function _saveAssignment(payload) {
+  var a = payload && payload.assignment;
+  if (!a || typeof a !== 'object') return { ok: false, error: 'missing_assignment' };
+  if (!a.id) return { ok: false, error: 'missing_id' };
+  // Canonicalize the phone exactly like _savePatient: an assignment row must key
+  // by the SAME canonical phone as the patient it links to, or the roster union
+  // (roster.js, normalized by phone) silently splits one patient into two — the
+  // רון מנחם bug. Reject empty (missing_phone) then non-canonical (invalid_phone);
+  // never store a raw/non-canonical patientPhone.
+  if (String(a.patientPhone == null ? '' : a.patientPhone).trim() === '') return { ok: false, error: 'missing_phone' };
+  var phone = _toCanonicalPhone(a.patientPhone);
+  if (!phone) return { ok: false, error: 'invalid_phone' };
+  var rec, res;
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sh = _ensureSheet('Assignments', ASSIGNMENTS_HEADERS);
+    rec = {
+      id: String(a.id),
+      patientPhone: phone,
+      therapist: a.therapist || '',
+      treatmentType: a.treatmentType || '',
+      frequencyPerWeek: (a.frequencyPerWeek === 0 || a.frequencyPerWeek) ? String(a.frequencyPerWeek) : '',
+      active: (a.active === false || a.active === 'false') ? 'false' : 'true',
+      updatedBy: a.updatedBy || '',
+      updated: a.updated || new Date().toISOString(),
+      // Weekly recurring pattern: store the JSON string as-is (already a string
+      // from the client, or stringify a passed array). Empty = no recurrence.
+      slots: (a.slots == null || a.slots === '') ? ''
+        : (typeof a.slots === 'string' ? a.slots : JSON.stringify(a.slots))
+    };
+    res = _upsertByKey(sh, ASSIGNMENTS_HEADERS, 'id', rec);
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+  var result = { ok: true, assignment: rec, created: !!res.created, updated: !!res.updated };
+  // Push the clinical treatment type to outpatient billing AFTER the local save
+  // and OUTSIDE the lock (no network round-trip held under lock). Fail-open: the
+  // assignment is saved regardless; we attach the sync outcome so the UI can warn
+  // when billing-type sync didn't land (never silently swallowed). Skip the push
+  // for a blank type — there is nothing to bill against.
+  if (rec.treatmentType) {
+    result.clinicalSync = _postSetClinicalType(rec.patientPhone, rec.treatmentType);
+  }
+  return result;
+}
+
+function _removeAssignment(id) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Assignments', ASSIGNMENTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = ASSIGNMENTS_HEADERS.indexOf('id');
     var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]) === String(chargeId)) {
+      if (String(ids[i][0]) === String(id)) {
         sh.deleteRow(i + 2);
-        return { ok: true, removed: true, id: chargeId };
+        return { ok: true, removed: true, id: id };
       }
     }
     return { ok: false, error: 'not_found' };
@@ -547,77 +1465,163 @@ function _removeCharge(chargeId) {
   }
 }
 
-function _removeLead(lead) {
-  if (!lead || typeof lead !== 'object') return { ok: false, error: 'missing_lead' };
-  if (!lead.id) return { ok: false, error: 'missing_id' };
+// Edit an existing booking's day / time / location (by id). Debt is per-patient,
+// not per-slot, so this does NOT re-run the gate. If the booking was already
+// reported (attendance set), re-sync the session so outpatient gets the corrected
+// date/time (idempotent by treatmentId); an unreported booking isn't synced yet.
+function _updateBooking(payload) {
+  var id = payload && payload.id;
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = SCHEDULE_HEADERS.indexOf('id');
+    var sidIdx = SCHEDULE_HEADERS.indexOf('sessionId');
+    var attIdx = SCHEDULE_HEADERS.indexOf('attendance');
+    var grid = sh.getRange(2, 1, lastRow - 1, SCHEDULE_HEADERS.length).getValues();
+    var found = -1;
+    for (var i = 0; i < grid.length; i++) {
+      if (String(grid[i][idIdx]) === String(id)) { found = i; break; }
+    }
+    if (found < 0) return { ok: false, error: 'not_found' };
+    function setCol(name, val) {
+      var idx = SCHEDULE_HEADERS.indexOf(name);
+      if (idx > -1) sh.getRange(found + 2, idx + 1, 1, 1).setValues([[val]]);
+    }
+    if (payload.scheduledDate != null) setCol('scheduledDate', String(payload.scheduledDate));
+    if (payload.time != null) setCol('time', String(payload.time));
+    if (payload.location != null) setCol('location', String(payload.location));
 
+    var status = '';
+    if (String(grid[found][attIdx] || '') !== '') {   // already reported → re-sync the correction
+      status = _syncSession(sh, String(grid[found][sidIdx] || id));
+    }
+    return { ok: true, id: id, syncStatus: status };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _removeSchedule(id) {
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Schedule', SCHEDULE_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = SCHEDULE_HEADERS.indexOf('id');
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(id)) {
+        sh.deleteRow(i + 2);
+        return { ok: true, removed: true, id: id };
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== One-time therapist name migration (short → full) =====
+ * Mirror of public/therapist-migration.js (FINAL_THERAPISTS = THERAPISTS_SEED,
+ * SHORT_TO_FULL, migrateName, normalizeKey). Renames the therapist field on
+ * existing Assignment + Schedule rows from the old SHORT names to the FINAL full
+ * names, so pay/credit matching lines up with the new roster. ONLY the explicit
+ * mapping is applied — no mapping is invented; a name with no full equivalent is
+ * left as-is and reported. IDEMPOTENT: a full name (or any non-short name) is
+ * returned unchanged, so re-running rewrites nothing. Approvals (audit trail) is
+ * intentionally NOT migrated. */
+var _THERAPIST_SHORT_TO_FULL = {
+  'דליה': 'דליה מלמד',
+  'מעיין': 'מעיין דלומי',
+  'תמר': 'תמר גנץ',
+  'איתן': 'איתן דשה',
+  'עידו': 'עידו בוזגלו',
+  'נועה': 'נועה זיפמן'
+};
+function _migrateTherapistName(name) {
+  var t = String(name == null ? '' : name).trim();
+  return _THERAPIST_SHORT_TO_FULL.hasOwnProperty(t) ? _THERAPIST_SHORT_TO_FULL[t] : t;
+}
+// Punctuation-only key (drop gershayim/geresh + ASCII quotes, collapse spaces) so
+// ד״ר vs ד"ר count as the same name for roster membership.
+function _normalizeTherapistKey(name) {
+  return String(name == null ? '' : name).trim().replace(/[״׳"']/g, '').replace(/\s+/g, ' ');
+}
+function _rosterKeySet() {
+  var exact = {}, norm = {};
+  for (var i = 0; i < THERAPISTS_SEED.length; i++) {
+    exact[String(THERAPISTS_SEED[i]).trim()] = true;
+    norm[_normalizeTherapistKey(THERAPISTS_SEED[i])] = true;
+  }
+  return { exact: exact, norm: norm };
+}
+
+// Rewrite the `therapist` column of one sheet in place. Returns the per-row
+// changes plus the distinct post-migration names that are unknown / quote-variant.
+function _migrateTherapistColumn(sheetName, headers) {
+  var roster = _rosterKeySet();
+  var sh = _ensureSheet(sheetName, headers);
+  var thIdx = headers.indexOf('therapist');
+  var idIdx = headers.indexOf('id');
+  var lastRow = sh.getLastRow();
+  var out = { scanned: 0, migrated: 0, changes: [], unmapped: {}, punctuationVariants: {} };
+  if (thIdx < 0 || lastRow < 2) return out;
+  var grid = sh.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  for (var i = 0; i < grid.length; i++) {
+    var from = String(grid[i][thIdx] == null ? '' : grid[i][thIdx]).trim();
+    if (!from) continue;
+    out.scanned++;
+    var to = _migrateTherapistName(from);
+    if (to !== from) {
+      sh.getRange(i + 2, thIdx + 1, 1, 1).setValues([[to]]);   // write back only changed cells
+      out.migrated++;
+      out.changes.push({ sheet: sheetName, id: idIdx > -1 ? String(grid[i][idIdx]) : '', from: from, to: to });
+    }
+    // Classify the POST-migration name for the report.
+    if (!roster.norm[_normalizeTherapistKey(to)]) out.unmapped[to] = (out.unmapped[to] || 0) + 1;
+    else if (!roster.exact[to]) out.punctuationVariants[to] = (out.punctuationVariants[to] || 0) + 1;
+  }
+  return out;
+}
+
+// The migration action — safe to run repeatedly (idempotent). Returns a full
+// report: what was renamed, and which therapist names are NOT in the final 19
+// (so a human decides), incl. ד״ר-quote variants surfaced separately.
+function _migrateTherapistNames() {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var ss = _ss();
-    var sheet = ss.getSheetByName('Leads');
-    if (!sheet) return { ok: false, error: 'not_found' };
-
-    var data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { ok: false, error: 'not_found' };
-    var headers = data[0];
-    var idCol = headers.indexOf('id');
-    if (idCol === -1) return { ok: false, error: 'not_found' };
-
-    var rowIndex = -1;
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][idCol]) === String(lead.id)) {
-        rowIndex = i;
-        break;
-      }
+    var a = _migrateTherapistColumn('Assignments', ASSIGNMENTS_HEADERS);
+    var s = _migrateTherapistColumn('Schedule', SCHEDULE_HEADERS);
+    function keys(o1, o2) {
+      var m = {}; [o1, o2].forEach(function (o) { Object.keys(o).forEach(function (k) { m[k] = (m[k] || 0) + o[k]; }); });
+      return Object.keys(m).map(function (k) { return { name: k, rows: m[k] }; });
     }
-    if (rowIndex === -1) return { ok: false, error: 'not_found' };
-
-    var sourceRow = data[rowIndex];
-    var rowObj = {};
-    for (var j = 0; j < headers.length; j++) {
-      rowObj[headers[j]] = sourceRow[j];
-    }
-    rowObj.removedAt = new Date().toISOString();
-    rowObj.originSheet = 'Leads';
-
-    var removedSheet = _ensureSheet('לידים שהוסרו', REMOVED_LEADS_HEADERS);
-    var newRow = REMOVED_LEADS_HEADERS.map(function(h) {
-      return rowObj[h] !== undefined ? rowObj[h] : '';
-    });
-    removedSheet.appendRow(newRow);
-
-    sheet.deleteRow(rowIndex + 1);
-
-    return { ok: true, lead: lead, removed: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
+    return {
+      ok: true,
+      assignments: { scanned: a.scanned, migrated: a.migrated },
+      schedule: { scanned: s.scanned, migrated: s.migrated },
+      changes: a.changes.concat(s.changes),
+      unmapped: keys(a.unmapped, s.unmapped),                       // unknown names — decide manually
+      punctuationVariants: keys(a.punctuationVariants, s.punctuationVariants)   // ד״ר vs ד"ר, left as-is
+    };
   } finally {
-    lock.releaseLock();
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 
-/* ===== Settings ===== */
-function _getSettings() {
-  var sh = _ensureSheet('Settings', SETTINGS_HEADERS);
-  var rows = _readAll(sh, SETTINGS_HEADERS);
-  var settings = {};
-  rows.forEach(function (r) {
-    if (r.key) settings[r.key] = r.value || '';
-  });
-  return { ok: true, settings: settings };
-}
-
-function _saveSettings(settings) {
-  var sh = _ensureSheet('Settings', SETTINGS_HEADERS);
-  var rows = [];
-  if (settings && typeof settings === 'object') {
-    Object.keys(settings).forEach(function (k) {
-      rows.push({ key: k, value: settings[k] == null ? '' : String(settings[k]) });
-    });
-  }
-  _writeAll(sh, SETTINGS_HEADERS, rows);
-  return { ok: true };
+// Run this straight from the Apps Script editor (Run ▸ migrateTherapistNamesNow)
+// for a one-time, in-place migration; the full report is logged. Idempotent.
+function migrateTherapistNamesNow() {
+  var report = _migrateTherapistNames();
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
 }
 
 function _json(obj) {
@@ -626,1037 +1630,10 @@ function _json(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/* ===== Win-back source (read-only cross-app endpoint) =====
- *
- * Consumed by the E-Zone-Dashboard win-back call list.
- *
- * Returns only the two projections the dashboard is allowed to see:
- *   lostLeads:         rows from Leads where stage === 'לא רלוונטי'
- *   dischargedClients: rows from Clients where status === 'סיים טיפול'
- *
- * Each row is projected to exactly the columns the dashboard renders.
- * Fields like pricePerSession, paymentLink, payerPhone, bundle*, etc.
- * are deliberately NOT included — the dashboard never receives billing
- * or payer data even though it lives in the same sheet.
- *
- * Auth: optional shared secret. If a Script Property named
- * 'WINBACK_SECRET' exists, the request must pass ?secret=<value> that
- * matches. If the property is absent the endpoint is open (URL-only
- * obscurity — same security level as every other action on this script).
- */
-var LOST_LEAD_STAGE_HE = 'לא רלוונטי';
-var DISCHARGED_CLIENT_STATUS_HE = 'סיים טיפול';
-
-/* Cross-app deactivation status (task: deactivateClient receiver). When the
- * E-Zone Therapists app deletes a patient there, it POSTs deactivateClient and
- * this receiver sets the matching outpatient Client's `status` to this value —
- * a soft, reversible deactivation (the row, billing and session history are
- * kept). It is DISTINCT from `סיים טיפול` (Vered's manual discharge): a
- * discharged client still flows through getDebtStatus (debt survives discharge)
- * and the win-back list, whereas a cross-app-deactivated client is EXCLUDED from
- * both getTreatmentPlans and getDebtStatus so it leaves the therapists roster
- * union (which unions those two as base sources). Currently unused elsewhere. */
-var DEACTIVATED_CLIENT_STATUS_HE = 'לא פעיל';
-
-function _winbackAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('WINBACK_SECRET');
-  if (!expected) return true; // not configured → open
-  var got = (params && params.secret) ? String(params.secret) : '';
-  return got === expected;
-}
-
-function _getWinbackSource() {
-  var leadsSh   = _ensureSheet('Leads',   LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var leads     = _readAll(leadsSh,   LEADS_HEADERS);
-  var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
-
-  var lostLeads = [];
-  for (var i = 0; i < leads.length; i++) {
-    var l = leads[i];
-    if (l.stage !== LOST_LEAD_STAGE_HE) continue;
-    lostLeads.push({
-      sourceApp:       'ezone-outpatient',
-      sourceId:        l.id,
-      name:            l.name           || '',
-      phone:           l.phone          || '',
-      originalService: l.serviceType    || '',
-      location:        l.location       || '',
-      reasonLeft:      l.note           || '',  // best-available proxy
-      dateLeft:        l.created        || '',  // best-available proxy
-      kind:            'lost_lead'
-    });
-  }
-
-  var dischargedClients = [];
-  for (var j = 0; j < clients.length; j++) {
-    var c = clients[j];
-    if (c.status !== DISCHARGED_CLIENT_STATUS_HE) continue;
-    dischargedClients.push({
-      sourceApp:       'ezone-outpatient',
-      sourceId:        c.id,
-      name:            c.name           || '',
-      phone:           c.phone          || '',
-      originalService: c.serviceType    || '',
-      location:        c.location       || '',
-      reasonLeft:      c.notes          || '',  // best-available proxy
-      dateLeft:        c.exitDate       || '',
-      kind:            'discharged'
-    });
-  }
-
-  return { ok: true, lostLeads: lostLeads, dischargedClients: dischargedClients };
-}
-
-/* ===== Debt status (read-only cross-app endpoint) =====
- *
- * Consumed by the E-Zone Therapists app to gate patient intake on outpatient
- * debt. Returns EVERY client with a tri-state debt status, so the consumer can
- * tell "confirmed no debt" apart from "couldn't determine":
- *   clientId, name, phone (canonical patient phone), debtStatus, amountOwed
- *
- * Never-fail-open: three outcomes, not two.
- *   - has payment rows, open balance > 0 -> 'debt'    (consumer: block+approval)
- *   - has payment rows, nothing owing     -> 'clear'   (consumer: allow)
- *   - ZERO payment rows                   -> 'unknown' (consumer: FLAG — no data
- *                                                       is NOT proof of payment)
- * The consumer adds: phone matches no client -> flag; matches >1 -> flag.
- *
- * Matching contract: the consumer matches on NAME + the canonical patient
- * phone (the `phone` column, falling back to `treatmentContactPhone`, leading-
- * zero recovered). payerPhone, paymentLink, prices, bundle* and every other
- * billing/payer field are deliberately NOT included.
- *
- * Per-row rule (lockstep with public/debt-status.js and billing-status.js):
- * for a row that EXISTS, owed = (status paid or blank) ? 0 :
- * max(0, amountDue - amountPaid). "Don't assume paid" applies at the CLIENT
- * level (zero rows = 'unknown'), not by reinterpreting an existing blank row.
- * Included regardless of client status (debt survives discharge).
- *
- * Auth: optional shared secret, same model as getWinbackSource. If a Script
- * Property named 'DEBT_STATUS_SECRET' exists, the request must pass
- * ?secret=<value> that matches. If the property is absent the endpoint is open
- * (URL-only obscurity — same level as every other action on this script).
- */
-function _debtAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('DEBT_STATUS_SECRET');
-  if (!expected) return true; // not configured → open
-  var got = (params && params.secret) ? String(params.secret) : '';
-  return got === expected;
-}
-
-var DEBT_PAYMENT_STATUS_ALIASES = {
-  'שולם': 'paid', 'paid': 'paid',
-  'שולם חלקית': 'partial', 'partial': 'partial',
-  'לא שולם': 'unpaid', 'unpaid': 'unpaid'
-};
-
-function _resolvePaymentStatus(v) {
-  var raw = String(v == null ? '' : v).trim();
-  if (!raw) return '';
-  return DEBT_PAYMENT_STATUS_ALIASES[raw] ||
-         DEBT_PAYMENT_STATUS_ALIASES[raw.toLowerCase()] || '';
-}
-
-function _rowOwed(row) {
-  if (!row) return 0;
-  var status = _resolvePaymentStatus(row.status);
-  if (status === 'paid' || status === '') return 0;
-  var due = Number(row.amountDue); if (!isFinite(due)) due = 0;
-  var paid = Number(row.amountPaid); if (!isFinite(paid)) paid = 0;
-  var owed = due - paid;
-  return owed > 0 ? owed : 0;
-}
-
-function _getDebtStatus() {
-  var clientsSh  = _ensureSheet('Clients',  CLIENTS_HEADERS);
-  var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-  var clients    = _readAll(clientsSh,  CLIENTS_HEADERS);
-  var payments   = _readAll(paymentsSh, PAYMENTS_HEADERS);
-
-  var byClient = {};
-  for (var i = 0; i < payments.length; i++) {
-    var p = payments[i];
-    var cid = (p && p.clientId != null) ? String(p.clientId) : '';
-    if (!cid) continue;
-    (byClient[cid] = byClient[cid] || []).push(p);
-  }
-
-  var out = [];
-  for (var c = 0; c < clients.length; c++) {
-    var cl = clients[c];
-    var id = (cl && cl.id != null) ? String(cl.id) : '';
-    if (!id) continue;
-    // Cross-app-deactivated clients (deleted in the therapists app) are dropped
-    // from the roster union — they must not be re-added via this base source.
-    // NOTE: discharged (`סיים טיפול`) clients are still INCLUDED here; debt
-    // survives discharge. Only the explicit deactivation status is excluded.
-    if (cl.status === DEACTIVATED_CLIENT_STATUS_HE) continue;
-    var rows = byClient[id] || [];
-    var debtStatus, amountOwed;
-    if (rows.length === 0) {
-      debtStatus = 'unknown'; amountOwed = 0; // no billing record → flag
-    } else {
-      var sum = 0;
-      for (var r = 0; r < rows.length; r++) sum += _rowOwed(rows[r]);
-      sum = Math.round(sum * 100) / 100;
-      debtStatus = sum > 0 ? 'debt' : 'clear';
-      amountOwed = sum > 0 ? sum : 0;
-    }
-    out.push({
-      sourceApp:  'ezone-outpatient',
-      clientId:   id,
-      name:       cl.name || '',
-      phone:      _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone),
-      debtStatus: debtStatus,
-      amountOwed: amountOwed
-    });
-  }
-
-  return { ok: true, clients: out };
-}
-
-/* ===== Treatment plans (read-only cross-app endpoint) =====
- *
- * Consumed by E-Zone Therapists to show each outpatient's treatment plan.
- * Minimal projection: clientId, name, phone (treatmentContactPhone),
- * serviceType, sessions (sessionsPerWeek), status. NO billing/payer data.
- *
- * Auth: optional shared secret 'TREATMENT_PLANS_SECRET', same model as
- * getWinbackSource / getDebtStatus.
- */
-function _treatmentPlansAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('TREATMENT_PLANS_SECRET');
-  if (!expected) return true; // not configured -> open
-  var got = (params && params.secret) ? String(params.secret) : '';
-  return got === expected;
-}
-
-function _getTreatmentPlans() {
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
-  var out = [];
-  for (var c = 0; c < clients.length; c++) {
-    var cl = clients[c];
-    var id = (cl && cl.id != null) ? String(cl.id) : '';
-    if (!id) continue;
-    // Cross-app-deactivated clients (deleted in the therapists app) leave the
-    // roster — exclude them so the therapists roster union does not re-add them.
-    if (cl.status === DEACTIVATED_CLIENT_STATUS_HE) continue;
-    // Cross-app join key for the therapists app — must be the populated
-    // canonical patient phone. The patient number lives in the `phone` column
-    // (added in the stop-flow work); the legacy `treatmentContactPhone` column
-    // is empty for every live client, so projecting it returned "phone":"" for
-    // all. Prefer `phone`, fall back to `treatmentContactPhone`, and recover the
-    // leading zero either way so consumers get the canonical 10-digit form.
-    var phone = _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone);
-    out.push({
-      sourceApp:   'ezone-outpatient',
-      clientId:    id,
-      name:        cl.name || '',
-      phone:       phone,
-      serviceType: cl.serviceType || '',
-      sessions:    cl.sessionsPerWeek || '',
-      status:      cl.status || ''
-    });
-  }
-  return { ok: true, clients: out };
-}
-
-/* ===== Stop-treatment flags =====
- *
- * Inbound: the E-Zone Therapists app POSTs { action:'flagStop', secret, phone,
- * name, reportedBy?, note? } directly to this /exec. FAIL-CLOSED auth: the
- * shared secret 'STOP_FLAG_SECRET' Script Property MUST exist and match — unlike
- * the read endpoints, an unset secret REJECTS (this is an external write).
- *
- * _flagStop validates input, normalizes the phone to canonical leading-zero
- * (reusing _recoverPhone), tries to match an existing client by normalized phone
- * (vs client.phone OR treatmentContactPhone) + exact trimmed name to fill
- * clientId, and appends ONE row with status='pending'. Clients is never touched.
- *
- * getStopFlags / resolveStopFlag(id) are INTERNAL (Vered's dashboard via the Node
- * proxy) — open, same trust level as getData/saveAll. resolveStopFlag(id) marks a
- * flag resolved when Vered completes the discharge; it does not discharge.
- *
- * resolveStopFlag can ALSO be called by the therapists app as a SECURED receiver
- * — { action:'resolveStopFlag', secret, phone } (fail-closed, reuses
- * STOP_FLAG_SECRET) clears the StopFlags row(s) for a canonical phone by phone
- * ALONE (no Clients join), so it resolves orphaned flags too. doPost routes by
- * the presence of `secret`; see _resolveStopFlagByPhone.
- */
-function _stopFlagAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('STOP_FLAG_SECRET');
-  if (!expected) return false; // fail-closed: not configured -> reject
-  var got = (params && params.secret != null) ? String(params.secret) : '';
-  return got !== '' && got === expected;
-}
-
-function _matchStopFlagClient(clients, phone, name) {
-  if (!phone) return '';
-  var nm = String(name == null ? '' : name).trim();
-  // A phone match alone is sufficient — match the reported phone against ANY of
-  // the client's phone fields (patient phone / treatment-contact / payer). Name
-  // is only a soft tiebreaker when more than one client shares the phone, never
-  // a hard gate (Hebrew names drift on spacing/RTL/spelling). 0 or still-
-  // ambiguous → leave clientId empty and let the dashboard panel resolve/ask.
-  var hits = [];
-  for (var i = 0; i < clients.length; i++) {
-    var c = clients[i];
-    if (_recoverPhone(c.phone) === phone ||
-        _recoverPhone(c.treatmentContactPhone) === phone ||
-        _recoverPhone(c.payerPhone) === phone) {
-      hits.push(c);
-    }
-  }
-  if (hits.length === 1) return String(hits[0].id);
-  if (hits.length > 1 && nm) {
-    var narrowed = hits.filter(function (c) {
-      return String(c.name == null ? '' : c.name).trim() === nm;
-    });
-    if (narrowed.length === 1) return String(narrowed[0].id);
-  }
-  return '';
-}
-
-function _flagStop(payload) {
-  var phone = _recoverPhone(payload && payload.phone);
-  var name = String((payload && payload.name) || '').trim();
-  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
-  if (!name) return { ok: false, error: 'missing_name' };
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
-    var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
-    var flag = {
-      id: Utilities.getUuid(),
-      phone: phone,
-      name: name,
-      clientId: _matchStopFlagClient(clients, phone, name),
-      reportedBy: String((payload && payload.reportedBy) || '').trim(),
-      reportedAt: new Date().toISOString(),
-      note: String((payload && payload.note) || '').trim().slice(0, 1000),
-      status: 'pending',
-      resolvedBy: '',
-      resolvedAt: ''
-    };
-    sh.appendRow(STOP_FLAGS_HEADERS.map(function (h) {
-      return flag[h] == null ? '' : flag[h];
-    }));
-    return { ok: true, flag: flag };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-function _getStopFlags() {
-  var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
-  return { ok: true, stopFlags: _readAll(sh, STOP_FLAGS_HEADERS) };
-}
-
-/* Read-only SessionLog projection for the internal therapist-payout view (read
- * step 1 of 4). Returns every reconciliation row written by recordSessionOutcome.
- * Open, same trust level as getStopFlags / getPayments (an internal dashboard
- * read, NOT a cross-app endpoint). The dashboard computes the monthly per-
- * therapist payout client-side from these rows; this endpoint never writes. */
-function _getSessionLog() {
-  var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
-  return { ok: true, sessionLog: _readAll(sh, SESSION_LOG_HEADERS) };
-}
-
-/* ===== Set clinical treatment type (secured cross-app write) =====
- *
- * Inbound: the E-Zone Therapists app POSTs { action:'setClinicalType', secret,
- * phone, clinicalTreatmentType } directly to this /exec. FAIL-CLOSED auth: the
- * shared secret 'CLINICAL_TYPE_SECRET' Script Property MUST exist and match —
- * same model as flagStop, NOT the fail-open read pattern. An unset/empty/wrong
- * secret REJECTS (this is an external write to Clients).
- *
- * Behaviour (never fail-open, never guess):
- *   single phone match   -> set that client's clinicalTreatmentType, derive +
- *                           overwrite serviceType via the SAME _clinicalToBilling
- *                           / _deriveClientServiceType used on save, write the
- *                           row, return { ok:true, matched:1 }.
- *   no match             -> { ok:false, reason:'no_match' },    write nothing.
- *   multiple matches     -> { ok:false, reason:'multi_match' }, write nothing.
- *   unknown clinical type-> { ok:false, reason:'unknown_type' },write nothing.
- *
- * Only the two fields (clinicalTreatmentType + derived serviceType) change on the
- * matched row; every other cell is written back exactly as read. _writeAll maps
- * positionally so the full Clients array is rewritten — untouched rows are
- * byte-identical, preserving the append-only column layout.
- */
-function _clinicalTypeAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('CLINICAL_TYPE_SECRET');
-  if (!expected) return false; // fail-closed: not configured -> reject
-  var got = (params && params.secret != null) ? String(params.secret) : '';
-  return got !== '' && got === expected;
-}
-
-function _setClinicalType(payload) {
-  var phone = _recoverPhone(payload && payload.phone);
-  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
-
-  var clinical = String((payload && payload.clinicalTreatmentType) || '').trim();
-  if (!clinical) return { ok: false, reason: 'unknown_type' };
-  // Validate against the SAME map used on save — reject (write nothing) before
-  // touching the sheet rather than letting the derive throw mid-write.
-  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, clinical)) {
-    return { ok: false, reason: 'unknown_type' };
-  }
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var clients = _readAll(sh, CLIENTS_HEADERS);
-
-    // Match by canonical phone across the same phone fields _matchStopFlagClient
-    // checks (patient phone / treatment-contact / payer). Never guess: a single
-    // hit writes, anything else writes nothing.
-    var hits = [];
-    for (var i = 0; i < clients.length; i++) {
-      var c = clients[i];
-      if (_recoverPhone(c.phone) === phone ||
-          _recoverPhone(c.treatmentContactPhone) === phone ||
-          _recoverPhone(c.payerPhone) === phone) {
-        hits.push(c);
-      }
-    }
-    if (hits.length === 0) return { ok: false, reason: 'no_match' };
-    if (hits.length > 1) return { ok: false, reason: 'multi_match' };
-
-    var client = hits[0];
-    client.clinicalTreatmentType = clinical;
-    _deriveClientServiceType(client); // overwrites serviceType via _clinicalToBilling
-
-    _writeAll(sh, CLIENTS_HEADERS, clients);
-    return { ok: true, matched: 1 };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-/* ===== Record session outcome (secured cross-app write — task 4.8-step3-out) =
- *
- * Inbound: the E-Zone Therapists app POSTs a session-outcome event:
- *   { action:'recordSessionOutcome', secret, sessionId, phone, therapist,
- *     clinicalTreatmentType, date, outcome, patientName?, freqPerWeek? }
- * FAIL-CLOSED auth ('SESSION_OUTCOME_SECRET' Script Property must exist + match —
- * same model as flagStop / setClinicalType, NOT the fail-open read pattern).
- *
- * Computes the therapist pay + client session value for the session and logs ONE
- * reconciliation row to the SessionLog tab, UPSERTED by sessionId (a corrected
- * outcome re-sent with the same sessionId overwrites the row and recomputes pay —
- * never a duplicate, never stale pay).
- *
- * Clients is modified ONLY for the credit balance (creditsOwed) when a single
- * client matches: therapist_cancelled grants +1; a happened session beyond the
- * patient's monthly quota (weekly frequency × 4) auto-draws a credit when one is
- * available, zeroing that session's clientSessionValue (therapist pay unchanged).
- * Because creditsOwed is a stateful running total, an upsert first REVERSES the
- * existing row's credit effect, then applies the new outcome's — so a correction
- * undoes the old draw/grant. No plan frequency or no session date -> NO draw, the
- * row is flagged (creditStatus). See the credit engine below + _planWeeklyFrequency.
- *
- *   outcome:        happened | therapist_cancelled | patient_no_show (any other
- *                   value rejects, writes nothing)
- *   sessionStatus:  happened->consumed, therapist_cancelled->credited,
- *                   patient_no_show->forfeited
- *   therapistPay:   happened / patient_no_show -> _therapistPay (therapist showed
- *                   up, so a no-show still pays); therapist_cancelled -> 0 (never
- *                   delivered); group (קבוצה) -> 0
- *   clientSessionValue: _billingPrice(billingType, freq). קבוצה -> 0 (decided
- *                   free). ליווי with NO freq in the event -> null (blank cell —
- *                   flagged, never guessed; distinct from a real 0).
- *
- * Unknown clinical type / unknown outcome / (for paid non-group outcomes) unknown
- * therapist all REJECT and write nothing. The log is keyed by session, so it
- * always writes regardless of client match: matchStatus records matched (single
- * phone hit, fills clientId+patientName) / no_match / multi_match.
- */
-var SESSION_LOG_HEADERS = [
-  'sessionId', 'phone', 'patientName', 'clientId',
-  'therapist', 'clinicalTreatmentType', 'billingType', 'date',
-  'outcome', 'therapistPay', 'clientSessionValue', 'sessionStatus',
-  'matchStatus', 'recordedAt',
-  // APPEND-ONLY (session accounting + credits): how the credit engine treated
-  // this row. '' = N/A (no-show / unmatched non-credit); 'credit_added' =
-  // therapist_cancelled gave +1; 'within_quota' = happened inside the monthly
-  // quota (normal value); 'covered' = happened beyond quota, a credit was drawn
-  // (clientSessionValue forced to 0); 'beyond_no_credit' = beyond quota but no
-  // credit available (normal value); 'quota_unknown' = quota undeterminable
-  // (no plan frequency / no session date) so NO draw — flagged; 'no_client' =
-  // no single client match, so the patient balance could not be touched.
-  'creditStatus',
-  // APPEND-ONLY (payout forwarding): the 'YYYY-MM' payroll cycle this session was
-  // forwarded to חשבת שכר in. '' = not yet forwarded (still in the open payout
-  // view). Once stamped the row is SETTLED and is filtered out of the payout view;
-  // a session logged late for an already-stamped month surfaces as a הפרש.
-  // Set ONLY by _markForwarded; preserved (never cleared) across outcome upserts.
-  'forwardedToPayroll'
-];
-
-var SESSION_STATUS_BY_OUTCOME = {
-  happened:            'consumed',
-  therapist_cancelled: 'credited',
-  patient_no_show:     'forfeited'
-};
-
-function _sessionOutcomeAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('SESSION_OUTCOME_SECRET');
-  if (!expected) return false; // fail-closed: not configured -> reject
-  var got = (params && params.secret != null) ? String(params.secret) : '';
-  return got !== '' && got === expected;
-}
-
-/* Pay rule by outcome. therapist_cancelled and group never call _therapistPay,
- * so they log fine even for an unknown therapist; only a PAID non-group outcome
- * (happened / patient_no_show) looks up the therapist and may throw. */
-function _computeSessionPay(outcome, therapist, clinicalTreatmentType, billingType) {
-  if (outcome === 'therapist_cancelled') return 0; // never delivered -> never paid
-  if (billingType === GROUP_BILLING) return 0;      // group -> 0 pay
-  return _therapistPay(therapist, clinicalTreatmentType); // showed up -> paid
-}
-
-/* Value rule. Day-center needs a frequency; if the event carries none, return
- * null (flag) rather than guessing. Everything else (incl. group -> 0) prices
- * straight from the billing table. */
-function _computeSessionValue(billingType, freqPerWeek) {
-  if (_isDayCenterBilling(billingType) &&
-      (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '')) {
-    return null;
-  }
-  return _billingPrice(billingType, freqPerWeek);
-}
-
-function _recordSessionOutcome(payload) {
-  var sessionId = String((payload && payload.sessionId) || '').trim();
-  if (!sessionId) return { ok: false, reason: 'missing_session_id' };
-
-  var outcome = String((payload && payload.outcome) || '').trim();
-  if (!_hasOwn(SESSION_STATUS_BY_OUTCOME, outcome)) {
-    return { ok: false, reason: 'unknown_outcome' };
-  }
-
-  var clinical = String((payload && payload.clinicalTreatmentType) || '').trim();
-  if (!clinical || !_hasOwn(CLINICAL_TO_BILLING, clinical)) {
-    return { ok: false, reason: 'unknown_type' };
-  }
-  var billingType = _clinicalToBilling(clinical);
-  var therapist = String((payload && payload.therapist) || '').trim();
-
-  // Frequency only matters for ליווי; absent everywhere else. Accept either key.
-  var freq;
-  if (payload && payload.freqPerWeek != null && payload.freqPerWeek !== '') freq = payload.freqPerWeek;
-  else if (payload && payload.frequencyPerWeek != null && payload.frequencyPerWeek !== '') freq = payload.frequencyPerWeek;
-
-  var therapistPay, clientSessionValue;
-  try {
-    therapistPay = _computeSessionPay(outcome, therapist, clinical, billingType);
-  } catch (err) {
-    return { ok: false, reason: 'unknown_therapist' };
-  }
-  try {
-    clientSessionValue = _computeSessionValue(billingType, freq);
-  } catch (err) {
-    return { ok: false, reason: 'invalid_frequency' };
-  }
-
-  var sessionStatus = SESSION_STATUS_BY_OUTCOME[outcome];
-  var phone = _recoverPhone(payload && payload.phone);
-  var patientName = String((payload && payload.patientName) || '').trim();
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    // Optional client match for enrichment — never gates the log (keyed by session).
-    // A SINGLE phone hit also unlocks the credit engine (we can read+write that
-    // client's creditsOwed); 0 or >1 hits leave the patient balance untouched.
-    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
-    var clientId = '', matchStatus = 'no_match', matchedClient = null;
-    if (phone && /^0\d{8,9}$/.test(phone)) {
-      var hits = [];
-      for (var i = 0; i < clients.length; i++) {
-        var c = clients[i];
-        if (_recoverPhone(c.phone) === phone ||
-            _recoverPhone(c.treatmentContactPhone) === phone ||
-            _recoverPhone(c.payerPhone) === phone) {
-          hits.push(c);
-        }
-      }
-      if (hits.length === 1) {
-        matchedClient = hits[0];
-        clientId = String(matchedClient.id);
-        matchStatus = 'matched';
-        if (!patientName) patientName = String(matchedClient.name == null ? '' : matchedClient.name).trim();
-      } else if (hits.length > 1) {
-        matchStatus = 'multi_match';
-      }
-    }
-
-    var rowObj = {
-      sessionId:          sessionId,
-      phone:              phone,
-      patientName:        patientName,
-      clientId:           clientId,
-      therapist:          therapist,
-      clinicalTreatmentType: clinical,
-      billingType:        billingType,
-      date:               String((payload && payload.date) || '').trim(),
-      outcome:            outcome,
-      therapistPay:       therapistPay,
-      clientSessionValue: clientSessionValue,   // null -> blank cell (flag)
-      sessionStatus:      sessionStatus,
-      matchStatus:        matchStatus,
-      recordedAt:         new Date().toISOString(),
-      creditStatus:       '',
-      // Preserved below from the existing row on an upsert — a re-sent / corrected
-      // outcome must NOT lose an already-forwarded stamp (only _markForwarded sets it).
-      forwardedToPayroll: ''
-    };
-
-    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
-
-    // ---- Credit engine -----------------------------------------------------
-    // creditsOwed is a stateful running balance, so an UPSERT must first REVERSE
-    // the effect the existing row for this sessionId had, then apply the new
-    // outcome's effect (idempotent re-send nets zero; a real correction undoes
-    // the old and applies the new — e.g. happened-covered -> cancelled gives the
-    // drawn credit back AND adds the cancellation credit). We do NOT re-simulate
-    // sibling rows: reversing one row's own effect is locally correct; the
-    // month's other draws keep whatever they resolved to (documented).
-    var logRows = _readAll(sh, SESSION_LOG_HEADERS);
-    var oldRow = null;
-    for (var lr = 0; lr < logRows.length; lr++) {
-      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
-    }
-    // Preserve an already-forwarded stamp across the upsert: a correction re-runs
-    // pay/credit but must not silently un-forward a session payroll already received.
-    if (oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '') {
-      rowObj.forwardedToPayroll = String(oldRow.forwardedToPayroll).trim();
-    }
-
-    if (matchedClient) {
-      var origCredits = _toCredits(matchedClient.creditsOwed);
-      var balance = origCredits;
-      // 1) reverse the old row's effect on this client's balance
-      if (oldRow) {
-        if (oldRow.outcome === 'therapist_cancelled') balance -= 1;       // undo the +1
-        if (String(oldRow.creditStatus) === 'covered')  balance += 1;       // undo the draw (give it back)
-      }
-      if (balance < 0) balance = 0;
-      // 2) apply the new outcome's effect
-      if (outcome === 'therapist_cancelled') {
-        balance += 1;
-        rowObj.creditStatus = 'credit_added';
-      } else if (outcome === 'happened') {
-        var quotaFreq = _planWeeklyFrequency(matchedClient);
-        if (!quotaFreq && freq != null && freq !== '') {           // fall back to the event frequency
-          var ef = parseInt(freq, 10);
-          if (!isNaN(ef) && ef > 0) quotaFreq = ef;
-        }
-        var month = _monthKey(rowObj.date);
-        if (!quotaFreq || !month) {
-          rowObj.creditStatus = 'quota_unknown';                   // can't bucket -> never draw
-        } else {
-          var quota = quotaFreq * 4;
-          var priorHappened = 0;                                   // delivered this month, excluding self
-          for (var hh = 0; hh < logRows.length; hh++) {
-            var lrow = logRows[hh];
-            if (String(lrow.sessionId) === sessionId) continue;
-            if (String(lrow.clientId) === clientId &&
-                lrow.outcome === 'happened' &&
-                _monthKey(lrow.date) === month) priorHappened++;
-          }
-          var beyondQuota = priorHappened >= quota;
-          if (!beyondQuota) {
-            rowObj.creditStatus = 'within_quota';
-          } else if (balance > 0 && typeof clientSessionValue === 'number' && clientSessionValue > 0) {
-            clientSessionValue = 0;                                // credit covers this session
-            rowObj.clientSessionValue = 0;
-            balance -= 1;
-            rowObj.creditStatus = 'covered';
-          } else {
-            rowObj.creditStatus = 'beyond_no_credit';              // beyond quota, no credit to draw
-          }
-        }
-      }
-      // 3) persist the balance only if it actually changed (whole-sheet write)
-      if (balance !== origCredits) {
-        matchedClient.creditsOwed = balance;
-        _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-      }
-      rowObj.creditsOwed = balance;
-    } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
-      // No single client to credit/debit — flag, change no balance.
-      rowObj.creditStatus = 'no_client';
-    }
-    // ------------------------------------------------------------------------
-
-    var rowArr = SESSION_LOG_HEADERS.map(function (h) {
-      var v = rowObj[h];
-      return (v === undefined || v === null) ? '' : v;
-    });
-    var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
-    var lastRow = sh.getLastRow();
-    var upserted = false;
-    if (lastRow > 1) {
-      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
-      for (var r = 0; r < ids.length; r++) {
-        if (String(ids[r][0]) === sessionId) {
-          sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
-          upserted = true;
-          break;
-        }
-      }
-    }
-    if (!upserted) sh.appendRow(rowArr);
-
-    var result = {
-      ok: true,
-      sessionId: sessionId,
-      therapistPay: therapistPay,
-      clientSessionValue: clientSessionValue,
-      sessionStatus: sessionStatus,
-      creditStatus: rowObj.creditStatus
-    };
-    if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
-    if (upserted) result.upserted = true; else result.appended = true;
-    return result;
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-/* Tolerant 'YYYY-MM' extraction for the payout forwarding match — MUST mirror
- * public/therapist-payout.js monthOf so _markForwarded stamps exactly the rows
- * the dashboard view groups into that month. Handles both shapes seen in
- * SessionLog: ISO 'YYYY-MM-DD' (Sheets normalizes Date cells to this) AND a raw
- * JS Date.toString() like 'Thu Jun 18 2026 …' (what recordSessionOutcome stores
- * verbatim from the Therapists payload). Returns '' for empty/unparseable input.
- * (_monthKey is ISO-only and intentionally left as-is for the credit engine.) */
-function _payoutMonthOf(dateCell) {
-  var s = String(dateCell == null ? '' : dateCell).trim();
-  if (!s) return '';
-  var m = s.match(/^(\d{4})-(\d{2})/);
-  if (m) return m[1] + '-' + m[2];
-  var d = new Date(s);
-  if (isNaN(d.getTime())) return '';
-  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
-}
-
-/* ===== Mark a therapist's month as forwarded to payroll (internal write) =====
- *
- * Inbound (internal dashboard, NO secret — same trust level as the by-id
- * resolveStopFlag / savePayment path; this is מורן acting inside the dashboard,
- * not a cross-app receiver):
- *   { action:'markForwarded', therapist, month:'YYYY-MM' }
- *
- * Stamps `forwardedToPayroll = month` on EVERY still-unstamped SessionLog row for
- * that (therapist, month) — matched on the SESSION date via _payoutMonthOf so it
- * tracks the view exactly. Stamped rows drop out of the payout view permanently;
- * a session logged late for the same month after this runs stays unstamped and
- * surfaces as a הפרש, until מורן forwards that month again (this can be re-run, it
- * only ever touches rows that aren't already stamped).
- *
- * Per-therapist + per-month: a forward for one therapist never touches another's
- * rows, and never touches a different month. Idempotent: a second call with no new
- * rows stamps 0 and reports forwarded:0.
- */
-function _markForwarded(payload) {
-  var therapist = String((payload && payload.therapist) || '').trim();
-  if (!therapist) return { ok: false, reason: 'missing_therapist' };
-  var month = _payoutMonthOf((payload && payload.month) || '');
-  if (!month) return { ok: false, reason: 'invalid_month' };
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
-    var rows = _readAll(sh, SESSION_LOG_HEADERS);
-    var forwarded = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i];
-      if (String(row.therapist || '').trim() !== therapist) continue;
-      if (_payoutMonthOf(row.date) !== month) continue;
-      if (String(row.forwardedToPayroll || '').trim() !== '') continue; // already settled
-      row.forwardedToPayroll = month;
-      forwarded++;
-    }
-    if (forwarded) _writeAll(sh, SESSION_LOG_HEADERS, rows);
-    return { ok: true, therapist: therapist, month: month, forwarded: forwarded };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-function _resolveStopFlag(id, resolvedBy) {
-  if (!id) return { ok: false, error: 'missing_id' };
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
-    var lastRow = sh.getLastRow();
-    if (lastRow < 2) return { ok: false, error: 'not_found' };
-    var idIdx = STOP_FLAGS_HEADERS.indexOf('id');
-    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
-    for (var i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]) === String(id)) {
-        var rowNum = i + 2;
-        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('status') + 1).setValue('resolved');
-        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('resolvedBy') + 1).setValue(String(resolvedBy || '').trim());
-        sh.getRange(rowNum, STOP_FLAGS_HEADERS.indexOf('resolvedAt') + 1).setValue(new Date().toISOString());
-        return { ok: true, resolved: true, id: id };
-      }
-    }
-    return { ok: false, error: 'not_found' };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-/* Secured receiver: the E-Zone Therapists app POSTs
- * { action:'resolveStopFlag', secret, phone } to clear a stop flag it previously
- * raised — e.g. the patient resumed treatment. FAIL-CLOSED auth: reuses
- * STOP_FLAG_SECRET, the SAME secret as flagStop (unset/empty/wrong REJECTS).
- *
- * Unlike the internal id-based _resolveStopFlag (Vered's dashboard), this matches
- * by canonical phone ALONE — NO Clients join — so it also clears ORPHANED flags
- * (e.g. 'יעל') whose phone never matched a client row. Mirrors _flagStop: one
- * script lock, _ensureSheet, positional writes by header index. Marks EVERY
- * matching still-pending row status='resolved' (idempotent: already-resolved rows
- * are skipped). Returns { ok:true, resolved:N } — N=0 is a successful no-match,
- * not an error. Clients is never touched. */
-function _resolveStopFlagByPhone(payload) {
-  if (!_stopFlagAuthOk(payload)) return { ok: false, reason: 'unauthorized' };
-  var phone = _recoverPhone(payload && payload.phone);
-  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
-  var resolvedBy = String((payload && payload.resolvedBy) || 'therapists-app').trim();
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
-    var lastRow = sh.getLastRow();
-    if (lastRow < 2) return { ok: true, resolved: 0 };
-    var phoneIdx     = STOP_FLAGS_HEADERS.indexOf('phone');
-    var statusIdx    = STOP_FLAGS_HEADERS.indexOf('status');
-    var resolvedByIdx = STOP_FLAGS_HEADERS.indexOf('resolvedBy');
-    var resolvedAtIdx = STOP_FLAGS_HEADERS.indexOf('resolvedAt');
-    var rows = sh.getRange(2, 1, lastRow - 1, STOP_FLAGS_HEADERS.length).getValues();
-    var resolvedAt = new Date().toISOString();
-    var resolved = 0;
-    for (var i = 0; i < rows.length; i++) {
-      // Canonical-phone match handles a leading zero Sheets dropped on store.
-      if (_recoverPhone(rows[i][phoneIdx]) !== phone) continue;
-      if (String(rows[i][statusIdx]) === 'resolved') continue; // already cleared
-      var rowNum = i + 2;
-      sh.getRange(rowNum, statusIdx + 1).setValue('resolved');
-      sh.getRange(rowNum, resolvedByIdx + 1).setValue(resolvedBy);
-      sh.getRange(rowNum, resolvedAtIdx + 1).setValue(resolvedAt);
-      resolved++;
-    }
-    return { ok: true, resolved: resolved };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-/* ===== Deactivate client (secured cross-app receiver) =======================
- *
- * Pairs with the E-Zone Therapists delete-propagation sender (ezone-therapists
- * PR #24, `_postDeactivateClient`): when a patient is DELETED in the therapists
- * app, it POSTs { action:'deactivateClient', secret, phone } here so the patient
- * stops appearing in outpatient's roster (the therapists roster unions
- * getTreatmentPlans / getDebtStatus as base sources, so a still-active outpatient
- * Client would otherwise be re-added).
- *
- * FAIL-CLOSED auth on a DEDICATED secret 'DEACTIVATE_CLIENT_SECRET' — its OWN
- * secret, NOT reused from STOP_FLAG_SECRET (least authority; matches the sender,
- * which provisions the same value on both Apps Scripts). Unset/empty/wrong
- * REJECTS, exactly like flagStop / resolveStopFlag-by-phone.
- *
- * DEACTIVATE, not hard-delete (reversible; the row + billing/session history are
- * kept): every Client matching the canonical phone has its `status` set to
- * DEACTIVATED_CLIENT_STATUS_HE ('לא פעיל'), which both projections now exclude.
- * Match is by canonical phone ALONE (handles a leading zero Sheets dropped), the
- * same phone fields the other receivers check (phone / treatmentContactPhone /
- * payerPhone). ORPHAN-SAFE: no match -> { ok:true, deactivated:0 } (a successful
- * no-op, never a crash). Returns { ok:true, deactivated:N }. Idempotent: a row
- * already deactivated is skipped (not re-counted). Mirrors _resolveStopFlagByPhone:
- * one script lock, positional writes by header index. */
-function _deactivateAuthOk(params) {
-  var expected = PropertiesService.getScriptProperties().getProperty('DEACTIVATE_CLIENT_SECRET');
-  if (!expected) return false; // fail-closed: not configured -> reject
-  var got = (params && params.secret != null) ? String(params.secret) : '';
-  return got !== '' && got === expected;
-}
-
-function _deactivateClient(payload) {
-  if (!_deactivateAuthOk(payload)) return { ok: false, reason: 'unauthorized' };
-  var phone = _recoverPhone(payload && payload.phone);
-  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var lastRow = sh.getLastRow();
-    if (lastRow < 2) return { ok: true, deactivated: 0 }; // orphan-safe: no rows
-    var phoneIdx   = CLIENTS_HEADERS.indexOf('phone');
-    var contactIdx = CLIENTS_HEADERS.indexOf('treatmentContactPhone');
-    var payerIdx   = CLIENTS_HEADERS.indexOf('payerPhone');
-    var statusIdx  = CLIENTS_HEADERS.indexOf('status');
-    var rows = sh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
-    var deactivated = 0;
-    for (var i = 0; i < rows.length; i++) {
-      if (_recoverPhone(rows[i][phoneIdx]) !== phone &&
-          _recoverPhone(rows[i][contactIdx]) !== phone &&
-          _recoverPhone(rows[i][payerIdx]) !== phone) continue;
-      if (String(rows[i][statusIdx]) === DEACTIVATED_CLIENT_STATUS_HE) continue; // already
-      sh.getRange(i + 2, statusIdx + 1).setValue(DEACTIVATED_CLIENT_STATUS_HE);
-      deactivated++;
-    }
-    return { ok: true, deactivated: deactivated };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
-/* ===== Merge duplicate clients =====
- *
- * Internal dashboard action (open, same trust level as saveAll). Merges one or
- * more duplicate client rows into a survivor:
- *   1. Repoint every Payments.clientId / ClientCharges.clientId from a dup to
- *      the survivor (and refresh Payments.clientName) — done BEFORE removal so
- *      no billing row is ever orphaned.
- *   2. Fill BLANK survivor fields from the dups (first non-blank), excluding
- *      id/status/exitDate/fromLead so the active survivor never inherits a
- *      discharge state.
- *   3. Remove the dup client rows.
- * All under one script lock, written back atomically. Returns counts.
- *
- * NOTE: a repointed payment/charge keeps its original deterministic id (it is a
- * historical record); only the clientId foreign key the dashboard groups on is
- * moved. The caller picks the survivor (default: the active row).
- */
-function _isBlankCell(v) {
-  return v === undefined || v === null || String(v).trim() === '';
-}
-
-function _mergeClients(payload) {
-  var survivorId = (payload && payload.survivorId != null) ? String(payload.survivorId) : '';
-  var dupIds = (payload && Array.isArray(payload.dupIds)) ? payload.dupIds.map(String) : [];
-  if (!survivorId) return { ok: false, error: 'missing_survivor' };
-  var dupSet = {};
-  dupIds.forEach(function (id) { if (id && id !== survivorId) dupSet[id] = true; });
-  dupIds = Object.keys(dupSet);
-  if (!dupIds.length) return { ok: false, error: 'no_dups' };
-
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    var clientsSh  = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
-    var chargesSh  = _ensureSheet('ClientCharges', CHARGES_HEADERS);
-    var clients  = _readAll(clientsSh, CLIENTS_HEADERS);
-    var payments = _readAll(paymentsSh, PAYMENTS_HEADERS);
-    var charges  = _readAll(chargesSh, CHARGES_HEADERS);
-
-    var survivor = null, dups = [];
-    for (var i = 0; i < clients.length; i++) {
-      var id = String(clients[i].id);
-      if (id === survivorId) survivor = clients[i];
-      else if (dupSet[id]) dups.push(clients[i]);
-    }
-    if (!survivor) return { ok: false, error: 'survivor_not_found' };
-    if (dups.length !== dupIds.length) return { ok: false, error: 'dup_not_found' };
-
-    // 2. Fill blank survivor fields from dups (first non-blank), skipping fields
-    //    we must not import onto the active survivor.
-    var SKIP = { id: true, status: true, exitDate: true, fromLead: true };
-    for (var h = 0; h < CLIENTS_HEADERS.length; h++) {
-      var key = CLIENTS_HEADERS[h];
-      if (SKIP[key] || !_isBlankCell(survivor[key])) continue;
-      for (var d = 0; d < dups.length; d++) {
-        if (!_isBlankCell(dups[d][key])) { survivor[key] = dups[d][key]; break; }
-      }
-    }
-
-    // 1. Repoint billing rows dup -> survivor (before removal).
-    var repPay = 0, repChg = 0;
-    for (var p = 0; p < payments.length; p++) {
-      if (dupSet[String(payments[p].clientId)]) {
-        payments[p].clientId = survivorId;
-        payments[p].clientName = survivor.name || payments[p].clientName || '';
-        repPay++;
-      }
-    }
-    for (var ch = 0; ch < charges.length; ch++) {
-      if (dupSet[String(charges[ch].clientId)]) {
-        charges[ch].clientId = survivorId;
-        repChg++;
-      }
-    }
-
-    // 3. Remove dup client rows and write everything back.
-    var keptClients = clients.filter(function (c) { return !dupSet[String(c.id)]; });
-    _writeAll(clientsSh, CLIENTS_HEADERS, keptClients);
-    if (repPay) _writeAll(paymentsSh, PAYMENTS_HEADERS, payments);
-    if (repChg) _writeAll(chargesSh, CHARGES_HEADERS, charges);
-
-    return {
-      ok: true,
-      survivorId: survivorId,
-      removed: dupIds,
-      repointed: { payments: repPay, charges: repChg }
-    };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
-
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
-    if (action === 'getData')      return _json(_getData());
-    if (action === 'getPayments')  return _json(_getPayments());
-    if (action === 'getCharges')   return _json(_getCharges());
-    if (action === 'getSettings')  return _json(_getSettings());
-    if (action === 'getWinbackSource') {
-      if (!_winbackAuthOk(e && e.parameter)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getWinbackSource());
-    }
-    if (action === 'getDebtStatus') {
-      if (!_debtAuthOk(e && e.parameter)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getDebtStatus());
-    }
-    if (action === 'getTreatmentPlans') {
-      if (!_treatmentPlansAuthOk(e && e.parameter)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getTreatmentPlans());
-    }
-    if (action === 'getStopFlags') return _json(_getStopFlags());
-    if (action === 'getSessionLog') return _json(_getSessionLog());
-    if (action === 'saveAll') {
-      var payload = { leads: [], clients: [] };
-      if (e.parameter.payload) {
-        try { payload = JSON.parse(e.parameter.payload); } catch (err) {}
-      } else {
-        if (e.parameter.leads) try { payload.leads = JSON.parse(e.parameter.leads); } catch (_) {}
-        if (e.parameter.clients) try { payload.clients = JSON.parse(e.parameter.clients); } catch (_) {}
-      }
-      return _json(_saveAll(payload));
-    }
+    if (action === 'getData') return _json(_getData());
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
@@ -1665,120 +1642,33 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    var action = (e && e.parameter && e.parameter.action) || 'saveAll';
+    var action = (e && e.parameter && e.parameter.action) || 'saveSession';
     var payload = {};
     if (e.postData && e.postData.contents) {
       try { payload = JSON.parse(e.postData.contents); } catch (err) {}
       if (payload && payload.action) action = payload.action;
     }
-    if (action === 'saveAll') {
-      return _json(_saveAll({
-        leads:   Array.isArray(payload.leads)   ? payload.leads   : [],
-        clients: Array.isArray(payload.clients) ? payload.clients : []
-      }));
+    if (action === 'getData') return _json(_getData());
+    if (action === 'saveSession') return _json(_saveSession(payload));
+    if (action === 'markAttendance') return _json(_markAttendance(payload));
+    if (action === 'setSessionOutcome') return _json(_setSessionOutcome(payload));
+    if (action === 'syncPending') return _json(_syncPending());
+    if (action === 'savePatient') return _json(_savePatient(payload));
+    if (action === 'markPatientStopped') return _json(_markPatientStopped(payload));
+    if (action === 'restorePatient') return _json(_restorePatient(payload));
+    if (action === 'removePatient') return _json(_removePatient(payload));
+    if (action === 'saveAssignment') return _json(_saveAssignment(payload));
+    if (action === 'updateBooking') return _json(_updateBooking(payload));
+    if (action === 'removeAssignment') {
+      var aid = payload.id || (payload.assignment && payload.assignment.id) || '';
+      return _json(_removeAssignment(aid));
     }
-    if (action === 'getData')     return _json(_getData());
-    if (action === 'getPayments') return _json(_getPayments());
-    if (action === 'getCharges')  return _json(_getCharges());
-    if (action === 'getSettings') return _json(_getSettings());
-    if (action === 'getWinbackSource') {
-      var authParams = (e && e.parameter) || {};
-      if (payload && payload.secret) authParams.secret = payload.secret;
-      if (!_winbackAuthOk(authParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getWinbackSource());
+    if (action === 'removeSchedule') {
+      var id = payload.id || (payload.row && payload.row.id) || '';
+      return _json(_removeSchedule(id));
     }
-    if (action === 'getDebtStatus') {
-      var debtParams = (e && e.parameter) || {};
-      if (payload && payload.secret) debtParams.secret = payload.secret;
-      if (!_debtAuthOk(debtParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getDebtStatus());
-    }
-    if (action === 'getTreatmentPlans') {
-      var tpParams = (e && e.parameter) || {};
-      if (payload && payload.secret) tpParams.secret = payload.secret;
-      if (!_treatmentPlansAuthOk(tpParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_getTreatmentPlans());
-    }
-    if (action === 'flagStop') {
-      var sfParams = (e && e.parameter) || {};
-      if (payload && payload.secret) sfParams.secret = payload.secret;
-      if (!_stopFlagAuthOk(sfParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_flagStop(payload));
-    }
-    if (action === 'setClinicalType') {
-      var ctParams = (e && e.parameter) || {};
-      if (payload && payload.secret) ctParams.secret = payload.secret;
-      if (!_clinicalTypeAuthOk(ctParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_setClinicalType(payload));
-    }
-    if (action === 'deactivateClient') {
-      var dcParams = (e && e.parameter) || {};
-      if (payload && payload.secret) dcParams.secret = payload.secret;
-      if (!_deactivateAuthOk(dcParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_deactivateClient(payload));
-    }
-    if (action === 'recordSessionOutcome') {
-      var soParams = (e && e.parameter) || {};
-      if (payload && payload.secret) soParams.secret = payload.secret;
-      if (!_sessionOutcomeAuthOk(soParams)) {
-        return _json({ ok: false, error: 'unauthorized' });
-      }
-      return _json(_recordSessionOutcome(payload));
-    }
-    if (action === 'correctSessionOutcome') {
-      // Internal dashboard correction / add-missing-session path — מורן fixes an
-      // outcome (or logs a session that was never recorded) from the payout
-      // screen. Open, like the by-id resolveStopFlag / savePayment dashboard
-      // writes (NOT the secured cross-app receiver). It runs the SAME
-      // _recordSessionOutcome rules engine: pay + credit are RECOMPUTED and the
-      // prior effect reversed (upsert by sessionId) — there is no raw amount
-      // override. A new sessionId appends a fresh row; an existing one corrects in
-      // place. forwardedToPayroll is preserved across the upsert.
-      return _json(_recordSessionOutcome(payload));
-    }
-    if (action === 'markForwarded') {
-      return _json(_markForwarded(payload));
-    }
-    if (action === 'getStopFlags') return _json(_getStopFlags());
-    if (action === 'getSessionLog') return _json(_getSessionLog());
-    if (action === 'resolveStopFlag') {
-      // A request carrying a secret is the secured therapists-app receiver
-      // (resolve by canonical phone, fail-closed). Without a secret it is the
-      // internal dashboard path (resolve one row by id, open) — unchanged.
-      if (payload && payload.secret != null) {
-        return _json(_resolveStopFlagByPhone(payload));
-      }
-      return _json(_resolveStopFlag(payload.id, payload.resolvedBy));
-    }
-    if (action === 'mergeClients') {
-      return _json(_mergeClients(payload));
-    }
-    if (action === 'saveSettings') {
-      return _json(_saveSettings(payload.settings || {}));
-    }
-    if (action === 'savePayment' || action === 'updatePayment') {
-      return _json(_upsertPayment(payload.payment));
-    }
-    if (action === 'saveCharge' || action === 'updateCharge') {
-      return _json(_upsertCharge(payload.charge));
-    }
-    if (action === 'removeCharge') {
-      var chgId = payload.id || (payload.charge && payload.charge.id) || '';
-      return _json(_removeCharge(chgId));
-    }
-    if (action === 'removeLead') return _json(_removeLead(payload.lead));
+    if (action === 'migrateTherapistNames') return _json(_migrateTherapistNames());
+    if (action === 'requestExtraSession') return _json(_postRequestExtraSession(payload));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
