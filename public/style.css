@@ -647,6 +647,11 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .charge-status-partial { background: #3a310f; color: var(--amber); border-color: #5a4818; }
 .charge-status-unpaid  { background: #3a0f10; color: #ef8484; border-color: #5a1818; }
 
+/* Editor toggle variant of the charge status: looks clickable, flips paid state. */
+.charge-status-btn { cursor: pointer; font-family: inherit; transition: filter 0.12s, transform 0.06s; }
+.charge-status-btn:hover { filter: brightness(1.25); }
+.charge-status-btn:active { transform: scale(0.96); }
+
 /* Ambiguous stop-flag manual picker (one button per candidate client) */
 .stopflag-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .stopflag-pick-label { font-size: 0.78rem; color: var(--amber); margin-inline-end: 4px; }
