@@ -652,6 +652,11 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .charge-status-btn:hover { filter: brightness(1.25); }
 .charge-status-btn:active { transform: scale(0.96); }
 
+/* Paid checkbox row in the add-charge modal. */
+.addcharge-paid-row { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; cursor: pointer; }
+.addcharge-paid-row input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; margin: 0; accent-color: var(--green); }
+.addcharge-paid-row span { font-weight: 600; flex: 0 1 auto; }
+
 /* Ambiguous stop-flag manual picker (one button per candidate client) */
 .stopflag-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .stopflag-pick-label { font-size: 0.78rem; color: var(--amber); margin-inline-end: 4px; }
