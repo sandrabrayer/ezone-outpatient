@@ -3699,6 +3699,8 @@
       if (duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
       if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
+        name: client.name,
+        location: client.location,
         phone: client.phone,
         treatmentContactPhone: client.treatmentContactPhone,
         payerName: client.payerName, payerPhone: client.payerPhone,
