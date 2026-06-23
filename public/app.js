@@ -3709,7 +3709,14 @@
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
+      var newName = (fd.get('name') || '').trim();
+      if (newName) client.name = newName;
       client.phone = ptPhone;
+      if (fd.has('location')) {
+        client.location = hasDayCenter(client.serviceType)
+          ? DAY_CENTER_LOCATION
+          : (fd.get('location') || '').trim();
+      }
       client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;
