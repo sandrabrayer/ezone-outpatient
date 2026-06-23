@@ -466,6 +466,14 @@
               <option value="monthly">חודשי</option>
             </select>
           </label>
+          <label>סוג טיפול
+            <select name="treatmentType" id="addChargeTreatmentType">
+              <option value="">—</option>
+            </select>
+          </label>
+          <label id="addChargeFreqWrap" class="field-hidden">מספר טיפולים בשבוע
+            <input name="frequencyPerWeek" type="number" min="1" max="14" step="1" placeholder="למשל 1, 2, 3" />
+          </label>
           <label>סכום ₪<input name="amount" type="number" min="0" step="1" required /></label>
           <label class="wide">תיאור<input name="description" type="text" required placeholder="למשל: טיפול CBT נוסף" /></label>
           <label>תאריך<input name="chargeDate" type="date" required /></label>
@@ -473,6 +481,10 @@
             <input name="billingDay" type="number" min="1" max="31" placeholder="ריק = יום החודש של התאריך" />
           </label>
           <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+          <label class="wide addcharge-paid-row">
+            <input name="chargePaid" type="checkbox" />
+            <span>שולם — סמן אם התשלום כבר נגבה</span>
+          </label>
           <div class="form-actions edit-only">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="addChargeSubmit">שמור</button>
