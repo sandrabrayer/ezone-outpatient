@@ -2446,7 +2446,11 @@
       paymentHtml = '<div class="client-meta">' +
         statusEl +
         (psId === 'paid' && basePay.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(basePay.paymentDate) + '</span>' : '') +
-        (c.nextBillingDate ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>' : '') +
+        (c.nextBillingDate
+          ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>'
+          : (renewalInfo(c) && renewalInfo(c).renewalDate
+              ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(renewalInfo(c).renewalDate) + '</span>'
+              : '')) +
         '</div>';
     }
 
