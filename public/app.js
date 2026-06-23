@@ -2897,6 +2897,15 @@
     form.reset();
     $('#editClientName').textContent = client.name;
     form.clientId.value = client.id;
+    if (form.name) form.name.value = client.name || '';
+    // Location/סניף: day-center patients are locked to DAY_CENTER_LOCATION.
+    if (form.location) {
+      var lockLoc = hasDayCenter(client.serviceType);
+      form.location.value = lockLoc ? DAY_CENTER_LOCATION : (client.location || '');
+      form.location.disabled = lockLoc;
+      var locWrap = $('#editClientLocationWrap');
+      if (locWrap) locWrap.style.opacity = lockLoc ? '0.6' : '';
+    }
     // Patient's primary phone (the populated `phone` column, with fallback +
     // leading-zero recovery). treatmentContactPhone is edited separately below.
     if (form.phone) form.phone.value = clientPhone(client);
