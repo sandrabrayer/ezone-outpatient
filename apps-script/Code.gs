@@ -549,6 +549,28 @@ function _removeCharge(chargeId) {
         sh.deleteRow(i + 2);
         return { ok: true, removed: true, id: chargeId };
       }
+
+function _removePayment(paymentId) {
+  if (!paymentId) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = PAYMENTS_HEADERS.indexOf('id');
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(paymentId)) {
+        sh.deleteRow(i + 2);
+        return { ok: true, removed: true, id: paymentId };
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
     }
     return { ok: false, error: 'not_found' };
   } finally {
@@ -1892,6 +1914,10 @@ function doPost(e) {
     if (action === 'removeCharge') {
       var chgId = payload.id || (payload.charge && payload.charge.id) || '';
       return _json(_removeCharge(chgId));
+    }
+    if (action === 'removePayment') {
+      var pmtId = payload.id || (payload.payment && payload.payment.id) || '';
+      return _json(_removePayment(pmtId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
