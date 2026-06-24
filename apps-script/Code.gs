@@ -549,6 +549,12 @@ function _removeCharge(chargeId) {
         sh.deleteRow(i + 2);
         return { ok: true, removed: true, id: chargeId };
       }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
 
 function _removePayment(paymentId) {
   if (!paymentId) return { ok: false, error: 'missing_id' };
@@ -565,12 +571,6 @@ function _removePayment(paymentId) {
         sh.deleteRow(i + 2);
         return { ok: true, removed: true, id: paymentId };
       }
-    }
-    return { ok: false, error: 'not_found' };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
-}
     }
     return { ok: false, error: 'not_found' };
   } finally {
