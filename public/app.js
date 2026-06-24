@@ -37,11 +37,13 @@
     DAY_CENTER_LABEL,
     'מעקב פסיכיאטרי'
   ];
-  var LOCATIONS = ['רעננה הפרדס', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
+  var LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
 
   var HOUSE_OF_ORIGIN_LABELS = {
+    raanana_pardes: 'רעננה הפרדס',
     raanana:  'רעננה אשר',
     ramot:    'רמות השבים',
+    kisaria_gmila: 'קיסריה גמילה',
     efroni:   'קיסריה עפרוני',
     rehab:    'קיסריה ריהאב',
     external: 'חיצוני'
@@ -785,7 +787,7 @@
     var byLoc = {};
     LOCATIONS.forEach(function (l) { byLoc[l] = 0; });
     activeOnly.forEach(function (c) {
-      var loc = hasDayCenter(c.serviceType) ? DAY_CENTER_LOCATION : c.location;
+      var loc = c.location;
       if (!loc) return;
       if (byLoc[loc] === undefined) byLoc[loc] = 0;
       byLoc[loc]++;
@@ -2279,10 +2281,8 @@
     card.className = 'card';
     var services = parseServices(l.serviceType);
     var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
-    if (l.location && !hasDayCenter(services)) {
+    if (l.location) {
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
-    } else if (hasDayCenter(services)) {
-      chipsHtml += '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>';
     }
     var hooLabel = houseOfOriginLabel(l.house_of_origin);
     if (hooLabel) {
@@ -2445,9 +2445,7 @@
     var phoneDisp = clientPhone(c);
     var services = parseServices(c.serviceType);
     var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
-    var locationChip = hasDayCenter(services)
-      ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
-      : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
+    var locationChip = c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '';
     var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
     var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
@@ -2719,7 +2717,7 @@
       name: (fd.get('name') || '').trim(),
       phone: normalizePhone(fd.get('phone') || ''),
       serviceType: formatServices(services),
-      location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
+      location: (fd.get('location') || ''),
       note: (fd.get('note') || '').trim(),
       created: fd.get('created') || today(),
       house_of_origin: (fd.get('house_of_origin') || '').trim()
@@ -2810,15 +2808,9 @@
     var wrap = formLocationWrap(form);
     if (!wrap) return;
     var picked = readServiceGroup(group);
-    if (hasDayCenter(picked)) {
-      wrap.classList.add('field-hidden');
-      var sel = $('select[name="location"]', form);
-      if (sel) { sel.required = false; sel.value = DAY_CENTER_LOCATION; }
-    } else {
-      wrap.classList.remove('field-hidden');
-      var sel2 = $('select[name="location"]', form);
-      if (sel2) sel2.required = true;
-    }
+    wrap.classList.remove('field-hidden');
+    var sel = $('select[name="location"]', form);
+    if (sel) sel.required = true;
   }
 
   // --- modals ------------------------------------------------------------
@@ -2913,14 +2905,8 @@
     var sel = $('select[name="location"]', form);
     if (!group || !wrap || !sel) return;
     var picked = readServiceGroup(group);
-    if (hasDayCenter(picked)) {
-      wrap.classList.add('field-hidden');
-      sel.required = false;
-      sel.value = DAY_CENTER_LOCATION;
-    } else {
-      wrap.classList.remove('field-hidden');
-      sel.required = true;
-    }
+    wrap.classList.remove('field-hidden');
+    sel.required = true;
   }
 
   var exitClientId = null;
@@ -2940,13 +2926,12 @@
     $('#editClientName').textContent = client.name;
     form.clientId.value = client.id;
     if (form.name) form.name.value = client.name || '';
-    // Location/סניף: day-center patients are locked to DAY_CENTER_LOCATION.
+    // Location/סניף is always editable (no day-center lock).
     if (form.location) {
-      var lockLoc = hasDayCenter(client.serviceType);
-      form.location.value = lockLoc ? DAY_CENTER_LOCATION : (client.location || '');
-      form.location.disabled = lockLoc;
+      form.location.value = client.location || '';
+      form.location.disabled = false;
       var locWrap = $('#editClientLocationWrap');
-      if (locWrap) locWrap.style.opacity = lockLoc ? '0.6' : '';
+      if (locWrap) locWrap.style.opacity = '';
     }
     // Patient's primary phone (the populated `phone` column, with fallback +
     // leading-zero recovery). treatmentContactPhone is edited separately below.
@@ -3435,7 +3420,7 @@
         var client = {
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
-          location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
+          location: (fd.get('location') || ''),
           sessionsPerWeek: clean, pricePerSession: monthlyAmount,
           startDate: startDate, status: 'פעיל', exitDate: '',
           fromLead: '', source: 'direct_admin',
@@ -3592,7 +3577,7 @@
       var client = {
         id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
         serviceType: formatServices(services),
-        location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
+        location: (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: startDate,
@@ -3761,9 +3746,7 @@
       if (newName) client.name = newName;
       client.phone = ptPhone;
       if (fd.has('location')) {
-        client.location = hasDayCenter(client.serviceType)
-          ? DAY_CENTER_LOCATION
-          : (fd.get('location') || '').trim();
+        client.location = (fd.get('location') || '').trim();
       }
       client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
