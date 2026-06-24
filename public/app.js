@@ -584,6 +584,20 @@
     await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
   }
 
+  async function removePayment(paymentId) {
+    await apiPostAction('removePayment', { id: paymentId });
+  }
+
+  // Remove every payment row tied to a clientId (used when a patient is deleted).
+  async function removePaymentsForClient(clientId) {
+    var theirs = state.payments.filter(function (p) { return p.clientId === clientId; });
+    state.payments = state.payments.filter(function (p) { return p.clientId !== clientId; });
+    for (var i = 0; i < theirs.length; i++) {
+      try { await removePayment(theirs[i].id); } catch (e) { console.warn('[ezone] removePayment failed:', theirs[i].id, e.message); }
+    }
+    return theirs.length;
+  }
+
   function normalizeChargeFromSheet(row) {
     var active = row.active;
     var activeBool = (active === true) || (String(active).toLowerCase() === 'true');
@@ -1610,6 +1624,25 @@
       if (v >= amount) { statusSel.value = 'paid'; saveBillingRow(recompute('paid', amount)); }
       else { saveBillingRow(recompute('partial', v)); }
     });
+
+    // Orphan row: the payment's patient no longer exists (e.g. a deleted test
+    // record). Offer a הסר button to remove the stray payment row from גבייה.
+    var clientExists = state.clients.some(function (cc) { return cc.id === payment.clientId; });
+    if (state.role === 'editor' && payment.clientId && !clientExists) {
+      var rm = document.createElement('button');
+      rm.className = 'btn btn-danger billing-remove';
+      rm.textContent = 'הסר';
+      rm.title = 'מחיקת רשומת גבייה של מטופל שנמחק';
+      rm.onclick = function () {
+        if (!confirm('להסיר את רשומת הגבייה של ' + (nameDisplay || 'מטופל שנמחק') + '?')) return;
+        rm.disabled = true;
+        state.payments = state.payments.filter(function (p) { return p.id !== payment.id; });
+        removePayment(payment.id)
+          .then(function () { toast('הוסר'); renderBilling(); })
+          .catch(function (e) { toast('שגיאה: ' + e.message, true); rm.disabled = false; });
+      };
+      row.appendChild(rm);
+    }
     return row;
   }
 
@@ -2598,8 +2631,12 @@
       del.title = 'מחיקה לצמיתות';
       del.onclick = function () {
         if (!confirm('למחוק לצמיתות את ' + c.name + '?')) return;
-        state.clients = state.clients.filter(function (x) { return x.id !== c.id; });
-        persist().then(function () { toast('נמחק'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+        var delId = c.id;
+        state.clients = state.clients.filter(function (x) { return x.id !== delId; });
+        persist()
+          .then(function () { return removePaymentsForClient(delId); })
+          .then(function () { toast('נמחק'); render(); })
+          .catch(function (e) { toast('שגיאה: ' + e.message, true); });
       };
       actions.appendChild(del);
     }
