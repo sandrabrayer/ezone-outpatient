@@ -3585,15 +3585,9 @@
         else state.payments.push(intakePayment);
         intakePaymentToPersist = intakePayment;
       }
-      lead.stage = 'active';
-      lead.serviceType = client.serviceType;
-      lead.location = client.location;
-      lead.sessionsPerWeek = client.sessionsPerWeek;
-      lead.pricePerSession = client.pricePerSession;
-      lead.startDate = client.startDate;
-      lead.paymentStatus = payStatus;
-      lead.paymentDate = payDate;
-      lead.nextBillingDate = nextBill;
+    // Lead has converted to a client. The lead record has no further meaning,
+      // so remove it from state — persist() (clear-and-rewrite) drops it from the sheet.
+      state.leads = state.leads.filter(function (x) { return x.id !== lead.id; });
       persist()
         .then(function () {
           // Save the intake payment row through its own path (persist() doesn't
