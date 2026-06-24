@@ -54,10 +54,9 @@
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
 
   var STAGES = [
-    { id: 'new',        he: 'ליד חדש' },
+ { id: 'new',        he: 'פרטים אישיים' },
     { id: 'intro',      he: 'שיחת היכרות' },
-    { id: 'agreement',  he: 'מתחיל טיפול' },
-    { id: 'active',     he: 'מטופל פעיל' }
+    { id: 'agreement',  he: 'תוכנית טיפול' }
   ];
   var STAGE_ALIASES = { 'הסכם נחתם': 'agreement' };
   var NOT_RELEVANT_HE = 'לא רלוונטי';
@@ -2329,17 +2328,24 @@
         setAgree.onclick = function () { openAgreementModal(l); };
         actions.appendChild(setAgree);
       }
-      if (idx < STAGES.length - 1) {
+     if (idx < STAGES.length - 1) {
         var next = document.createElement('button');
         next.className = 'btn btn-primary';
         var nextStage = STAGES[idx + 1];
         next.textContent = '← שלב הבא: ' + nextStage.he;
         next.onclick = function () {
           if (nextStage.id === 'agreement') openAgreementModal(l, true);
-          else if (nextStage.id === 'active') openActivateModal(l);
           else moveLead(l.id, nextStage.id);
         };
         actions.appendChild(next);
+      }
+      if (stage.id === 'agreement') {
+        var convert = document.createElement('button');
+        convert.className = 'btn btn-primary';
+        convert.textContent = '← הפוך למטופל פעיל';
+        convert.onclick = function () { openActivateModal(l); };
+        actions.appendChild(convert);
+      }
       }
       var edit = document.createElement('button');
       edit.className = 'btn btn-ghost';
