@@ -2346,7 +2346,6 @@
         convert.onclick = function () { openActivateModal(l); };
         actions.appendChild(convert);
       }
-      }
       var edit = document.createElement('button');
       edit.className = 'btn btn-ghost';
       edit.textContent = 'עריכה';
