@@ -3082,6 +3082,19 @@
       var data = await apiLoad();
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
+      // One-time cleanup: a converted lead has no further meaning. Remove any lead
+      // that already has a matching client (linked by fromLead). If we removed any,
+      // persist the trimmed leads list back so the duplication is fixed permanently.
+      (function cleanupConvertedLeads() {
+        var clientLeadIds = {};
+        state.clients.forEach(function (c) { if (c.fromLead) clientLeadIds[c.fromLead] = true; });
+        var before = state.leads.length;
+        state.leads = state.leads.filter(function (l) { return !clientLeadIds[l.id]; });
+        if (state.leads.length !== before) {
+          console.log('[ezone] removed', before - state.leads.length, 'converted leads');
+          persist().catch(function (e) { console.warn('[ezone] cleanup persist failed:', e.message); });
+        }
+      })();
       backfillClientPhones();
       try {
         var pr = await apiGetPayments();
