@@ -208,19 +208,19 @@ button, input, select, textarea {
 }
 .client-tabs .ct.active { color: var(--text); border-color: var(--green-deep); background: var(--panel-2); }
 
-.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
 .client-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px; display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
 }
 .client-card.finished { opacity: 0.5; }
 .client-card .client-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.client-card .client-name { font-weight: 700; font-size: 16px; color: var(--text); }
-.client-card .client-meta { color: var(--text-soft); font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
-.client-card .client-stats { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--text); margin-top: 4px; }
+.client-card .client-name { font-weight: 700; font-size: 19px; color: var(--text); }
+.client-card .client-meta { color: var(--text-soft); font-size: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+.client-card .client-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 15px; color: var(--text); margin-top: 6px; line-height: 1.5; }
 .client-card .client-stats b { color: var(--green-2); font-weight: 700; }
 .client-card .client-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.client-card .client-actions .btn { padding: 4px 10px; font-size: 12px; }
+.client-card .client-actions .btn { padding: 6px 14px; font-size: 13px; }
 
 .status-badge {
   font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
