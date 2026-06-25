@@ -40,14 +40,15 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal. Anchors on the last
-  // payment date when present, else the start date, then advances one calendar
-  // month (short-month clamp via addMonth). Mirrors renewalInfo()'s date calc
-  // in public/app.js — keep both in sync. This is the single source the
-  // "renewal banner" and the "חידוש ותשלום" button share so they never diverge.
+  // The ISO due-date of a client's next monthly renewal. Anchor precedence:
+  // packageChangeDate (a שינוי חבילה re-anchors the cycle) when present, else the
+  // last payment date, else the start date, then advances one calendar month
+  // (short-month clamp via addMonth). Mirrors renewalInfo()'s date calc in
+  // public/app.js — keep both in sync. This is the single source the "renewal
+  // banner" and the "חידוש ותשלום" button share so they never diverge.
   function nextRenewalDueDate(client) {
     if (!client) return '';
-    var anchor = client.paymentDate || client.startDate || '';
+    var anchor = client.packageChangeDate || client.paymentDate || client.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
   }

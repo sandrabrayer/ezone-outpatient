@@ -243,13 +243,14 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal — anchor (last payment
-  // date, else start date) + 1 month with short-month clamp. Mirrors
+  // The ISO due-date of a client's next monthly renewal — anchor + 1 month with
+  // short-month clamp. Anchor precedence: packageChangeDate (a שינוי חבילה
+  // re-anchors the cycle), else last payment date, else start date. Mirrors
   // nextRenewalDueDate in public/charges-logic.js — keep both in sync. Shared
   // by renewalInfo()'s banner and the "חידוש ותשלום" button so they never diverge.
   function nextRenewalDueDate(c) {
     if (!c) return '';
-    var anchor = c.paymentDate || c.startDate || '';
+    var anchor = c.packageChangeDate || c.paymentDate || c.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
   }
@@ -276,7 +277,7 @@
   //   - Otherwise: date calc (renewal = anchor + 1 month) + hasBillingProblem.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
-    var anchor = c.paymentDate || c.startDate || '';
+    var anchor = c.packageChangeDate || c.paymentDate || c.startDate || '';
     if (!anchor) return { status: 'unknown' };
     var status;
     var renewal;
@@ -407,7 +408,10 @@
       clinicalTreatmentType: row.clinicalTreatmentType || '',
       // Server-managed monthly credit balance (session accounting). Read-only on
       // the card; the server owns it and ignores the value on saveAll.
-      creditsOwed: toNum(row.creditsOwed) || 0
+      creditsOwed: toNum(row.creditsOwed) || 0,
+      // שינוי חבילה: date the package was last changed. Re-anchors the renewal
+      // cycle (see nextRenewalDueDate / renewalInfo). Blank for never-changed rows.
+      packageChangeDate: fmtDate(row.packageChangeDate)
     };
   }
 
@@ -468,7 +472,9 @@
       clinicalTreatmentType: c.clinicalTreatmentType || '',
       // Send the last-known credit balance to keep the column aligned; the server
       // treats creditsOwed as authoritative and preserves its own value by id.
-      creditsOwed: c.creditsOwed == null || c.creditsOwed === '' ? 0 : toNum(c.creditsOwed)
+      creditsOwed: c.creditsOwed == null || c.creditsOwed === '' ? 0 : toNum(c.creditsOwed),
+      // שינוי חבילה passthrough: preserve the package-change re-anchor date on save.
+      packageChangeDate: c.packageChangeDate || ''
     };
   }
 
@@ -2578,6 +2584,13 @@
       renewBtn.onclick = function () { openRenewModal(c); };
       actions.appendChild(renewBtn);
 
+      var changePkgBtn = document.createElement('button');
+      changePkgBtn.className = 'btn btn-ghost edit-only';
+      changePkgBtn.textContent = 'שינוי חבילה';
+      changePkgBtn.title = 'עדכן מחיר למפגש ותדירות שבועית, וקבע תאריך שינוי שמאפס את מועד הגבייה';
+      changePkgBtn.onclick = function () { openChangePackageModal(c); };
+      actions.appendChild(changePkgBtn);
+
       // Wire × buttons on the inline charge list.
       $$('[data-charge-remove]', card).forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -3012,6 +3025,32 @@
     renewClientId = null;
   }
 
+  // --- Change package modal (שינוי חבילה) --------------------------------
+  // Updates the client's pricePerSession + sessionsPerWeek and stamps
+  // packageChangeDate, which re-anchors the renewal cycle (גבייה הבאה =
+  // packageChangeDate + 1 month). paymentDate is left untouched. Weekly sessions
+  // use the SAME per-service host as the ✏️ ערוך modal (one input per existing
+  // service type) so a multi-service breakdown is preserved, not collapsed to a
+  // total. Service TYPES are not editable here — that stays in ✏️ ערוך.
+  var changePackageClientId = null;
+  function openChangePackageModal(client) {
+    changePackageClientId = client.id;
+    var form = $('#changePackageForm');
+    if (!form) return;
+    form.reset();
+    $('#changePackageClientName').textContent = 'שינוי חבילה עבור: ' + (client.name || '');
+    if (form.changeDate) form.changeDate.value = client.packageChangeDate || today();
+    if (form.newPrice) form.newPrice.value = client.pricePerSession || '';
+    var host = $('[data-host="changePackageSessions"]', form);
+    if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek);
+    $('#changePackageModal').hidden = false;
+  }
+  function closeChangePackageModal() {
+    var m = $('#changePackageModal');
+    if (m) m.hidden = true;
+    changePackageClientId = null;
+  }
+
   function updateAddChargeBillingDayVisibility(form) {
     if (!form) return;
     var type = form.billingType && form.billingType.value;
@@ -3230,7 +3269,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeChangePackageModal(); closeMergeClientsModal(); closeSessionModal();
       });
     });
 
@@ -3359,6 +3398,53 @@
         .catch(function (err) {
           // Client persist failed: roll back the in-memory change and abort
           // (do not write the payment).
+          Object.assign(c, prev);
+          toast('שגיאה: ' + err.message, true);
+          render();
+        })
+        .finally(function () { submit.disabled = false; });
+    });
+
+    var changePackageForm = $('#changePackageForm');
+    if (changePackageForm) changePackageForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#changePackageSubmit');
+      if (submit.disabled) return;
+      if (!changePackageClientId) return;
+      var c = state.clients.find(function (x) { return x.id === changePackageClientId; });
+      if (!c) { toast('מטופל לא נמצא', true); return; }
+      var fd = new FormData(e.target);
+      var changeDate = fmtDate(fd.get('changeDate'));
+      if (!changeDate) { toast('יש לבחור תאריך שינוי', true); return; }
+      var newPrice = toNum(fd.get('newPrice'));
+      if (!newPrice || newPrice <= 0) { toast('יש להזין מחיר', true); return; }
+      // Per-service breakdown from the host, keyed by the client's existing
+      // services (types are fixed in this modal) — same shape as ✏️ ערוך.
+      var host = $('[data-host="changePackageSessions"]', e.target);
+      var services = parseServices(c.serviceType);
+      var raw = host ? readSessionsHost(host) : {};
+      var newSessions = {};
+      services.forEach(function (s) { newSessions[s] = wholeSessions(raw[s] || 0); });
+      var totalSess = services.reduce(function (n, s) { return n + newSessions[s]; }, 0);
+      if (!totalSess) { toast('יש להזין מספר מפגשים', true); return; }
+      submit.disabled = true;
+
+      // Snapshot for rollback if persist fails.
+      var prev = {
+        pricePerSession: c.pricePerSession,
+        sessionsPerWeek: c.sessionsPerWeek,
+        packageChangeDate: c.packageChangeDate
+      };
+      c.pricePerSession = newPrice;
+      c.sessionsPerWeek = newSessions;
+      c.packageChangeDate = changeDate;
+      persist()
+        .then(function () {
+          toast('החבילה עודכנה');
+          closeChangePackageModal();
+          render();
+        })
+        .catch(function (err) {
           Object.assign(c, prev);
           toast('שגיאה: ' + err.message, true);
           render();

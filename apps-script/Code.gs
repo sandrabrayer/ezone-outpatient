@@ -60,7 +60,16 @@ var CLIENTS_HEADERS = [
   // auto-draws -1). _saveAll preserves it by id so a dashboard save never reverts
   // it. Default 0. Appended at the very END so clinicalTreatmentType and every
   // earlier column keep their positions.
-  'creditsOwed'
+  'creditsOwed',
+  // APPEND-ONLY (שינוי חבילה / package change): the date on which the patient's
+  // package was last changed (new price-per-session and/or weekly frequency). When
+  // present it becomes the billing RE-ANCHOR for the next renewal — the client
+  // computes גבייה הבאה = packageChangeDate + 1 month, taking precedence over
+  // paymentDate/startDate (see nextRenewalDueDate / renewalInfo / cycleEndDate).
+  // Carried through verbatim by _saveAll/_writeAll — no server logic reads it.
+  // Appended at the very END so creditsOwed and every earlier column keep their
+  // positions (same append-only lesson as creditsOwed / clinicalTreatmentType).
+  'packageChangeDate'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
