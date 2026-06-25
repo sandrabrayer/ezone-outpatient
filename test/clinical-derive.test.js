@@ -137,15 +137,17 @@ test('unknown clinical value throws and does not blank serviceType', () => {
 });
 
 // --- columns are appended LAST (positional safety) --------------------------
-test('packageChangeDate is the LAST CLIENTS_HEADERS column; creditsOwed, clinicalTreatmentType, phone before it', () => {
+test('assignedTo is the LAST CLIENTS_HEADERS column; packageChangeDate, creditsOwed, clinicalTreatmentType, phone before it', () => {
   const H = clientsHeaders();
-  // packageChangeDate (שינוי חבילה) was appended after creditsOwed (session
-  // accounting), which was appended after clinicalTreatmentType, which was
-  // appended after phone — so each keeps its position (append-only rule).
-  assert.equal(H[H.length - 1], 'packageChangeDate');
-  assert.equal(H[H.length - 2], 'creditsOwed');
-  assert.equal(H[H.length - 3], 'clinicalTreatmentType');
-  assert.equal(H[H.length - 4], 'phone');
+  // assignedTo (משוייך ל) was appended after packageChangeDate (שינוי חבילה),
+  // which was after creditsOwed (session accounting), which was after
+  // clinicalTreatmentType, which was after phone — each keeps its position
+  // (append-only rule).
+  assert.equal(H[H.length - 1], 'assignedTo');
+  assert.equal(H[H.length - 2], 'packageChangeDate');
+  assert.equal(H[H.length - 3], 'creditsOwed');
+  assert.equal(H[H.length - 4], 'clinicalTreatmentType');
+  assert.equal(H[H.length - 5], 'phone');
 });
 
 // Mirror of Code.gs _writeAll / _readAll positional mapping.

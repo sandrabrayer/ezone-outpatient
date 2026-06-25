@@ -15,7 +15,13 @@ var LEADS_HEADERS = [
   'stage', 'sessionsPerWeek', 'pricePerSession', 'startDate', 'created', 'introDateTime',
   'house_of_origin',
   'not_relevant_reason',
-  'not_relevant_note'
+  'not_relevant_note',
+  // APPEND-ONLY (משוייך ל / assigned-to): staff member the lead is assigned to
+  // (ורד / שירן / יעל). Other staff besides Vered now enter leads. Appended at
+  // the very END so every earlier column keeps its position (_readAll/_writeAll
+  // map positionally; _ensureSheet does not migrate). Follows the lead onto the
+  // client on conversion. Old rows read back blank.
+  'assignedTo'
 ];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,
@@ -69,7 +75,13 @@ var CLIENTS_HEADERS = [
   // Carried through verbatim by _saveAll/_writeAll — no server logic reads it.
   // Appended at the very END so creditsOwed and every earlier column keep their
   // positions (same append-only lesson as creditsOwed / clinicalTreatmentType).
-  'packageChangeDate'
+  'packageChangeDate',
+  // APPEND-ONLY (משוייך ל / assigned-to): staff member responsible for this
+  // patient, copied from the originating lead on conversion so the assignee
+  // follows the person. Appended at the very END (after packageChangeDate) so
+  // every earlier column keeps its position. Carried through verbatim by
+  // _saveAll/_writeAll — no server logic reads it. Old rows read back blank.
+  'assignedTo'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -107,7 +119,11 @@ var REMOVED_LEADS_HEADERS = [
   'not_relevant_reason',
   'not_relevant_note',
   'removedAt',
-  'originSheet'
+  'originSheet',
+  // APPEND-ONLY (משוייך ל / assigned-to): mirror of the LEADS_HEADERS column so a
+  // removed lead preserves its assignee. Appended at the very END (after the
+  // removedAt/originSheet bookkeeping columns) per the positional append-only rule.
+  'assignedTo'
 ];
 
 /* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a

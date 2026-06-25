@@ -373,7 +373,9 @@
       paymentStatus: row.paymentStatus || '',   // 'paid' | 'partial' | 'unpaid'
       paymentDate: fmtDate(row.paymentDate),
       nextBillingDate: fmtDate(row.nextBillingDate),
-      house_of_origin: row.house_of_origin || ''
+      house_of_origin: row.house_of_origin || '',
+      // משוייך ל (assigned-to): staff member the lead is assigned to.
+      assignedTo: row.assignedTo || ''
     };
   }
   function normalizeClientFromSheet(row) {
@@ -411,7 +413,9 @@
       creditsOwed: toNum(row.creditsOwed) || 0,
       // שינוי חבילה: date the package was last changed. Re-anchors the renewal
       // cycle (see nextRenewalDueDate / renewalInfo). Blank for never-changed rows.
-      packageChangeDate: fmtDate(row.packageChangeDate)
+      packageChangeDate: fmtDate(row.packageChangeDate),
+      // משוייך ל (assigned-to): staff member responsible, carried from the lead.
+      assignedTo: row.assignedTo || ''
     };
   }
 
@@ -436,7 +440,9 @@
       nextBillingDate: l.nextBillingDate || '',
       not_relevant_reason: l.not_relevant_reason || '',
       not_relevant_note: l.not_relevant_note || '',
-      house_of_origin: l.house_of_origin || ''
+      house_of_origin: l.house_of_origin || '',
+      // משוייך ל (assigned-to): preserve the lead's assignee on save.
+      assignedTo: l.assignedTo || ''
     };
   }
   function clientForSheet(c) {
@@ -474,7 +480,9 @@
       // treats creditsOwed as authoritative and preserves its own value by id.
       creditsOwed: c.creditsOwed == null || c.creditsOwed === '' ? 0 : toNum(c.creditsOwed),
       // שינוי חבילה passthrough: preserve the package-change re-anchor date on save.
-      packageChangeDate: c.packageChangeDate || ''
+      packageChangeDate: c.packageChangeDate || '',
+      // משוייך ל (assigned-to): preserve the patient's assignee on save.
+      assignedTo: c.assignedTo || ''
     };
   }
 
@@ -2294,6 +2302,9 @@
     if (hooLabel) {
       chipsHtml += '<span class="chip">בית מוצא: ' + escapeHtml(hooLabel) + '</span>';
     }
+    if (l.assignedTo) {
+      chipsHtml += '<span class="chip">משוייך: ' + escapeHtml(l.assignedTo) + '</span>';
+    }
     var agreementFields = '';
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
@@ -2454,6 +2465,7 @@
     var locationChip = c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '';
     var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
     var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
+    var assignedChip = c.assignedTo ? '<span class="chip">משוייך: ' + escapeHtml(c.assignedTo) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var breakdownChips = Object.keys(breakdown).map(function (k) {
       return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
@@ -2550,7 +2562,7 @@
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
       (phoneDisp ? '<div class="client-meta">טלפון: ' + escapeHtml(phoneDisp) + '</div>' : '') +
-      '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
+      '<div class="client-meta">' + serviceChips + locationChip + hooChip + assignedChip + '</div>' +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
       paymentHtml +
@@ -2733,7 +2745,8 @@
       location: (fd.get('location') || ''),
       note: (fd.get('note') || '').trim(),
       created: fd.get('created') || today(),
-      house_of_origin: (fd.get('house_of_origin') || '').trim()
+      house_of_origin: (fd.get('house_of_origin') || '').trim(),
+      assignedTo: (fd.get('assignedTo') || '').trim()
     };
   }
   function addLeadFromForm(form) {
@@ -2745,7 +2758,8 @@
       pricePerSession: '', startDate: '',
       created: f.created, introDateTime: '',
       paymentStatus: '', paymentDate: '', nextBillingDate: '',
-      house_of_origin: f.house_of_origin
+      house_of_origin: f.house_of_origin,
+      assignedTo: f.assignedTo
     };
     state.leads.push(lead);
     return lead;
@@ -2756,6 +2770,7 @@
     lead.serviceType = f.serviceType; lead.location = f.location;
     lead.note = f.note; lead.created = f.created;
     if (f.house_of_origin) lead.house_of_origin = f.house_of_origin;
+    if (f.assignedTo) lead.assignedTo = f.assignedTo;
   }
 
   // --- dynamic per-service sessions fields
@@ -2845,10 +2860,17 @@
       f.house_of_origin.value = lead.house_of_origin || '';
       // Don't force backfill: optional when editing a historical lead that lacks a value.
       f.house_of_origin.required = !!lead.house_of_origin;
+      if (f.assignedTo) {
+        f.assignedTo.value = lead.assignedTo || '';
+        // Same relax-on-edit rule: a historical lead without an assignee is not
+        // blocked, but a new/already-assigned lead must keep one.
+        f.assignedTo.required = !!lead.assignedTo;
+      }
     } else {
       f.created.value = today();
       f.house_of_origin.value = '';
       f.house_of_origin.required = true;
+      if (f.assignedTo) { f.assignedTo.value = ''; f.assignedTo.required = true; }
     }
     updateLocationVisibility(f);
     m.hidden = false;
@@ -3569,6 +3591,9 @@
       var form = e.target;
       var group = $('[data-group="serviceType"]', form);
       if (!readServiceGroup(group).length) { toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
+      if (form.assignedTo && form.assignedTo.required && !(form.assignedTo.value || '').trim()) {
+        toast('יש לבחור למי הליד משוייך', true); return;
+      }
       if (acceptPhone((form.phone && form.phone.value) || '', 'טלפון', 'mobile', true) === false) return;
       submit.disabled = true;
       function runAddFlow() {
@@ -3673,7 +3698,9 @@
         paymentStatus: payStatus,
         paymentDate: payDate,
         nextBillingDate: nextBill,
-        house_of_origin: lead.house_of_origin || ''
+        house_of_origin: lead.house_of_origin || '',
+        // משוייך ל: the assignee follows the person from lead to patient.
+        assignedTo: lead.assignedTo || ''
       };
       state.clients.push(client);
       var intakePaymentToPersist = null;
