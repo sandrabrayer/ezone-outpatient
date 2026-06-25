@@ -6,6 +6,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Patient phone never showed on the patient card, and couldn't be edited.**
+  The canonical patient number (`phone`) was loaded and leading-zero-recovered
+  on read (and back-filled in memory from the originating lead), but
+  `clientCard()` rendered no phone element and the edit modal had no input for
+  it — only the responsible-person (`treatmentContactPhone`) and payer
+  (`payerPhone`) phones. The card now shows a tap-to-call chip with the
+  canonical 10-digit number (`recoverPhone` on read), and the edit modal has a
+  **טלפון מטופל** field (normalized + saved like the other phones).
+  `public/app.js`, `public/index.html`. See
+  `CHANGELOG-patient-phone-and-orphan-cleanup.md`.
+- **Deleting a patient orphaned their extra-charge rows ("בקשות לטיפול נוסף").**
+  The ✕ delete handler removed the client and re-`persist()`ed leads+clients,
+  but the `ClientCharges` sheet is written through its own `saveCharge` /
+  `removeCharge` actions, so every charge row keyed to the deleted `clientId`
+  survived. Delete now also hard-deletes those rows via a new backend
+  `removeChargesForClient(clientId)` action (one round-trip), and load-time
+  applies an `excludeOrphanCharges` filter so any pre-existing orphan is dropped
+  from the UI/aggregations. `apps-script/Code.gs`, `public/app.js`,
+  `public/charges-logic.js`. **Apps Script redeploy required** (new `doPost`
+  action) — use the pencil ✏️ on the existing deployment to preserve the /exec
+  URL. See `CHANGELOG-patient-phone-and-orphan-cleanup.md`.
 - **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
   rendered a non-interactive `<span>` with no control, and the click handler
   only fired on the single-match button — so Vered could neither pick the right

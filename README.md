@@ -13,8 +13,10 @@ through an Apps Script Web App.
    `לא רלוונטי` button per card. Moving to `מטופל פעיל` opens the activation
    modal (service type, location, sessions/week, price/session, start date).
 3. **Clients (מטופלים)** – tabbed by service type; status `פעיל / הפסקה זמנית /
-   סיים טיפול`. `סיים טיפול` captures exit date and grays out the card. `✕`
-   deletes permanently.
+   סיים טיפול`. `סיים טיפול` captures exit date and grays out the card. Each
+   card shows the patient's phone as a tap-to-call chip (editable via ערוך →
+   טלפון מטופל). `✕` deletes permanently — and also hard-deletes the patient's
+   extra-charge rows ("בקשות לטיפול נוסף") so none survive as orphans.
 
 ## Access
 

@@ -315,6 +315,33 @@ function _removeCharge(chargeId) {
   }
 }
 
+/* Hard-delete every extra-charge row belonging to a client. Called when a
+ * patient is deleted so their "בקשות לטיפול נוסף" (ClientCharges) rows don't
+ * survive as orphans. One round-trip; deletes bottom-up so row indexes stay
+ * valid as rows shift up. Returns { ok, removed: <count> }. */
+function _removeChargesForClient(clientId) {
+  if (!clientId) return { ok: false, error: 'missing_clientId' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0, clientId: clientId };
+    var cidIdx = CHARGES_HEADERS.indexOf('clientId');
+    var cids = sh.getRange(2, cidIdx + 1, lastRow - 1, 1).getValues();
+    var removed = 0;
+    for (var i = cids.length - 1; i >= 0; i--) {
+      if (String(cids[i][0]) === String(clientId)) {
+        sh.deleteRow(i + 2);
+        removed++;
+      }
+    }
+    return { ok: true, removed: removed, clientId: clientId };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _removeLead(lead) {
   if (!lead || typeof lead !== 'object') return { ok: false, error: 'missing_lead' };
   if (!lead.id) return { ok: false, error: 'missing_id' };
@@ -928,6 +955,9 @@ function doPost(e) {
     if (action === 'removeCharge') {
       var chgId = payload.id || (payload.charge && payload.charge.id) || '';
       return _json(_removeCharge(chgId));
+    }
+    if (action === 'removeChargesForClient') {
+      return _json(_removeChargesForClient(payload.clientId || ''));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });

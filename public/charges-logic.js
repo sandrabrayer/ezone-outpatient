@@ -145,6 +145,19 @@
     return out;
   }
 
+  // Orphan-exclusion filter: keep only charges whose clientId still matches a
+  // patient in `clients`. A charge with no active patient (e.g. left behind by
+  // an old delete that didn't clean up, or pointing at a removed client) is
+  // excluded. Pure: no shared state. Mirrors the inline copy in public/app.js —
+  // keep both in sync.
+  function excludeOrphanCharges(charges, clients) {
+    var live = {};
+    (clients || []).forEach(function (c) { if (c && c.id != null) live[String(c.id)] = true; });
+    return (charges || []).filter(function (ch) {
+      return ch && ch.clientId != null && live[String(ch.clientId)] === true;
+    });
+  }
+
   // Status of a charge for display on the client card, lookup-only.
   //   one_time charge: status of the ::once payment row.
   //   monthly charge:  status of the CURRENT month's payment row
@@ -177,6 +190,7 @@
     isLegacyBasePaymentId: isLegacyBasePaymentId,
     paymentKindFromId: paymentKindFromId,
     dueItemsOn: dueItemsOn,
+    excludeOrphanCharges: excludeOrphanCharges,
     chargeStatusFor: chargeStatusFor
   };
 });
