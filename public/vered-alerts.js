@@ -63,11 +63,13 @@
   }
 
   // The ISO date on which a client's treatment-month ends (next renewal /
-  // billing due). Anchor = last payment date, else start date, + 1 month.
-  // Returns '' when there is no cycle date (no paymentDate and no startDate).
+  // billing due). Anchor precedence: packageChangeDate (a שינוי חבילה re-anchors
+  // the cycle), else last payment date, else start date, + 1 month. Kept in
+  // lockstep with nextRenewalDueDate / renewalInfo so alerts never diverge from
+  // the card's גבייה הבאה. Returns '' when there is no cycle date.
   function cycleEndDate(client) {
     if (!client) return '';
-    var anchor = client.paymentDate || client.startDate || '';
+    var anchor = client.packageChangeDate || client.paymentDate || client.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
   }

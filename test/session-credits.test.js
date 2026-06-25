@@ -293,8 +293,9 @@ test('saveAll preserves the on-sheet creditsOwed by id, ignoring the payload val
 // ============================================================================
 // Positional safety for the new columns.
 // ============================================================================
-test('Clients.creditsOwed is LAST and round-trips positionally; legacy blank -> 0', () => {
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'creditsOwed');
+test('Clients.creditsOwed round-trips positionally (now second-to-last, before packageChangeDate); legacy blank -> 0', () => {
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'packageChangeDate');
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 2], 'creditsOwed');
   const row = writeRow(CLIENTS_H, { id: 'c1', phone: '0501234567', clinicalTreatmentType: 'פרטני CBT', creditsOwed: 3 });
   assert.equal(row[CLIENTS_H.indexOf('creditsOwed')], 3);
   assert.equal(row[CLIENTS_H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // not shifted

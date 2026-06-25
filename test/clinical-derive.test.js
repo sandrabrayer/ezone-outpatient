@@ -137,13 +137,15 @@ test('unknown clinical value throws and does not blank serviceType', () => {
 });
 
 // --- columns are appended LAST (positional safety) --------------------------
-test('creditsOwed is the LAST CLIENTS_HEADERS column; clinicalTreatmentType then phone before it', () => {
+test('packageChangeDate is the LAST CLIENTS_HEADERS column; creditsOwed, clinicalTreatmentType, phone before it', () => {
   const H = clientsHeaders();
-  // creditsOwed (session accounting) was appended after clinicalTreatmentType,
-  // which was itself appended after phone — so each keeps its position.
-  assert.equal(H[H.length - 1], 'creditsOwed');
-  assert.equal(H[H.length - 2], 'clinicalTreatmentType');
-  assert.equal(H[H.length - 3], 'phone');
+  // packageChangeDate (שינוי חבילה) was appended after creditsOwed (session
+  // accounting), which was appended after clinicalTreatmentType, which was
+  // appended after phone — so each keeps its position (append-only rule).
+  assert.equal(H[H.length - 1], 'packageChangeDate');
+  assert.equal(H[H.length - 2], 'creditsOwed');
+  assert.equal(H[H.length - 3], 'clinicalTreatmentType');
+  assert.equal(H[H.length - 4], 'phone');
 });
 
 // Mirror of Code.gs _writeAll / _readAll positional mapping.
@@ -179,7 +181,7 @@ test('a legacy row lacking the new column reads back without misaligning phone',
   assert.equal(back.creditsOwed, '');                    // new column reads blank
 });
 
-test('writing a client without creditsOwed blanks only the last column', () => {
+test('writing a client without creditsOwed blanks that cell, leaving earlier columns aligned', () => {
   const H = clientsHeaders();
   const client = {
     id: 'c1', name: 'אורי', serviceType: 'פרטני', phone: '0509998888',
@@ -187,7 +189,7 @@ test('writing a client without creditsOwed blanks only the last column', () => {
     clinicalTreatmentType: 'פרטני CBT'
   };
   const row = writeRow(H, client);
-  assert.equal(row[H.indexOf('creditsOwed')], '');         // new last column blank
+  assert.equal(row[H.indexOf('creditsOwed')], '');         // absent -> blank cell
   assert.equal(row[H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // still aligned
   assert.equal(row[H.indexOf('phone')], '0509998888');     // still aligned
   assert.equal(row[H.indexOf('paymentLink')], 'https://pay/x');
