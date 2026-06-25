@@ -194,6 +194,9 @@ button, input, select, textarea {
   font-size: 12px; padding: 3px 10px; border-radius: 999px;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
 }
+/* Tap-to-call patient phone chip — keep the chip look, drop the link underline. */
+a.chip-phone { text-decoration: none; cursor: pointer; }
+a.chip-phone:hover { border-color: var(--green-2); }
 .card .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .card .actions .btn { padding: 4px 10px; font-size: 12px; }
 
