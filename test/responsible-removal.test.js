@@ -76,13 +76,13 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
   // ...sitting exactly between house_of_origin and the kept contact phone —
   // i.e. nothing after them shifted. (Append-only tail since: clinicalTreatmentType
   // after `phone` in task 4.5a, then creditsOwed for session accounting, then
-  // packageChangeDate for שינוי חבילה.)
+  // packageChangeDate for שינוי חבילה, then assignedTo for משוייך ל.)
   const tail = H.slice(H.indexOf('house_of_origin'));
   assert.deepEqual(tail, [
     'house_of_origin',
     'responsiblePerson', 'serviceScope',
     'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate'
+    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo'
   ]);
 });
 
