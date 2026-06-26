@@ -145,6 +145,21 @@
     return out;
   }
 
+  // Drop "orphan" charges — rows whose clientId no longer matches any patient
+  // in `clients` (the patient was deleted, the charge row survived). Such rows
+  // must never surface on the dashboard. clientId is compared as a string on
+  // both sides (Sheets may return a numeric id). Pure: no shared state.
+  // Mirrors excludeOrphanCharges in public/app.js — keep both in sync.
+  function excludeOrphanCharges(charges, clients) {
+    var live = {};
+    (clients || []).forEach(function (c) {
+      if (c && c.id != null && String(c.id) !== '') live[String(c.id)] = true;
+    });
+    return (charges || []).filter(function (ch) {
+      return ch && ch.clientId != null && live[String(ch.clientId)] === true;
+    });
+  }
+
   // Status of a charge for display on the client card, lookup-only.
   //   one_time charge: status of the ::once payment row.
   //   monthly charge:  status of the CURRENT month's payment row
@@ -177,6 +192,7 @@
     isLegacyBasePaymentId: isLegacyBasePaymentId,
     paymentKindFromId: paymentKindFromId,
     dueItemsOn: dueItemsOn,
+    excludeOrphanCharges: excludeOrphanCharges,
     chargeStatusFor: chargeStatusFor
   };
 });

@@ -130,6 +130,18 @@ npm start
   No bulk migration — rows heal on read and persist canonical on next save.
   See `CHANGELOG-phone-normalization.md`. **Requires an Apps Script redeploy.**
 
+## Additional-treatment charges (orphan cleanup)
+
+- `ClientCharges` rows are keyed by `clientId`. Deleting a patient now also
+  deletes their charge rows: the dashboard `✕` flow calls the internal
+  `POST { action:'removeChargesForClient', clientId }` action
+  (`_removeChargesForClient`, idempotent, logs each removed row). A display-time
+  guard `excludeOrphanCharges(charges, clients)` (in `public/charges-logic.js`,
+  mirrored inline in `public/app.js`) additionally hides any charge whose
+  `clientId` no longer matches a live patient, so pre-existing orphans never
+  surface. See `CHANGELOG-orphan-charges-cleanup.md`. **Requires an Apps Script
+  redeploy.**
+
 ## Notes / lessons baked in
 
 - Frontend only uses **relative** `/api/sheets` URLs — no hardcoded domain.

@@ -6,6 +6,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Orphaned "additional treatment" charges from deleted patients.** Charge
+  rows (`ClientCharges`, keyed by `clientId`) survived patient deletion as
+  orphans and leaked into the dashboard. Two-layer fix: (1) display-time
+  `excludeOrphanCharges(charges, clients)` hides any charge whose `clientId` no
+  longer matches a live patient — applied right after charges load in
+  `loadAll`, so pre-existing orphans (the test patients on `0543123270`) vanish
+  immediately; (2) root cause — the permanent-delete (`✕`) flow now prunes the
+  patient's charges locally and calls the new backend bulk action
+  `removeChargesForClient(clientId)` (`_removeChargesForClient` in
+  `apps-script/Code.gs`, one round-trip, idempotent, logs each removed row), so
+  no new orphans are ever created. Pure helper mirrored in
+  `public/charges-logic.js` ↔ inline copy in `public/app.js`.
+  `test/charge-orphans.test.js`. **Apps Script redeploy required** (see below).
+
+### Added
+- **Editable patient phone in the edit-client modal + on the card.** The
+  patient's own `phone` is now shown as a chip on each client card (`📞 …`) and
+  is editable via a new **"טלפון מטופל"** field in `#editClientModal`, validated
+  as a strict 10-digit leading-zero mobile through the shared `acceptPhone`
+  guard. Read-side normalization (leading-zero recovery on the Sheets
+  stripped-zero case) was already in place via `recoverPhone` /
+  `backfillClientPhones`. `public/index.html`, `public/app.js`.
+
+### Fixed
 - **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
   rendered a non-interactive `<span>` with no control, and the click handler
   only fired on the single-match button — so Vered could neither pick the right

@@ -315,6 +315,38 @@ function _removeCharge(chargeId) {
   }
 }
 
+// Bulk-delete every ClientCharges row belonging to a deleted patient. Called
+// from the dashboard's patient-delete flow so charge rows never outlive their
+// patient as orphans. Safe and idempotent: a clientId with no rows returns
+// { ok:true, removed:0 }. Deletes bottom-up so row indices stay valid, and
+// logs each removed row for an audit trail in the Apps Script execution log.
+function _removeChargesForClient(clientId) {
+  var cid = String(clientId == null ? '' : clientId).trim();
+  if (!cid) return { ok: false, error: 'missing_clientId' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
+    var cidIdx = CHARGES_HEADERS.indexOf('clientId');
+    var idIdx  = CHARGES_HEADERS.indexOf('id');
+    var rows = sh.getRange(2, 1, lastRow - 1, CHARGES_HEADERS.length).getValues();
+    var removed = 0;
+    // Iterate bottom-up: deleting a lower row never shifts a higher index.
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i][cidIdx]).trim() === cid) {
+        Logger.log('removeChargesForClient: clientId=%s chargeId=%s', cid, String(rows[i][idIdx]));
+        sh.deleteRow(i + 2);
+        removed++;
+      }
+    }
+    return { ok: true, removed: removed, clientId: cid };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _removeLead(lead) {
   if (!lead || typeof lead !== 'object') return { ok: false, error: 'missing_lead' };
   if (!lead.id) return { ok: false, error: 'missing_id' };
@@ -928,6 +960,9 @@ function doPost(e) {
     if (action === 'removeCharge') {
       var chgId = payload.id || (payload.charge && payload.charge.id) || '';
       return _json(_removeCharge(chgId));
+    }
+    if (action === 'removeChargesForClient') {
+      return _json(_removeChargesForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
