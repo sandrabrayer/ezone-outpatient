@@ -580,6 +580,23 @@
   async function persistRemoveCharge(id) {
     await apiPostAction('removeCharge', { id: id });
   }
+  // Bulk-delete every ClientCharges row for a deleted patient in one round-trip.
+  async function persistRemoveChargesForClient(clientId) {
+    await apiPostAction('removeChargesForClient', { clientId: clientId });
+  }
+
+  // Drop "orphan" charges — rows whose clientId no longer matches any patient
+  // (the patient was deleted, the charge row survived). Mirrors
+  // excludeOrphanCharges in public/charges-logic.js — keep both in sync.
+  function excludeOrphanCharges(charges, clients) {
+    var live = {};
+    (clients || []).forEach(function (c) {
+      if (c && c.id != null && String(c.id) !== '') live[String(c.id)] = true;
+    });
+    return (charges || []).filter(function (ch) {
+      return ch && ch.clientId != null && live[String(ch.clientId)] === true;
+    });
+  }
 
   async function persistRemoveLead(lead) {
     await apiPostAction('removeLead', { lead: leadForSheet(lead) });
@@ -1844,6 +1861,7 @@
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
     var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
     var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
+    var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var breakdownChips = Object.keys(breakdown).map(function (k) {
       return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
@@ -1939,6 +1957,7 @@
         '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
       '</div>' +
       '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
+      (phoneChip ? '<div class="client-meta">' + phoneChip + '</div>' : '') +
       responsibleHtml +
       (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
       '<div class="client-stats">' + statsHtml + '</div>' +
@@ -2013,8 +2032,14 @@
       del.title = 'מחיקה לצמיתות';
       del.onclick = function () {
         if (!confirm('למחוק לצמיתות את ' + c.name + '?')) return;
-        state.clients = state.clients.filter(function (x) { return x.id !== c.id; });
-        persist().then(function () { toast('נמחק'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+        var deletedId = c.id;
+        state.clients = state.clients.filter(function (x) { return x.id !== deletedId; });
+        // Also drop this patient's charge rows so they can't become orphans.
+        state.charges = state.charges.filter(function (ch) { return ch.clientId !== deletedId; });
+        persist()
+          .then(function () { return persistRemoveChargesForClient(deletedId); })
+          .then(function () { toast('נמחק'); render(); })
+          .catch(function (e) { toast('שגיאה: ' + e.message, true); render(); });
       };
       actions.appendChild(del);
     }
@@ -2317,6 +2342,7 @@
     form.reset();
     $('#editClientName').textContent = client.name;
     form.clientId.value = client.id;
+    if (form.phone) form.phone.value = client.phone || '';
     form.serviceScope.value = client.serviceScope || '';
     form.responsiblePerson.value = client.responsiblePerson || '';
     form.treatmentContactPhone.value = client.treatmentContactPhone || '';
@@ -2482,6 +2508,10 @@
       try {
         var cr = await apiGetCharges();
         state.charges = (cr.charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
+        // Display-time safety net: never surface charges whose patient was
+        // deleted (orphans). Root-cause cleanup runs server-side on delete via
+        // removeChargesForClient; this hides any pre-existing orphan rows.
+        state.charges = excludeOrphanCharges(state.charges, state.clients);
       } catch (ce) {
         console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
         state.charges = [];
@@ -2972,6 +3002,8 @@
       var resp = (fd.get('responsiblePerson') || '').trim();
       if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
       if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
+      var pPhone = acceptPhone(fd.get('phone') || '', 'טלפון מטופל', 'mobile', false);
+      if (pPhone === false) { submit.disabled = false; return; }
       var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
       if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
@@ -2980,6 +3012,7 @@
       // this client. payerPhone is intentionally not deduped (shared payers).
       if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
+        phone: client.phone,
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
         treatmentContactPhone: client.treatmentContactPhone,
         payerName: client.payerName, payerPhone: client.payerPhone,
@@ -2990,6 +3023,7 @@
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
+      client.phone = pPhone;
       client.serviceScope = scope;
       client.responsiblePerson = resp;
       client.treatmentContactPhone = tcPhone;
