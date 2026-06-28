@@ -1938,39 +1938,9 @@
       ? '<div class="cc-line"><span class="cc-k">תחילת טיפול</span><span class="cc-v">' + displayDate(c.startDate) + '</span></div>'
       : '';
 
-    // כספים (right, RTL reads first): single amount + paid chip + dated rows.
-    var moneyPanel =
-      '<div class="cc-panel cc-money">' +
-        '<div class="cc-panel-title">כספים</div>' +
-        '<div class="cc-amount">' + money(c.pricePerSession) +
-          '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
-        (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
-        paidOnRow + nextBillRow + startRow +
-      '</div>';
-
-    // תוכנית טיפול (left): scope, treatment-type rows, בית מוצא.
-    var planPanel =
-      '<div class="cc-panel cc-plan">' +
-        '<div class="cc-panel-title">תוכנית טיפול</div>' +
-        (scopeChip ? '<div class="cc-chips">' + scopeChip + '</div>' : '') +
-        planRows +
-        hooRow +
-      '</div>';
-
-    // Renewal status banner (overdue / due soon)
-    var renewBannerHtml = '';
-    var renew = renewalInfo(c);
-    if (renew.status === 'overdue') {
-      card.classList.add('client-card-stop');
-      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
-    } else if (renew.status === 'due_soon') {
-      card.classList.add('client-card-warn');
-      var dl = renew.daysLeft;
-      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
-      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
-    }
-
-    // Extra charges (active only) shown inline as a compact list.
+    // Extra charges (active only) — additional treatments layered on the base
+    // package. Rendered INSIDE the treatment panel; only present when the patient
+    // has active charges, so empty cards stay clean. Carries the × remove control.
     var activeCharges = state.charges.filter(function (ch) {
       return ch.clientId === c.id && ch.active !== false;
     });
@@ -1998,6 +1968,39 @@
       chargesHtml = '<ul class="client-charges">' + items + '</ul>';
     }
 
+    // כספים (right, RTL reads first): single amount + paid chip + dated rows.
+    var moneyPanel =
+      '<div class="cc-panel cc-money">' +
+        '<div class="cc-panel-title">כספים</div>' +
+        '<div class="cc-amount">' + money(c.pricePerSession) +
+          '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
+        (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
+        paidOnRow + nextBillRow + startRow +
+      '</div>';
+
+    // תוכנית טיפול (left): scope, treatment-type rows, בית מוצא, extra charges.
+    var planPanel =
+      '<div class="cc-panel cc-plan">' +
+        '<div class="cc-panel-title">תוכנית טיפול</div>' +
+        (scopeChip ? '<div class="cc-chips">' + scopeChip + '</div>' : '') +
+        planRows +
+        hooRow +
+        chargesHtml +
+      '</div>';
+
+    // Renewal status banner (overdue / due soon)
+    var renewBannerHtml = '';
+    var renew = renewalInfo(c);
+    if (renew.status === 'overdue') {
+      card.classList.add('client-card-stop');
+      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
+    } else if (renew.status === 'due_soon') {
+      card.classList.add('client-card-warn');
+      var dl = renew.daysLeft;
+      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
+      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
+    }
+
     card.innerHTML =
       renewBannerHtml +
       '<div class="cc-top">' +
@@ -2008,7 +2011,6 @@
         ((phoneChip || locationChip) ? '<div class="client-meta">' + phoneChip + locationChip + '</div>' : '') +
       '</div>' +
       '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
-      chargesHtml +
       '<div class="client-actions edit-only"></div>';
 
     if (state.role === 'editor') {
