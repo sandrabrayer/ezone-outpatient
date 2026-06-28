@@ -2516,6 +2516,26 @@
     });
   }
 
+  // Bug B: legacy clients saved before the nextBillingDate column have it blank,
+  // so renewalInfo would fall back to startDate (banner counts from תחילת טיפול).
+  // Reconstruct it from the latest PAID base payment row (paymentDate else dueDate,
+  // + 30 days) on load, without overwriting a populated value — no manual re-save
+  // needed. Mirrors deriveNextBillingDate in public/charges-logic.js.
+  function deriveNextBillingDates() {
+    if (!Array.isArray(state.clients) || !Array.isArray(state.payments)) return;
+    state.clients.forEach(function (c) {
+      if (!c || c.nextBillingDate) return;
+      var latest = '';
+      state.payments.forEach(function (p) {
+        if (!p || p.clientId !== c.id || p.status !== 'paid') return;
+        if (paymentKindFromId(p.id).kind !== 'base') return;
+        var anchor = p.paymentDate || p.dueDate || '';
+        if (anchor && anchor > latest) latest = anchor;
+      });
+      if (latest) c.nextBillingDate = addDays(latest, 30);
+    });
+  }
+
   async function loadAll() {
     try {
       var data = await apiLoad();
@@ -2529,6 +2549,8 @@
         console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
         state.payments = [];
       }
+      // Derive nextBillingDate for legacy clients now that payments are loaded.
+      deriveNextBillingDates();
       try {
         var cr = await apiGetCharges();
         state.charges = (cr.charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });

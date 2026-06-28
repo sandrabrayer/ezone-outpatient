@@ -19,7 +19,9 @@ const {
   dueItemsOn,
   chargeStatusFor,
   nextRenewalDueDate,
-  basePaymentPaidOn
+  basePaymentPaidOn,
+  addDays,
+  deriveNextBillingDate
 } = require('../public/charges-logic');
 
 test('paymentId scheme: base / extra-monthly / one-time-extra produce distinct ids', () => {
@@ -272,6 +274,48 @@ test('nextRenewalDueDate falls back to legacy calc when nextBillingDate is blank
     nextRenewalDueDate({ id: 'abc', nextBillingDate: '', paymentDate: '2026-05-15' }),
     '2026-06-15'
   );
+});
+
+/* ===== Bug B: derive-on-load nextBillingDate for legacy clients ===== */
+
+test('deriveNextBillingDate = latest paid base payment paymentDate + 30 days', () => {
+  const client = { id: 'abc' }; // no nextBillingDate (legacy)
+  const payments = [
+    { id: 'pay::abc::base::2026-04', clientId: 'abc', status: 'paid', paymentDate: '2026-04-10' },
+    { id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-22' },
+    { id: 'pay::abc::base::2026-05', clientId: 'abc', status: 'paid', paymentDate: '2026-05-15' }
+  ];
+  // Latest paid base is 2026-06-22 -> + 30 days = 2026-07-22 (same formula as
+  // the גבייה הבאה chip and the activate/renew path).
+  assert.equal(deriveNextBillingDate(client, payments), '2026-07-22');
+});
+
+test('deriveNextBillingDate never overwrites a populated nextBillingDate', () => {
+  const client = { id: 'abc', nextBillingDate: '2026-09-01' };
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-22' }];
+  assert.equal(deriveNextBillingDate(client, payments), '2026-09-01');
+});
+
+test('deriveNextBillingDate ignores unpaid rows, extra charges, and other clients', () => {
+  const client = { id: 'abc' };
+  const payments = [
+    { id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'unpaid', paymentDate: '2026-06-22' }, // unpaid
+    { id: 'pay::abc::chg-c1::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-25' }, // extra
+    { id: 'pay::zzz::base::2026-06', clientId: 'zzz', status: 'paid', paymentDate: '2026-06-28' }    // other client
+  ];
+  assert.equal(deriveNextBillingDate(client, payments), '');
+});
+
+test('deriveNextBillingDate falls back to dueDate when a paid base row lacks paymentDate', () => {
+  const client = { id: 'abc' };
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '', dueDate: '2026-06-01' }];
+  assert.equal(deriveNextBillingDate(client, payments), '2026-07-01');
+});
+
+test('deriveNextBillingDate parity: derived value equals the chip formula addDays(anchor,30)', () => {
+  const client = { id: 'abc' };
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-22' }];
+  assert.equal(deriveNextBillingDate(client, payments), addDays('2026-06-22', 30));
 });
 
 /* ===== Bug A: backdated paid-date round-trips (not coerced to today) ===== */

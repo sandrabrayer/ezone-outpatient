@@ -55,6 +55,39 @@
     return addMonth(anchor);
   }
 
+  // Add N days to an ISO date string. Mirrors addDays in public/app.js — keep
+  // both in sync. Used for the nextBillingDate = anchor + 30 derivation.
+  function addDays(isoDate, days) {
+    if (!isoDate) return '';
+    var d = new Date(isoDate);
+    if (isNaN(d)) return '';
+    d.setDate(d.getDate() + days);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  // Reconstruct a client's next-billing date for legacy rows saved before the
+  // nextBillingDate column existed (it comes back blank). Take the latest PAID
+  // base payment row and add 30 days to its paymentDate (else dueDate) — the same
+  // addDays(anchor, 30) formula used on activate/renew/edit. NEVER overwrites a
+  // populated nextBillingDate. Returns '' when nothing can be derived. Mirrors
+  // deriveNextBillingDates in public/app.js — keep both in sync.
+  function deriveNextBillingDate(client, payments) {
+    if (!client) return '';
+    if (client.nextBillingDate) return client.nextBillingDate;
+    if (!Array.isArray(payments)) return '';
+    var latest = '';
+    for (var i = 0; i < payments.length; i++) {
+      var p = payments[i];
+      if (!p || p.clientId !== client.id || p.status !== 'paid') continue;
+      if (paymentKindFromId(p.id).kind !== 'base') continue;
+      var anchor = p.paymentDate || p.dueDate || '';
+      if (anchor && anchor > latest) latest = anchor;
+    }
+    return latest ? addDays(latest, 30) : '';
+  }
+
   function dayOfMonth(iso) {
     if (!iso) return null;
     var parts = String(iso).slice(0, 10).split('-');
@@ -202,6 +235,8 @@
   return {
     monthKey: monthKey,
     addMonth: addMonth,
+    addDays: addDays,
+    deriveNextBillingDate: deriveNextBillingDate,
     nextRenewalDueDate: nextRenewalDueDate,
     dayOfMonth: dayOfMonth,
     lastDayOfMonth: lastDayOfMonth,
