@@ -218,7 +218,9 @@ button, input, select, textarea {
 }
 .client-tabs .ct.active { color: var(--text); border-color: var(--green-deep); background: var(--panel-2); }
 
-.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+/* Wider min so the two-column patient card has room (drops ~3→2 per row on a
+   typical desktop, which is fine). */
+.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; }
 .client-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px; display: flex; flex-direction: column; gap: 6px;
@@ -231,6 +233,39 @@ button, input, select, textarea {
 .client-card .client-stats b { color: var(--green-2); font-weight: 700; }
 .client-card .client-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .client-card .client-actions .btn { padding: 4px 10px; font-size: 12px; }
+
+/* Two-column patient card: כספים (right, RTL reads first) | תוכנית טיפול (left). */
+.client-card .cc-top { display: flex; flex-direction: column; gap: 6px; }
+.client-card .cc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+.client-card .cc-panel {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.client-card .cc-money { background: var(--panel-money); border-color: var(--panel-money-border); }
+.client-card .cc-plan  { background: var(--panel-plan);  border-color: var(--panel-plan-border); }
+.client-card .cc-panel-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--text-soft); opacity: 0.8; text-transform: none;
+}
+.client-card .cc-amount { display: flex; flex-direction: column; line-height: 1.1; }
+.client-card .cc-amount { font-size: 22px; font-weight: 800; color: var(--green-2); }
+.client-card .cc-amount-sub { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.client-card .cc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.client-card .cc-line { display: flex; flex-direction: column; }
+.client-card .cc-line .cc-k { font-size: 11px; color: var(--muted); }
+.client-card .cc-line .cc-v { font-size: 13px; font-weight: 600; color: var(--text); }
+.client-card .cc-line.cc-muted { font-size: 12px; color: var(--muted); }
+/* גבייה הבאה — highlighted in the money panel with the promoted blue accent. */
+.client-card .cc-line-hot {
+  background: var(--blue-soft); border-radius: 8px; padding: 4px 6px;
+}
+.client-card .cc-line-hot .cc-k { color: var(--blue-deep); opacity: 0.85; }
+.client-card .cc-line-hot .cc-v { color: var(--blue-deep); }
+/* Mobile: stack the two halves, money on top (it is first in the DOM). */
+@media (max-width: 560px) {
+  .clients-list { grid-template-columns: 1fr; }
+  .client-card .cc-body { grid-template-columns: 1fr; }
+}
 
 .status-badge {
   font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
