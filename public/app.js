@@ -231,12 +231,15 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal — anchor (last payment
-  // date, else start date) + 1 month with short-month clamp. Mirrors
-  // nextRenewalDueDate in public/charges-logic.js — keep both in sync. Shared
-  // by renewalInfo()'s banner and the "חידוש ותשלום" button so they never diverge.
+  // The ISO due-date of a client's next monthly renewal. Prefers the stored
+  // nextBillingDate — the SAME value the גבייה הבאה chip shows — so the renewal
+  // alert/button never diverge from the chip. Falls back to the (paymentDate else
+  // startDate) + 1 month calc only for legacy rows saved before nextBillingDate
+  // was persisted. Mirrors nextRenewalDueDate in public/charges-logic.js — keep
+  // both in sync. Shared by renewalInfo()'s banner and the "חידוש ותשלום" button.
   function nextRenewalDueDate(c) {
     if (!c) return '';
+    if (c.nextBillingDate) return c.nextBillingDate;
     var anchor = c.paymentDate || c.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
@@ -253,30 +256,30 @@
 
   // Compute renewal info for a client.
   // Returns { renewalDate, daysLeft, status: 'overdue'|'due_soon'|'ok'|'unknown' }
+  // The renewal date anchors on nextRenewalDueDate(c) — i.e. the stored
+  // nextBillingDate, the SAME value the גבייה הבאה chip shows — so the alert and
+  // the chip read one source and never diverge. No independent addMonth recompute.
   // Source of truth for "is the current month settled?" is the actual base
   // payment row — the SAME lookup the paid/unpaid badge uses — not the
-  // date-only calc or the denormalized paymentStatus flag. Without this the
-  // banner screamed "overdue" on a month that was already paid (the row says
-  // paid, but the renewal date had quietly slipped into the past).
+  // denormalized paymentStatus flag. Without this the banner screamed "overdue"
+  // on a month that was already paid (the row says paid, but the next-billing
+  // date had quietly slipped into the past).
   //   - If the current month's base row is paid: that month is settled. The
-  //     next renewal is one cycle out from this month's due date, so the banner
-  //     counts toward next cycle (ok/due_soon) and is NEVER overdue.
-  //   - Otherwise: date calc (renewal = anchor + 1 month) + hasBillingProblem.
+  //     banner counts toward the stored next-billing date (ok/due_soon), clamps a
+  //     negative gap to 0, and is NEVER overdue.
+  //   - Otherwise: stored next-billing date + hasBillingProblem.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
-    var anchor = c.paymentDate || c.startDate || '';
-    if (!anchor) return { status: 'unknown' };
-    var status;
-    var renewal;
-    var daysLeft;
+    var renewal = nextRenewalDueDate(c);
+    if (!renewal) return { status: 'unknown' };
+    var daysLeft = daysBetween(today(), renewal);
     var curDue = currentMonthBaseDueDate(c);
     var paidThisMonth = paymentForClientOn(c, curDue).status === 'paid';
+    var status;
     if (paidThisMonth) {
-      // Current month is settled — renewal is one cycle past this month's due
-      // date. Clamp a negative gap to 0 ("renew today") so stale data can't
-      // produce nonsense like "renew in -5 days", and so paid never => overdue.
-      renewal = addMonth(curDue);
-      daysLeft = daysBetween(today(), renewal);
+      // Current month is settled. Clamp a negative gap to 0 ("renew today") so
+      // stale data can't produce nonsense like "renew in -5 days", and so paid
+      // never => overdue.
       if (daysLeft === null) {
         status = 'unknown';
       } else {
@@ -284,8 +287,6 @@
         status = daysLeft <= 7 ? 'due_soon' : 'ok';
       }
     } else {
-      renewal = nextRenewalDueDate(c);
-      daysLeft = daysBetween(today(), renewal);
       if (hasBillingProblem(c)) {
         // Explicitly marked partial/unpaid - overdue
         status = 'overdue';
@@ -1414,11 +1415,14 @@
         '<input class="billing-paid" type="number" min="0" step="1" value="' + (payment.amountPaid || 0) + '"' + disabled + ' />' +
       '</div>' +
       '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span></div>' +
+      '<div class="billing-paid-date-wrap"><span class="p-label">תאריך תשלום</span>' +
+        '<input class="billing-paid-date" type="date" value="' + (payment.paymentDate || today()) + '"' + disabled + ' /></div>' +
       nextBillHtml;
 
     var statusSel = row.querySelector('.billing-status');
     var paidWrap  = row.querySelector('.billing-paid-wrap');
     var paidInput = row.querySelector('.billing-paid');
+    var paidDateInput = row.querySelector('.billing-paid-date');
     var balanceEl = row.querySelector('.billing-balance');
 
     function recompute(newStatus, newPaid) {
@@ -1436,7 +1440,9 @@
         billingType: payment.billingType || (isExtra && charge && charge.billingType === 'one_time' ? 'one_time' : 'monthly'),
         dueDate: dueDateISO,
         amountDue: amount, amountPaid: ap, status: newStatus,
-        paymentDate: newStatus === 'paid' ? today() : (payment.paymentDate || ''),
+        paymentDate: newStatus === 'paid'
+          ? ((paidDateInput && paidDateInput.value) || today())
+          : (payment.paymentDate || ''),
         method: payment.method || '', notes: payment.notes || '',
         bundleSize: 0, sessionsUsed: 0
       };
@@ -1450,6 +1456,12 @@
       var v = toNum(paidInput.value);
       if (v >= amount) { statusSel.value = 'paid'; saveBillingRow(recompute('paid', amount)); }
       else { saveBillingRow(recompute('partial', v)); }
+    });
+    // Backdating: when the row is already marked paid, editing the date persists
+    // it through the same single save path (no effect while unpaid/partial).
+    if (paidDateInput) paidDateInput.addEventListener('change', function () {
+      if (statusSel.value !== 'paid') return;
+      saveBillingRow(recompute('paid', paidInput.value));
     });
     return row;
   }

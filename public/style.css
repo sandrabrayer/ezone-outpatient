@@ -313,7 +313,7 @@ body.viewer .edit-only { display: none !important; }
   background: var(--bg-elev); border: 1px solid var(--border);
   border-radius: 10px; padding: 10px 12px;
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1.1fr 1.1fr 1fr;
+  grid-template-columns: 1.4fr 1fr 1fr 1.1fr 1.1fr 1.1fr 1fr;
   gap: 10px; align-items: center;
 }
 .billing-row:hover { border-color: var(--green-deep); }
@@ -327,7 +327,8 @@ body.viewer .edit-only { display: none !important; }
 .billing-row .p-val  { font-size: 14px; font-weight: 600; color: var(--text); }
 .billing-row .p-name { font-weight: 700;  font-size: 15px; color: var(--text); }
 .billing-row .billing-status,
-.billing-row .billing-paid {
+.billing-row .billing-paid,
+.billing-row .billing-paid-date {
   width: 100%; padding: 6px 8px;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text); font-size: 13px;
