@@ -12,6 +12,18 @@
   --green-deep: #0f6a44;
   --red: #ff7676;
   --amber: #f2c355;
+  /* Cool accent — promoted from the existing chip-next / next-bill blue so the
+     patient-card treatment panel can share one source with the גבייה הבאה chip
+     (no new hue introduced). */
+  --blue-soft: #cce5ff;
+  --blue-deep: #004085;
+  /* Patient-card panel tints, derived from existing tokens so each half is
+     distinct from the card (--panel) and from each other: money = green family,
+     treatment plan = the promoted blue. */
+  --panel-money: color-mix(in srgb, var(--green-deep) 34%, var(--panel));
+  --panel-money-border: color-mix(in srgb, var(--green-deep) 60%, var(--border));
+  --panel-plan: color-mix(in srgb, var(--blue-deep) 30%, var(--panel));
+  --panel-plan-border: color-mix(in srgb, var(--blue-deep) 55%, var(--border));
   --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
 }
 
@@ -384,7 +396,7 @@ body.viewer .edit-only { display: none !important; }
 .chip-paid    { background: #d4edda; color: #155724; }
 .chip-partial { background: #fff3cd; color: #856404; }
 .chip-unpaid  { background: #f8d7da; color: #721c24; }
-.chip-next    { background: #cce5ff; color: #004085; font-weight: 600; }
+.chip-next    { background: var(--blue-soft); color: var(--blue-deep); font-weight: 600; }
 
 /* Clickable monthly-payment chip on the patient card (editor, unpaid). */
 button.month-pay-btn {
@@ -396,7 +408,7 @@ button.month-pay-btn {
 button.month-pay-btn:hover { filter: brightness(0.94); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12) inset; }
 button.month-pay-btn:active { filter: brightness(0.88); }
 
-.next-bill { color: #004085; font-weight: 600; }
+.next-bill { color: var(--blue-deep); font-weight: 600; }
 
 .form-section-title {
   font-size: 0.82rem;
