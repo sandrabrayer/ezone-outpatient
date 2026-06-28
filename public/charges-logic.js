@@ -40,13 +40,16 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal. Anchors on the last
-  // payment date when present, else the start date, then advances one calendar
-  // month (short-month clamp via addMonth). Mirrors renewalInfo()'s date calc
-  // in public/app.js — keep both in sync. This is the single source the
-  // "renewal banner" and the "חידוש ותשלום" button share so they never diverge.
+  // The ISO due-date of a client's next monthly renewal. Prefers the stored
+  // nextBillingDate — the SAME value the גבייה הבאה chip shows — so the renewal
+  // alert/button never diverge from the chip. Falls back to the last payment
+  // date (else start date) + 1 calendar month (short-month clamp via addMonth)
+  // only for legacy rows saved before nextBillingDate was persisted. Mirrors
+  // nextRenewalDueDate in public/app.js — keep both in sync. This is the single
+  // source the "renewal banner" and the "חידוש ותשלום" button share.
   function nextRenewalDueDate(client) {
     if (!client) return '';
+    if (client.nextBillingDate) return client.nextBillingDate;
     var anchor = client.paymentDate || client.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
