@@ -18,7 +18,8 @@ const {
   paymentKindFromId,
   dueItemsOn,
   chargeStatusFor,
-  nextRenewalDueDate
+  nextRenewalDueDate,
+  basePaymentPaidOn
 } = require('../public/charges-logic');
 
 test('paymentId scheme: base / extra-monthly / one-time-extra produce distinct ids', () => {
@@ -271,6 +272,29 @@ test('nextRenewalDueDate falls back to legacy calc when nextBillingDate is blank
     nextRenewalDueDate({ id: 'abc', nextBillingDate: '', paymentDate: '2026-05-15' }),
     '2026-06-15'
   );
+});
+
+/* ===== Bug A: backdated paid-date round-trips (not coerced to today) ===== */
+
+test('basePaymentPaidOn stamps the explicit paid date, not today', () => {
+  const client = { id: 'abc', name: 'ליאור' };
+  const row = basePaymentPaidOn(client, '2026-06-01', 2000, '2026-06-22', '');
+  assert.equal(row.id, 'pay::abc::base::2026-06');
+  assert.equal(row.status, 'paid');
+  assert.equal(row.amountDue, 2000);
+  assert.equal(row.amountPaid, 2000);
+  // The backdate survives verbatim — this is the value the chip renders and the
+  // value persistPayment writes to the Payments row's paymentDate column.
+  assert.equal(row.paymentDate, '2026-06-22');
+});
+
+test('basePaymentPaidOn keys the row by due-month so the chip reads the same row', () => {
+  const client = { id: 'abc', name: 'ליאור' };
+  // Same client+month always upserts the same id (idempotent backdate edits).
+  const a = basePaymentPaidOn(client, '2026-06-01', 2000, '2026-06-22', '');
+  const b = basePaymentPaidOn(client, '2026-06-28', 2000, '2026-06-10', 'note');
+  assert.equal(a.id, b.id);
+  assert.equal(b.notes, 'note');
 });
 
 test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {

@@ -85,6 +85,21 @@
     return 'pay::' + clientId + '::' + monthKey(dueDateISO);
   }
 
+  // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
+  // explicit paidDateISO (NOT today) so a backdated payment round-trips unchanged.
+  // Mirrors basePaymentPaidOn in public/app.js — keep both in sync. Used by the
+  // edit-modal paid-date propagation (Bug A) and renew-and-pay (Bug C).
+  function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
+    return {
+      id: paymentId(client.id, dueDateISO, 'base'),
+      clientId: client.id, clientName: client.name || '',
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: paidDateISO || '', method: '', notes: notes || '',
+      bundleSize: '', sessionsUsed: ''
+    };
+  }
+
   // Legacy = exactly 3 '::'-separated segments, ending in YYYY-MM.
   function isLegacyBasePaymentId(id) {
     if (!id) return false;
@@ -191,6 +206,7 @@
     dayOfMonth: dayOfMonth,
     lastDayOfMonth: lastDayOfMonth,
     paymentId: paymentId,
+    basePaymentPaidOn: basePaymentPaidOn,
     legacyBasePaymentId: legacyBasePaymentId,
     isLegacyBasePaymentId: isLegacyBasePaymentId,
     paymentKindFromId: paymentKindFromId,

@@ -675,6 +675,21 @@
       bundleSize: 0, sessionsUsed: 0
     };
   }
+  // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
+  // explicit paidDateISO (NOT today) so a backdated payment round-trips through
+  // persistPayment unchanged. Mirrors basePaymentPaidOn in public/charges-logic.js
+  // — keep both in sync. Shared by the edit-modal paid-date propagation (Bug A)
+  // and renew-and-pay (Bug C).
+  function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
+    return {
+      id: paymentId(client, dueDateISO, 'base'),
+      clientId: client.id, clientName: client.name || '',
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: paidDateISO || '', method: '', notes: notes || '',
+      bundleSize: '', sessionsUsed: ''
+    };
+  }
   function paymentForExtraOn(client, charge, dueDateISO) {
     var id = paymentId(client, dueDateISO, 'extra', charge.id);
     var existing = findPaymentById(id);
@@ -3040,6 +3055,7 @@
       var ps = fd.get('paymentStatus') || '';
       if (ps) client.paymentStatus = ps;
       var pd = fd.get('paymentDate') || '';
+      var paidDateChanged = pd && pd !== (prev.paymentDate || '');
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
@@ -3064,7 +3080,22 @@
       if (client.paymentDate) {
         client.nextBillingDate = addDays(client.paymentDate, 30);
       }
+      // Bug A: a deliberately changed paid-date with status=paid must reach the
+      // per-month base payment row (the single source the card chip + גבייה read)
+      // via persistPayment — otherwise the chip keeps showing the old/today date.
+      var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
       persist()
+        .then(function () {
+          if (!propagatePaid) return;
+          var dueISO = currentMonthBaseDueDate(client);
+          var basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
+          var i = state.payments.findIndex(function (p) { return p.id === basePay.id; });
+          var existing = i >= 0 ? state.payments[i] : null;
+          // Keep any existing notes/method when re-stamping the paid date.
+          if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
+          if (i >= 0) state.payments[i] = basePay; else state.payments.push(basePay);
+          return persistPayment(basePay);
+        })
         .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
         .catch(function (err) {
           Object.assign(client, prev);
