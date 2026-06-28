@@ -2429,6 +2429,7 @@
     $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
       (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
     form.renewAmount.value = client.pricePerSession || '';
+    if (form.renewDate) form.renewDate.value = today();
     $('#renewModal').hidden = false;
   }
   function closeRenewModal() {
@@ -2706,23 +2707,25 @@
       var fd = new FormData(e.target);
       var amount = toNum(fd.get('renewAmount'));
       if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      // Editable paid date (default today, backdatable) + free-text notes.
+      var paidDate = fd.get('renewDate') || today();
+      var notes = (fd.get('renewNotes') || '').trim();
       submit.disabled = true;
 
       // ORDERING IS DELIBERATE: persist the client default FIRST, payment
       // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
       // failure mode; the payment row is idempotent (deterministic id) and
       // safely re-clickable, so it is the safer step to leave for retry.
-      var prev = { pricePerSession: c.pricePerSession };
+      var prev = { pricePerSession: c.pricePerSession, paymentDate: c.paymentDate, nextBillingDate: c.nextBillingDate };
       c.pricePerSession = amount;
+      // Re-anchor from the paid date (same addDays(x,30) formula as edit/activate),
+      // so the renewal alert/גבייה הבאה advance off the date actually entered.
+      c.paymentDate = paidDate;
+      c.nextBillingDate = addDays(paidDate, 30);
       persist()
         .then(function () {
-          var payment = {
-            id: paymentId(c, renewalDate, 'base'),
-            clientId: c.id, clientName: c.name, billingType: 'monthly',
-            dueDate: renewalDate, amountDue: amount, amountPaid: amount,
-            status: 'paid', paymentDate: today(), method: '', notes: '',
-            bundleSize: '', sessionsUsed: ''
-          };
+          // Single paid-date path: same builder as the edit-modal propagation.
+          var payment = basePaymentPaidOn(c, renewalDate, amount, paidDate, notes);
           return persistPayment(payment)
             .then(function () {
               // Upsert by id so גבייה reflects it without a reload.

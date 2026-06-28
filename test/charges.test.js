@@ -341,6 +341,27 @@ test('basePaymentPaidOn keys the row by due-month so the chip reads the same row
   assert.equal(b.notes, 'note');
 });
 
+/* ===== Bug C: renew modal feeds paid-date + notes; re-anchors nextBillingDate ===== */
+
+test('renew payment carries the modal paid-date + notes, keyed to the renewal month', () => {
+  const client = { id: 'abc', name: 'ליאור' };
+  const renewalDate = '2026-07-22';
+  const paidDate = '2026-06-28';
+  const pay = basePaymentPaidOn(client, renewalDate, 1800, paidDate, 'מזומן');
+  assert.equal(pay.id, 'pay::abc::base::2026-07'); // billed month = renewal month
+  assert.equal(pay.dueDate, renewalDate);
+  assert.equal(pay.status, 'paid');
+  assert.equal(pay.amountDue, 1800);
+  assert.equal(pay.paymentDate, paidDate);         // backdatable, not coerced to today
+  assert.equal(pay.notes, 'מזומן');                 // free-text notes persist to the row
+});
+
+test('renew re-anchors nextBillingDate from the paid date (+30), backdate-sensitive', () => {
+  assert.equal(addDays('2026-06-28', 30), '2026-07-28');
+  // A backdated paid date yields a different anchor than a later date would.
+  assert.notEqual(addDays('2026-06-10', 30), addDays('2026-06-28', 30));
+});
+
 test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {
   const client = { id: 'abc' };
   const charge = { id: 'c1', billingType: 'one_time' };
