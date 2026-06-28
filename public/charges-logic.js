@@ -25,6 +25,13 @@
 
   function monthKey(iso) { return String(iso || '').slice(0, 7); }
 
+  // Session-frequency unit for a treatment type. Psychiatric follow-up
+  // (מעקב פסיכיאטרי) is scheduled MONTHLY; every other treatment type is weekly.
+  // Mirrors sessionFrequencyUnit in public/app.js — keep both in sync.
+  function sessionFrequencyUnit(serviceType) {
+    return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
+
   // Add 1 calendar month to an ISO date string, clamping to the last day of
   // the target month (Jan 31 + 1mo -> Feb 28). Mirrors addMonth in
   // public/app.js — keep both in sync.
@@ -234,6 +241,7 @@
 
   return {
     monthKey: monthKey,
+    sessionFrequencyUnit: sessionFrequencyUnit,
     addMonth: addMonth,
     addDays: addDays,
     deriveNextBillingDate: deriveNextBillingDate,

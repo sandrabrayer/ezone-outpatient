@@ -198,6 +198,11 @@
     return isFinite(n) ? n : 0;
   }
   function monthlyRevenue(c) { return toNum(c.pricePerSession); }
+  // Session-frequency unit per treatment type — psychiatric follow-up is monthly,
+  // all others weekly. Mirrors sessionFrequencyUnit in public/charges-logic.js.
+  function sessionFrequencyUnit(serviceType) {
+    return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
   function toast(msg, isError) {
     var t = $('#toast');
     t.textContent = msg;
@@ -1729,7 +1734,7 @@
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/' + sessionFrequencyUnit(k) + '</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -1899,7 +1904,7 @@
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
     var planRows = services.map(function (s) {
       var n = breakdown[s];
-      var freq = (n || n === 0) ? n + '/שבוע' : '';
+      var freq = (n || n === 0) ? n + '/' + sessionFrequencyUnit(s) : '';
       return '<div class="cc-line"><span class="cc-k">' + escapeHtml(serviceLabel(s)) + '</span>' +
              '<span class="cc-v">' + freq + '</span></div>';
     }).join('');
