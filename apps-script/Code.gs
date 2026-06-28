@@ -765,6 +765,101 @@ function _resolveStopFlag(id, resolvedBy) {
   }
 }
 
+/* ===== Create lead (inbound, fail-closed write) =====
+ *
+ * Inbound: the E-Zone Dashboard POSTs { action:'createLead', secret, name,
+ * phone, house, note } directly to this /exec when a patient is discharged with
+ * disposition "released to outpatient care" — pushing that patient in as a new
+ * outpatient lead. FAIL-CLOSED auth (mirrors flagStop, an external write): the
+ * shared secret 'CREATE_LEAD_SECRET' Script Property MUST exist and match —
+ * unlike the read endpoints (open when unset), a missing/empty/wrong secret is
+ * rejected. The secret is read ONLY from Script Properties and is never logged.
+ *
+ * Appends ONE Leads row as a brand-new lead (stage 'new', created = today),
+ * mirroring how addLeadFromForm builds a fresh lead in public/app.js: the lead
+ * starts in the first kanban stage with empty serviceType/location/sessions/
+ * price/startDate. phone MAY be empty (hand-entered patients have no phone);
+ * it is normalized through _recoverPhone and stored as-is when blank. note is
+ * free text (source + notes combined) and may be empty. Clients is never
+ * touched — this only creates a lead for Vered to work.
+ */
+
+/* Known Dashboard houseId keys. They are identical to the Outpatient
+ * house_of_origin keys (HOUSE_OF_ORIGIN_LABELS in public/app.js), so the
+ * mapping is 1:1 / verbatim — no remapping table. Kept only to document the
+ * contract; an UNKNOWN key is still stored as-is and never rejected, so an
+ * unexpected house never fails the write (the lead must still be created). */
+var CREATE_LEAD_HOUSE_KEYS = {
+  raanana: true, ramot: true, efroni: true, rehab: true, external: true
+};
+
+function _mapLeadHouse(house) {
+  // 1:1 with the Outpatient house_of_origin keys; unknown keys pass through
+  // verbatim (guarded: never throw, never reject — the lead still writes).
+  return String(house == null ? '' : house).trim();
+}
+
+/* Trim, strip control characters, and length-cap a free-text field before it
+ * is written to the sheet. */
+function _sanitizeLeadText(v, maxLen) {
+  var s = String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F]/g, ' ').trim();
+  if (maxLen && s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
+/* Mirrors uid() in public/app.js so server-created leads share the in-app id
+ * shape (id_<base36 time>_<base36 rand>). */
+function _leadUid() {
+  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function _createLeadAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('CREATE_LEAD_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _createLead(payload) {
+  var name = _sanitizeLeadText(payload && payload.name, 200);
+  if (!name) return { ok: false, error: 'missing_name' };
+  var phone = _recoverPhone(payload && payload.phone); // '' stays '' (valid)
+  var note  = _sanitizeLeadText(payload && payload.note, 2000);
+  var house = _mapLeadHouse(payload && payload.house);
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // _ensureSheet applies the '@' plain-text format to the phone column for
+    // the grid rows, so the appended phone keeps its leading zero.
+    var sh = _ensureSheet('Leads', LEADS_HEADERS);
+    var lead = {
+      id: _leadUid(),
+      name: name,
+      phone: phone,
+      serviceType: '',
+      location: '',
+      note: note,
+      stage: 'new',
+      sessionsPerWeek: '',
+      pricePerSession: '',
+      startDate: '',
+      created: Utilities.formatDate(
+        new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd'),
+      introDateTime: '',
+      house_of_origin: house,
+      not_relevant_reason: '',
+      not_relevant_note: ''
+    };
+    sh.appendRow(LEADS_HEADERS.map(function (h) {
+      return lead[h] == null ? '' : lead[h];
+    }));
+    return { ok: true, id: lead.id };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Merge duplicate clients =====
  *
  * Internal dashboard action (open, same trust level as saveAll). Merges one or
@@ -949,6 +1044,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_flagStop(payload));
+    }
+    if (action === 'createLead') {
+      var clParams = (e && e.parameter) || {};
+      if (payload && payload.secret) clParams.secret = payload.secret;
+      if (!_createLeadAuthOk(clParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_createLead(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'resolveStopFlag') {
