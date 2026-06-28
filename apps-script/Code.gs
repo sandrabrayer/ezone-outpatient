@@ -26,12 +26,20 @@ var LEADS_HEADERS = [
  *
  * `phone` is the patient's own number, carried from the lead on activation.
  * It is the durable home for the patient phone used by cross-app matching
- * (debt, stop-flow). It is appended LAST per the append-only rule: _readAll/
- * _writeAll map columns positionally to this array, so a new column may only be
- * added at the end — inserting it mid-array would shift every later column on
- * existing rows. Old rows get a blank `phone` until re-saved; the client
- * backfills it in memory from the originating lead. It is a PHONE_COLUMN, so it
- * gets the same Sheets leading-zero text-format/recovery as the other phones. */
+ * (debt, stop-flow). It is a PHONE_COLUMN, so it gets the same Sheets
+ * leading-zero text-format/recovery as the other phones.
+ *
+ * The append-only rule: _readAll/_writeAll map columns positionally to this
+ * array, so a new column may only be added at the end — inserting it mid-array
+ * would shift every later column on existing rows. Old rows get blank values
+ * for the new columns until re-saved.
+ *
+ * `paymentStatus`, `paymentDate`, `nextBillingDate` were appended after launch.
+ * Before this, clientForSheet wrote them but they were silently dropped on every
+ * save (absent from this header array); the renewal alert then fell back to
+ * startDate after each reload. They are now persisted so the alert anchors on
+ * the stored nextBillingDate. No backfill — existing rows stay blank until the
+ * next save of that client. */
 var CLIENTS_HEADERS = [
   'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
   'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
@@ -40,7 +48,8 @@ var CLIENTS_HEADERS = [
   'house_of_origin',
   'responsiblePerson', 'serviceScope',
   'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-  'phone'
+  'phone',
+  'paymentStatus', 'paymentDate', 'nextBillingDate'
 ];
 
 /* Settings sheet: one row per setting, key/value style.

@@ -137,12 +137,18 @@ test('backfill: existing client with no stored phone inherits it from its lead',
   assert.equal(resolveStopFlagClient({ phone: '0543123276' }, clients).client.id, 'C1');
 });
 
-test('schema guard: Clients `phone` column exists and is appended LAST', () => {
+test('schema guard: Clients headers are append-only (phone, then payment fields, last)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const m = src.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'CLIENTS_HEADERS not found');
   const cols = m[1].match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  assert.equal(cols[cols.length - 1], 'phone', 'phone must be LAST (append-only)');
-  assert.equal(cols[cols.length - 2], 'paymentLink');
+  // paymentStatus/paymentDate/nextBillingDate were appended AFTER phone (so the
+  // renewal alert can read a persisted nextBillingDate). Append-only: they sit at
+  // the very end in this exact order, with phone immediately before them.
+  assert.deepEqual(
+    cols.slice(-4),
+    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate'],
+    'payment fields must be appended LAST, after phone (append-only)'
+  );
 });

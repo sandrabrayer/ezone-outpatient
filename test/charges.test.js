@@ -233,6 +233,46 @@ test('renewal base paymentId is idempotent: same client+month -> identical id', 
   assert.equal(a, 'pay::abc::base::2026-06');
 });
 
+/* ===== chip-vs-alert anchor parity (renewal alert reads גבייה הבאה) =====
+ * The renewal alert (חידוש בעוד X ימים) and the גבייה הבאה chip must read ONE
+ * source. The chip renders client.nextBillingDate; the alert anchors on
+ * nextRenewalDueDate(client). With nextBillingDate persisted they resolve to the
+ * exact same date — same anchor in, same date out — so they can never diverge. */
+
+test('nextRenewalDueDate prefers stored nextBillingDate over paymentDate/startDate', () => {
+  // nextBillingDate (the chip's source) wins over both paymentDate and startDate.
+  assert.equal(
+    nextRenewalDueDate({
+      id: 'abc',
+      nextBillingDate: '2026-06-14',
+      paymentDate: '2026-05-15',
+      startDate: '2026-01-10'
+    }),
+    '2026-06-14'
+  );
+});
+
+test('renewal alert anchor === גבייה הבאה chip source (no divergence)', () => {
+  const client = {
+    id: 'abc',
+    nextBillingDate: '2026-06-14', // what the chip renders (e.g. addDays(payDate,30))
+    paymentDate: '2026-05-15',
+    startDate: '2026-01-10'
+  };
+  const chipDate = client.nextBillingDate;        // chip source
+  const alertAnchor = nextRenewalDueDate(client); // alert anchor
+  assert.equal(alertAnchor, chipDate);
+});
+
+test('nextRenewalDueDate falls back to legacy calc when nextBillingDate is blank', () => {
+  // Legacy rows saved before nextBillingDate was persisted: an empty string is
+  // not a stored value, so the paymentDate/startDate + 1mo calc still applies.
+  assert.equal(
+    nextRenewalDueDate({ id: 'abc', nextBillingDate: '', paymentDate: '2026-05-15' }),
+    '2026-06-15'
+  );
+});
+
 test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {
   const client = { id: 'abc' };
   const charge = { id: 'c1', billingType: 'one_time' };
