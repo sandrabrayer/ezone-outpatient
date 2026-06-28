@@ -360,10 +360,6 @@
           </label>
           <div class="wide sessions-host" data-host="editClientSessions"></div>
 
-          <div class="wide form-section-title">אחראי טיפול (מטפל לטיפול פרטני, מנהל בית לתוכנית מורחבת)</div>
-          <label>שם אחראי טיפול<input name="responsiblePerson" type="text" required /></label>
-          <label>טלפון אחראי טיפול<input name="treatmentContactPhone" type="tel" placeholder="050-1234567" /></label>
-
           <div class="wide form-section-title">גורם משלם (קרוב משפחה או המטופל עצמו)</div>
           <label>שם גורם משלם<input name="payerName" type="text" /></label>
           <label>טלפון גורם משלם<input name="payerPhone" type="tel" placeholder="050-1234567" /></label>
@@ -487,6 +483,8 @@
         </div>
         <form id="renewForm" class="form-grid">
           <label class="wide">סכום חודשי (₪)<input name="renewAmount" type="number" min="0" step="1" required /></label>
+          <label class="wide">תאריך תשלום<input name="renewDate" type="date" /></label>
+          <label class="wide">הערות<textarea name="renewNotes" rows="2"></textarea></label>
           <div class="form-actions edit-only">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="renewSubmit">חידוש ותשלום</button>

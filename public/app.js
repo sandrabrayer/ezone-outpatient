@@ -675,6 +675,21 @@
       bundleSize: 0, sessionsUsed: 0
     };
   }
+  // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
+  // explicit paidDateISO (NOT today) so a backdated payment round-trips through
+  // persistPayment unchanged. Mirrors basePaymentPaidOn in public/charges-logic.js
+  // — keep both in sync. Shared by the edit-modal paid-date propagation (Bug A)
+  // and renew-and-pay (Bug C).
+  function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
+    return {
+      id: paymentId(client, dueDateISO, 'base'),
+      clientId: client.id, clientName: client.name || '',
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: paidDateISO || '', method: '', notes: notes || '',
+      bundleSize: '', sessionsUsed: ''
+    };
+  }
   function paymentForExtraOn(client, charge, dueDateISO) {
     var id = paymentId(client, dueDateISO, 'extra', charge.id);
     var existing = findPaymentById(id);
@@ -1921,17 +1936,16 @@
       renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
     }
 
-    // Responsible person + scope chips (always show if filled)
+    // Treatment-scope chip (responsiblePerson chip removed; field decommissioned).
     var responsibleHtml = '';
-    if (c.responsiblePerson || c.serviceScope) {
+    if (c.serviceScope) {
       var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
                    : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
-      var roleLbl = c.serviceScope === 'individual' ? 'מטפל'
-                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
-      responsibleHtml = '<div class="client-meta">' +
-        (scopeLbl ? '<span class="chip chip-scope">' + scopeLbl + '</span>' : '') +
-        (c.responsiblePerson ? '<span class="chip chip-resp">' + roleLbl + ': ' + escapeHtml(c.responsiblePerson) + '</span>' : '') +
-        '</div>';
+      if (scopeLbl) {
+        responsibleHtml = '<div class="client-meta">' +
+          '<span class="chip chip-scope">' + scopeLbl + '</span>' +
+          '</div>';
+      }
     }
 
     // Extra charges (active only) shown inline as a compact list.
@@ -2356,8 +2370,6 @@
     form.clientId.value = client.id;
     if (form.phone) form.phone.value = client.phone || '';
     form.serviceScope.value = client.serviceScope || '';
-    form.responsiblePerson.value = client.responsiblePerson || '';
-    form.treatmentContactPhone.value = client.treatmentContactPhone || '';
     form.payerName.value = client.payerName || '';
     form.payerPhone.value = client.payerPhone || '';
     form.paymentLink.value = client.paymentLink || '';
@@ -2417,6 +2429,7 @@
     $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
       (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
     form.renewAmount.value = client.pricePerSession || '';
+    if (form.renewDate) form.renewDate.value = today();
     $('#renewModal').hidden = false;
   }
   function closeRenewModal() {
@@ -2504,6 +2517,26 @@
     });
   }
 
+  // Bug B: legacy clients saved before the nextBillingDate column have it blank,
+  // so renewalInfo would fall back to startDate (banner counts from תחילת טיפול).
+  // Reconstruct it from the latest PAID base payment row (paymentDate else dueDate,
+  // + 30 days) on load, without overwriting a populated value — no manual re-save
+  // needed. Mirrors deriveNextBillingDate in public/charges-logic.js.
+  function deriveNextBillingDates() {
+    if (!Array.isArray(state.clients) || !Array.isArray(state.payments)) return;
+    state.clients.forEach(function (c) {
+      if (!c || c.nextBillingDate) return;
+      var latest = '';
+      state.payments.forEach(function (p) {
+        if (!p || p.clientId !== c.id || p.status !== 'paid') return;
+        if (paymentKindFromId(p.id).kind !== 'base') return;
+        var anchor = p.paymentDate || p.dueDate || '';
+        if (anchor && anchor > latest) latest = anchor;
+      });
+      if (latest) c.nextBillingDate = addDays(latest, 30);
+    });
+  }
+
   async function loadAll() {
     try {
       var data = await apiLoad();
@@ -2517,6 +2550,8 @@
         console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
         state.payments = [];
       }
+      // Derive nextBillingDate for legacy clients now that payments are loaded.
+      deriveNextBillingDates();
       try {
         var cr = await apiGetCharges();
         state.charges = (cr.charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
@@ -2672,23 +2707,25 @@
       var fd = new FormData(e.target);
       var amount = toNum(fd.get('renewAmount'));
       if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      // Editable paid date (default today, backdatable) + free-text notes.
+      var paidDate = fd.get('renewDate') || today();
+      var notes = (fd.get('renewNotes') || '').trim();
       submit.disabled = true;
 
       // ORDERING IS DELIBERATE: persist the client default FIRST, payment
       // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
       // failure mode; the payment row is idempotent (deterministic id) and
       // safely re-clickable, so it is the safer step to leave for retry.
-      var prev = { pricePerSession: c.pricePerSession };
+      var prev = { pricePerSession: c.pricePerSession, paymentDate: c.paymentDate, nextBillingDate: c.nextBillingDate };
       c.pricePerSession = amount;
+      // Re-anchor from the paid date (same addDays(x,30) formula as edit/activate),
+      // so the renewal alert/גבייה הבאה advance off the date actually entered.
+      c.paymentDate = paidDate;
+      c.nextBillingDate = addDays(paidDate, 30);
       persist()
         .then(function () {
-          var payment = {
-            id: paymentId(c, renewalDate, 'base'),
-            clientId: c.id, clientName: c.name, billingType: 'monthly',
-            dueDate: renewalDate, amountDue: amount, amountPaid: amount,
-            status: 'paid', paymentDate: today(), method: '', notes: '',
-            bundleSize: '', sessionsUsed: ''
-          };
+          // Single paid-date path: same builder as the edit-modal propagation.
+          var payment = basePaymentPaidOn(c, renewalDate, amount, paidDate, notes);
           return persistPayment(payment)
             .then(function () {
               // Upsert by id so גבייה reflects it without a reload.
@@ -3011,18 +3048,16 @@
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
       var scope = fd.get('serviceScope') || '';
-      var resp = (fd.get('responsiblePerson') || '').trim();
       if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
-      if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
       var pPhone = acceptPhone(fd.get('phone') || '', 'טלפון מטופל', 'mobile', false);
       if (pPhone === false) { submit.disabled = false; return; }
-      var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
-      if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
-      // Block only on the patient-identity (treatment-contact) phone, excluding
-      // this client. payerPhone is intentionally not deduped (shared payers).
-      if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
+      // Block on the patient's own phone (identity), excluding this client.
+      // payerPhone is intentionally not deduped (shared payers). The former
+      // treatment-contact phone field was removed; its column stays dormant and
+      // existing values are still honored by cross-app matching.
+      if (duplicateClientBlock(pPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
         phone: client.phone,
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
@@ -3037,14 +3072,15 @@
       };
       client.phone = pPhone;
       client.serviceScope = scope;
-      client.responsiblePerson = resp;
-      client.treatmentContactPhone = tcPhone;
+      // responsiblePerson / treatmentContactPhone fields removed from the form;
+      // existing values are left untouched (column dormant, matching preserved).
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;
       client.paymentLink = (fd.get('paymentLink') || '').trim();
       var ps = fd.get('paymentStatus') || '';
       if (ps) client.paymentStatus = ps;
       var pd = fd.get('paymentDate') || '';
+      var paidDateChanged = pd && pd !== (prev.paymentDate || '');
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
@@ -3069,7 +3105,22 @@
       if (client.paymentDate) {
         client.nextBillingDate = addDays(client.paymentDate, 30);
       }
+      // Bug A: a deliberately changed paid-date with status=paid must reach the
+      // per-month base payment row (the single source the card chip + גבייה read)
+      // via persistPayment — otherwise the chip keeps showing the old/today date.
+      var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
       persist()
+        .then(function () {
+          if (!propagatePaid) return;
+          var dueISO = currentMonthBaseDueDate(client);
+          var basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
+          var i = state.payments.findIndex(function (p) { return p.id === basePay.id; });
+          var existing = i >= 0 ? state.payments[i] : null;
+          // Keep any existing notes/method when re-stamping the paid date.
+          if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
+          if (i >= 0) state.payments[i] = basePay; else state.payments.push(basePay);
+          return persistPayment(basePay);
+        })
         .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
         .catch(function (err) {
           Object.assign(client, prev);
