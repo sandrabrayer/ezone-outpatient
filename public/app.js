@@ -1921,17 +1921,16 @@
       renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
     }
 
-    // Responsible person + scope chips (always show if filled)
+    // Treatment-scope chip (responsiblePerson chip removed; field decommissioned).
     var responsibleHtml = '';
-    if (c.responsiblePerson || c.serviceScope) {
+    if (c.serviceScope) {
       var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
                    : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
-      var roleLbl = c.serviceScope === 'individual' ? 'מטפל'
-                  : c.serviceScope === 'program' ? 'מנהל בית' : 'אחראי';
-      responsibleHtml = '<div class="client-meta">' +
-        (scopeLbl ? '<span class="chip chip-scope">' + scopeLbl + '</span>' : '') +
-        (c.responsiblePerson ? '<span class="chip chip-resp">' + roleLbl + ': ' + escapeHtml(c.responsiblePerson) + '</span>' : '') +
-        '</div>';
+      if (scopeLbl) {
+        responsibleHtml = '<div class="client-meta">' +
+          '<span class="chip chip-scope">' + scopeLbl + '</span>' +
+          '</div>';
+      }
     }
 
     // Extra charges (active only) shown inline as a compact list.
@@ -2356,8 +2355,6 @@
     form.clientId.value = client.id;
     if (form.phone) form.phone.value = client.phone || '';
     form.serviceScope.value = client.serviceScope || '';
-    form.responsiblePerson.value = client.responsiblePerson || '';
-    form.treatmentContactPhone.value = client.treatmentContactPhone || '';
     form.payerName.value = client.payerName || '';
     form.payerPhone.value = client.payerPhone || '';
     form.paymentLink.value = client.paymentLink || '';
@@ -3011,18 +3008,16 @@
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
       var scope = fd.get('serviceScope') || '';
-      var resp = (fd.get('responsiblePerson') || '').trim();
       if (!scope) { toast('יש לבחור היקף טיפול', true); submit.disabled = false; return; }
-      if (!resp) { toast('יש להזין שם אחראי טיפול', true); submit.disabled = false; return; }
       var pPhone = acceptPhone(fd.get('phone') || '', 'טלפון מטופל', 'mobile', false);
       if (pPhone === false) { submit.disabled = false; return; }
-      var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
-      if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
-      // Block only on the patient-identity (treatment-contact) phone, excluding
-      // this client. payerPhone is intentionally not deduped (shared payers).
-      if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
+      // Block on the patient's own phone (identity), excluding this client.
+      // payerPhone is intentionally not deduped (shared payers). The former
+      // treatment-contact phone field was removed; its column stays dormant and
+      // existing values are still honored by cross-app matching.
+      if (duplicateClientBlock(pPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
         phone: client.phone,
         serviceScope: client.serviceScope, responsiblePerson: client.responsiblePerson,
@@ -3037,8 +3032,8 @@
       };
       client.phone = pPhone;
       client.serviceScope = scope;
-      client.responsiblePerson = resp;
-      client.treatmentContactPhone = tcPhone;
+      // responsiblePerson / treatmentContactPhone fields removed from the form;
+      // existing values are left untouched (column dormant, matching preserved).
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;
       client.paymentLink = (fd.get('paymentLink') || '').trim();
