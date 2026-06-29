@@ -21,7 +21,8 @@ const {
   nextRenewalDueDate,
   basePaymentPaidOn,
   addDays,
-  deriveNextBillingDate
+  deriveNextBillingDate,
+  sessionFrequencyUnit
 } = require('../public/charges-logic');
 
 test('paymentId scheme: base / extra-monthly / one-time-extra produce distinct ids', () => {
@@ -274,6 +275,19 @@ test('nextRenewalDueDate falls back to legacy calc when nextBillingDate is blank
     nextRenewalDueDate({ id: 'abc', nextBillingDate: '', paymentDate: '2026-05-15' }),
     '2026-06-15'
   );
+});
+
+/* ===== sessionFrequencyUnit: psychiatric is monthly, others weekly ===== */
+
+test('sessionFrequencyUnit: מעקב פסיכיאטרי is monthly (חודש)', () => {
+  assert.equal(sessionFrequencyUnit('מעקב פסיכיאטרי'), 'חודש');
+});
+
+test('sessionFrequencyUnit: all other treatment types are weekly (שבוע)', () => {
+  ['פרטני', 'פרטני CBT', 'פרטני EMDR', 'קבוצה', 'טיפול משפחתי', 'מרכז יום']
+    .forEach(function (svc) {
+      assert.equal(sessionFrequencyUnit(svc), 'שבוע');
+    });
 });
 
 /* ===== Bug B: derive-on-load nextBillingDate for legacy clients ===== */

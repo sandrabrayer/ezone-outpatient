@@ -198,6 +198,11 @@
     return isFinite(n) ? n : 0;
   }
   function monthlyRevenue(c) { return toNum(c.pricePerSession); }
+  // Session-frequency unit per treatment type — psychiatric follow-up is monthly,
+  // all others weekly. Mirrors sessionFrequencyUnit in public/charges-logic.js.
+  function sessionFrequencyUnit(serviceType) {
+    return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
   function toast(msg, isError) {
     var t = $('#toast');
     t.textContent = msg;
@@ -1729,7 +1734,7 @@
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/' + sessionFrequencyUnit(k) + '</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -1880,75 +1885,67 @@
   function clientCard(c) {
     var card = document.createElement('div');
     card.className = 'client-card';
-    var rev = monthlyRevenue(c);
     var services = parseServices(c.serviceType);
-    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     var locationChip = hasDayCenter(services)
       ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
       : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
-    var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
-    var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
     var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
+
+    // Treatment-scope chip (treatment-context).
+    var scopeChip = '';
+    if (c.serviceScope) {
+      var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
+                   : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
+      if (scopeLbl) scopeChip = '<span class="chip chip-scope">' + escapeHtml(scopeLbl) + '</span>';
+    }
+
+    // Treatment-type rows (name + frequency). Weekly unit here is corrected to a
+    // per-type unit (psychiatric = monthly) in the dedicated unit-fix commit.
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
-    var breakdownChips = Object.keys(breakdown).map(function (k) {
-      return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
+    var planRows = services.map(function (s) {
+      var n = breakdown[s];
+      var freq = (n || n === 0) ? n + '/' + sessionFrequencyUnit(s) : '';
+      return '<div class="cc-line"><span class="cc-k">' + escapeHtml(serviceLabel(s)) + '</span>' +
+             '<span class="cc-v">' + freq + '</span></div>';
     }).join('');
-    var total = totalSessions(c.sessionsPerWeek, c.serviceType);
-    var statsHtml =
-      '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
-      '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
-      '<span>הכנסה: <b>' + money(rev) + '</b></span>';
+    if (!planRows) planRows = '<div class="cc-line cc-muted">לא נקבעו מפגשים</div>';
+
+    var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
+    var hooRow = hooLabelClient
+      ? '<div class="cc-line"><span class="cc-k">בית מוצא</span><span class="cc-v">' + escapeHtml(hooLabelClient) + '</span></div>'
+      : '';
 
     // Monthly base-payment status for the CURRENT month. Driven by the same
     // per-month payment row the גבייה tab uses (paymentForClientOn) so both
     // tabs stay consistent. For editors it is a toggle button: unpaid/partial →
     // mark paid, paid → revert to unpaid (both via persistPayment).
-    var paymentHtml = '';
+    var paidChipHtml = '';
+    var paidOnRow = '';
     if (c.status !== 'סיים טיפול') {
       var basePay = paymentForClientOn(c, currentMonthBaseDueDate(c));
       var psId = basePay.status === 'paid' ? 'paid' : basePay.status === 'partial' ? 'partial' : 'unpaid';
       var psLabel = psId === 'paid' ? 'שולם' : psId === 'partial' ? 'שולם חלקית' : 'לא שולם';
-      var statusEl;
       if (state.role === 'editor') {
-        statusEl = psId === 'paid'
+        paidChipHtml = psId === 'paid'
           ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="בטל סימון תשלום לחודש הנוכחי">חבילה: ' + psLabel + ' ↺</button>'
           : '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">חבילה: ' + psLabel + ' ✓</button>';
       } else {
-        statusEl = '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
+        paidChipHtml = '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
       }
-      paymentHtml = '<div class="client-meta">' +
-        statusEl +
-        (psId === 'paid' && basePay.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(basePay.paymentDate) + '</span>' : '') +
-        (c.nextBillingDate ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>' : '') +
-        '</div>';
+      paidOnRow = (psId === 'paid' && basePay.paymentDate)
+        ? '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' + displayDate(basePay.paymentDate) + '</span></div>'
+        : '';
     }
+    var nextBillRow = c.nextBillingDate
+      ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' + displayDate(c.nextBillingDate) + '</span></div>'
+      : '';
+    var startRow = c.startDate
+      ? '<div class="cc-line"><span class="cc-k">תחילת טיפול</span><span class="cc-v">' + displayDate(c.startDate) + '</span></div>'
+      : '';
 
-    // Renewal status banner (overdue / due soon)
-    var renewBannerHtml = '';
-    var renew = renewalInfo(c);
-    if (renew.status === 'overdue') {
-      card.classList.add('client-card-stop');
-      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
-    } else if (renew.status === 'due_soon') {
-      card.classList.add('client-card-warn');
-      var dl = renew.daysLeft;
-      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
-      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
-    }
-
-    // Treatment-scope chip (responsiblePerson chip removed; field decommissioned).
-    var responsibleHtml = '';
-    if (c.serviceScope) {
-      var scopeLbl = c.serviceScope === 'individual' ? 'טיפול פרטני'
-                   : c.serviceScope === 'program' ? 'תוכנית מורחבת' : '';
-      if (scopeLbl) {
-        responsibleHtml = '<div class="client-meta">' +
-          '<span class="chip chip-scope">' + scopeLbl + '</span>' +
-          '</div>';
-      }
-    }
-
-    // Extra charges (active only) shown inline as a compact list.
+    // Extra charges (active only) — additional treatments layered on the base
+    // package. Rendered INSIDE the treatment panel; only present when the patient
+    // has active charges, so empty cards stay clean. Carries the × remove control.
     var activeCharges = state.charges.filter(function (ch) {
       return ch.clientId === c.id && ch.active !== false;
     });
@@ -1976,22 +1973,49 @@
       chargesHtml = '<ul class="client-charges">' + items + '</ul>';
     }
 
+    // כספים (right, RTL reads first): single amount + paid chip + dated rows.
+    var moneyPanel =
+      '<div class="cc-panel cc-money">' +
+        '<div class="cc-panel-title">כספים</div>' +
+        '<div class="cc-amount">' + money(c.pricePerSession) +
+          '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
+        (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
+        paidOnRow + nextBillRow + startRow +
+      '</div>';
+
+    // תוכנית טיפול (left): scope, treatment-type rows, בית מוצא, extra charges.
+    var planPanel =
+      '<div class="cc-panel cc-plan">' +
+        '<div class="cc-panel-title">תוכנית טיפול</div>' +
+        (scopeChip ? '<div class="cc-chips">' + scopeChip + '</div>' : '') +
+        planRows +
+        hooRow +
+        chargesHtml +
+      '</div>';
+
+    // Renewal status banner (overdue / due soon)
+    var renewBannerHtml = '';
+    var renew = renewalInfo(c);
+    if (renew.status === 'overdue') {
+      card.classList.add('client-card-stop');
+      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
+    } else if (renew.status === 'due_soon') {
+      card.classList.add('client-card-warn');
+      var dl = renew.daysLeft;
+      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
+      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
+    }
+
     card.innerHTML =
       renewBannerHtml +
-      '<div class="client-head">' +
-        '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
-        '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
+      '<div class="cc-top">' +
+        '<div class="client-head">' +
+          '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
+          '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
+        '</div>' +
+        ((phoneChip || locationChip) ? '<div class="client-meta">' + phoneChip + locationChip + '</div>' : '') +
       '</div>' +
-      '<div class="client-meta">' + serviceChips + locationChip + hooChip + '</div>' +
-      (phoneChip ? '<div class="client-meta">' + phoneChip + '</div>' : '') +
-      responsibleHtml +
-      (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
-      '<div class="client-stats">' + statsHtml + '</div>' +
-      paymentHtml +
-      chargesHtml +
-      '<div class="client-meta">' +
-        (c.startDate ? 'תחילת טיפול: ' + displayDate(c.startDate) : '') +
-      '</div>' +
+      '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
       '<div class="client-actions edit-only"></div>';
 
     if (state.role === 'editor') {

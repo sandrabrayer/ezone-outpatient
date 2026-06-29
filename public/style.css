@@ -12,6 +12,18 @@
   --green-deep: #0f6a44;
   --red: #ff7676;
   --amber: #f2c355;
+  /* Cool accent — promoted from the existing chip-next / next-bill blue so the
+     patient-card treatment panel can share one source with the גבייה הבאה chip
+     (no new hue introduced). */
+  --blue-soft: #cce5ff;
+  --blue-deep: #004085;
+  /* Patient-card panel tints, derived from existing tokens so each half is
+     distinct from the card (--panel) and from each other: money = green family,
+     treatment plan = the promoted blue. */
+  --panel-money: color-mix(in srgb, var(--green-deep) 34%, var(--panel));
+  --panel-money-border: color-mix(in srgb, var(--green-deep) 60%, var(--border));
+  --panel-plan: color-mix(in srgb, var(--blue-deep) 30%, var(--panel));
+  --panel-plan-border: color-mix(in srgb, var(--blue-deep) 55%, var(--border));
   --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
 }
 
@@ -206,7 +218,9 @@ button, input, select, textarea {
 }
 .client-tabs .ct.active { color: var(--text); border-color: var(--green-deep); background: var(--panel-2); }
 
-.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+/* Wider min so the two-column patient card has room (drops ~3→2 per row on a
+   typical desktop, which is fine). */
+.clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; }
 .client-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px; display: flex; flex-direction: column; gap: 6px;
@@ -219,6 +233,48 @@ button, input, select, textarea {
 .client-card .client-stats b { color: var(--green-2); font-weight: 700; }
 .client-card .client-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .client-card .client-actions .btn { padding: 4px 10px; font-size: 12px; }
+
+/* Two-column patient card: כספים (right, RTL reads first) | תוכנית טיפול (left). */
+.client-card .cc-top { display: flex; flex-direction: column; gap: 6px; }
+.client-card .cc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+.client-card .cc-panel {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+/* Static hex tints (precomputed from the same tokens) are the reliable default;
+   color-mix is opted into via @supports below. A var()/color-mix value that the
+   browser can't resolve becomes invalid at computed-value time and falls back to
+   transparent — NOT to a prior declaration — so the hex must be the base and
+   color-mix the enhancement, guaranteeing the tints always render. */
+.client-card .cc-money { background: #124733; border-color: #1a6a49; }
+.client-card .cc-plan  { background: #0d3845; border-color: #13536e; }
+@supports (background: color-mix(in srgb, red, blue)) {
+  .client-card .cc-money { background: var(--panel-money); border-color: var(--panel-money-border); }
+  .client-card .cc-plan  { background: var(--panel-plan);  border-color: var(--panel-plan-border); }
+}
+.client-card .cc-panel-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--text-soft); opacity: 0.8; text-transform: none;
+}
+.client-card .cc-amount { display: flex; flex-direction: column; line-height: 1.1; }
+.client-card .cc-amount { font-size: 22px; font-weight: 800; color: var(--green-2); }
+.client-card .cc-amount-sub { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.client-card .cc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.client-card .cc-line { display: flex; flex-direction: column; }
+.client-card .cc-line .cc-k { font-size: 11px; color: var(--muted); }
+.client-card .cc-line .cc-v { font-size: 13px; font-weight: 600; color: var(--text); }
+.client-card .cc-line.cc-muted { font-size: 12px; color: var(--muted); }
+/* גבייה הבאה — highlighted in the money panel with the promoted blue accent. */
+.client-card .cc-line-hot {
+  background: var(--blue-soft); border-radius: 8px; padding: 4px 6px;
+}
+.client-card .cc-line-hot .cc-k { color: var(--blue-deep); opacity: 0.85; }
+.client-card .cc-line-hot .cc-v { color: var(--blue-deep); }
+/* Mobile: stack the two halves, money on top (it is first in the DOM). */
+@media (max-width: 560px) {
+  .clients-list { grid-template-columns: 1fr; }
+  .client-card .cc-body { grid-template-columns: 1fr; }
+}
 
 .status-badge {
   font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
@@ -384,7 +440,7 @@ body.viewer .edit-only { display: none !important; }
 .chip-paid    { background: #d4edda; color: #155724; }
 .chip-partial { background: #fff3cd; color: #856404; }
 .chip-unpaid  { background: #f8d7da; color: #721c24; }
-.chip-next    { background: #cce5ff; color: #004085; font-weight: 600; }
+.chip-next    { background: var(--blue-soft); color: var(--blue-deep); font-weight: 600; }
 
 /* Clickable monthly-payment chip on the patient card (editor, unpaid). */
 button.month-pay-btn {
@@ -396,7 +452,7 @@ button.month-pay-btn {
 button.month-pay-btn:hover { filter: brightness(0.94); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12) inset; }
 button.month-pay-btn:active { filter: brightness(0.88); }
 
-.next-bill { color: #004085; font-weight: 600; }
+.next-bill { color: var(--blue-deep); font-weight: 600; }
 
 .form-section-title {
   font-size: 0.82rem;
