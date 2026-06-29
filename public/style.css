@@ -241,8 +241,17 @@ button, input, select, textarea {
   border: 1px solid var(--border); border-radius: 10px; padding: 10px;
   display: flex; flex-direction: column; gap: 6px;
 }
-.client-card .cc-money { background: var(--panel-money); border-color: var(--panel-money-border); }
-.client-card .cc-plan  { background: var(--panel-plan);  border-color: var(--panel-plan-border); }
+/* Static hex tints (precomputed from the same tokens) are the reliable default;
+   color-mix is opted into via @supports below. A var()/color-mix value that the
+   browser can't resolve becomes invalid at computed-value time and falls back to
+   transparent — NOT to a prior declaration — so the hex must be the base and
+   color-mix the enhancement, guaranteeing the tints always render. */
+.client-card .cc-money { background: #124733; border-color: #1a6a49; }
+.client-card .cc-plan  { background: #0d3845; border-color: #13536e; }
+@supports (background: color-mix(in srgb, red, blue)) {
+  .client-card .cc-money { background: var(--panel-money); border-color: var(--panel-money-border); }
+  .client-card .cc-plan  { background: var(--panel-plan);  border-color: var(--panel-plan-border); }
+}
 .client-card .cc-panel-title {
   font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
   color: var(--text-soft); opacity: 0.8; text-transform: none;

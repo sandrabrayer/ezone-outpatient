@@ -16,6 +16,13 @@ All derived from existing theme values — no new hue:
 - `--panel-money` / `--panel-plan` (+ matching borders): `color-mix` tints of
   `--green-deep` and `--blue-deep` over `--panel`, so each card half is distinct
   from the card background and from each other.
+- **Fallback:** the panel-tint *use sites* (`.cc-money` / `.cc-plan`) set a
+  precomputed static hex (`#124733`/`#1a6a49`, `#0d3845`/`#13536e` — computed
+  from the same tokens) as the base, then opt into the `color-mix` tokens via
+  `@supports`. A `var()`/`color-mix` value the browser can't resolve becomes
+  invalid at computed-value time and falls back to transparent (not to a prior
+  declaration), so the hex must be the base — guaranteeing the tints always
+  render even on browsers without `color-mix`.
 
 ## 2. Card restructure (`public/app.js`, `public/style.css`)
 
