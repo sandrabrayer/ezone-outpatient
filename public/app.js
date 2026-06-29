@@ -2504,9 +2504,6 @@
   // --- auth
   function applyRole() {
     document.body.classList.toggle('viewer', state.role !== 'editor');
-    var badge = $('#roleBadge');
-    badge.textContent = state.role === 'editor' ? 'עורך' : 'צופה';
-    badge.classList.toggle('editor', state.role === 'editor');
   }
   function showPin() {
     $('#pinScreen').hidden = false;
