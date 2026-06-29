@@ -118,15 +118,6 @@ button, input, select, textarea {
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); background: var(--panel); border-color: var(--border); }
 .topbar-right { display: flex; gap: 6px; align-items: center; }
-.role-badge {
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--muted);
-}
-.role-badge.editor { color: var(--green-2); border-color: var(--green-deep); }
 
 .main { padding: 18px; max-width: 1280px; margin: 0 auto; width: 100%; flex: 1; }
 
