@@ -764,7 +764,7 @@
     var byLoc = {};
     LOCATIONS.forEach(function (l) { byLoc[l] = 0; });
     activeOnly.forEach(function (c) {
-      var loc = hasDayCenter(c.serviceType) ? DAY_CENTER_LOCATION : c.location;
+      var loc = c.location;
       if (!loc) return;
       if (byLoc[loc] === undefined) byLoc[loc] = 0;
       byLoc[loc]++;
@@ -1721,10 +1721,8 @@
     card.className = 'card';
     var services = parseServices(l.serviceType);
     var chipsHtml = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
-    if (l.location && !hasDayCenter(services)) {
+    if (l.location) {
       chipsHtml += '<span class="chip">' + escapeHtml(l.location) + '</span>';
-    } else if (hasDayCenter(services)) {
-      chipsHtml += '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>';
     }
     var hooLabel = houseOfOriginLabel(l.house_of_origin);
     if (hooLabel) {
@@ -1886,9 +1884,7 @@
     var card = document.createElement('div');
     card.className = 'client-card';
     var services = parseServices(c.serviceType);
-    var locationChip = hasDayCenter(services)
-      ? '<span class="chip">' + escapeHtml(DAY_CENTER_LOCATION) + '</span>'
-      : (c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '');
+    var locationChip = c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '';
     var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
 
     // Treatment-scope chip (treatment-context).
@@ -2167,12 +2163,11 @@
     var fd = new FormData(form);
     var group = $('[data-group="serviceType"]', form);
     var services = readServiceGroup(group);
-    var isDayCenter = hasDayCenter(services);
     return {
       name: (fd.get('name') || '').trim(),
       phone: normalizePhone(fd.get('phone') || ''),
       serviceType: formatServices(services),
-      location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
+      location: (fd.get('location') || ''),
       note: (fd.get('note') || '').trim(),
       created: fd.get('created') || today(),
       house_of_origin: (fd.get('house_of_origin') || '').trim()
@@ -2258,20 +2253,12 @@
   }
   function updateLocationVisibility(form) {
     if (!form) return;
-    var group = $('[data-group="serviceType"]', form);
-    if (!group) return;
+    // סניף is always visible and selectable, regardless of service type — the
+    // branch the user picks is the single source of truth (incl. day-center).
     var wrap = formLocationWrap(form);
-    if (!wrap) return;
-    var picked = readServiceGroup(group);
-    if (hasDayCenter(picked)) {
-      wrap.classList.add('field-hidden');
-      var sel = $('select[name="location"]', form);
-      if (sel) { sel.required = false; sel.value = DAY_CENTER_LOCATION; }
-    } else {
-      wrap.classList.remove('field-hidden');
-      var sel2 = $('select[name="location"]', form);
-      if (sel2) sel2.required = true;
-    }
+    if (wrap) wrap.classList.remove('field-hidden');
+    var sel = $('select[name="location"]', form);
+    if (sel) sel.required = true;
   }
 
   // --- modals ------------------------------------------------------------
@@ -2361,19 +2348,12 @@
   function closeDirectClientModal() { $('#directClientModal').hidden = true; }
 
   function updateLocationVisibilityForDirect(form) {
-    var group = $('[data-group="serviceType"]', form);
+    // סניף is always visible and selectable, regardless of service type.
     var wrap = $('#directLocationWrap');
     var sel = $('select[name="location"]', form);
-    if (!group || !wrap || !sel) return;
-    var picked = readServiceGroup(group);
-    if (hasDayCenter(picked)) {
-      wrap.classList.add('field-hidden');
-      sel.required = false;
-      sel.value = DAY_CENTER_LOCATION;
-    } else {
-      wrap.classList.remove('field-hidden');
-      sel.required = true;
-    }
+    if (!wrap || !sel) return;
+    wrap.classList.remove('field-hidden');
+    sel.required = true;
   }
 
   var exitClientId = null;
@@ -2804,7 +2784,6 @@
         var group = $('[data-group="serviceType"]', form);
         var services = readServiceGroup(group);
         if (!services.length) { toast('יש לבחור לפחות סוג טיפול אחד', true); submit.disabled = false; return; }
-        var isDayCenter = hasDayCenter(services);
         var name = (fd.get('name') || '').trim();
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
         var directPhone = acceptPhone(fd.get('phone') || '', 'טלפון', 'mobile', false);
@@ -2830,7 +2809,7 @@
         var client = {
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
-          location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || ''),
+          location: (fd.get('location') || ''),
           sessionsPerWeek: clean, pricePerSession: monthlyAmount,
           startDate: startDate, status: 'פעיל', exitDate: '',
           fromLead: '', source: 'direct_admin',
@@ -2942,7 +2921,6 @@
       var breakdown = readSessionsHost(host);
       var cleanBreakdown = {};
       services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
-      var isDayCenter = hasDayCenter(services);
       var startDate = fd.get('startDate') || today();
       var payStatus = fd.get('paymentStatus') || 'unpaid';
       var payDate = fd.get('paymentDate') || '';
@@ -2956,7 +2934,7 @@
       var client = {
         id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
         serviceType: formatServices(services),
-        location: isDayCenter ? DAY_CENTER_LOCATION : (fd.get('location') || lead.location),
+        location: (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: startDate,
