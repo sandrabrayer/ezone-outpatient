@@ -95,14 +95,14 @@
     var out = {};
     if (!v && v !== 0) return out;
     if (typeof v === 'object' && !Array.isArray(v)) {
-      Object.keys(v).forEach(function (k) { out[k] = wholeSessions(v[k]); });
+      Object.keys(v).forEach(function (k) { if (k !== '_units') out[k] = wholeSessions(v[k]); });
       return out;
     }
     var s = String(v).trim();
     if (s && s.charAt(0) === '{') {
       try {
         var parsed = JSON.parse(s);
-        Object.keys(parsed).forEach(function (k) { out[k] = wholeSessions(parsed[k]); });
+        Object.keys(parsed).forEach(function (k) { if (k !== '_units') out[k] = wholeSessions(parsed[k]); });
         return out;
       } catch (_) {}
     }
@@ -112,7 +112,20 @@
     if (n) out._total = n;
     return out;
   }
-  function formatSessionsBreakdown(b) { return JSON.stringify(b || {}); }
+  // Serialize the service→count breakdown, attaching any valid per-service unit
+  // overrides under the reserved `_units` key (omitted when none apply, so
+  // override-free records are unchanged). Mirrors charges-logic attachSessionsUnits.
+  function formatSessionsBreakdown(b, units) {
+    var obj = {};
+    Object.keys(b || {}).forEach(function (k) { if (k !== '_units') obj[k] = b[k]; });
+    var u = {};
+    Object.keys(units || {}).forEach(function (k) {
+      var val = String(units[k] == null ? '' : units[k]).trim();
+      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+    });
+    if (Object.keys(u).length) obj._units = u;
+    return JSON.stringify(obj);
+  }
   function totalSessions(v, services) {
     var b = parseSessionsBreakdown(v, services);
     return Object.keys(b).reduce(function (s, k) { return s + wholeSessions(b[k]); }, 0);
@@ -202,6 +215,32 @@
   // all others weekly. Mirrors sessionFrequencyUnit in public/charges-logic.js.
   function sessionFrequencyUnit(serviceType) {
     return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
+  // Resolve the unit for a service: a valid per-patient override wins, else the
+  // by-type default. Mirrors sessionUnitFor in public/charges-logic.js.
+  function sessionUnitFor(serviceType, units) {
+    var u = units && units[serviceType];
+    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+  }
+  // Extract per-service unit overrides from a stored sessionsPerWeek value
+  // (object or JSON string); overrides live under the reserved `_units` key.
+  // Mirrors parseSessionsUnits in public/charges-logic.js.
+  function parseSessionsUnits(v) {
+    var out = {};
+    if (!v) return out;
+    var obj = null;
+    if (typeof v === 'object' && !Array.isArray(v)) obj = v;
+    else {
+      var s = String(v).trim();
+      if (s && s.charAt(0) === '{') { try { obj = JSON.parse(s); } catch (_) {} }
+    }
+    if (obj && obj._units && typeof obj._units === 'object') {
+      Object.keys(obj._units).forEach(function (k) {
+        var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
+        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+      });
+    }
+    return out;
   }
   function toast(msg, isError) {
     var t = $('#toast');
@@ -358,6 +397,7 @@
       note: row.note || '',
       stage: heToId(row.stage || ''),
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
+      sessionsUnit: parseSessionsUnits(row.sessionsPerWeek),
       pricePerSession: row.pricePerSession === '' ? '' : toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       created: fmtDate(row.created) || today(),
@@ -378,6 +418,7 @@
       serviceType: services,
       location: row.location || '',
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
+      sessionsUnit: parseSessionsUnits(row.sessionsPerWeek),
       pricePerSession: toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       status: row.status || 'פעיל',
@@ -412,7 +453,7 @@
       location: l.location,
       note: l.note,
       stage: idToHe(l.stage),
-      sessionsPerWeek: Object.keys(breakdown).length ? formatSessionsBreakdown(breakdown) : '',
+      sessionsPerWeek: Object.keys(breakdown).length ? formatSessionsBreakdown(breakdown, l.sessionsUnit) : '',
       pricePerSession: l.pricePerSession === '' ? '' : toNum(l.pricePerSession),
       startDate: l.startDate || '',
       created: l.created || today(),
@@ -434,7 +475,7 @@
       phone: c.phone || '',
       serviceType: services,
       location: c.location,
-      sessionsPerWeek: formatSessionsBreakdown(breakdown),
+      sessionsPerWeek: formatSessionsBreakdown(breakdown, c.sessionsUnit),
       pricePerSession: toNum(c.pricePerSession),
       startDate: c.startDate || '',
       status: c.status || 'פעיל',
@@ -1731,8 +1772,9 @@
     var agreementFields = '';
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
+      var bdUnits = l.sessionsUnit || parseSessionsUnits(l.sessionsPerWeek);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/' + sessionFrequencyUnit(k) + '</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/' + sessionUnitFor(k, bdUnits) + '</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -1898,9 +1940,10 @@
     // Treatment-type rows (name + frequency). Weekly unit here is corrected to a
     // per-type unit (psychiatric = monthly) in the dedicated unit-fix commit.
     var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
+    var planUnits = c.sessionsUnit || parseSessionsUnits(c.sessionsPerWeek);
     var planRows = services.map(function (s) {
       var n = breakdown[s];
-      var freq = (n || n === 0) ? n + '/' + sessionFrequencyUnit(s) : '';
+      var freq = (n || n === 0) ? n + '/' + sessionUnitFor(s, planUnits) : '';
       return '<div class="cc-line"><span class="cc-k">' + escapeHtml(serviceLabel(s)) + '</span>' +
              '<span class="cc-v">' + freq + '</span></div>';
     }).join('');
@@ -2196,7 +2239,7 @@
   }
 
   // --- dynamic per-service sessions fields
-  function renderSessionsHost(host, services, values) {
+  function renderSessionsHost(host, services, values, unitValues) {
     host.innerHTML = '';
     var list = parseServices(services);
     if (!list.length) {
@@ -2207,20 +2250,41 @@
       return;
     }
     var current = parseSessionsBreakdown(values, services);
+    var units = unitValues || parseSessionsUnits(values);
     list.forEach(function (svc) {
       var label = document.createElement('label');
-      label.textContent = 'מפגשים בשבוע — ' + svc;
+      label.textContent = 'תדירות הטיפול — ' + svc;
       var input = document.createElement('input');
       input.type = 'number'; input.min = '0'; input.step = '1'; input.required = true;
       input.dataset.service = svc;
       input.value = current[svc] != null ? current[svc] : '';
       label.appendChild(input);
+      // Unit selector (per service). Defaults to the stored override if present,
+      // else the by-type default (psychiatric → חודש, all others → שבוע).
+      var unitSel = document.createElement('select');
+      unitSel.dataset.serviceUnit = svc;
+      ['שבוע', 'חודש'].forEach(function (unit) {
+        var o = document.createElement('option');
+        o.value = unit; o.textContent = unit;
+        unitSel.appendChild(o);
+      });
+      unitSel.value = sessionUnitFor(svc, units);
+      label.appendChild(unitSel);
       host.appendChild(label);
     });
   }
   function readSessionsHost(host) {
     var out = {};
     $$('input[data-service]', host).forEach(function (inp) { out[inp.dataset.service] = wholeSessions(inp.value); });
+    return out;
+  }
+  // Read the per-service unit selections from a sessions host. Returns only
+  // services whose select carries a valid unit ('שבוע'|'חודש').
+  function readSessionsUnits(host) {
+    var out = {};
+    $$('select[data-service-unit]', host).forEach(function (sel) {
+      if (sel.value === 'שבוע' || sel.value === 'חודש') out[sel.dataset.serviceUnit] = sel.value;
+    });
     return out;
   }
 
@@ -2297,7 +2361,7 @@
     agreementAdvance = !!advance;
     var f = $('#agreementForm');
     f.reset();
-    renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek);
+    renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit);
     f.pricePerSession.value = lead.pricePerSession || '';
     if (f.paymentStatus) f.paymentStatus.value = lead.paymentStatus || 'paid';
     if (f.paymentDate) f.paymentDate.value = lead.paymentDate || today();
@@ -2314,12 +2378,12 @@
     populateServiceGroup(group, lead.serviceType);
     if (lead.location) f.location.value = lead.location;
     var host = $('[data-host="activateSessions"]', f);
-    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek);
+    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit);
     $$('input[type="checkbox"]', group).forEach(function (cb) {
       cb.addEventListener('change', function () {
         var picked = readServiceGroup(group);
         var current = readSessionsHost(host);
-        renderSessionsHost(host, formatServices(picked), current);
+        renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
       });
     });
     f.pricePerSession.value = lead.pricePerSession || '';
@@ -2341,7 +2405,7 @@
     if (f.billingDay) f.billingDay.value = '';
     if (f.monthlyAmount) f.monthlyAmount.value = '';
     if (f.paymentDate) f.paymentDate.value = today();
-    renderSessionsHost($('[data-host="directSessions"]', f), '', {});
+    renderSessionsHost($('[data-host="directSessions"]', f), '', {}, {});
     updateLocationVisibilityForDirect(f);
     m.hidden = false;
   }
@@ -2388,12 +2452,12 @@
     var ecHost = $('[data-host="editClientSessions"]', form);
     if (ecGroup && ecHost) {
       populateServiceGroup(ecGroup, client.serviceType);
-      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek);
+      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
       $$('input[type="checkbox"]', ecGroup).forEach(function (cb) {
         cb.addEventListener('change', function () {
           var picked = readServiceGroup(ecGroup);
           var current = readSessionsHost(ecHost);
-          renderSessionsHost(ecHost, formatServices(picked), current);
+          renderSessionsHost(ecHost, formatServices(picked), current, readSessionsUnits(ecHost));
         });
       });
     }
@@ -2766,7 +2830,7 @@
           var picked = readServiceGroup(group);
           var host = $('[data-host="directSessions"]', f);
           var current = readSessionsHost(host);
-          renderSessionsHost(host, formatServices(picked), current);
+          renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
           updateLocationVisibilityForDirect(f);
         });
       }
@@ -2794,6 +2858,7 @@
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
         var host = $('[data-host="directSessions"]', form);
         var breakdown = readSessionsHost(host);
+        var cleanUnits = readSessionsUnits(host);
         var clean = {};
         services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
         var bd = fd.get('billingDay');
@@ -2810,7 +2875,7 @@
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
           location: (fd.get('location') || ''),
-          sessionsPerWeek: clean, pricePerSession: monthlyAmount,
+          sessionsPerWeek: clean, sessionsUnit: cleanUnits, pricePerSession: monthlyAmount,
           startDate: startDate, status: 'פעיל', exitDate: '',
           fromLead: '', source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
@@ -2884,6 +2949,7 @@
       var fd = new FormData(e.target);
       var host = $('[data-host="agreementSessions"]', e.target);
       lead.sessionsPerWeek = readSessionsHost(host);
+      lead.sessionsUnit = readSessionsUnits(host);
       lead.pricePerSession = toNum(fd.get('pricePerSession'));
       var agPayStatus = fd.get('paymentStatus') || '';
       var agPayDate = fd.get('paymentDate') || '';
@@ -2919,6 +2985,7 @@
       if (!services.length) { submit.disabled = false; toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       var host = $('[data-host="activateSessions"]', e.target);
       var breakdown = readSessionsHost(host);
+      var cleanUnits = readSessionsUnits(host);
       var cleanBreakdown = {};
       services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
       var startDate = fd.get('startDate') || today();
@@ -2936,6 +3003,7 @@
         serviceType: formatServices(services),
         location: (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
+        sessionsUnit: cleanUnits,
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: startDate,
         status: 'פעיל', exitDate: '', fromLead: lead.id,
@@ -2953,6 +3021,7 @@
       lead.serviceType = client.serviceType;
       lead.location = client.location;
       lead.sessionsPerWeek = client.sessionsPerWeek;
+      lead.sessionsUnit = client.sessionsUnit;
       lead.pricePerSession = client.pricePerSession;
       lead.startDate = client.startDate;
       lead.paymentStatus = payStatus;
@@ -3067,6 +3136,7 @@
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
         pricePerSession: client.pricePerSession,
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
+        sessionsUnit: client.sessionsUnit,
         nextBillingDate: client.nextBillingDate,
         location: client.location,
         house_of_origin: client.house_of_origin, notes: client.notes
@@ -3099,10 +3169,12 @@
         var pickedSvc = readServiceGroup(ecGroup2);
         if (pickedSvc.length) {
           var bd = readSessionsHost(ecHost2);
+          var bdUnits = readSessionsUnits(ecHost2);
           var cleanBd = {};
           pickedSvc.forEach(function (s) { cleanBd[s] = wholeSessions(bd[s] || 0); });
           client.serviceType = formatServices(pickedSvc);
           client.sessionsPerWeek = cleanBd;
+          client.sessionsUnit = bdUnits;
         }
       }
       // Recalculate next billing date from payment date (+30 days), as on activate

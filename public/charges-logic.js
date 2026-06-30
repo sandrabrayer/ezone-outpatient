@@ -32,6 +32,59 @@
     return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
   }
 
+  // Resolve the frequency unit for a service: an explicit, valid per-patient
+  // override wins; otherwise fall back to the by-type default in
+  // sessionFrequencyUnit. `units` is a { service: 'שבוע'|'חודש' } map and may be
+  // empty/undefined (legacy records). Mirrors sessionUnitFor in public/app.js —
+  // keep both in sync.
+  function sessionUnitFor(serviceType, units) {
+    var u = units && units[serviceType];
+    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+  }
+
+  // Extract per-service unit overrides from a stored sessionsPerWeek value
+  // (object or JSON string). Overrides live under the reserved `_units` key
+  // inside the SAME blob as the service→count entries, so no schema/column
+  // change is needed. Invalid/unknown units are dropped. Returns a
+  // { service: 'שבוע'|'חודש' } map. Mirrors parseSessionsUnits in
+  // public/app.js — keep both in sync.
+  function parseSessionsUnits(v) {
+    var out = {};
+    if (!v) return out;
+    var obj = null;
+    if (typeof v === 'object' && !Array.isArray(v)) obj = v;
+    else {
+      var s = String(v).trim();
+      if (s && s.charAt(0) === '{') { try { obj = JSON.parse(s); } catch (_) {} }
+    }
+    if (obj && obj._units && typeof obj._units === 'object') {
+      Object.keys(obj._units).forEach(function (k) {
+        var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
+        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+      });
+    }
+    return out;
+  }
+
+  // Build the serializable sessionsPerWeek object: the service→count entries
+  // plus a reserved `_units` map of any VALID per-service overrides. Invalid
+  // units are dropped and `_units` is omitted entirely when none apply, so
+  // records without overrides serialize byte-for-byte as before. Mirrors
+  // attachSessionsUnits in public/app.js — keep both in sync.
+  function attachSessionsUnits(breakdown, units) {
+    var obj = {};
+    Object.keys(breakdown || {}).forEach(function (k) {
+      if (k !== '_units') obj[k] = breakdown[k];
+    });
+    var u = {};
+    Object.keys(units || {}).forEach(function (k) {
+      var val = String(units[k] == null ? '' : units[k]).trim();
+      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+    });
+    if (Object.keys(u).length) obj._units = u;
+    return obj;
+  }
+
   // Add 1 calendar month to an ISO date string, clamping to the last day of
   // the target month (Jan 31 + 1mo -> Feb 28). Mirrors addMonth in
   // public/app.js — keep both in sync.
@@ -242,6 +295,9 @@
   return {
     monthKey: monthKey,
     sessionFrequencyUnit: sessionFrequencyUnit,
+    sessionUnitFor: sessionUnitFor,
+    parseSessionsUnits: parseSessionsUnits,
+    attachSessionsUnits: attachSessionsUnits,
     addMonth: addMonth,
     addDays: addDays,
     deriveNextBillingDate: deriveNextBillingDate,
