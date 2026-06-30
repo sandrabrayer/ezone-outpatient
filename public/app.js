@@ -2400,6 +2400,7 @@
     form.paymentStatus.value = client.paymentStatus || 'paid';
     form.paymentDate.value = client.paymentDate || '';
     form.monthlyAmount.value = client.pricePerSession || '';
+    if (form.location) form.location.value = client.location || '';
     if (form.house_of_origin) form.house_of_origin.value = client.house_of_origin || '';
     if (form.notes) form.notes.value = client.notes || '';
     // Treatment plan: service types + sessions per week per treatment
@@ -3089,6 +3090,7 @@
         pricePerSession: client.pricePerSession,
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
         nextBillingDate: client.nextBillingDate,
+        location: client.location,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
       client.phone = pPhone;
@@ -3105,6 +3107,9 @@
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
+      // location (סניף): allow setting OR clearing. Stored as raw Hebrew text
+      // (not keyed), so the chosen option value is saved verbatim.
+      if (fd.has('location')) client.location = (fd.get('location') || '').trim();
       // house_of_origin: allow setting OR clearing (user may correct a wrong value).
       if (fd.has('house_of_origin')) client.house_of_origin = (fd.get('house_of_origin') || '').trim();
       // notes: allow setting OR clearing.
