@@ -85,6 +85,36 @@
     return obj;
   }
 
+  // Urgency tier for a card, from a renewalInfo() status:
+  //   0 = overdue / red (עצור טיפול — לא שולם)   [top]
+  //   1 = due_soon (חידוש היום / בעוד N ימים)
+  //   2 = everyone else (ok / unknown)
+  // Reuses the status renewalInfo already computed — no independent recompute.
+  // Mirrors urgencyTier in public/app.js — keep both in sync.
+  function urgencyTier(status) {
+    if (status === 'overdue') return 0;
+    if (status === 'due_soon') return 1;
+    return 2;
+  }
+
+  // Stable comparator over decorated card entries { tier, daysLeft, index }:
+  //   - lower tier first (red -> due_soon -> other)
+  //   - within the red and due_soon tiers, ascending daysLeft so the most
+  //     overdue / soonest renewal floats up (today=0 before "in 2 days";
+  //     -3 before -1); null daysLeft sinks to the end of its tier
+  //   - same tier (and same daysLeft) -> original index, an explicit stable
+  //     tiebreak so tier 2 (and any ties) keep their incoming order
+  // Mirrors compareCardUrgency in public/app.js — keep both in sync.
+  function compareCardUrgency(a, b) {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.tier !== 2) {
+      var da = a.daysLeft == null ? Infinity : a.daysLeft;
+      var db = b.daysLeft == null ? Infinity : b.daysLeft;
+      if (da !== db) return da - db;
+    }
+    return a.index - b.index;
+  }
+
   // Add 1 calendar month to an ISO date string, clamping to the last day of
   // the target month (Jan 31 + 1mo -> Feb 28). Mirrors addMonth in
   // public/app.js — keep both in sync.
@@ -298,6 +328,8 @@
     sessionUnitFor: sessionUnitFor,
     parseSessionsUnits: parseSessionsUnits,
     attachSessionsUnits: attachSessionsUnits,
+    urgencyTier: urgencyTier,
+    compareCardUrgency: compareCardUrgency,
     addMonth: addMonth,
     addDays: addDays,
     deriveNextBillingDate: deriveNextBillingDate,

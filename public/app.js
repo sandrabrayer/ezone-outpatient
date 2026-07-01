@@ -347,6 +347,27 @@
     return { renewalDate: renewal, daysLeft: daysLeft, status: status };
   }
 
+  // Urgency tier from a renewalInfo() status: 0 = overdue/red, 1 = due_soon,
+  // 2 = everyone else. Mirrors urgencyTier in public/charges-logic.js.
+  function urgencyTier(status) {
+    if (status === 'overdue') return 0;
+    if (status === 'due_soon') return 1;
+    return 2;
+  }
+  // Stable comparator over decorated card entries { tier, daysLeft, index }:
+  // lower tier first; within red + due_soon ascending daysLeft (most overdue /
+  // soonest first, null last); ties fall back to original index (stable).
+  // Mirrors compareCardUrgency in public/charges-logic.js.
+  function compareCardUrgency(a, b) {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.tier !== 2) {
+      var da = a.daysLeft == null ? Infinity : a.daysLeft;
+      var db = b.daysLeft == null ? Infinity : b.daysLeft;
+      if (da !== db) return da - db;
+    }
+    return a.index - b.index;
+  }
+
   // --- API ---------------------------------------------------------------
   async function apiLoad() {
     var r = await fetch('/api/sheets', { cache: 'no-store' });
@@ -1912,8 +1933,16 @@
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
-    visible.forEach(function (c) { list.appendChild(clientCard(c)); });
-    if (!visible.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
+    // Urgency sort: red (overdue) first, then renewals by soonest, everyone
+    // else stable. renewalInfo() is computed ONCE per card here and reused —
+    // the sort never recomputes urgency independently of the banner.
+    var decorated = visible.map(function (c, i) {
+      var info = renewalInfo(c);
+      return { client: c, tier: urgencyTier(info.status), daysLeft: info.daysLeft, index: i };
+    });
+    decorated.sort(compareCardUrgency);
+    decorated.forEach(function (d) { list.appendChild(clientCard(d.client)); });
+    if (!decorated.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
   }
 
   function statusClass(s) {
