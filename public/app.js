@@ -147,6 +147,11 @@
     billingSearch: '',
     clientTab: 'all',
     billingDate: '',
+    sessionLog: null,          // SessionLog rows for the payout view; null = not yet fetched
+    sessionLogLoading: false,  // in-flight guard for the lazy SessionLog load
+    sessionLogError: '',       // last SessionLog fetch error (shown in the payout view)
+    payoutMonth: '',           // 'YYYY-MM' for the payout view; defaults to current month
+    payoutExpanded: {},        // therapist name -> expanded session detail (bool)
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
   };
@@ -534,6 +539,12 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  async function apiGetSessionLog() {
+    var r = await fetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
   async function apiGetCharges() {
     var r = await fetch('/api/sheets?action=getCharges', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
@@ -800,6 +811,7 @@
     else if (state.view === 'clients') renderClients();
     else if (state.view === 'billing') renderBilling();
     else if (state.view === 'retention') renderRetention();
+    else if (state.view === 'payouts') renderPayouts();
   }
 
   // ---- Dashboard
@@ -1793,6 +1805,251 @@
     }
   }
 
+  // ---- Therapist payouts (read-only, step 1 of 4) ----
+  // Per-therapist monthly payout summary computed client-side from SessionLog
+  // rows via the shared pure module (window.TherapistPayout). Display only — no
+  // corrections, no export, no forward-marking (those are steps 2–4).
+  var OUTCOME_LABELS = {
+    happened: 'התקיים',
+    patient_no_show: 'מטופל לא הגיע',
+    therapist_cancelled: 'בוטל ע״י מטפל'
+  };
+
+  function currentMonthStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  // Lazy first-load of SessionLog rows (only when the payout tab is first opened).
+  function ensureSessionLogLoaded() {
+    if (state.sessionLog !== null || state.sessionLogLoading) return;
+    state.sessionLogLoading = true;
+    apiGetSessionLog().then(function (data) {
+      state.sessionLog = Array.isArray(data.sessionLog) ? data.sessionLog : [];
+      state.sessionLogError = '';
+    }).catch(function (e) {
+      state.sessionLog = [];
+      state.sessionLogError = e.message || String(e);
+    }).then(function () {
+      state.sessionLogLoading = false;
+      if (state.view === 'payouts') renderPayouts();
+    });
+  }
+
+  function setPayoutKpis(therapists, paid, preVat, withVatTotal) {
+    var a = $('#payoutTherapistCount'); if (a) a.textContent = therapists;
+    var b = $('#payoutPaidCount'); if (b) b.textContent = paid;
+    var c = $('#payoutPreVat'); if (c) c.textContent = money(preVat);
+    var d = $('#payoutWithVat'); if (d) d.textContent = money(withVatTotal);
+  }
+
+  function payoutStat(label, value) {
+    return '<div><div style="font-size:0.75rem;color:#7d93b0;">' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:1.05rem;font-weight:700;color:#eaf2ff;">' + escapeHtml(String(value)) + '</div></div>';
+  }
+
+  // Last summary computed by renderPayouts — reused by the Excel export so it
+  // exports EXACTLY what is on screen (same month, same forwarding state).
+  var lastPayoutSummary = null;
+
+  // One therapist card. `opts.isDiff` flips it to a הפרש card (no mark-forwarded
+  // button — those are caught up by re-forwarding the prior month — and the
+  // detail table shows the originating month). Correct buttons stay available so
+  // a mis-logged late session can still be fixed.
+  function payoutTherapistCard(t, opts) {
+    opts = opts || {};
+    var expanded = !!state.payoutExpanded[(opts.isDiff ? 'diff:' : '') + t.therapist];
+    var toggleKey = (opts.isDiff ? 'diff:' : '') + t.therapist;
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;';
+
+    var forwardBtn = '';
+    if (!opts.isDiff && state.role === 'editor') {
+      forwardBtn =
+        '<button type="button" class="btn edit-only" data-action="payout-forward" data-therapist="' +
+          escapeHtml(t.therapist) + '" title="סמן את החודש של מטפל זה כהועבר לחשבת שכר">הועבר לחשבת שכר</button>';
+    }
+
+    var head =
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:#9fcfcf;">' + escapeHtml(t.therapist || '—') + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+          forwardBtn +
+          '<button type="button" class="btn" data-action="payout-toggle" data-key="' + escapeHtml(toggleKey) + '">' +
+            (expanded ? 'הסתר פירוט' : 'הצג פירוט (' + t.sessionCount + ')') + '</button>' +
+        '</div>' +
+      '</div>';
+
+    var stats =
+      '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
+        payoutStat('סשנים משולמים', t.paidCount) +
+        payoutStat('לפני מע״מ', money(t.preVatTotal)) +
+        payoutStat('כולל מע״מ', money(t.vatTotal)) +
+        payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
+        (opts.isDiff ? payoutStat('חודשים', (t.months || []).join(', ') || '—') : '') +
+      '</div>';
+
+    var detail = '';
+    if (expanded) {
+      var canEdit = state.role === 'editor';
+      var monthCol = opts.isDiff;
+      var rows = t.sessions.map(function (s) {
+        var dimmed = s.paid ? '' : 'opacity:0.55;';
+        // Stash the session payload on the correct button so the handler can
+        // re-send the identity fields (server recomputes pay + reverses credit).
+        var correctBtn = canEdit
+          ? '<button type="button" class="btn" data-action="payout-correct" ' +
+              'data-session=\'' + escapeHtml(JSON.stringify({
+                sessionId: s.sessionId, therapist: t.therapist,
+                clinicalTreatmentType: s.type, date: fmtDate(s.date),
+                outcome: s.outcome, patientName: s.patient, phone: s.phone
+              })) + '\' style="padding:2px 10px;font-size:0.8rem;">תקן</button>'
+          : '';
+        return '<tr style="' + dimmed + '">' +
+          (monthCol ? '<td style="padding:6px 10px;">' + escapeHtml(s.month || '—') + '</td>' : '') +
+          '<td style="padding:6px 10px;">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
+          '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
+          (canEdit ? '<td style="padding:6px 10px;text-align:left;">' + correctBtn + '</td>' : '') +
+        '</tr>';
+      }).join('');
+      detail =
+        '<div style="margin-top:14px;overflow-x:auto;">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;color:#cfe3f5;">' +
+            '<thead><tr style="color:#9fcfcf;text-align:right;border-bottom:1px solid #2a3f5a;">' +
+              (monthCol ? '<th style="padding:6px 10px;font-weight:600;">חודש</th>' : '') +
+              '<th style="padding:6px 10px;font-weight:600;">תאריך</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">מטופל</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">סוג טיפול</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">תוצאה</th>' +
+              '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום</th>' +
+              (state.role === 'editor' ? '<th style="padding:6px 10px;font-weight:600;text-align:left;">תיקון</th>' : '') +
+            '</tr></thead><tbody>' + rows + '</tbody>' +
+          '</table>' +
+        '</div>';
+    }
+
+    card.innerHTML = head + stats + detail;
+    return card;
+  }
+
+  function renderPayouts() {
+    var listEl = $('#payoutList');
+    if (!listEl) return;
+    if (!state.payoutMonth) state.payoutMonth = currentMonthStr();
+    var monthInput = $('#payoutMonth');
+    if (monthInput && monthInput.value !== state.payoutMonth) monthInput.value = state.payoutMonth;
+
+    if (state.sessionLog === null) {
+      ensureSessionLogLoaded();
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">טוען נתוני סשנים…</p></div>';
+      setPayoutKpis(0, 0, 0, 0);
+      return;
+    }
+    if (state.sessionLogError) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">שגיאה בטעינת יומן הסשנים: ' +
+        escapeHtml(state.sessionLogError) + '</p></div>';
+      setPayoutKpis(0, 0, 0, 0);
+      return;
+    }
+
+    var TPay = (typeof window !== 'undefined' && window.TherapistPayout) || null;
+    if (!TPay) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">מודול החישוב לא נטען</p></div>';
+      return;
+    }
+
+    var summary = TPay.monthlyPayoutSummary(state.sessionLog, state.payoutMonth);
+    lastPayoutSummary = summary;
+    setPayoutKpis(summary.therapists.length, summary.totals.paidCount,
+      summary.totals.preVatTotal, summary.totals.vatTotal);
+
+    listEl.innerHTML = '';
+    var diffs = (summary.differences && summary.differences.therapists) || [];
+
+    if (!summary.therapists.length && !diffs.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין סשנים לחודש זה</p></div>';
+      return;
+    }
+
+    summary.therapists.forEach(function (t) {
+      listEl.appendChild(payoutTherapistCard(t, { isDiff: false }));
+    });
+
+    if (diffs.length) {
+      var header = document.createElement('div');
+      header.style.cssText = 'margin:22px 0 10px;display:flex;align-items:baseline;gap:10px;';
+      header.innerHTML =
+        '<span style="font-size:1.05rem;font-weight:700;color:#e0b15a;">הפרשים</span>' +
+        '<span style="font-size:0.85rem;color:#7d93b0;">סשנים מחודשים שכבר הועברו לחשבת שכר (תשלום משלים)</span>';
+      listEl.appendChild(header);
+      diffs.forEach(function (t) {
+        listEl.appendChild(payoutTherapistCard(t, { isDiff: true }));
+      });
+    }
+  }
+
+  // Re-fetch SessionLog after a write (correct / add / forward) and re-render.
+  function reloadSessionLog() {
+    state.sessionLog = null;
+    state.sessionLogLoading = false;
+    ensureSessionLogLoaded();
+  }
+
+  // --- Session correct / add-missing modal -----------------------------------
+  function handlePayoutListClick(e) {
+    var toggle = e.target.closest('[data-action="payout-toggle"]');
+    if (toggle) {
+      var key = toggle.getAttribute('data-key') || '';
+      state.payoutExpanded[key] = !state.payoutExpanded[key];
+      renderPayouts();
+      return;
+    }
+    // Note: the inline session-correction modal ("תיקון סשן" / "+ הוסף סשן חסר")
+    // is intentionally deferred to a follow-up PR. The payout view here is
+    // read-only + export + mark-forwarded, which is what payroll needs.
+    var forward = e.target.closest('[data-action="payout-forward"]');
+    if (forward) {
+      var therapist = forward.getAttribute('data-therapist') || '';
+      markTherapistForwarded(therapist, forward);
+    }
+  }
+
+  function markTherapistForwarded(therapist, btn) {
+    if (!therapist) return;
+    var month = state.payoutMonth || currentMonthStr();
+    if (!window.confirm('לסמן את ' + therapist + ' לחודש ' + month + ' כהועבר לחשבת שכר?\nהסשנים יוסרו מהתצוגה ולא יופיעו שוב.')) return;
+    if (btn) btn.disabled = true;
+    apiPostAction('markForwarded', { therapist: therapist, month: month })
+      .then(function (r) {
+        toast('הועבר: ' + (r.forwarded || 0) + ' סשנים');
+        reloadSessionLog();
+      })
+      .catch(function (err) {
+        toast('שגיאה: ' + err.message, true);
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  // Build a UTF-8-BOM CSV (so Excel renders Hebrew correctly) and download it.
+  function exportPayoutCsv() {
+    var PE = window.PayoutExport;
+    if (!PE || !lastPayoutSummary) { toast('אין נתונים לייצוא', true); return; }
+    var csv = PE.buildPayoutCsv(lastPayoutSummary);
+    var BOM = '﻿';   // so Excel detects UTF-8 and renders Hebrew correctly
+    var blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'payout-' + (lastPayoutSummary.month || state.payoutMonth || '') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   // ---- Leads kanban
   function renderLeads() {
     var kanban = $('#kanban');
@@ -2779,6 +3036,14 @@
     $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
     on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
     on('#settingsBtn', 'click', function () { openSettingsModal(); });
+    // Therapist payouts: month picker, detail toggle, mark-forwarded, Excel export.
+    // (The "+ הוסף סשן חסר"/session-correction modal is deferred to a follow-up PR.)
+    on('#payoutMonth', 'change', function (e) {
+      state.payoutMonth = e.target.value || currentMonthStr();
+      renderPayouts();
+    });
+    on('#payoutList', 'click', handlePayoutListClick);
+    on('#payoutExportBtn', 'click', exportPayoutCsv);
     var renewalsBox = $('#renewalsAlerts');
     if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
     var stopFlagsBox = $('#stopFlagsAlerts');
