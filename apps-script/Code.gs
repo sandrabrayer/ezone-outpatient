@@ -121,7 +121,11 @@ function _recoverPhone(raw) {
 }
 
 /* Force '@' (plain text) format on any phone columns in this sheet, below the
- * header row, so future writes preserve leading zeros. */
+ * header row, so future writes preserve leading zeros. Number format is a
+ * PERSISTENT cell property, so this only needs to run ONCE at sheet creation
+ * (it formats the full row allocation so appendRow-based writers land in
+ * already-'@' cells). It is intentionally NOT called on every save anymore —
+ * _writeAll re-asserts the format over the actual data rows on each write. */
 function _formatPhoneColumns(sh, headers) {
   var maxRows = sh.getMaxRows();
   if (maxRows < 2) return;
@@ -156,7 +160,12 @@ function _ensureSheet(name, headers) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   }
-  _formatPhoneColumns(sh, headers);
+  // Phone-column '@' formatting is applied once at creation (above) and persists
+  // as a cell property, so it is NOT re-applied here on every ensure/save.
+  // _writeAll re-asserts it over the actual data rows (values.length) on each
+  // write — that is where the save-path leading-zero guarantee lives. Dropping
+  // the per-save full-allocation (~1000-row) setNumberFormat pass on both sheets
+  // is the bulk of the save-perf win. See _writeAll / CHANGELOG-save-perf.
   return sh;
 }
 
@@ -217,13 +226,25 @@ function _getData() {
 }
 
 function _saveAll(payload) {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var leads = (payload && payload.leads) || [];
-  var clients = (payload && payload.clients) || [];
-  _writeAll(leadsSh, LEADS_HEADERS, leads);
-  _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-  return { ok: true, savedLeads: leads.length, savedClients: clients.length };
+  // Serialize full-sheet rewrites so two overlapping saves can't clobber each
+  // other (every other writer already takes this lock). If the lock can't be
+  // acquired we return an error rather than writing lock-less — no write path
+  // bypasses the lock, and it is always released in finally.
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return { ok: false, error: 'Could not acquire lock (another save in progress) — try again' };
+  }
+  try {
+    var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var leads = (payload && payload.leads) || [];
+    var clients = (payload && payload.clients) || [];
+    _writeAll(leadsSh, LEADS_HEADERS, leads);
+    _writeAll(clientsSh, CLIENTS_HEADERS, clients);
+    return { ok: true, savedLeads: leads.length, savedClients: clients.length };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 /* ===== Payments =====
