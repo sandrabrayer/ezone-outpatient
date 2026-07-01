@@ -2132,8 +2132,18 @@
         statusSel.appendChild(o);
       });
       statusSel.onchange = function () {
+        // Optimistic: apply + render now, persist in background, roll back the
+        // status (and re-sync the select) on failure.
+        var prevStatus = c.status;
         c.status = statusSel.value;
-        persist().then(function () { toast('עודכן'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+        render();
+        persist()
+          .then(function () { toast('עודכן'); })
+          .catch(function (e) {
+            c.status = prevStatus;
+            render();
+            toast('שמירה נכשלה: ' + e.message, true);
+          });
       };
       statusSel.className = 'btn';
       actions.appendChild(statusSel);
@@ -2918,13 +2928,18 @@
           serviceScope: fd.get('serviceScope') || ''
         };
         state.clients.push(client);
+        // Optimistic: show the new patient + close the modal before the network;
+        // on failure remove the just-added client and surface an error toast.
+        closeDirectClientModal();
+        render();
+        submit.disabled = false;
         persist()
-          .then(function () { toast('המטופל נוסף'); closeDirectClientModal(); render(); })
+          .then(function () { toast('המטופל נוסף'); })
           .catch(function (err) {
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            render(); toast('שגיאה: ' + err.message, true);
-          })
-          .finally(function () { submit.disabled = false; });
+            render();
+            toast('שמירה נכשלה: ' + err.message, true);
+          });
       } catch (e2) { toast('שגיאה: ' + e2.message, true); submit.disabled = false; }
     });
 
@@ -3045,6 +3060,15 @@
         responsiblePerson: (fd.get('responsiblePerson') || '').trim(),
         serviceScope: fd.get('serviceScope') || ''
       };
+      // Snapshot the lead's pre-activation fields so an optimistic activate can
+      // be rolled back cleanly on save failure (this path had no rollback before).
+      var leadPrev = {
+        stage: lead.stage, serviceType: lead.serviceType, location: lead.location,
+        sessionsPerWeek: lead.sessionsPerWeek, sessionsUnit: lead.sessionsUnit,
+        pricePerSession: lead.pricePerSession, startDate: lead.startDate,
+        paymentStatus: lead.paymentStatus, paymentDate: lead.paymentDate,
+        nextBillingDate: lead.nextBillingDate
+      };
       state.clients.push(client);
       lead.stage = 'active';
       lead.serviceType = client.serviceType;
@@ -3056,10 +3080,19 @@
       lead.paymentStatus = payStatus;
       lead.paymentDate = payDate;
       lead.nextBillingDate = nextBill;
+      // Optimistic: navigate to the clients view + close the modal before the
+      // network; on failure remove the new client, restore the lead, re-render.
+      closeActivateModal();
+      setView('clients');
+      submit.disabled = false;
       persist()
-        .then(function () { toast('המטופל נוסף'); closeActivateModal(); setView('clients'); })
-        .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
+        .then(function () { toast('המטופל נוסף'); })
+        .catch(function (err) {
+          state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
+          Object.assign(lead, leadPrev);
+          render();
+          toast('שמירה נכשלה: ' + err.message, true);
+        });
     });
 
     $('#exitForm').addEventListener('submit', function (e) {
@@ -3214,25 +3247,39 @@
       // per-month base payment row (the single source the card chip + גבייה read)
       // via persistPayment — otherwise the chip keeps showing the old/today date.
       var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
+      // Optimistic base-payment propagation: apply to state.payments NOW so the
+      // card chip reflects it immediately; snapshot for rollback on failure.
+      var basePay = null;
+      var payPrev = null;   // { index, value } — value null means the row was newly pushed
+      if (propagatePaid) {
+        var dueISO = currentMonthBaseDueDate(client);
+        basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
+        var pi = state.payments.findIndex(function (p) { return p.id === basePay.id; });
+        var existing = pi >= 0 ? state.payments[pi] : null;
+        // Keep any existing notes/method when re-stamping the paid date.
+        if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
+        payPrev = { index: pi, value: existing };
+        if (pi >= 0) state.payments[pi] = basePay; else state.payments.push(basePay);
+      }
+      // Optimistic UI: reflect the change and close the modal BEFORE awaiting the
+      // network, so the ~5s save is not felt. Persist in the background; on
+      // failure roll back client + payment and surface an error toast. Mirrors
+      // the setCurrentMonthPaid optimistic pattern.
+      closeEditClientModal();
+      render();
+      submit.disabled = false;
       persist()
-        .then(function () {
-          if (!propagatePaid) return;
-          var dueISO = currentMonthBaseDueDate(client);
-          var basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
-          var i = state.payments.findIndex(function (p) { return p.id === basePay.id; });
-          var existing = i >= 0 ? state.payments[i] : null;
-          // Keep any existing notes/method when re-stamping the paid date.
-          if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
-          if (i >= 0) state.payments[i] = basePay; else state.payments.push(basePay);
-          return persistPayment(basePay);
-        })
-        .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
+        .then(function () { return propagatePaid ? persistPayment(basePay) : null; })
+        .then(function () { toast('נשמר'); })
         .catch(function (err) {
           Object.assign(client, prev);
-          toast('שגיאה: ' + err.message, true);
+          if (propagatePaid && payPrev) {
+            if (payPrev.value) state.payments[payPrev.index] = payPrev.value;
+            else state.payments = state.payments.filter(function (p) { return p !== basePay; });
+          }
           render();
-        })
-        .finally(function () { submit.disabled = false; });
+          toast('שמירה נכשלה: ' + err.message, true);
+        });
     });
 
     var settingsForm = $('#settingsForm');
