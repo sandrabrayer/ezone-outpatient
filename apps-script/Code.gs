@@ -1000,6 +1000,7 @@ function doGet(e) {
       return _json(_getTreatmentPlans());
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -1098,8 +1099,542 @@ function doPost(e) {
       return _json(_removeChargesForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
+    // ---- Therapist-payout routes ----
+    // recordSessionOutcome: SECURED cross-app receiver (therapists app posts a
+    // completed session). Fail-closed: reject on secret mismatch.
+    if (action === 'recordSessionOutcome') {
+      var soParams = (e && e.parameter) || {};
+      if (payload && payload.secret) soParams.secret = payload.secret;
+      if (!_sessionOutcomeAuthOk(soParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_recordSessionOutcome(payload));
+    }
+    // markForwarded / getSessionLog: internal dashboard operations (open, like
+    // the other by-id dashboard reads/writes above).
+    if (action === 'markForwarded') {
+      return _json(_markForwarded(payload));
+    }
+    if (action === 'getSessionLog') return _json(_getSessionLog());
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
   }
 }
+
+// ============================================================================
+// THERAPIST-PAYOUT SUBSYSTEM (ported from claude/inspiring work via
+// claude/youthful-volta-laarnk). Feeds the "תשלומי מטפלים" tab: SessionLog
+// ingestion (recordSessionOutcome), per-therapist monthly pay computation,
+// mark-forwarded-to-payroll, and read (getSessionLog).
+// All identifiers below are NET-NEW to this branch (verified no collisions).
+// Config note: SESSION_OUTCOME_SECRET is read from Script Properties, and must
+// be set (identical value) alongside the other cross-app secrets.
+// ============================================================================
+
+var CLINICAL_TO_BILLING = {
+  'פרטני כללי':             'פרטני',
+  'פרטני CBT':              'פרטני CBT',
+  'פרטני EMDR':             'פרטני EMDR',
+  'קבוצה':                  'קבוצה',
+  'טיפול משפחתי':           'טיפול משפחתי',
+  'מעקב פסיכיאטרי':         'מעקב פסיכיאטרי',
+  'ליווי יומי בקהילה':      'ליווי יומי בקהילה',
+  'פסיכודינמי':             'פסיכודינמי',
+  'פסיכותרפי ממוקד טראומה': 'פסיכותרפי ממוקד טראומה',
+  'עיסוי טיפולי':           'עיסוי טיפולי',
+  'טיפול ממוקד התמכרויות':  'טיפול ממוקד התמכרויות',
+  'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי'
+};
+
+function _clinicalToBilling(clinicalType) {
+  var key = String(clinicalType == null ? '' : clinicalType).trim();
+  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, key)) {
+    throw new Error('Unknown clinical treatment type: "' + key + '"');
+  }
+  return CLINICAL_TO_BILLING[key];
+}
+
+/* If a client row carries a clinicalTreatmentType, derive serviceType from it
+ * (clinical is authoritative) and overwrite. Absent/empty -> leave serviceType
+ * untouched (back-compat for legacy / not-yet-migrated rows). Throws on an
+ * unknown clinical value rather than silently blanking. Mutates + returns. */
+function _deriveClientServiceType(client) {
+  if (!client) return client;
+  var clinical = String(client.clinicalTreatmentType == null ? '' : client.clinicalTreatmentType).trim();
+  if (!clinical) return client;
+  client.serviceType = _clinicalToBilling(clinical);
+  return client;
+}
+
+/* ===== Pay + price mirrors (task 4.8-step3-out) =============================
+ *
+ * MIRRORS of public/therapist-pay.js (the PAY side) and the price half of
+ * public/treatment-map.js (the client-facing BILLING side). The Apps Script
+ * runtime cannot import those modules, so — exactly like CLINICAL_TO_BILLING
+ * above — the tables are duplicated here. test/session-outcome.test.js parses
+ * each literal out of Code.gs and asserts it deep-equals the canonical module,
+ * so the mirror can never silently drift. Keep in sync; ALL RATES ARE PRE-VAT on
+ * the pay side and INCL. VAT on the billing side, untouched here.
+ */
+
+// --- Pay: flat per-therapist (pre-VAT). Mirror of FLAT_RATES. ----------------
+var THERAPIST_FLAT_RATES = {
+  'מעיין דלומי': 250,
+  'תמר גנץ':     250,
+  'אורן כביר':   250,
+  'אביב מלכה':   250,
+  'רמי':         250,
+  'כנרת':        250,
+  'הילה':        250,
+  'עידו בוזגלו': 250,
+  'אלה':         250,
+  'שירן':        250,
+  'דנה':         250,
+  'יפעת':        250,
+  'איתן דשה':    250,
+  'דליה מלמד':   230,
+  'נועה זיפמן':  210,
+  'אסתר':        180
+};
+
+// --- Pay: psychiatrists by treatment type (pre-VAT). Mirror of PSYCHIATRIST_RATES.
+var PSYCHIATRIST_RATES = {
+  'ד״ר שפרינץ': { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 },
+  'ד״ר נטליה':  { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 },
+  'ד״ר דנגור':  { 'אינטייק': 900, 'מעקב פסיכיאטרי': 700 }
+};
+
+// --- Billing: flat client-facing prices (incl. VAT). Mirror of BILLING_PRICES.
+// 0 is a DECIDED price (קבוצה intentionally free), not a "no price" flag.
+var BILLING_PRICES = {
+  'פרטני':                  500,
+  'פרטני CBT':              500,
+  'פרטני EMDR':             500,
+  'פסיכודינמי':             500,
+  'פסיכותרפי ממוקד טראומה': 500,
+  'עיסוי טיפולי':           500,
+  'טיפול ממוקד התמכרויות':  500,
+  'טיפול אינטגרטיבי':       500,
+  'מעקב פסיכיאטרי':         1100,
+  'אינטייק':                2300,
+  'קבוצה':                  0,
+  'טיפול משפחתי':           600
+};
+
+// Day-center is priced by weekly frequency, not in BILLING_PRICES. Mirror of
+// DAY_CENTER_BILLING / DAY_CENTER_MONTHLY_BY_FREQ.
+var DAY_CENTER_BILLING = 'ליווי יומי בקהילה';
+var DAY_CENTER_MONTHLY_BY_FREQ = { 3: 15000, 5: 18000 };
+var GROUP_BILLING = 'קבוצה';
+
+function _hasOwn(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); }
+
+/* _therapistPay(name, treatmentType?) -> pre-VAT rate. Mirror of therapistPay():
+ * flat therapist ignores type; psychiatrist REQUIRES a valid type; unknown
+ * therapist / bad psych type throws. */
+function _therapistPay(therapistName, treatmentType) {
+  var name = String(therapistName == null ? '' : therapistName).trim();
+  if (_hasOwn(THERAPIST_FLAT_RATES, name)) return THERAPIST_FLAT_RATES[name];
+  if (_hasOwn(PSYCHIATRIST_RATES, name)) {
+    var type = String(treatmentType == null ? '' : treatmentType).trim();
+    var table = PSYCHIATRIST_RATES[name];
+    if (!type || !_hasOwn(table, type)) {
+      throw new Error('Psychiatrist "' + name + '" requires a valid treatmentType (אינטייק or מעקב פסיכיאטרי)');
+    }
+    return table[type];
+  }
+  throw new Error('Unknown therapist: "' + name + '"');
+}
+
+function _isDayCenterBilling(billingType) {
+  return String(billingType == null ? '' : billingType).trim() === DAY_CENTER_BILLING;
+}
+
+/* _billingPrice(billingType, freqPerWeek?) -> price. Mirror of billingPrice():
+ * day-center REQUIRES a valid frequency (3/5); flat types return the number;
+ * unknown billing type throws. */
+function _billingPrice(billingType, freqPerWeek) {
+  var key = String(billingType == null ? '' : billingType).trim();
+  if (_isDayCenterBilling(key)) {
+    if (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '') {
+      throw new Error('ליווי יומי בקהילה requires frequencyPerWeek (3 or 5)');
+    }
+    var freq = Number(freqPerWeek);
+    if (!_hasOwn(DAY_CENTER_MONTHLY_BY_FREQ, freq)) {
+      throw new Error('Unsupported ליווי יומי בקהילה frequency: ' + freqPerWeek + ' (expected 3 or 5)');
+    }
+    return DAY_CENTER_MONTHLY_BY_FREQ[freq];
+  }
+  if (!_hasOwn(BILLING_PRICES, key)) {
+    throw new Error('Unknown billing type: "' + key + '"');
+  }
+  return BILLING_PRICES[key];
+}
+
+/* ===== Session accounting + credits helpers ================================
+ *
+ * Monthly model (locked): a patient's paid quota = weekly frequency × 4, renewed
+ * in full each month. A `happened` session beyond that month's quota auto-draws a
+ * credit when one is available (the session is then free to the patient —
+ * clientSessionValue 0 — but the therapist is still paid normally). A
+ * therapist_cancelled session grants +1 credit. Credits carry forward across
+ * months; the delivered (happened) count is implicitly per-month (we recount the
+ * current month each time). creditsOwed lives on the Clients row, server-managed.
+ */
+
+/* A non-negative integer credit balance from any cell value (blank -> 0). */
+function _toCredits(v) {
+  var n = parseInt(v, 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+
+/* Weekly session frequency from the client's PLAN. sessionsPerWeek is stored as
+ * a JSON breakdown ({"פרטני":2}) — sum the values; a bare number also works.
+ * Returns a non-negative integer (0 = undeterminable). */
+function _planWeeklyFrequency(client) {
+  if (!client) return 0;
+  var s = String(client.sessionsPerWeek == null ? '' : client.sessionsPerWeek).trim();
+  if (!s) return 0;
+  var total = 0;
+  if (s.charAt(0) === '{') {
+    try {
+      var o = JSON.parse(s);
+      Object.keys(o).forEach(function (k) { var n = parseInt(o[k], 10); if (!isNaN(n) && n > 0) total += n; });
+    } catch (_) { return 0; }
+  } else {
+    var n = parseInt(s, 10);
+    if (!isNaN(n) && n > 0) total = n;
+  }
+  return total;
+}
+
+/* Calendar-month key (YYYY-MM) of a yyyy-MM-dd date string, or '' if absent /
+ * unparseable (no month bucket -> quota cannot be applied). */
+function _monthKey(dateStr) {
+  var s = String(dateStr == null ? '' : dateStr).trim();
+  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
+}
+
+function _getSessionLog() {
+  var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+  return { ok: true, sessionLog: _readAll(sh, SESSION_LOG_HEADERS) };
+}
+
+var SESSION_LOG_HEADERS = [
+  'sessionId', 'phone', 'patientName', 'clientId',
+  'therapist', 'clinicalTreatmentType', 'billingType', 'date',
+  'outcome', 'therapistPay', 'clientSessionValue', 'sessionStatus',
+  'matchStatus', 'recordedAt',
+  // APPEND-ONLY (session accounting + credits): how the credit engine treated
+  // this row. '' = N/A (no-show / unmatched non-credit); 'credit_added' =
+  // therapist_cancelled gave +1; 'within_quota' = happened inside the monthly
+  // quota (normal value); 'covered' = happened beyond quota, a credit was drawn
+  // (clientSessionValue forced to 0); 'beyond_no_credit' = beyond quota but no
+  // credit available (normal value); 'quota_unknown' = quota undeterminable
+  // (no plan frequency / no session date) so NO draw — flagged; 'no_client' =
+  // no single client match, so the patient balance could not be touched.
+  'creditStatus',
+  // APPEND-ONLY (payout forwarding): the 'YYYY-MM' payroll cycle this session was
+  // forwarded to חשבת שכר in. '' = not yet forwarded (still in the open payout
+  // view). Once stamped the row is SETTLED and is filtered out of the payout view;
+  // a session logged late for an already-stamped month surfaces as a הפרש.
+  // Set ONLY by _markForwarded; preserved (never cleared) across outcome upserts.
+  'forwardedToPayroll'
+];
+
+var SESSION_STATUS_BY_OUTCOME = {
+  happened:            'consumed',
+  therapist_cancelled: 'credited',
+  patient_no_show:     'forfeited'
+};
+
+function _sessionOutcomeAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('SESSION_OUTCOME_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+/* Pay rule by outcome. therapist_cancelled and group never call _therapistPay,
+ * so they log fine even for an unknown therapist; only a PAID non-group outcome
+ * (happened / patient_no_show) looks up the therapist and may throw. */
+function _computeSessionPay(outcome, therapist, clinicalTreatmentType, billingType) {
+  if (outcome === 'therapist_cancelled') return 0; // never delivered -> never paid
+  if (billingType === GROUP_BILLING) return 0;      // group -> 0 pay
+  return _therapistPay(therapist, clinicalTreatmentType); // showed up -> paid
+}
+
+/* Value rule. Day-center needs a frequency; if the event carries none, return
+ * null (flag) rather than guessing. Everything else (incl. group -> 0) prices
+ * straight from the billing table. */
+function _computeSessionValue(billingType, freqPerWeek) {
+  if (_isDayCenterBilling(billingType) &&
+      (freqPerWeek === undefined || freqPerWeek === null || freqPerWeek === '')) {
+    return null;
+  }
+  return _billingPrice(billingType, freqPerWeek);
+}
+
+function _recordSessionOutcome(payload) {
+  var sessionId = String((payload && payload.sessionId) || '').trim();
+  if (!sessionId) return { ok: false, reason: 'missing_session_id' };
+
+  var outcome = String((payload && payload.outcome) || '').trim();
+  if (!_hasOwn(SESSION_STATUS_BY_OUTCOME, outcome)) {
+    return { ok: false, reason: 'unknown_outcome' };
+  }
+
+  var clinical = String((payload && payload.clinicalTreatmentType) || '').trim();
+  if (!clinical || !_hasOwn(CLINICAL_TO_BILLING, clinical)) {
+    return { ok: false, reason: 'unknown_type' };
+  }
+  var billingType = _clinicalToBilling(clinical);
+  var therapist = String((payload && payload.therapist) || '').trim();
+
+  // Frequency only matters for ליווי; absent everywhere else. Accept either key.
+  var freq;
+  if (payload && payload.freqPerWeek != null && payload.freqPerWeek !== '') freq = payload.freqPerWeek;
+  else if (payload && payload.frequencyPerWeek != null && payload.frequencyPerWeek !== '') freq = payload.frequencyPerWeek;
+
+  var therapistPay, clientSessionValue;
+  try {
+    therapistPay = _computeSessionPay(outcome, therapist, clinical, billingType);
+  } catch (err) {
+    return { ok: false, reason: 'unknown_therapist' };
+  }
+  try {
+    clientSessionValue = _computeSessionValue(billingType, freq);
+  } catch (err) {
+    return { ok: false, reason: 'invalid_frequency' };
+  }
+
+  var sessionStatus = SESSION_STATUS_BY_OUTCOME[outcome];
+  var phone = _recoverPhone(payload && payload.phone);
+  var patientName = String((payload && payload.patientName) || '').trim();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // Optional client match for enrichment — never gates the log (keyed by session).
+    // A SINGLE phone hit also unlocks the credit engine (we can read+write that
+    // client's creditsOwed); 0 or >1 hits leave the patient balance untouched.
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    var clientId = '', matchStatus = 'no_match', matchedClient = null;
+    if (phone && /^0\d{8,9}$/.test(phone)) {
+      var hits = [];
+      for (var i = 0; i < clients.length; i++) {
+        var c = clients[i];
+        if (_recoverPhone(c.phone) === phone ||
+            _recoverPhone(c.treatmentContactPhone) === phone ||
+            _recoverPhone(c.payerPhone) === phone) {
+          hits.push(c);
+        }
+      }
+      if (hits.length === 1) {
+        matchedClient = hits[0];
+        clientId = String(matchedClient.id);
+        matchStatus = 'matched';
+        if (!patientName) patientName = String(matchedClient.name == null ? '' : matchedClient.name).trim();
+      } else if (hits.length > 1) {
+        matchStatus = 'multi_match';
+      }
+    }
+
+    var rowObj = {
+      sessionId:          sessionId,
+      phone:              phone,
+      patientName:        patientName,
+      clientId:           clientId,
+      therapist:          therapist,
+      clinicalTreatmentType: clinical,
+      billingType:        billingType,
+      date:               String((payload && payload.date) || '').trim(),
+      outcome:            outcome,
+      therapistPay:       therapistPay,
+      clientSessionValue: clientSessionValue,   // null -> blank cell (flag)
+      sessionStatus:      sessionStatus,
+      matchStatus:        matchStatus,
+      recordedAt:         new Date().toISOString(),
+      creditStatus:       '',
+      // Preserved below from the existing row on an upsert — a re-sent / corrected
+      // outcome must NOT lose an already-forwarded stamp (only _markForwarded sets it).
+      forwardedToPayroll: ''
+    };
+
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+
+    // ---- Credit engine -----------------------------------------------------
+    // creditsOwed is a stateful running balance, so an UPSERT must first REVERSE
+    // the effect the existing row for this sessionId had, then apply the new
+    // outcome's effect (idempotent re-send nets zero; a real correction undoes
+    // the old and applies the new — e.g. happened-covered -> cancelled gives the
+    // drawn credit back AND adds the cancellation credit). We do NOT re-simulate
+    // sibling rows: reversing one row's own effect is locally correct; the
+    // month's other draws keep whatever they resolved to (documented).
+    var logRows = _readAll(sh, SESSION_LOG_HEADERS);
+    var oldRow = null;
+    for (var lr = 0; lr < logRows.length; lr++) {
+      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+    }
+    // Preserve an already-forwarded stamp across the upsert: a correction re-runs
+    // pay/credit but must not silently un-forward a session payroll already received.
+    if (oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '') {
+      rowObj.forwardedToPayroll = String(oldRow.forwardedToPayroll).trim();
+    }
+
+    if (matchedClient) {
+      var origCredits = _toCredits(matchedClient.creditsOwed);
+      var balance = origCredits;
+      // 1) reverse the old row's effect on this client's balance
+      if (oldRow) {
+        if (oldRow.outcome === 'therapist_cancelled') balance -= 1;       // undo the +1
+        if (String(oldRow.creditStatus) === 'covered')  balance += 1;       // undo the draw (give it back)
+      }
+      if (balance < 0) balance = 0;
+      // 2) apply the new outcome's effect
+      if (outcome === 'therapist_cancelled') {
+        balance += 1;
+        rowObj.creditStatus = 'credit_added';
+      } else if (outcome === 'happened') {
+        var quotaFreq = _planWeeklyFrequency(matchedClient);
+        if (!quotaFreq && freq != null && freq !== '') {           // fall back to the event frequency
+          var ef = parseInt(freq, 10);
+          if (!isNaN(ef) && ef > 0) quotaFreq = ef;
+        }
+        var month = _monthKey(rowObj.date);
+        if (!quotaFreq || !month) {
+          rowObj.creditStatus = 'quota_unknown';                   // can't bucket -> never draw
+        } else {
+          var quota = quotaFreq * 4;
+          var priorHappened = 0;                                   // delivered this month, excluding self
+          for (var hh = 0; hh < logRows.length; hh++) {
+            var lrow = logRows[hh];
+            if (String(lrow.sessionId) === sessionId) continue;
+            if (String(lrow.clientId) === clientId &&
+                lrow.outcome === 'happened' &&
+                _monthKey(lrow.date) === month) priorHappened++;
+          }
+          var beyondQuota = priorHappened >= quota;
+          if (!beyondQuota) {
+            rowObj.creditStatus = 'within_quota';
+          } else if (balance > 0 && typeof clientSessionValue === 'number' && clientSessionValue > 0) {
+            clientSessionValue = 0;                                // credit covers this session
+            rowObj.clientSessionValue = 0;
+            balance -= 1;
+            rowObj.creditStatus = 'covered';
+          } else {
+            rowObj.creditStatus = 'beyond_no_credit';              // beyond quota, no credit to draw
+          }
+        }
+      }
+      // 3) persist the balance only if it actually changed (whole-sheet write)
+      if (balance !== origCredits) {
+        matchedClient.creditsOwed = balance;
+        _writeAll(clientsSh, CLIENTS_HEADERS, clients);
+      }
+      rowObj.creditsOwed = balance;
+    } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
+      // No single client to credit/debit — flag, change no balance.
+      rowObj.creditStatus = 'no_client';
+    }
+    // ------------------------------------------------------------------------
+
+    var rowArr = SESSION_LOG_HEADERS.map(function (h) {
+      var v = rowObj[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
+    var lastRow = sh.getLastRow();
+    var upserted = false;
+    if (lastRow > 1) {
+      var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+      for (var r = 0; r < ids.length; r++) {
+        if (String(ids[r][0]) === sessionId) {
+          sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
+          upserted = true;
+          break;
+        }
+      }
+    }
+    if (!upserted) sh.appendRow(rowArr);
+
+    var result = {
+      ok: true,
+      sessionId: sessionId,
+      therapistPay: therapistPay,
+      clientSessionValue: clientSessionValue,
+      sessionStatus: sessionStatus,
+      creditStatus: rowObj.creditStatus
+    };
+    if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
+    if (upserted) result.upserted = true; else result.appended = true;
+    return result;
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Tolerant 'YYYY-MM' extraction for the payout forwarding match — MUST mirror
+ * public/therapist-payout.js monthOf so _markForwarded stamps exactly the rows
+ * the dashboard view groups into that month. Handles both shapes seen in
+ * SessionLog: ISO 'YYYY-MM-DD' (Sheets normalizes Date cells to this) AND a raw
+ * JS Date.toString() like 'Thu Jun 18 2026 …' (what recordSessionOutcome stores
+ * verbatim from the Therapists payload). Returns '' for empty/unparseable input.
+ * (_monthKey is ISO-only and intentionally left as-is for the credit engine.) */
+function _payoutMonthOf(dateCell) {
+  var s = String(dateCell == null ? '' : dateCell).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2];
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+}
+
+/* ===== Mark a therapist's month as forwarded to payroll (internal write) =====
+ *
+ * Inbound (internal dashboard, NO secret — same trust level as the by-id
+ * resolveStopFlag / savePayment path; this is מורן acting inside the dashboard,
+ * not a cross-app receiver):
+ *   { action:'markForwarded', therapist, month:'YYYY-MM' }
+ *
+ * Stamps `forwardedToPayroll = month` on EVERY still-unstamped SessionLog row for
+ * that (therapist, month) — matched on the SESSION date via _payoutMonthOf so it
+ * tracks the view exactly. Stamped rows drop out of the payout view permanently;
+ * a session logged late for the same month after this runs stays unstamped and
+ * surfaces as a הפרש, until מורן forwards that month again (this can be re-run, it
+ * only ever touches rows that aren't already stamped).
+ *
+ * Per-therapist + per-month: a forward for one therapist never touches another's
+ * rows, and never touches a different month. Idempotent: a second call with no new
+ * rows stamps 0 and reports forwarded:0.
+ */
+function _markForwarded(payload) {
+  var therapist = String((payload && payload.therapist) || '').trim();
+  if (!therapist) return { ok: false, reason: 'missing_therapist' };
+  var month = _payoutMonthOf((payload && payload.month) || '');
+  if (!month) return { ok: false, reason: 'invalid_month' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var rows = _readAll(sh, SESSION_LOG_HEADERS);
+    var forwarded = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (String(row.therapist || '').trim() !== therapist) continue;
+      if (_payoutMonthOf(row.date) !== month) continue;
+      if (String(row.forwardedToPayroll || '').trim() !== '') continue; // already settled
+      row.forwardedToPayroll = month;
+      forwarded++;
+    }
+    if (forwarded) _writeAll(sh, SESSION_LOG_HEADERS, rows);
+    return { ok: true, therapist: therapist, month: month, forwarded: forwarded };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
