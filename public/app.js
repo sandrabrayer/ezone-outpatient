@@ -1606,6 +1606,45 @@
       });
   }
 
+  // Toggle an extra charge's CURRENT-month (or ::once) payment paid/unpaid from
+  // the patient card. Same single write path as the גבייה tab (persistPayment /
+  // savePayment) and the same paid/unpaid rules as setCurrentMonthPaid — a plain
+  // toggle stamped with today() on pay (no backdate; that stays in גבייה).
+  // partial → paid. Optimistic update + rollback. Mirrors togglePaymentRow in
+  // public/charges-logic.js — keep both in sync.
+  function setChargePaid(c, ch) {
+    if (state.role !== 'editor') return;
+    var ex = paymentForExtraOn(c, ch, today());
+    var makePaid = ex.status !== 'paid';   // paid → unpaid; unpaid/partial → paid
+    var amount = ex.amountDue || toNum(ch.amount) || 0;
+    var updated = {
+      id: ex.id,
+      clientId: ex.clientId || c.id,
+      clientName: ex.clientName || c.name || '',
+      billingType: ex.billingType || (ch.billingType === 'one_time' ? 'one_time' : 'monthly'),
+      dueDate: ex.dueDate || today(),
+      amountDue: amount,
+      amountPaid: makePaid ? amount : 0,
+      status: makePaid ? 'paid' : 'unpaid',
+      paymentDate: makePaid ? today() : (ex.paymentDate || ''),
+      method: ex.method || '', notes: ex.notes || ch.description || '',
+      bundleSize: 0, sessionsUsed: 0
+    };
+    var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
+    var prev = idx >= 0 ? state.payments[idx] : null;
+    if (idx >= 0) state.payments[idx] = updated;
+    else state.payments.push(updated);
+    render();
+    persistPayment(updated)
+      .then(function () { toast(makePaid ? 'החיוב סומן כשולם' : 'בוטל סימון התשלום'); })
+      .catch(function (e) {
+        if (prev) state.payments[idx] = prev;
+        else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        render();
+        toast('שמירה נכשלה: ' + e.message, true);
+      });
+  }
+
   function renderBillingMonthlySummary(selectedISO) {
     var mk = monthKey(selectedISO);
     $('#billMonthLabel').textContent = '— ' + monthLabel(selectedISO);
@@ -2031,7 +2070,10 @@
         }
         var status = chargeStatusFor(c, ch);
         var statusLabel = status === 'paid' ? 'שולם' : status === 'partial' ? 'שולם חלקית' : 'לא שולם';
-        var statusBadge = '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
+        // Editors get a clickable toggle (paid ⇄ unpaid); viewers see a static badge.
+        var statusBadge = state.role === 'editor'
+          ? '<button type="button" class="charge-status charge-status-' + status + ' charge-status-toggle" data-charge-toggle="' + escapeHtml(ch.id) + '" title="' + (status === 'paid' ? 'בטל סימון תשלום' : 'סמן כשולם') + '">' + statusLabel + '</button>'
+          : '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
         return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
           '<span class="charge-label">' + label + '</span>' +
           statusBadge +
@@ -2115,6 +2157,15 @@
         btn.addEventListener('click', function () {
           var chargeId = btn.getAttribute('data-charge-remove');
           handleRemoveCharge(chargeId);
+        });
+      });
+
+      // Wire the extra-charge status badges as paid ⇄ unpaid toggles (editor only).
+      $$('[data-charge-toggle]', card).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var chargeId = btn.getAttribute('data-charge-toggle');
+          var ch = state.charges.find(function (x) { return x.id === chargeId; });
+          if (ch) setChargePaid(c, ch);
         });
       });
 

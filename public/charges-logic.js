@@ -322,6 +322,34 @@
     return 'unpaid';
   }
 
+  // Build the updated payment row for a plain paid/unpaid toggle from the client
+  // card (base package OR extra charge). Mirrors the גבייה recompute() paid/unpaid
+  // rules and setCurrentMonthPaid, so the card and the גבייה tab produce identical
+  // rows through the same single persist path:
+  //   makePaid=true  -> status 'paid',   amountPaid = amount, paymentDate = todayISO
+  //   makePaid=false -> status 'unpaid', amountPaid = 0,      paymentDate kept
+  // `existing` is the current/derived payment row (id, clientId, dueDate, notes…).
+  // No 'partial' is ever produced here — partial stays a גבייה-only state.
+  // Mirrors togglePaymentRow in public/app.js — keep both in sync.
+  function togglePaymentRow(existing, makePaid, amount, todayISO) {
+    var amt = Number(amount) || 0;
+    return {
+      id: existing.id,
+      clientId: existing.clientId,
+      clientName: existing.clientName || '',
+      billingType: existing.billingType || 'monthly',
+      dueDate: existing.dueDate,
+      amountDue: amt,
+      amountPaid: makePaid ? amt : 0,
+      status: makePaid ? 'paid' : 'unpaid',
+      paymentDate: makePaid ? todayISO : (existing.paymentDate || ''),
+      method: existing.method || '',
+      notes: existing.notes || '',
+      bundleSize: 0,
+      sessionsUsed: 0
+    };
+  }
+
   return {
     monthKey: monthKey,
     sessionFrequencyUnit: sessionFrequencyUnit,
@@ -343,6 +371,7 @@
     paymentKindFromId: paymentKindFromId,
     dueItemsOn: dueItemsOn,
     excludeOrphanCharges: excludeOrphanCharges,
-    chargeStatusFor: chargeStatusFor
+    chargeStatusFor: chargeStatusFor,
+    togglePaymentRow: togglePaymentRow
   };
 });
