@@ -334,6 +334,17 @@
     return data;
   }
 
+  async function apiVerifyPin(pin) {
+    var r = await fetch('/api/verify-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: pin })
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    return r.ok && data.ok === true;
+  }
+
   async function apiLoadSettings() {
     try {
       var r = await fetch('/api/sheets?action=getSettings', { cache: 'no-store' });
@@ -3231,13 +3242,23 @@
     on('#pinSubmit', 'click', function () {
       var input = $('#pinInput');
       var v = (input && input.value || '').trim();
-      if (v === '2107') {
-        try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
-        state.role = 'editor';
-        enterApp();
-      } else {
-        var err = $('#pinError'); if (err) err.hidden = false;
-      }
+      var btn = $('#pinSubmit');
+      var err = $('#pinError');
+      if (err) err.hidden = true;
+      if (btn) btn.disabled = true;
+      apiVerifyPin(v).then(function (ok) {
+        if (ok) {
+          try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
+          state.role = 'editor';
+          enterApp();
+        } else if (err) {
+          err.hidden = false;
+        }
+      }).catch(function () {
+        if (err) err.hidden = false;
+      }).finally(function () {
+        if (btn) btn.disabled = false;
+      });
     });
     on('#pinInput', 'keydown', function (e) {
       var err = $('#pinError'); if (err) err.hidden = true;
