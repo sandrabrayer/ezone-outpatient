@@ -1,11 +1,30 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { checkPin } = require('./lib/pin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SHEETS_URL = process.env.SHEETS_URL || '';
+const APP_PIN = process.env.APP_PIN || '';
 const BUILD = String(Date.now());
+
+if (!APP_PIN) {
+  console.warn('APP_PIN env var is not set — /api/verify-pin will reject every attempt.');
+}
+
+// --- PIN verification rate limiting ------------------------------------
+// In-memory per-IP window: 10 attempts / 15 minutes. Resets on a match.
+const PIN_RATE_LIMIT_MAX = 10;
+const PIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const pinAttempts = new Map(); // ip -> { count, windowStart }
+
+function getClientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (fwd) return String(fwd).split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+// ---------------------------------------------------------------------------
 
 // --- Cache config -----------------------------------------------------------
 // Caches the slow `getData` bulk read from Apps Script in memory.
@@ -155,6 +174,30 @@ app.post('/api/sheets', async (req, res) => {
   } catch (err) {
     res.status(502).json({ ok: false, error: String(err) });
   }
+});
+
+app.post('/api/verify-pin', (req, res) => {
+  const ip = getClientIp(req);
+  const now = Date.now();
+
+  let entry = pinAttempts.get(ip);
+  if (!entry || now - entry.windowStart >= PIN_RATE_LIMIT_WINDOW_MS) {
+    entry = { count: 0, windowStart: now };
+    pinAttempts.set(ip, entry);
+  }
+
+  if (entry.count >= PIN_RATE_LIMIT_MAX) {
+    return res.status(429).json({ ok: false, error: 'Too many attempts. Try again later.' });
+  }
+
+  const submitted = req.body && req.body.pin;
+  if (checkPin(submitted, APP_PIN)) {
+    pinAttempts.delete(ip);
+    return res.status(200).json({ ok: true });
+  }
+
+  entry.count += 1;
+  return res.status(401).json({ ok: false, error: 'Incorrect PIN.' });
 });
 
 app.get('/api/debug/env', (req, res) => {

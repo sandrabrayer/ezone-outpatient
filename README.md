@@ -20,7 +20,9 @@ through an Apps Script Web App.
 
 ## Access
 
-- PIN screen on load. `2107` grants full edit access.
+- PIN screen on load. The PIN is configured server-side via the `APP_PIN`
+  env var and verified by `POST /api/verify-pin`; a correct PIN grants full
+  edit access.
 - "המשך כצופה בלבד" hides all edit controls (read-only).
 - Choice is stored in `sessionStorage` for the session only.
 
@@ -54,6 +56,7 @@ pricePerSession, startDate, status, exitDate, fromLead`
 ```bash
 npm install
 export SHEETS_URL="https://script.google.com/macros/s/.../exec"
+export APP_PIN="your-edit-pin"
 npm start
 # open http://localhost:3000
 ```
@@ -61,7 +64,9 @@ npm start
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
-- Set the environment variable `SHEETS_URL` on the Railway service.
+- Set the environment variables `SHEETS_URL` and `APP_PIN` on the Railway
+  service. `APP_PIN` is the edit-mode PIN, checked server-side — if unset,
+  `/api/verify-pin` rejects every attempt.
 - The app listens on `process.env.PORT`.
 - Deploy as a single service — one URL only.
 
@@ -69,6 +74,8 @@ npm start
 
 - `GET /api/sheets` → `{ ok, leads, clients }`
 - `POST /api/sheets` with `{ leads, clients }` → saves everything
+- `POST /api/verify-pin` with `{ pin }` → `{ ok: true }` on match, `401` on
+  mismatch, `429` after 10 attempts in 15 minutes from the same IP
 
 ### Cross-app read endpoints (shared-secret, read-only)
 
