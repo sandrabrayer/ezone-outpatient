@@ -1,3 +1,4 @@
+[CHANGELOG (12).md](https://github.com/user-attachments/files/29659702/CHANGELOG.12.md)
 # Changelog
 
 All notable changes to the E-ZONE Outpatient Dashboard are documented here.
@@ -456,3 +457,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `public/app.js` implements the rule inline (no browser build step). It is
   kept in sync with `public/billing-status.js` by hand; any change to the
   rule must update both, and the tests guard the canonical module.
+
+## 2026-07-04 — Payout follow-ups (visibility, unknown therapists, save speed)
+
+### Fixed
+- **Invisible headings**: תשלומי מטפלים and שימור לידים headings used `#1a2e4a`
+  (dark navy) on the dark theme — now `#9fcfcf`.
+- **unknown_therapist on valid therapists**: pay rates were hardcoded maps — any
+  therapist not listed (or spelled differently than in ezone-therapists) was
+  rejected. Rates now live in a **TherapistRates sheet** (auto-seeded from the
+  constants on first run; columns: name / flatRate / intakeRate / followupRate).
+  Add a therapist = add a row; no redeploy. Cached 120s (edits apply ≤2 min).
+  Unknown names still fail closed — a pay rate is never invented.
+- **Slow save**: `_recordSessionOutcome` rewrote the whole Clients sheet to
+  persist one credit balance — now a single-cell write (`_writeCreditsOwed`).
+
+### Tests
+- `test/payout-followups.test.js` (7 source-guard tests).
+
+### Deploy
+- Frontend: Railway auto-deploy on commit to this branch; hard-refresh.
+- **Apps Script: manual redeploy required** (paste Code.gs → Save → new version
+  of the EXISTING deployment). The TherapistRates sheet is created and seeded on
+  the next recorded session — then add missing therapists' rows.
