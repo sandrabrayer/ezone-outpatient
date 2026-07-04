@@ -6,6 +6,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Payout modules were committed to wrong nested paths — payouts tab failed
+  with "מודול החישוב לא נטען" (calculation module not loaded).** `2026-07-04` —
+  `therapist-payout.js` and `payout-export.js` had landed under
+  `public/public/…` (and duplicate copies under `apps-script/public/…`), so the
+  `<script>` tags in `public/index.html` (which reference them at the `public/`
+  root) 404'd and `window.TherapistPayout` never defined. Moved both modules to
+  `public/therapist-payout.js` and `public/payout-export.js`, moved
+  `therapist-pay.test.js` back to `test/`, restored the missing
+  `test/payout-export.test.js` (6 cases), and deleted the stray duplicate copies
+  and now-empty nested `public/` / `apps-script/public/` folders. Full payout
+  suite green again: `test/therapist-pay.test.js` (12),
+  `test/therapist-payout.test.js` (9), `test/payout-export.test.js` (6) — 27
+  passing. No changes to `apps-script/Code.gs`.
 - **Orphaned "additional treatment" charges from deleted patients.** Charge
   rows (`ClientCharges`, keyed by `clientId`) survived patient deletion as
   orphans and leaked into the dashboard. Two-layer fix: (1) display-time

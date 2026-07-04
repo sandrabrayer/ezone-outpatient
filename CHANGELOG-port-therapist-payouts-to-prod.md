@@ -1,4 +1,3 @@
-[CHANGELOG-port-therapist-payouts-to-prod.md](https://github.com/user-attachments/files/29563601/CHANGELOG-port-therapist-payouts-to-prod.md)
 # CHANGELOG — Port therapist-payout ("תשלומי מטפלים") tab into production
 
 ## Why
