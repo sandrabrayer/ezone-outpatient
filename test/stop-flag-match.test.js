@@ -144,11 +144,12 @@ test('schema guard: Clients headers are append-only (phone, then payment fields,
   const cols = m[1].match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
   // paymentStatus/paymentDate/nextBillingDate were appended AFTER phone (so the
-  // renewal alert can read a persisted nextBillingDate). Append-only: they sit at
-  // the very end in this exact order, with phone immediately before them.
+  // renewal alert can read a persisted nextBillingDate), and creditsOwed was
+  // appended after them (session-quota credit engine — without a persisted
+  // column the engine silently no-ops). Append-only: this exact tail order.
   assert.deepEqual(
-    cols.slice(-4),
-    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate'],
-    'payment fields must be appended LAST, after phone (append-only)'
+    cols.slice(-5),
+    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'],
+    'payment fields + creditsOwed must be appended LAST, after phone (append-only)'
   );
 });
