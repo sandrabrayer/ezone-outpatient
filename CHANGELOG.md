@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs
+- **`EZONE-ECOSYSTEM-STATUS.md` added at repo root** `2026-07-04` — the July 4 merged cross-app ecosystem status doc, distributed to the root of all six E-Zone repos so every project/session starts from the true state.
+
 ### Changed
 - **Unified the two diverged production lines (volta + dashboard).** `2026-07-04`
   — the live `claude/youthful-volta-laarnk` line (payouts) and the
