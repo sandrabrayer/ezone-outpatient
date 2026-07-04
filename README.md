@@ -182,6 +182,18 @@ npm start
 - `GET /api/debug/routes` – lists mounted routes.
 - `GET /api/debug/last-load` – status of the most recent Sheets load.
 
+## Additional-treatment charges (orphan cleanup)
+
+- `ClientCharges` rows are keyed by `clientId`. Deleting a patient now also
+  deletes their charge rows: the dashboard `✕` flow calls the internal
+  `POST { action:'removeChargesForClient', clientId }` action
+  (`_removeChargesForClient`, idempotent, logs each removed row). A display-time
+  guard `excludeOrphanCharges(charges, clients)` (in `public/charges-logic.js`,
+  mirrored inline in `public/app.js`) additionally hides any charge whose
+  `clientId` no longer matches a live patient, so pre-existing orphans never
+  surface. See `CHANGELOG-orphan-charges-cleanup.md`. **Requires an Apps Script
+  redeploy.**
+
 ## Phone numbers
 
 - **Canonical form:** leading-zero, no separators (e.g. `0501234567`).

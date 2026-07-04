@@ -56,7 +56,7 @@
   var DAY_CENTER_LOCATION = 'רעננה הפרדס';
 
   var STAGES = [
- { id: 'new',        he: 'פרטים אישיים' },
+    { id: 'new',        he: 'פרטים אישיים' },
     { id: 'intro',      he: 'שיחת היכרות' },
     { id: 'agreement',  he: 'תוכנית טיפול' }
   ];
@@ -97,14 +97,14 @@
     var out = {};
     if (!v && v !== 0) return out;
     if (typeof v === 'object' && !Array.isArray(v)) {
-      Object.keys(v).forEach(function (k) { out[k] = wholeSessions(v[k]); });
+      Object.keys(v).forEach(function (k) { if (k !== '_units') out[k] = wholeSessions(v[k]); });
       return out;
     }
     var s = String(v).trim();
     if (s && s.charAt(0) === '{') {
       try {
         var parsed = JSON.parse(s);
-        Object.keys(parsed).forEach(function (k) { out[k] = wholeSessions(parsed[k]); });
+        Object.keys(parsed).forEach(function (k) { if (k !== '_units') out[k] = wholeSessions(parsed[k]); });
         return out;
       } catch (_) {}
     }
@@ -114,7 +114,20 @@
     if (n) out._total = n;
     return out;
   }
-  function formatSessionsBreakdown(b) { return JSON.stringify(b || {}); }
+  // Serialize the service→count breakdown, attaching any valid per-service unit
+  // overrides under the reserved `_units` key (omitted when none apply, so
+  // override-free records are unchanged). Mirrors charges-logic attachSessionsUnits.
+  function formatSessionsBreakdown(b, units) {
+    var obj = {};
+    Object.keys(b || {}).forEach(function (k) { if (k !== '_units') obj[k] = b[k]; });
+    var u = {};
+    Object.keys(units || {}).forEach(function (k) {
+      var val = String(units[k] == null ? '' : units[k]).trim();
+      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+    });
+    if (Object.keys(u).length) obj._units = u;
+    return JSON.stringify(obj);
+  }
   function totalSessions(v, services) {
     var b = parseSessionsBreakdown(v, services);
     return Object.keys(b).reduce(function (s, k) { return s + wholeSessions(b[k]); }, 0);
@@ -206,6 +219,37 @@
     return isFinite(n) ? n : 0;
   }
   function monthlyRevenue(c) { return toNum(c.pricePerSession); }
+  // Session-frequency unit per treatment type — psychiatric follow-up is monthly,
+  // all others weekly. Mirrors sessionFrequencyUnit in public/charges-logic.js.
+  function sessionFrequencyUnit(serviceType) {
+    return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
+  // Resolve the unit for a service: a valid per-patient override wins, else the
+  // by-type default. Mirrors sessionUnitFor in public/charges-logic.js.
+  function sessionUnitFor(serviceType, units) {
+    var u = units && units[serviceType];
+    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+  }
+  // Extract per-service unit overrides from a stored sessionsPerWeek value
+  // (object or JSON string); overrides live under the reserved `_units` key.
+  // Mirrors parseSessionsUnits in public/charges-logic.js.
+  function parseSessionsUnits(v) {
+    var out = {};
+    if (!v) return out;
+    var obj = null;
+    if (typeof v === 'object' && !Array.isArray(v)) obj = v;
+    else {
+      var s = String(v).trim();
+      if (s && s.charAt(0) === '{') { try { obj = JSON.parse(s); } catch (_) {} }
+    }
+    if (obj && obj._units && typeof obj._units === 'object') {
+      Object.keys(obj._units).forEach(function (k) {
+        var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
+        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+      });
+    }
+    return out;
+  }
   function toast(msg, isError) {
     var t = $('#toast');
     t.textContent = msg;
@@ -225,10 +269,6 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // 1 week before the treatment-month ends — collect the next monthly payment.
-  // Mirrors RENEWAL_WINDOW_DAYS in public/vered-alerts.js — keep both in sync.
-  var RENEWAL_WINDOW_DAYS = 7;
-
   // Add 1 calendar month to an ISO date string
   function addMonth(isoDate) {
     if (!isoDate) return '';
@@ -243,13 +283,17 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal — anchor + 1 month with
-  // short-month clamp. Anchor precedence: packageChangeDate (a שינוי חבילה
-  // re-anchors the cycle), else last payment date, else start date. Mirrors
-  // nextRenewalDueDate in public/charges-logic.js — keep both in sync. Shared
-  // by renewalInfo()'s banner and the "חידוש ותשלום" button so they never diverge.
+  // The ISO due-date of a client's next monthly renewal. Prefers the stored
+  // nextBillingDate — the SAME value the גבייה הבאה chip shows — so the renewal
+  // alert/button never diverge from the chip. Falls back to anchor + 1 month with
+  // short-month clamp for legacy rows saved before nextBillingDate was persisted.
+  // Anchor precedence: packageChangeDate (a שינוי חבילה re-anchors the cycle),
+  // else last payment date, else start date. Mirrors nextRenewalDueDate in
+  // public/charges-logic.js — keep both in sync. Shared by renewalInfo()'s banner
+  // and the "חידוש ותשלום" button so they never diverge.
   function nextRenewalDueDate(c) {
     if (!c) return '';
+    if (c.nextBillingDate) return c.nextBillingDate;
     var anchor = c.packageChangeDate || c.paymentDate || c.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
@@ -266,39 +310,37 @@
 
   // Compute renewal info for a client.
   // Returns { renewalDate, daysLeft, status: 'overdue'|'due_soon'|'ok'|'unknown' }
+  // The renewal date anchors on nextRenewalDueDate(c) — i.e. the stored
+  // nextBillingDate, the SAME value the גבייה הבאה chip shows — so the alert and
+  // the chip read one source and never diverge. No independent addMonth recompute.
   // Source of truth for "is the current month settled?" is the actual base
   // payment row — the SAME lookup the paid/unpaid badge uses — not the
-  // date-only calc or the denormalized paymentStatus flag. Without this the
-  // banner screamed "overdue" on a month that was already paid (the row says
-  // paid, but the renewal date had quietly slipped into the past).
+  // denormalized paymentStatus flag. Without this the banner screamed "overdue"
+  // on a month that was already paid (the row says paid, but the next-billing
+  // date had quietly slipped into the past).
   //   - If the current month's base row is paid: that month is settled. The
-  //     next renewal is one cycle out from this month's due date, so the banner
-  //     counts toward next cycle (ok/due_soon) and is NEVER overdue.
-  //   - Otherwise: date calc (renewal = anchor + 1 month) + hasBillingProblem.
+  //     banner counts toward the stored next-billing date (ok/due_soon), clamps a
+  //     negative gap to 0, and is NEVER overdue.
+  //   - Otherwise: stored next-billing date + hasBillingProblem.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
-    var anchor = c.packageChangeDate || c.paymentDate || c.startDate || '';
-    if (!anchor) return { status: 'unknown' };
-    var status;
-    var renewal;
-    var daysLeft;
+    var renewal = nextRenewalDueDate(c);
+    if (!renewal) return { status: 'unknown' };
+    var daysLeft = daysBetween(today(), renewal);
     var curDue = currentMonthBaseDueDate(c);
     var paidThisMonth = paymentForClientOn(c, curDue).status === 'paid';
+    var status;
     if (paidThisMonth) {
-      // Current month is settled — renewal is one cycle past this month's due
-      // date. Clamp a negative gap to 0 ("renew today") so stale data can't
-      // produce nonsense like "renew in -5 days", and so paid never => overdue.
-      renewal = addMonth(curDue);
-      daysLeft = daysBetween(today(), renewal);
+      // Current month is settled. Clamp a negative gap to 0 ("renew today") so
+      // stale data can't produce nonsense like "renew in -5 days", and so paid
+      // never => overdue.
       if (daysLeft === null) {
         status = 'unknown';
       } else {
         if (daysLeft < 0) daysLeft = 0;
-        status = daysLeft <= RENEWAL_WINDOW_DAYS ? 'due_soon' : 'ok';
+        status = daysLeft <= 7 ? 'due_soon' : 'ok';
       }
     } else {
-      renewal = nextRenewalDueDate(c);
-      daysLeft = daysBetween(today(), renewal);
       if (hasBillingProblem(c)) {
         // Explicitly marked partial/unpaid - overdue
         status = 'overdue';
@@ -306,13 +348,34 @@
         status = 'unknown';
       } else if (daysLeft < 0) {
         status = 'overdue';
-      } else if (daysLeft <= RENEWAL_WINDOW_DAYS) {
+      } else if (daysLeft <= 7) {
         status = 'due_soon';
       } else {
         status = 'ok';
       }
     }
     return { renewalDate: renewal, daysLeft: daysLeft, status: status };
+  }
+
+  // Urgency tier from a renewalInfo() status: 0 = overdue/red, 1 = due_soon,
+  // 2 = everyone else. Mirrors urgencyTier in public/charges-logic.js.
+  function urgencyTier(status) {
+    if (status === 'overdue') return 0;
+    if (status === 'due_soon') return 1;
+    return 2;
+  }
+  // Stable comparator over decorated card entries { tier, daysLeft, index }:
+  // lower tier first; within red + due_soon ascending daysLeft (most overdue /
+  // soonest first, null last); ties fall back to original index (stable).
+  // Mirrors compareCardUrgency in public/charges-logic.js.
+  function compareCardUrgency(a, b) {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.tier !== 2) {
+      var da = a.daysLeft == null ? Infinity : a.daysLeft;
+      var db = b.daysLeft == null ? Infinity : b.daysLeft;
+      if (da !== db) return da - db;
+    }
+    return a.index - b.index;
   }
 
   // --- API ---------------------------------------------------------------
@@ -376,6 +439,7 @@
       note: row.note || '',
       stage: heToId(row.stage || ''),
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
+      sessionsUnit: parseSessionsUnits(row.sessionsPerWeek),
       pricePerSession: row.pricePerSession === '' ? '' : toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       created: fmtDate(row.created) || today(),
@@ -398,6 +462,7 @@
       serviceType: services,
       location: row.location || '',
       sessionsPerWeek: parseSessionsBreakdown(row.sessionsPerWeek, services),
+      sessionsUnit: parseSessionsUnits(row.sessionsPerWeek),
       pricePerSession: toNum(row.pricePerSession),
       startDate: fmtDate(row.startDate),
       status: row.status || 'פעיל',
@@ -441,7 +506,7 @@
       location: l.location,
       note: l.note,
       stage: idToHe(l.stage),
-      sessionsPerWeek: Object.keys(breakdown).length ? formatSessionsBreakdown(breakdown) : '',
+      sessionsPerWeek: Object.keys(breakdown).length ? formatSessionsBreakdown(breakdown, l.sessionsUnit) : '',
       pricePerSession: l.pricePerSession === '' ? '' : toNum(l.pricePerSession),
       startDate: l.startDate || '',
       created: l.created || today(),
@@ -465,7 +530,7 @@
       phone: c.phone || '',
       serviceType: services,
       location: c.location,
-      sessionsPerWeek: formatSessionsBreakdown(breakdown),
+      sessionsPerWeek: formatSessionsBreakdown(breakdown, c.sessionsUnit),
       pricePerSession: toNum(c.pricePerSession),
       startDate: c.startDate || '',
       status: c.status || 'פעיל',
@@ -665,6 +730,23 @@
   async function persistRemoveCharge(id) {
     await apiPostAction('removeCharge', { id: id });
   }
+  // Bulk-delete every ClientCharges row for a deleted patient in one round-trip.
+  async function persistRemoveChargesForClient(clientId) {
+    await apiPostAction('removeChargesForClient', { clientId: clientId });
+  }
+
+  // Drop "orphan" charges — rows whose clientId no longer matches any patient
+  // (the patient was deleted, the charge row survived). Mirrors
+  // excludeOrphanCharges in public/charges-logic.js — keep both in sync.
+  function excludeOrphanCharges(charges, clients) {
+    var live = {};
+    (clients || []).forEach(function (c) {
+      if (c && c.id != null && String(c.id) !== '') live[String(c.id)] = true;
+    });
+    return (charges || []).filter(function (ch) {
+      return ch && ch.clientId != null && live[String(ch.clientId)] === true;
+    });
+  }
 
   async function persistRemoveLead(lead) {
     await apiPostAction('removeLead', { lead: leadForSheet(lead) });
@@ -740,6 +822,21 @@
       amountDue: clientAmountDue(client), amountPaid: 0,
       status: 'unpaid', paymentDate: '', method: '', notes: '',
       bundleSize: 0, sessionsUsed: 0
+    };
+  }
+  // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
+  // explicit paidDateISO (NOT today) so a backdated payment round-trips through
+  // persistPayment unchanged. Mirrors basePaymentPaidOn in public/charges-logic.js
+  // — keep both in sync. Shared by the edit-modal paid-date propagation (Bug A)
+  // and renew-and-pay (Bug C).
+  function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
+    return {
+      id: paymentId(client, dueDateISO, 'base'),
+      clientId: client.id, clientName: client.name || '',
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: paidDateISO || '', method: '', notes: notes || '',
+      bundleSize: '', sessionsUsed: ''
     };
   }
   function paymentForExtraOn(client, charge, dueDateISO) {
@@ -1614,11 +1711,14 @@
         '<input class="billing-paid" type="number" min="0" step="1" value="' + (payment.amountPaid || 0) + '"' + disabled + ' />' +
       '</div>' +
       '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span></div>' +
+      '<div class="billing-paid-date-wrap"><span class="p-label">תאריך תשלום</span>' +
+        '<input class="billing-paid-date" type="date" value="' + (payment.paymentDate || today()) + '"' + disabled + ' /></div>' +
       nextBillHtml;
 
     var statusSel = row.querySelector('.billing-status');
     var paidWrap  = row.querySelector('.billing-paid-wrap');
     var paidInput = row.querySelector('.billing-paid');
+    var paidDateInput = row.querySelector('.billing-paid-date');
     var balanceEl = row.querySelector('.billing-balance');
 
     function recompute(newStatus, newPaid) {
@@ -1636,7 +1736,9 @@
         billingType: payment.billingType || (isExtra && charge && charge.billingType === 'one_time' ? 'one_time' : 'monthly'),
         dueDate: dueDateISO,
         amountDue: amount, amountPaid: ap, status: newStatus,
-        paymentDate: newStatus === 'paid' ? today() : (payment.paymentDate || ''),
+        paymentDate: newStatus === 'paid'
+          ? ((paidDateInput && paidDateInput.value) || today())
+          : (payment.paymentDate || ''),
         method: payment.method || '', notes: payment.notes || '',
         bundleSize: 0, sessionsUsed: 0
       };
@@ -1650,6 +1752,12 @@
       var v = toNum(paidInput.value);
       if (v >= amount) { statusSel.value = 'paid'; saveBillingRow(recompute('paid', amount)); }
       else { saveBillingRow(recompute('partial', v)); }
+    });
+    // Backdating: when the row is already marked paid, editing the date persists
+    // it through the same single save path (no effect while unpaid/partial).
+    if (paidDateInput) paidDateInput.addEventListener('change', function () {
+      if (statusSel.value !== 'paid') return;
+      saveBillingRow(recompute('paid', paidInput.value));
     });
 
     // Orphan row: the payment's patient no longer exists (e.g. a deleted test
@@ -1731,32 +1839,31 @@
       });
   }
 
-  // Toggle a specific EXTRA CHARGE's paid status. A charge's status lives in its
-  // own payment row (id = paymentId(client, today(), 'extra', charge.id)), the
-  // same row chargeStatusFor reads. Mirrors setCurrentMonthPaid: optimistic
-  // update + persist, rollback on failure. Lets Vered mark an added treatment
-  // paid on the spot when money is collected the same day.
-  function setChargePaid(c, charge, makePaid) {
+  // Toggle an extra charge's CURRENT-month (or ::once) payment paid/unpaid from
+  // the patient card. Same single write path as the גבייה tab (persistPayment /
+  // savePayment) and the same paid/unpaid rules as setCurrentMonthPaid — a plain
+  // toggle stamped with today() on pay (no backdate; that stays in גבייה).
+  // partial → paid. Optimistic update + rollback. Mirrors togglePaymentRow in
+  // public/charges-logic.js — keep both in sync.
+  function setChargePaid(c, ch) {
     if (state.role !== 'editor') return;
-    var id = paymentId(c, today(), 'extra', charge.id);
-    var existing = findPaymentById(id);
-    var newStatus = makePaid ? 'paid' : 'unpaid';
-    if (existing && existing.status === newStatus) return;
-    var amount = (existing && existing.amountDue) || charge.amount || 0;
+    var ex = paymentForExtraOn(c, ch, today());
+    var makePaid = ex.status !== 'paid';   // paid → unpaid; unpaid/partial → paid
+    var amount = ex.amountDue || toNum(ch.amount) || 0;
     var updated = {
-      id: id,
-      clientId: c.id,
-      clientName: c.name || '',
-      billingType: 'extra',
-      dueDate: (existing && existing.dueDate) || today(),
+      id: ex.id,
+      clientId: ex.clientId || c.id,
+      clientName: ex.clientName || c.name || '',
+      billingType: ex.billingType || (ch.billingType === 'one_time' ? 'one_time' : 'monthly'),
+      dueDate: ex.dueDate || today(),
       amountDue: amount,
       amountPaid: makePaid ? amount : 0,
-      status: newStatus,
-      paymentDate: makePaid ? today() : ((existing && existing.paymentDate) || ''),
-      method: (existing && existing.method) || '', notes: (existing && existing.notes) || '',
+      status: makePaid ? 'paid' : 'unpaid',
+      paymentDate: makePaid ? today() : (ex.paymentDate || ''),
+      method: ex.method || '', notes: ex.notes || ch.description || '',
       bundleSize: 0, sessionsUsed: 0
     };
-    var idx = state.payments.findIndex(function (p) { return p.id === id; });
+    var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
     if (idx >= 0) state.payments[idx] = updated;
     else state.payments.push(updated);
@@ -1765,7 +1872,7 @@
       .then(function () { toast(makePaid ? 'החיוב סומן כשולם' : 'בוטל סימון התשלום'); })
       .catch(function (e) {
         if (prev) state.payments[idx] = prev;
-        else state.payments = state.payments.filter(function (p) { return p.id !== id; });
+        else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
         render();
         toast('שמירה נכשלה: ' + e.message, true);
       });
@@ -2319,8 +2426,9 @@
     var agreementFields = '';
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
+      var bdUnits = l.sessionsUnit || parseSessionsUnits(l.sessionsPerWeek);
       var bdChips = Object.keys(breakdown).map(function (k) {
-        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
+        return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/' + sessionUnitFor(k, bdUnits) + '</span>';
       }).join('');
       agreementFields =
         '<div class="row">' + (bdChips || '<span class="chip">מפגשים לא נקבעו</span>') + '</div>' +
@@ -2389,7 +2497,7 @@
         setAgree.onclick = function () { openAgreementModal(l); };
         actions.appendChild(setAgree);
       }
-     if (idx < STAGES.length - 1) {
+    if (idx < STAGES.length - 1) {
         var next = document.createElement('button');
         next.className = 'btn btn-primary';
         var nextStage = STAGES[idx + 1];
@@ -2400,6 +2508,8 @@
         };
         actions.appendChild(next);
       }
+      // תוכנית טיפול is now the terminal lead stage: converting to an active
+      // patient happens here via the activate modal (creates the client record).
       if (stage.id === 'agreement') {
         var convert = document.createElement('button');
         convert.className = 'btn btn-primary';
@@ -2456,8 +2566,16 @@
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
-    visible.forEach(function (c) { list.appendChild(clientCard(c)); });
-    if (!visible.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
+    // Urgency sort: red (overdue) first, then renewals by soonest, everyone
+    // else stable. renewalInfo() is computed ONCE per card here and reused —
+    // the sort never recomputes urgency independently of the banner.
+    var decorated = visible.map(function (c, i) {
+      var info = renewalInfo(c);
+      return { client: c, tier: urgencyTier(info.status), daysLeft: info.daysLeft, index: i };
+    });
+    decorated.sort(compareCardUrgency);
+    decorated.forEach(function (d) { list.appendChild(clientCard(d.client)); });
+    if (!decorated.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
   }
 
   function statusClass(s) {
@@ -2469,70 +2587,65 @@
   function clientCard(c) {
     var card = document.createElement('div');
     card.className = 'client-card';
-    var rev = monthlyRevenue(c);
-    var phoneDisp = clientPhone(c);
     var services = parseServices(c.serviceType);
-    var serviceChips = services.map(function (s) { return '<span class="chip">' + escapeHtml(serviceLabel(s)) + '</span>'; }).join('');
     var locationChip = c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '';
-    var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
-    var hooChip = hooLabelClient ? '<span class="chip">בית מוצא: ' + escapeHtml(hooLabelClient) + '</span>' : '';
+    var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
     var assignedChip = c.assignedTo ? '<span class="chip">משוייך: ' + escapeHtml(c.assignedTo) + '</span>' : '';
-    var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
-    var breakdownChips = Object.keys(breakdown).map(function (k) {
-      return '<span class="chip">' + escapeHtml(serviceLabel(k)) + ': ' + breakdown[k] + '/שבוע</span>';
-    }).join('');
-    var total = totalSessions(c.sessionsPerWeek, c.serviceType);
+
+    // Monthly session-credit balance (server-managed): cancelled-by-therapist
+    // sessions bank a credit; a session beyond the monthly quota spends one.
     var credits = toNum(c.creditsOwed) || 0;
-    var statsHtml =
-      '<span>סה״כ מפגשים/שבוע: <b>' + total + '</b></span>' +
-      '<span>חבילה חודשית: <b>' + money(c.pricePerSession) + '</b></span>' +
-      '<span>הכנסה: <b>' + money(rev) + '</b></span>' +
-      // Monthly session-credit balance (server-managed): cancelled-by-therapist
-      // sessions bank a credit; a session beyond the monthly quota spends one.
-      '<span>קרדיט מפגשים: <b' + (credits > 0 ? ' class="credit-pos"' : '') + '>' + credits + '</b></span>';
+    var creditRow = '<div class="cc-line"><span class="cc-k">קרדיט מפגשים</span>' +
+      '<span class="cc-v' + (credits > 0 ? ' credit-pos' : '') + '">' + credits + '</span></div>';
+
+    // Treatment-type rows (name + frequency). Weekly unit here is corrected to a
+    // per-type unit (psychiatric = monthly) in the dedicated unit-fix commit.
+    var breakdown = parseSessionsBreakdown(c.sessionsPerWeek, c.serviceType);
+    var planUnits = c.sessionsUnit || parseSessionsUnits(c.sessionsPerWeek);
+    var planRows = services.map(function (s) {
+      var n = breakdown[s];
+      var freq = (n || n === 0) ? n + '/' + sessionUnitFor(s, planUnits) : '';
+      return '<div class="cc-line"><span class="cc-k">' + escapeHtml(serviceLabel(s)) + '</span>' +
+             '<span class="cc-v">' + freq + '</span></div>';
+    }).join('');
+    if (!planRows) planRows = '<div class="cc-line cc-muted">לא נקבעו מפגשים</div>';
+
+    var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
+    var hooRow = hooLabelClient
+      ? '<div class="cc-line"><span class="cc-k">בית מוצא</span><span class="cc-v">' + escapeHtml(hooLabelClient) + '</span></div>'
+      : '';
 
     // Monthly base-payment status for the CURRENT month. Driven by the same
     // per-month payment row the גבייה tab uses (paymentForClientOn) so both
     // tabs stay consistent. For editors it is a toggle button: unpaid/partial →
     // mark paid, paid → revert to unpaid (both via persistPayment).
-    var paymentHtml = '';
+    var paidChipHtml = '';
+    var paidOnRow = '';
     if (c.status !== 'סיים טיפול') {
       var basePay = paymentForClientOn(c, currentMonthBaseDueDate(c));
       var psId = basePay.status === 'paid' ? 'paid' : basePay.status === 'partial' ? 'partial' : 'unpaid';
       var psLabel = psId === 'paid' ? 'שולם' : psId === 'partial' ? 'שולם חלקית' : 'לא שולם';
-      var statusEl;
       if (state.role === 'editor') {
-        statusEl = psId === 'paid'
+        paidChipHtml = psId === 'paid'
           ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="בטל סימון תשלום לחודש הנוכחי">חבילה: ' + psLabel + ' ↺</button>'
           : '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">חבילה: ' + psLabel + ' ✓</button>';
       } else {
-        statusEl = '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
+        paidChipHtml = '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
       }
-      paymentHtml = '<div class="client-meta">' +
-        statusEl +
-        (psId === 'paid' && basePay.paymentDate ? '<span class="chip">שולם ב: ' + displayDate(basePay.paymentDate) + '</span>' : '') +
-        (c.nextBillingDate
-          ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(c.nextBillingDate) + '</span>'
-          : (renewalInfo(c) && renewalInfo(c).renewalDate
-              ? '<span class="chip chip-next">גבייה הבאה: ' + displayDate(renewalInfo(c).renewalDate) + '</span>'
-              : '')) +
-        '</div>';
+      paidOnRow = (psId === 'paid' && basePay.paymentDate)
+        ? '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' + displayDate(basePay.paymentDate) + '</span></div>'
+        : '';
     }
+    var nextBillRow = c.nextBillingDate
+      ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' + displayDate(c.nextBillingDate) + '</span></div>'
+      : '';
+    var startRow = c.startDate
+      ? '<div class="cc-line"><span class="cc-k">תחילת טיפול</span><span class="cc-v">' + displayDate(c.startDate) + '</span></div>'
+      : '';
 
-    // Renewal status banner (overdue / due soon)
-    var renewBannerHtml = '';
-    var renew = renewalInfo(c);
-    if (renew.status === 'overdue') {
-      card.classList.add('client-card-stop');
-      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
-    } else if (renew.status === 'due_soon') {
-      card.classList.add('client-card-warn');
-      var dl = renew.daysLeft;
-      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
-      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
-    }
-
-    // Extra charges (active only) shown inline as a compact list.
+    // Extra charges (active only) — additional treatments layered on the base
+    // package. Rendered INSIDE the treatment panel; only present when the patient
+    // has active charges, so empty cards stay clean. Carries the × remove control.
     var activeCharges = state.charges.filter(function (ch) {
       return ch.clientId === c.id && ch.active !== false;
     });
@@ -2550,12 +2663,9 @@
         }
         var status = chargeStatusFor(c, ch);
         var statusLabel = status === 'paid' ? 'שולם' : status === 'partial' ? 'שולם חלקית' : 'לא שולם';
-        // Editors get a clickable toggle (mark paid / revert); viewers see a
-        // static badge. Clicking flips this charge's own payment row.
-        var statusBadge = (state.role === 'editor')
-          ? '<button type="button" class="charge-status charge-status-' + status + ' charge-status-btn edit-only" ' +
-              'data-charge-paid="' + escapeHtml(ch.id) + '" data-charge-makepaid="' + (status === 'paid' ? '0' : '1') + '" ' +
-              'title="' + (status === 'paid' ? 'בטל סימון תשלום' : 'סמן כשולם') + '">' + statusLabel + '</button>'
+        // Editors get a clickable toggle (paid ⇄ unpaid); viewers see a static badge.
+        var statusBadge = state.role === 'editor'
+          ? '<button type="button" class="charge-status charge-status-' + status + ' charge-status-toggle" data-charge-toggle="' + escapeHtml(ch.id) + '" title="' + (status === 'paid' ? 'בטל סימון תשלום' : 'סמן כשולם') + '">' + statusLabel + '</button>'
           : '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
         return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
           '<span class="charge-label">' + label + '</span>' +
@@ -2566,21 +2676,49 @@
       chargesHtml = '<ul class="client-charges">' + items + '</ul>';
     }
 
+    // כספים (right, RTL reads first): single amount + paid chip + dated rows.
+    var moneyPanel =
+      '<div class="cc-panel cc-money">' +
+        '<div class="cc-panel-title">כספים</div>' +
+        '<div class="cc-amount">' + money(c.pricePerSession) +
+          '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
+        (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
+        paidOnRow + nextBillRow + startRow +
+      '</div>';
+
+    // תוכנית טיפול (left): treatment-type rows, session credit, בית מוצא, extra charges.
+    var planPanel =
+      '<div class="cc-panel cc-plan">' +
+        '<div class="cc-panel-title">תוכנית טיפול</div>' +
+        planRows +
+        creditRow +
+        hooRow +
+        chargesHtml +
+      '</div>';
+
+    // Renewal status banner (overdue / due soon)
+    var renewBannerHtml = '';
+    var renew = renewalInfo(c);
+    if (renew.status === 'overdue') {
+      card.classList.add('client-card-stop');
+      renewBannerHtml = '<div class="card-banner card-banner-stop">🛑 עצור טיפול — לא שולם עבור החודש הנוכחי</div>';
+    } else if (renew.status === 'due_soon') {
+      card.classList.add('client-card-warn');
+      var dl = renew.daysLeft;
+      var txt = dl === 0 ? 'חידוש היום' : dl === 1 ? 'חידוש מחר' : 'חידוש בעוד ' + dl + ' ימים';
+      renewBannerHtml = '<div class="card-banner card-banner-warn">⏰ ' + txt + ' (' + displayDate(renew.renewalDate) + ')</div>';
+    }
+
     card.innerHTML =
       renewBannerHtml +
-      '<div class="client-head">' +
-        '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
-        '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
+      '<div class="cc-top">' +
+        '<div class="client-head">' +
+          '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
+          '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
+        '</div>' +
+        ((phoneChip || locationChip || assignedChip) ? '<div class="client-meta">' + phoneChip + locationChip + assignedChip + '</div>' : '') +
       '</div>' +
-      (phoneDisp ? '<div class="client-meta">טלפון: ' + escapeHtml(phoneDisp) + '</div>' : '') +
-      '<div class="client-meta">' + serviceChips + locationChip + hooChip + assignedChip + '</div>' +
-      (breakdownChips ? '<div class="client-meta">' + breakdownChips + '</div>' : '') +
-      '<div class="client-stats">' + statsHtml + '</div>' +
-      paymentHtml +
-      chargesHtml +
-      '<div class="client-meta">' +
-        (c.startDate ? 'תחילת טיפול: ' + displayDate(c.startDate) : '') +
-      '</div>' +
+      '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
       '<div class="client-actions edit-only"></div>';
 
     if (state.role === 'editor') {
@@ -2622,14 +2760,12 @@
         });
       });
 
-      // Wire the per-charge paid toggle (editor only): mark a single charge
-      // paid/unpaid on the spot (e.g. an added treatment paid the same day).
-      $$('[data-charge-paid]', card).forEach(function (btn) {
+      // Wire the extra-charge status badges as paid ⇄ unpaid toggles (editor only).
+      $$('[data-charge-toggle]', card).forEach(function (btn) {
         btn.addEventListener('click', function () {
-          var chargeId = btn.getAttribute('data-charge-paid');
-          var makePaid = btn.getAttribute('data-charge-makepaid') === '1';
-          var charge = (state.charges || []).find(function (ch) { return ch.id === chargeId; });
-          if (charge) setChargePaid(c, charge, makePaid);
+          var chargeId = btn.getAttribute('data-charge-toggle');
+          var ch = state.charges.find(function (x) { return x.id === chargeId; });
+          if (ch) setChargePaid(c, ch);
         });
       });
 
@@ -2647,8 +2783,18 @@
         statusSel.appendChild(o);
       });
       statusSel.onchange = function () {
+        // Optimistic: apply + render now, persist in background, roll back the
+        // status (and re-sync the select) on failure.
+        var prevStatus = c.status;
         c.status = statusSel.value;
-        persist().then(function () { toast('עודכן'); render(); }).catch(function (e) { toast('שגיאה: ' + e.message, true); });
+        render();
+        persist()
+          .then(function () { toast('עודכן'); })
+          .catch(function (e) {
+            c.status = prevStatus;
+            render();
+            toast('שמירה נכשלה: ' + e.message, true);
+          });
       };
       statusSel.className = 'btn';
       actions.appendChild(statusSel);
@@ -2665,12 +2811,15 @@
       del.title = 'מחיקה לצמיתות';
       del.onclick = function () {
         if (!confirm('למחוק לצמיתות את ' + c.name + '?')) return;
-        var delId = c.id;
-        state.clients = state.clients.filter(function (x) { return x.id !== delId; });
+        var deletedId = c.id;
+        state.clients = state.clients.filter(function (x) { return x.id !== deletedId; });
+        // Also drop this patient's charge rows so they can't become orphans.
+        state.charges = state.charges.filter(function (ch) { return ch.clientId !== deletedId; });
         persist()
-          .then(function () { return removePaymentsForClient(delId); })
+          .then(function () { return persistRemoveChargesForClient(deletedId); })
+          .then(function () { return removePaymentsForClient(deletedId); })
           .then(function () { toast('נמחק'); render(); })
-          .catch(function (e) { toast('שגיאה: ' + e.message, true); });
+          .catch(function (e) { toast('שגיאה: ' + e.message, true); render(); });
       };
       actions.appendChild(del);
     }
@@ -2748,7 +2897,6 @@
     var fd = new FormData(form);
     var group = $('[data-group="serviceType"]', form);
     var services = readServiceGroup(group);
-    var isDayCenter = hasDayCenter(services);
     return {
       name: (fd.get('name') || '').trim(),
       phone: normalizePhone(fd.get('phone') || ''),
@@ -2785,7 +2933,7 @@
   }
 
   // --- dynamic per-service sessions fields
-  function renderSessionsHost(host, services, values) {
+  function renderSessionsHost(host, services, values, unitValues) {
     host.innerHTML = '';
     var list = parseServices(services);
     if (!list.length) {
@@ -2796,20 +2944,41 @@
       return;
     }
     var current = parseSessionsBreakdown(values, services);
+    var units = unitValues || parseSessionsUnits(values);
     list.forEach(function (svc) {
       var label = document.createElement('label');
-      label.textContent = 'מפגשים בשבוע — ' + svc;
+      label.textContent = 'תדירות הטיפול — ' + svc;
       var input = document.createElement('input');
       input.type = 'number'; input.min = '0'; input.step = '1'; input.required = true;
       input.dataset.service = svc;
       input.value = current[svc] != null ? current[svc] : '';
       label.appendChild(input);
+      // Unit selector (per service). Defaults to the stored override if present,
+      // else the by-type default (psychiatric → חודש, all others → שבוע).
+      var unitSel = document.createElement('select');
+      unitSel.dataset.serviceUnit = svc;
+      ['שבוע', 'חודש'].forEach(function (unit) {
+        var o = document.createElement('option');
+        o.value = unit; o.textContent = unit;
+        unitSel.appendChild(o);
+      });
+      unitSel.value = sessionUnitFor(svc, units);
+      label.appendChild(unitSel);
       host.appendChild(label);
     });
   }
   function readSessionsHost(host) {
     var out = {};
     $$('input[data-service]', host).forEach(function (inp) { out[inp.dataset.service] = wholeSessions(inp.value); });
+    return out;
+  }
+  // Read the per-service unit selections from a sessions host. Returns only
+  // services whose select carries a valid unit ('שבוע'|'חודש').
+  function readSessionsUnits(host) {
+    var out = {};
+    $$('select[data-service-unit]', host).forEach(function (sel) {
+      if (sel.value === 'שבוע' || sel.value === 'חודש') out[sel.dataset.serviceUnit] = sel.value;
+    });
     return out;
   }
 
@@ -2842,12 +3011,10 @@
   }
   function updateLocationVisibility(form) {
     if (!form) return;
-    var group = $('[data-group="serviceType"]', form);
-    if (!group) return;
+    // סניף is always visible and selectable, regardless of service type — the
+    // branch the user picks is the single source of truth (incl. day-center).
     var wrap = formLocationWrap(form);
-    if (!wrap) return;
-    var picked = readServiceGroup(group);
-    wrap.classList.remove('field-hidden');
+    if (wrap) wrap.classList.remove('field-hidden');
     var sel = $('select[name="location"]', form);
     if (sel) sel.required = true;
   }
@@ -2895,7 +3062,7 @@
     agreementAdvance = !!advance;
     var f = $('#agreementForm');
     f.reset();
-    renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek);
+    renderSessionsHost($('[data-host="agreementSessions"]', f), lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit);
     f.pricePerSession.value = lead.pricePerSession || '';
     if (f.paymentStatus) f.paymentStatus.value = lead.paymentStatus || 'paid';
     if (f.paymentDate) f.paymentDate.value = lead.paymentDate || today();
@@ -2912,12 +3079,12 @@
     populateServiceGroup(group, lead.serviceType);
     if (lead.location) f.location.value = lead.location;
     var host = $('[data-host="activateSessions"]', f);
-    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek);
+    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit);
     $$('input[type="checkbox"]', group).forEach(function (cb) {
       cb.addEventListener('change', function () {
         var picked = readServiceGroup(group);
         var current = readSessionsHost(host);
-        renderSessionsHost(host, formatServices(picked), current);
+        renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
       });
     });
     f.pricePerSession.value = lead.pricePerSession || '';
@@ -2939,18 +3106,17 @@
     if (f.billingDay) f.billingDay.value = '';
     if (f.monthlyAmount) f.monthlyAmount.value = '';
     if (f.paymentDate) f.paymentDate.value = today();
-    renderSessionsHost($('[data-host="directSessions"]', f), '', {});
+    renderSessionsHost($('[data-host="directSessions"]', f), '', {}, {});
     updateLocationVisibilityForDirect(f);
     m.hidden = false;
   }
   function closeDirectClientModal() { $('#directClientModal').hidden = true; }
 
   function updateLocationVisibilityForDirect(form) {
-    var group = $('[data-group="serviceType"]', form);
+    // סניף is always visible and selectable, regardless of service type.
     var wrap = $('#directLocationWrap');
     var sel = $('select[name="location"]', form);
-    if (!group || !wrap || !sel) return;
-    var picked = readServiceGroup(group);
+    if (!wrap || !sel) return;
     wrap.classList.remove('field-hidden');
     sel.required = true;
   }
@@ -2996,12 +3162,12 @@
     var ecHost = $('[data-host="editClientSessions"]', form);
     if (ecGroup && ecHost) {
       populateServiceGroup(ecGroup, client.serviceType);
-      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek);
+      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
       $$('input[type="checkbox"]', ecGroup).forEach(function (cb) {
         cb.addEventListener('change', function () {
           var picked = readServiceGroup(ecGroup);
           var current = readSessionsHost(ecHost);
-          renderSessionsHost(ecHost, formatServices(picked), current);
+          renderSessionsHost(ecHost, formatServices(picked), current, readSessionsUnits(ecHost));
         });
       });
     }
@@ -3050,6 +3216,7 @@
     $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
       (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
     form.renewAmount.value = client.pricePerSession || '';
+    if (form.renewDate) form.renewDate.value = today();
     $('#renewModal').hidden = false;
   }
   function closeRenewModal() {
@@ -3075,7 +3242,7 @@
     if (form.changeDate) form.changeDate.value = client.packageChangeDate || today();
     if (form.newPrice) form.newPrice.value = client.pricePerSession || '';
     var host = $('[data-host="changePackageSessions"]', form);
-    if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek);
+    if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
     $('#changePackageModal').hidden = false;
   }
   function closeChangePackageModal() {
@@ -3168,6 +3335,26 @@
     });
   }
 
+  // Bug B: legacy clients saved before the nextBillingDate column have it blank,
+  // so renewalInfo would fall back to startDate (banner counts from תחילת טיפול).
+  // Reconstruct it from the latest PAID base payment row (paymentDate else dueDate,
+  // + 30 days) on load, without overwriting a populated value — no manual re-save
+  // needed. Mirrors deriveNextBillingDate in public/charges-logic.js.
+  function deriveNextBillingDates() {
+    if (!Array.isArray(state.clients) || !Array.isArray(state.payments)) return;
+    state.clients.forEach(function (c) {
+      if (!c || c.nextBillingDate) return;
+      var latest = '';
+      state.payments.forEach(function (p) {
+        if (!p || p.clientId !== c.id || p.status !== 'paid') return;
+        if (paymentKindFromId(p.id).kind !== 'base') return;
+        var anchor = p.paymentDate || p.dueDate || '';
+        if (anchor && anchor > latest) latest = anchor;
+      });
+      if (latest) c.nextBillingDate = addDays(latest, 30);
+    });
+  }
+
   async function loadAll() {
     try {
       // All six reads are independent Apps Script round-trips (~1-3s each).
@@ -3212,7 +3399,12 @@
       })();
       backfillClientPhones();
       state.payments = (results[1].payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
+      // Derive nextBillingDate for legacy clients now that payments are loaded.
+      deriveNextBillingDates();
       state.charges = (results[2].charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
+      // Display-time safety net: never surface charges whose patient was deleted
+      // (orphans). Root-cause cleanup runs server-side via removeChargesForClient.
+      state.charges = excludeOrphanCharges(state.charges, state.clients);
       state.stopFlags = (results[3].stopFlags || []).map(normalizeStopFlagFromSheet).filter(function (f) { return !!f.id; });
       state.extraRequests = (results[4].requests || []).filter(function (r) { return !!r.id; });
       var s = results[5];
@@ -3401,23 +3593,25 @@
       var fd = new FormData(e.target);
       var amount = toNum(fd.get('renewAmount'));
       if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      // Editable paid date (default today, backdatable) + free-text notes.
+      var paidDate = fd.get('renewDate') || today();
+      var notes = (fd.get('renewNotes') || '').trim();
       submit.disabled = true;
 
       // ORDERING IS DELIBERATE: persist the client default FIRST, payment
       // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
       // failure mode; the payment row is idempotent (deterministic id) and
       // safely re-clickable, so it is the safer step to leave for retry.
-      var prev = { pricePerSession: c.pricePerSession };
+      var prev = { pricePerSession: c.pricePerSession, paymentDate: c.paymentDate, nextBillingDate: c.nextBillingDate };
       c.pricePerSession = amount;
+      // Re-anchor from the paid date (same addDays(x,30) formula as edit/activate),
+      // so the renewal alert/גבייה הבאה advance off the date actually entered.
+      c.paymentDate = paidDate;
+      c.nextBillingDate = addDays(paidDate, 30);
       persist()
         .then(function () {
-          var payment = {
-            id: paymentId(c, renewalDate, 'base'),
-            clientId: c.id, clientName: c.name, billingType: 'monthly',
-            dueDate: renewalDate, amountDue: amount, amountPaid: amount,
-            status: 'paid', paymentDate: today(), method: '', notes: '',
-            bundleSize: '', sessionsUsed: ''
-          };
+          // Single paid-date path: same builder as the edit-modal propagation.
+          var payment = basePaymentPaidOn(c, renewalDate, amount, paidDate, notes);
           return persistPayment(payment)
             .then(function () {
               // Upsert by id so גבייה reflects it without a reload.
@@ -3503,7 +3697,7 @@
           var picked = readServiceGroup(group);
           var host = $('[data-host="directSessions"]', f);
           var current = readSessionsHost(host);
-          renderSessionsHost(host, formatServices(picked), current);
+          renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
           updateLocationVisibilityForDirect(f);
         });
       }
@@ -3521,7 +3715,6 @@
         var group = $('[data-group="serviceType"]', form);
         var services = readServiceGroup(group);
         if (!services.length) { toast('יש לבחור לפחות סוג טיפול אחד', true); submit.disabled = false; return; }
-        var isDayCenter = hasDayCenter(services);
         var name = (fd.get('name') || '').trim();
         if (!name) { toast('חסר שם', true); submit.disabled = false; return; }
         var directPhone = acceptPhone(fd.get('phone') || '', 'טלפון', 'mobile', false);
@@ -3532,6 +3725,7 @@
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); submit.disabled = false; return; }
         var host = $('[data-host="directSessions"]', form);
         var breakdown = readSessionsHost(host);
+        var cleanUnits = readSessionsUnits(host);
         var clean = {};
         services.forEach(function (s) { clean[s] = wholeSessions(breakdown[s] || 0); });
         var bd = fd.get('billingDay');
@@ -3548,7 +3742,7 @@
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
           location: (fd.get('location') || ''),
-          sessionsPerWeek: clean, pricePerSession: monthlyAmount,
+          sessionsPerWeek: clean, sessionsUnit: cleanUnits, pricePerSession: monthlyAmount,
           startDate: startDate, status: 'פעיל', exitDate: '',
           fromLead: '', source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
@@ -3584,6 +3778,11 @@
           if (dIdx >= 0) state.payments[dIdx] = directIntakePayment;
           else state.payments.push(directIntakePayment);
         }
+        // Optimistic: show the new patient + close the modal before the network;
+        // on failure remove the just-added client (and intake payment) and toast.
+        closeDirectClientModal();
+        render();
+        submit.disabled = false;
         persist()
           .then(function () {
             // Save the payment row through its own path (persist() saves only
@@ -3594,12 +3793,13 @@
               });
             }
           })
-          .then(function () { toast('המטופל נוסף'); closeDirectClientModal(); render(); })
+          .then(function () { toast('המטופל נוסף'); })
           .catch(function (err) {
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            render(); toast('שגיאה: ' + err.message, true);
-          })
-          .finally(function () { submit.disabled = false; });
+            if (directIntakePayment) state.payments = state.payments.filter(function (p) { return p.id !== directIntakePayment.id; });
+            render();
+            toast('שמירה נכשלה: ' + err.message, true);
+          });
       } catch (e2) { toast('שגיאה: ' + e2.message, true); submit.disabled = false; }
     });
 
@@ -3656,6 +3856,7 @@
       var fd = new FormData(e.target);
       var host = $('[data-host="agreementSessions"]', e.target);
       lead.sessionsPerWeek = readSessionsHost(host);
+      lead.sessionsUnit = readSessionsUnits(host);
       lead.pricePerSession = toNum(fd.get('pricePerSession'));
       var agPayStatus = fd.get('paymentStatus') || '';
       var agPayDate = fd.get('paymentDate') || '';
@@ -3691,9 +3892,9 @@
       if (!services.length) { submit.disabled = false; toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       var host = $('[data-host="activateSessions"]', e.target);
       var breakdown = readSessionsHost(host);
+      var cleanUnits = readSessionsUnits(host);
       var cleanBreakdown = {};
       services.forEach(function (s) { cleanBreakdown[s] = wholeSessions(breakdown[s] || 0); });
-      var isDayCenter = hasDayCenter(services);
       var startDate = fd.get('startDate') || today();
       var payStatus = fd.get('paymentStatus') || 'unpaid';
       var payDate = fd.get('paymentDate') || '';
@@ -3709,6 +3910,7 @@
         serviceType: formatServices(services),
         location: (fd.get('location') || lead.location),
         sessionsPerWeek: cleanBreakdown,
+        sessionsUnit: cleanUnits,
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: startDate,
         status: 'פעיל', exitDate: '', fromLead: lead.id,
@@ -3749,22 +3951,36 @@
         else state.payments.push(intakePayment);
         intakePaymentToPersist = intakePayment;
       }
-    // Lead has converted to a client. The lead record has no further meaning,
-      // so remove it from state — persist() (clear-and-rewrite) drops it from the sheet.
+      // Lead has converted to a client. The lead record has no further meaning,
+      // so remove it from state — persist() (clear-and-rewrite) drops it from the
+      // sheet, and loadAll's cleanupConvertedLeads keeps it gone. Snapshot the
+      // index so an optimistic-activate failure can restore it.
+      var leadIdx = state.leads.findIndex(function (x) { return x.id === lead.id; });
       state.leads = state.leads.filter(function (x) { return x.id !== lead.id; });
+      // Optimistic: navigate to the clients view + close the modal before the
+      // network; on failure remove the new client (+ intake payment), restore the
+      // lead, re-render.
+      closeActivateModal();
+      setView('clients');
+      submit.disabled = false;
       persist()
         .then(function () {
           // Save the intake payment row through its own path (persist() doesn't
           // cover payments). Non-fatal if it fails — the client is already saved.
           if (intakePaymentToPersist) {
-            return persistPayment(intakePaymentToPersist).catch(function (e) {
+            return persistPayment(intakePaymentToPersist).catch(function () {
               toast('המטופל נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
             });
           }
         })
-        .then(function () { toast('המטופל נוסף'); closeActivateModal(); setView('clients'); })
-        .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
+        .then(function () { toast('המטופל נוסף'); })
+        .catch(function (err) {
+          state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
+          if (intakePaymentToPersist) state.payments = state.payments.filter(function (p) { return p.id !== intakePaymentToPersist.id; });
+          if (leadIdx >= 0) state.leads.splice(leadIdx, 0, lead);
+          render();
+          toast('שמירה נכשלה: ' + err.message, true);
+        });
     });
 
     $('#exitForm').addEventListener('submit', function (e) {
@@ -3871,6 +4087,7 @@
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
         pricePerSession: client.pricePerSession,
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
+        sessionsUnit: client.sessionsUnit,
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes
       };
@@ -3887,6 +4104,7 @@
       var ps = fd.get('paymentStatus') || '';
       if (ps) client.paymentStatus = ps;
       var pd = fd.get('paymentDate') || '';
+      var paidDateChanged = pd && pd !== (prev.paymentDate || '');
       if (pd) client.paymentDate = pd;
       var amt = toNum(fd.get('monthlyAmount'));
       if (amt) client.pricePerSession = amt;
@@ -3901,24 +4119,55 @@
         var pickedSvc = readServiceGroup(ecGroup2);
         if (pickedSvc.length) {
           var bd = readSessionsHost(ecHost2);
+          var bdUnits = readSessionsUnits(ecHost2);
           var cleanBd = {};
           pickedSvc.forEach(function (s) { cleanBd[s] = wholeSessions(bd[s] || 0); });
           client.serviceType = formatServices(pickedSvc);
           client.sessionsPerWeek = cleanBd;
+          client.sessionsUnit = bdUnits;
         }
       }
       // Recalculate next billing date from payment date (+30 days), as on activate
       if (client.paymentDate) {
         client.nextBillingDate = addDays(client.paymentDate, 30);
       }
+      // Bug A: a deliberately changed paid-date with status=paid must reach the
+      // per-month base payment row (the single source the card chip + גבייה read)
+      // via persistPayment — otherwise the chip keeps showing the old/today date.
+      var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
+      // Optimistic base-payment propagation: apply to state.payments NOW so the
+      // card chip reflects it immediately; snapshot for rollback on failure.
+      var basePay = null;
+      var payPrev = null;   // { index, value } — value null means the row was newly pushed
+      if (propagatePaid) {
+        var dueISO = currentMonthBaseDueDate(client);
+        basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
+        var pi = state.payments.findIndex(function (p) { return p.id === basePay.id; });
+        var existing = pi >= 0 ? state.payments[pi] : null;
+        // Keep any existing notes/method when re-stamping the paid date.
+        if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
+        payPrev = { index: pi, value: existing };
+        if (pi >= 0) state.payments[pi] = basePay; else state.payments.push(basePay);
+      }
+      // Optimistic UI: reflect the change and close the modal BEFORE awaiting the
+      // network, so the ~5s save is not felt. Persist in the background; on
+      // failure roll back client + payment and surface an error toast. Mirrors
+      // the setCurrentMonthPaid optimistic pattern.
+      closeEditClientModal();
+      render();
+      submit.disabled = false;
       persist()
-        .then(function () { toast('נשמר'); closeEditClientModal(); render(); })
+        .then(function () { return propagatePaid ? persistPayment(basePay) : null; })
+        .then(function () { toast('נשמר'); })
         .catch(function (err) {
           Object.assign(client, prev);
-          toast('שגיאה: ' + err.message, true);
+          if (propagatePaid && payPrev) {
+            if (payPrev.value) state.payments[payPrev.index] = payPrev.value;
+            else state.payments = state.payments.filter(function (p) { return p !== basePay; });
+          }
           render();
-        })
-        .finally(function () { submit.disabled = false; });
+          toast('שמירה נכשלה: ' + err.message, true);
+        });
     });
 
     var settingsForm = $('#settingsForm');

@@ -5,6 +5,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Unified the two diverged production lines (volta + dashboard).** `2026-07-04`
+  — the live `claude/youthful-volta-laarnk` line (payouts) and the
+  `claude/ezone-outpatient-dashboard-hKjf9` line (~26 orphaned feature commits,
+  June 28–July 1) were merged into one. Payout/rates code (therapist pay &
+  payout view, `_recordSessionOutcome`, `_writeCreditsOwed`, `renderPayouts`,
+  parallel `loadAll`) stays on the live volta implementation; the following
+  dashboard features are restored on top: `createLead` inbound endpoint with
+  fail-closed auth, `LockService` around `_saveAll`, persisted
+  `paymentStatus` / `paymentDate` / `nextBillingDate` columns, editable/backdated
+  payment date, renewal anchored on the stored `nextBillingDate`, card
+  extra-charge paid/unpaid toggle, optimistic patient saves, urgency sort of the
+  מטופלים cards, the patient-card two-panel redesign + tint tokens, the סניף
+  location dropdown + source-of-truth, session frequency unit (שבוע/חודש), the
+  מעקב פסיכיאטרי /חודש fix, extra-charges inside the treatment panel, and the
+  removed role badge. `CLIENTS_HEADERS` unifies both schemas **append-only**:
+  volta's exact live column order is preserved verbatim and the three dashboard
+  columns (`paymentStatus`, `paymentDate`, `nextBillingDate`) are appended at the
+  END, after `assignedTo`. Because `_readAll`/`_writeAll` are positional and
+  `_ensureSheet` does not migrate, appending (rather than reordering) means the
+  live Clients sheet needs **no migration** — existing rows read the three new
+  columns back blank until their next save. No deploy blocker.
+
 ### Added
 - **`deactivateClient` cross-app receiver (delete-propagation).** A new
   fail-closed, shared-secret POST action on the Apps Script web app
@@ -269,6 +292,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `test/responsible-removal.test.js` locks the removal, the reserved-slot
   layout, and positional safety. **No Apps Script redeploy / schema change.**
   See `CHANGELOG-remove-responsible-person.md`.
+### Fixed
+- **Payout modules were committed to wrong nested paths — payouts tab failed
+  with "מודול החישוב לא נטען" (calculation module not loaded).** `2026-07-04` —
+  `therapist-payout.js` and `payout-export.js` had landed under
+  `public/public/…` (and duplicate copies under `apps-script/public/…`), so the
+  `<script>` tags in `public/index.html` (which reference them at the `public/`
+  root) 404'd and `window.TherapistPayout` never defined. Moved both modules to
+  `public/therapist-payout.js` and `public/payout-export.js`, moved
+  `therapist-pay.test.js` back to `test/`, restored the missing
+  `test/payout-export.test.js` (6 cases), and deleted the stray duplicate copies
+  and now-empty nested `public/` / `apps-script/public/` folders. Full payout
+  suite green again: `test/therapist-pay.test.js` (12),
+  `test/therapist-payout.test.js` (9), `test/payout-export.test.js` (6) — 27
+  passing. No changes to `apps-script/Code.gs`.
+- **Orphaned "additional treatment" charges from deleted patients.** Charge
+  rows (`ClientCharges`, keyed by `clientId`) survived patient deletion as
+  orphans and leaked into the dashboard. Two-layer fix: (1) display-time
+  `excludeOrphanCharges(charges, clients)` hides any charge whose `clientId` no
+  longer matches a live patient — applied right after charges load in
+  `loadAll`, so pre-existing orphans (the test patients on `0543123270`) vanish
+  immediately; (2) root cause — the permanent-delete (`✕`) flow now prunes the
+  patient's charges locally and calls the new backend bulk action
+  `removeChargesForClient(clientId)` (`_removeChargesForClient` in
+  `apps-script/Code.gs`, one round-trip, idempotent, logs each removed row), so
+  no new orphans are ever created. Pure helper mirrored in
+  `public/charges-logic.js` ↔ inline copy in `public/app.js`.
+  `test/charge-orphans.test.js`. **Apps Script redeploy required** (see below).
+
+### Added
+- **Editable patient phone in the edit-client modal + on the card.** The
+  patient's own `phone` is now shown as a chip on each client card (`📞 …`) and
+  is editable via a new **"טלפון מטופל"** field in `#editClientModal`, validated
+  as a strict 10-digit leading-zero mobile through the shared `acceptPhone`
+  guard. Read-side normalization (leading-zero recovery on the Sheets
+  stripped-zero case) was already in place via `recoverPhone` /
+  `backfillClientPhones`. `public/index.html`, `public/app.js`.
 
 ### Fixed
 - **Ambiguous stop-flag "בחר ידנית" did nothing.** The multiple-match case
@@ -491,3 +550,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Tests
 - Source guard in `test/payout-followups.test.js`: loadAll must stay parallel.
+- **Invisible headings**: the תשלומי מטפלים and שימור לידים tab headings used
+  `#1a2e4a` (dark navy) on the dark theme — now `#9fcfcf` (established light accent).
+- **Credit engine silently no-oping**: `creditsOwed` was missing from
+  `CLIENTS_HEADERS` on this branch (port defect vs the source branch), so the
+  session-quota credit balance was never persisted. Column restored (append-only,
+  schema guard updated); `_ensureSheet` self-heals the header row on first touch.
+- **unknown_therapist on valid therapists**: pay rates were a hardcoded 16-name
+  map — any therapist not listed (or spelled differently than in ezone-therapists)
+  was rejected. Rates now live in a **TherapistRates sheet** (auto-seeded from the
+  old constants on first run, columns: name / flatRate / intakeRate / followupRate).
+  Add a therapist = add a row; no redeploy. Cached 120s, so edits apply within
+  ~2 minutes. Unknown names still fail closed — a pay rate is never invented.
+- **Slow save**: `_recordSessionOutcome` rewrote the entire Clients sheet to
+  persist one credit balance. Now a single-cell write (`_writeCreditsOwed`,
+  id-column scan like the SessionLog upsert).
+
+### Tests
+- `test/payout-followups.test.js` (7 source-guard tests, create-lead pattern).
+- Schema guard in `test/stop-flag-match.test.js` extended for the appended column.
+
+### Deploy notes
+- Frontend: Railway auto-deploy on commit; hard-refresh.
+- **Apps Script: manual redeploy required** (paste Code.gs → Save → new version of
+  the EXISTING deployment). On the next recorded session the TherapistRates sheet
+  is created and seeded automatically — then add the missing therapists' rows.

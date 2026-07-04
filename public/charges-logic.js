@@ -25,6 +25,96 @@
 
   function monthKey(iso) { return String(iso || '').slice(0, 7); }
 
+  // Session-frequency unit for a treatment type. Psychiatric follow-up
+  // (מעקב פסיכיאטרי) is scheduled MONTHLY; every other treatment type is weekly.
+  // Mirrors sessionFrequencyUnit in public/app.js — keep both in sync.
+  function sessionFrequencyUnit(serviceType) {
+    return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
+  }
+
+  // Resolve the frequency unit for a service: an explicit, valid per-patient
+  // override wins; otherwise fall back to the by-type default in
+  // sessionFrequencyUnit. `units` is a { service: 'שבוע'|'חודש' } map and may be
+  // empty/undefined (legacy records). Mirrors sessionUnitFor in public/app.js —
+  // keep both in sync.
+  function sessionUnitFor(serviceType, units) {
+    var u = units && units[serviceType];
+    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+  }
+
+  // Extract per-service unit overrides from a stored sessionsPerWeek value
+  // (object or JSON string). Overrides live under the reserved `_units` key
+  // inside the SAME blob as the service→count entries, so no schema/column
+  // change is needed. Invalid/unknown units are dropped. Returns a
+  // { service: 'שבוע'|'חודש' } map. Mirrors parseSessionsUnits in
+  // public/app.js — keep both in sync.
+  function parseSessionsUnits(v) {
+    var out = {};
+    if (!v) return out;
+    var obj = null;
+    if (typeof v === 'object' && !Array.isArray(v)) obj = v;
+    else {
+      var s = String(v).trim();
+      if (s && s.charAt(0) === '{') { try { obj = JSON.parse(s); } catch (_) {} }
+    }
+    if (obj && obj._units && typeof obj._units === 'object') {
+      Object.keys(obj._units).forEach(function (k) {
+        var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
+        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+      });
+    }
+    return out;
+  }
+
+  // Build the serializable sessionsPerWeek object: the service→count entries
+  // plus a reserved `_units` map of any VALID per-service overrides. Invalid
+  // units are dropped and `_units` is omitted entirely when none apply, so
+  // records without overrides serialize byte-for-byte as before. Mirrors
+  // attachSessionsUnits in public/app.js — keep both in sync.
+  function attachSessionsUnits(breakdown, units) {
+    var obj = {};
+    Object.keys(breakdown || {}).forEach(function (k) {
+      if (k !== '_units') obj[k] = breakdown[k];
+    });
+    var u = {};
+    Object.keys(units || {}).forEach(function (k) {
+      var val = String(units[k] == null ? '' : units[k]).trim();
+      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+    });
+    if (Object.keys(u).length) obj._units = u;
+    return obj;
+  }
+
+  // Urgency tier for a card, from a renewalInfo() status:
+  //   0 = overdue / red (עצור טיפול — לא שולם)   [top]
+  //   1 = due_soon (חידוש היום / בעוד N ימים)
+  //   2 = everyone else (ok / unknown)
+  // Reuses the status renewalInfo already computed — no independent recompute.
+  // Mirrors urgencyTier in public/app.js — keep both in sync.
+  function urgencyTier(status) {
+    if (status === 'overdue') return 0;
+    if (status === 'due_soon') return 1;
+    return 2;
+  }
+
+  // Stable comparator over decorated card entries { tier, daysLeft, index }:
+  //   - lower tier first (red -> due_soon -> other)
+  //   - within the red and due_soon tiers, ascending daysLeft so the most
+  //     overdue / soonest renewal floats up (today=0 before "in 2 days";
+  //     -3 before -1); null daysLeft sinks to the end of its tier
+  //   - same tier (and same daysLeft) -> original index, an explicit stable
+  //     tiebreak so tier 2 (and any ties) keep their incoming order
+  // Mirrors compareCardUrgency in public/app.js — keep both in sync.
+  function compareCardUrgency(a, b) {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.tier !== 2) {
+      var da = a.daysLeft == null ? Infinity : a.daysLeft;
+      var db = b.daysLeft == null ? Infinity : b.daysLeft;
+      if (da !== db) return da - db;
+    }
+    return a.index - b.index;
+  }
+
   // Add 1 calendar month to an ISO date string, clamping to the last day of
   // the target month (Jan 31 + 1mo -> Feb 28). Mirrors addMonth in
   // public/app.js — keep both in sync.
@@ -40,17 +130,52 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  // The ISO due-date of a client's next monthly renewal. Anchor precedence:
-  // packageChangeDate (a שינוי חבילה re-anchors the cycle) when present, else the
-  // last payment date, else the start date, then advances one calendar month
-  // (short-month clamp via addMonth). Mirrors renewalInfo()'s date calc in
-  // public/app.js — keep both in sync. This is the single source the "renewal
-  // banner" and the "חידוש ותשלום" button share so they never diverge.
+  // The ISO due-date of a client's next monthly renewal. Prefers the stored
+  // nextBillingDate — the SAME value the גבייה הבאה chip shows — so the renewal
+  // alert/button never diverge from the chip. Falls back to the last payment
+  // date (else start date) + 1 calendar month (short-month clamp via addMonth)
+  // only for legacy rows saved before nextBillingDate was persisted. Mirrors
+  // nextRenewalDueDate in public/app.js — keep both in sync. This is the single
+  // source the "renewal banner" and the "חידוש ותשלום" button share.
   function nextRenewalDueDate(client) {
     if (!client) return '';
+    if (client.nextBillingDate) return client.nextBillingDate;
     var anchor = client.packageChangeDate || client.paymentDate || client.startDate || '';
     if (!anchor) return '';
     return addMonth(anchor);
+  }
+
+  // Add N days to an ISO date string. Mirrors addDays in public/app.js — keep
+  // both in sync. Used for the nextBillingDate = anchor + 30 derivation.
+  function addDays(isoDate, days) {
+    if (!isoDate) return '';
+    var d = new Date(isoDate);
+    if (isNaN(d)) return '';
+    d.setDate(d.getDate() + days);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  // Reconstruct a client's next-billing date for legacy rows saved before the
+  // nextBillingDate column existed (it comes back blank). Take the latest PAID
+  // base payment row and add 30 days to its paymentDate (else dueDate) — the same
+  // addDays(anchor, 30) formula used on activate/renew/edit. NEVER overwrites a
+  // populated nextBillingDate. Returns '' when nothing can be derived. Mirrors
+  // deriveNextBillingDates in public/app.js — keep both in sync.
+  function deriveNextBillingDate(client, payments) {
+    if (!client) return '';
+    if (client.nextBillingDate) return client.nextBillingDate;
+    if (!Array.isArray(payments)) return '';
+    var latest = '';
+    for (var i = 0; i < payments.length; i++) {
+      var p = payments[i];
+      if (!p || p.clientId !== client.id || p.status !== 'paid') continue;
+      if (paymentKindFromId(p.id).kind !== 'base') continue;
+      var anchor = p.paymentDate || p.dueDate || '';
+      if (anchor && anchor > latest) latest = anchor;
+    }
+    return latest ? addDays(latest, 30) : '';
   }
 
   function dayOfMonth(iso) {
@@ -81,6 +206,21 @@
 
   function legacyBasePaymentId(clientId, dueDateISO) {
     return 'pay::' + clientId + '::' + monthKey(dueDateISO);
+  }
+
+  // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
+  // explicit paidDateISO (NOT today) so a backdated payment round-trips unchanged.
+  // Mirrors basePaymentPaidOn in public/app.js — keep both in sync. Used by the
+  // edit-modal paid-date propagation (Bug A) and renew-and-pay (Bug C).
+  function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
+    return {
+      id: paymentId(client.id, dueDateISO, 'base'),
+      clientId: client.id, clientName: client.name || '',
+      billingType: 'monthly', dueDate: dueDateISO,
+      amountDue: amount, amountPaid: amount, status: 'paid',
+      paymentDate: paidDateISO || '', method: '', notes: notes || '',
+      bundleSize: '', sessionsUsed: ''
+    };
   }
 
   // Legacy = exactly 3 '::'-separated segments, ending in YYYY-MM.
@@ -146,6 +286,21 @@
     return out;
   }
 
+  // Drop "orphan" charges — rows whose clientId no longer matches any patient
+  // in `clients` (the patient was deleted, the charge row survived). Such rows
+  // must never surface on the dashboard. clientId is compared as a string on
+  // both sides (Sheets may return a numeric id). Pure: no shared state.
+  // Mirrors excludeOrphanCharges in public/app.js — keep both in sync.
+  function excludeOrphanCharges(charges, clients) {
+    var live = {};
+    (clients || []).forEach(function (c) {
+      if (c && c.id != null && String(c.id) !== '') live[String(c.id)] = true;
+    });
+    return (charges || []).filter(function (ch) {
+      return ch && ch.clientId != null && live[String(ch.clientId)] === true;
+    });
+  }
+
   // Status of a charge for display on the client card, lookup-only.
   //   one_time charge: status of the ::once payment row.
   //   monthly charge:  status of the CURRENT month's payment row
@@ -167,17 +322,56 @@
     return 'unpaid';
   }
 
+  // Build the updated payment row for a plain paid/unpaid toggle from the client
+  // card (base package OR extra charge). Mirrors the גבייה recompute() paid/unpaid
+  // rules and setCurrentMonthPaid, so the card and the גבייה tab produce identical
+  // rows through the same single persist path:
+  //   makePaid=true  -> status 'paid',   amountPaid = amount, paymentDate = todayISO
+  //   makePaid=false -> status 'unpaid', amountPaid = 0,      paymentDate kept
+  // `existing` is the current/derived payment row (id, clientId, dueDate, notes…).
+  // No 'partial' is ever produced here — partial stays a גבייה-only state.
+  // Mirrors togglePaymentRow in public/app.js — keep both in sync.
+  function togglePaymentRow(existing, makePaid, amount, todayISO) {
+    var amt = Number(amount) || 0;
+    return {
+      id: existing.id,
+      clientId: existing.clientId,
+      clientName: existing.clientName || '',
+      billingType: existing.billingType || 'monthly',
+      dueDate: existing.dueDate,
+      amountDue: amt,
+      amountPaid: makePaid ? amt : 0,
+      status: makePaid ? 'paid' : 'unpaid',
+      paymentDate: makePaid ? todayISO : (existing.paymentDate || ''),
+      method: existing.method || '',
+      notes: existing.notes || '',
+      bundleSize: 0,
+      sessionsUsed: 0
+    };
+  }
+
   return {
     monthKey: monthKey,
+    sessionFrequencyUnit: sessionFrequencyUnit,
+    sessionUnitFor: sessionUnitFor,
+    parseSessionsUnits: parseSessionsUnits,
+    attachSessionsUnits: attachSessionsUnits,
+    urgencyTier: urgencyTier,
+    compareCardUrgency: compareCardUrgency,
     addMonth: addMonth,
+    addDays: addDays,
+    deriveNextBillingDate: deriveNextBillingDate,
     nextRenewalDueDate: nextRenewalDueDate,
     dayOfMonth: dayOfMonth,
     lastDayOfMonth: lastDayOfMonth,
     paymentId: paymentId,
+    basePaymentPaidOn: basePaymentPaidOn,
     legacyBasePaymentId: legacyBasePaymentId,
     isLegacyBasePaymentId: isLegacyBasePaymentId,
     paymentKindFromId: paymentKindFromId,
     dueItemsOn: dueItemsOn,
-    chargeStatusFor: chargeStatusFor
+    excludeOrphanCharges: excludeOrphanCharges,
+    chargeStatusFor: chargeStatusFor,
+    togglePaymentRow: togglePaymentRow
   };
 });

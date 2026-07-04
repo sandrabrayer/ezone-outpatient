@@ -293,10 +293,12 @@ test('saveAll preserves the on-sheet creditsOwed by id, ignoring the payload val
 // ============================================================================
 // Positional safety for the new columns.
 // ============================================================================
-test('Clients.creditsOwed round-trips positionally (now third-to-last, before packageChangeDate/assignedTo); legacy blank -> 0', () => {
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'assignedTo');
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 2], 'packageChangeDate');
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 3], 'creditsOwed');
+test('Clients.creditsOwed round-trips positionally (keeps its volta position before packageChangeDate); legacy blank -> 0', () => {
+  // Append-only unification: creditsOwed keeps its EXACT volta position (before
+  // packageChangeDate/assignedTo); the three dashboard payment columns are
+  // appended after assignedTo, so no existing column moved.
+  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('creditsOwed') + 1], 'packageChangeDate');
+  assert.deepEqual(CLIENTS_H.slice(-3), ['paymentStatus', 'paymentDate', 'nextBillingDate']);
   const row = writeRow(CLIENTS_H, { id: 'c1', phone: '0501234567', clinicalTreatmentType: 'פרטני CBT', creditsOwed: 3 });
   assert.equal(row[CLIENTS_H.indexOf('creditsOwed')], 3);
   assert.equal(row[CLIENTS_H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // not shifted

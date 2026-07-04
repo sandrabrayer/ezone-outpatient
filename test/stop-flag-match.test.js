@@ -137,7 +137,7 @@ test('backfill: existing client with no stored phone inherits it from its lead',
   assert.equal(resolveStopFlagClient({ phone: '0543123276' }, clients).client.id, 'C1');
 });
 
-test('schema guard: Clients `phone` column exists, appended after paymentLink', () => {
+test('schema guard: Clients headers append the payment tail (append-only, no migration)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const m = src.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'CLIENTS_HEADERS not found');
@@ -145,16 +145,20 @@ test('schema guard: Clients `phone` column exists, appended after paymentLink', 
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n') // strip comments
     .match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  // Append-only chain: phone after paymentLink (stop-flow); clinicalTreatmentType
-  // after phone (task 4.5a); creditsOwed after that (session accounting);
-  // packageChangeDate after that (שינוי חבילה); assignedTo after that (משוייך ל).
-  // So the tail is ... phone, clinicalTreatmentType, creditsOwed,
-  // packageChangeDate, assignedTo.
+  // Unifying the volta (live) and dashboard lines is APPEND-ONLY: volta's exact
+  // live column order is preserved verbatim, and the three dashboard payment
+  // columns are appended at the very END — so the live positional sheet needs NO
+  // migration.
+  assert.deepEqual(
+    cols.slice(-3),
+    ['paymentStatus', 'paymentDate', 'nextBillingDate'],
+    'payment columns must be appended LAST (append-only — no live-sheet migration)'
+  );
+  // volta's live order through assignedTo is untouched (nothing shifted).
   const pi = cols.indexOf('phone');
-  assert.equal(cols[pi - 1], 'paymentLink');
-  assert.equal(cols[cols.length - 1], 'assignedTo', 'assignedTo must be LAST');
-  assert.equal(cols[cols.length - 2], 'packageChangeDate');
-  assert.equal(cols[cols.length - 3], 'creditsOwed');
-  assert.equal(cols[cols.length - 4], 'clinicalTreatmentType');
-  assert.equal(cols[cols.length - 5], 'phone');
+  assert.deepEqual(
+    cols.slice(pi, pi + 5),
+    ['phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo'],
+    'volta live column order must be preserved verbatim'
+  );
 });

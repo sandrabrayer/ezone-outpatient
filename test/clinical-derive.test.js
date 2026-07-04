@@ -137,17 +137,16 @@ test('unknown clinical value throws and does not blank serviceType', () => {
 });
 
 // --- columns are appended LAST (positional safety) --------------------------
-test('assignedTo is the LAST CLIENTS_HEADERS column; packageChangeDate, creditsOwed, clinicalTreatmentType, phone before it', () => {
+test('CLIENTS_HEADERS keeps volta\'s live order and appends the payment tail', () => {
   const H = clientsHeaders();
-  // assignedTo (משוייך ל) was appended after packageChangeDate (שינוי חבילה),
-  // which was after creditsOwed (session accounting), which was after
-  // clinicalTreatmentType, which was after phone — each keeps its position
-  // (append-only rule).
-  assert.equal(H[H.length - 1], 'assignedTo');
-  assert.equal(H[H.length - 2], 'packageChangeDate');
-  assert.equal(H[H.length - 3], 'creditsOwed');
-  assert.equal(H[H.length - 4], 'clinicalTreatmentType');
-  assert.equal(H[H.length - 5], 'phone');
+  // The volta + dashboard unification is APPEND-ONLY: volta's live order is kept
+  // verbatim (phone, clinicalTreatmentType, creditsOwed, packageChangeDate,
+  // assignedTo) and the three dashboard payment columns are appended at the END,
+  // so the live positional sheet needs NO migration.
+  assert.deepEqual(H.slice(-8), [
+    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo',
+    'paymentStatus', 'paymentDate', 'nextBillingDate'
+  ]);
 });
 
 // Mirror of Code.gs _writeAll / _readAll positional mapping.
