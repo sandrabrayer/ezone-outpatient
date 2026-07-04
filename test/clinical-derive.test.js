@@ -137,17 +137,17 @@ test('unknown clinical value throws and does not blank serviceType', () => {
 });
 
 // --- columns are appended LAST (positional safety) --------------------------
-test('assignedTo is the LAST CLIENTS_HEADERS column; packageChangeDate, creditsOwed, clinicalTreatmentType, phone before it', () => {
+test('CLIENTS_HEADERS ends with the unified payment tail; volta-line columns precede phone', () => {
   const H = clientsHeaders();
-  // assignedTo (משוייך ל) was appended after packageChangeDate (שינוי חבילה),
-  // which was after creditsOwed (session accounting), which was after
-  // clinicalTreatmentType, which was after phone — each keeps its position
-  // (append-only rule).
-  assert.equal(H[H.length - 1], 'assignedTo');
-  assert.equal(H[H.length - 2], 'packageChangeDate');
-  assert.equal(H[H.length - 3], 'creditsOwed');
-  assert.equal(H[H.length - 4], 'clinicalTreatmentType');
-  assert.equal(H[H.length - 5], 'phone');
+  // Unifying the volta + dashboard lines pinned the tail to the dashboard
+  // payment/renewal fields. clinicalTreatmentType/packageChangeDate/assignedTo
+  // (volta-line columns) were relocated ahead of `phone`; the header now ends:
+  //   ... clinicalTreatmentType, packageChangeDate, assignedTo,
+  //       phone, paymentStatus, paymentDate, nextBillingDate, creditsOwed.
+  assert.deepEqual(H.slice(-8), [
+    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo',
+    'phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'
+  ]);
 });
 
 // Mirror of Code.gs _writeAll / _readAll positional mapping.

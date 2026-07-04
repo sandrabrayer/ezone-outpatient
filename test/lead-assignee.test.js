@@ -55,10 +55,16 @@ const LEADS_H = headers('LEADS_HEADERS');
 const REMOVED_H = headers('REMOVED_LEADS_HEADERS');
 const CLIENTS_H = headers('CLIENTS_HEADERS');
 
-test('assignedTo is the LAST column on all three positional header arrays', () => {
+test('assignedTo is last on the leads arrays; on CLIENTS it precedes the unified payment tail', () => {
+  // Leads sheets were untouched by the volta+dashboard unification.
   assert.equal(LEADS_H[LEADS_H.length - 1], 'assignedTo');
   assert.equal(REMOVED_H[REMOVED_H.length - 1], 'assignedTo');
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'assignedTo');
+  // CLIENTS_HEADERS now ends with the mandated payment tail, so assignedTo is the
+  // last of the volta-line columns, sitting just before `phone`.
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'creditsOwed');
+  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('phone') - 1], 'assignedTo');
+  assert.deepEqual(CLIENTS_H.slice(-5),
+    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed']);
 });
 
 test('lead assignedTo round-trips positionally without misaligning earlier columns', () => {

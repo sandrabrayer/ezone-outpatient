@@ -52,36 +52,42 @@ var CLIENTS_HEADERS = [
   // The app no longer reads or writes them; existing cells blank on next save.
   'responsiblePerson', 'serviceScope',
   'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-  'phone',
-  // APPEND-ONLY (task 4.5a): clinical treatment type as recorded by the E-Zone
+  // clinicalTreatmentType: clinical treatment type as recorded by the E-Zone
   // Therapists app. When present on save, _deriveClientServiceType() runs it
   // through the clinical→billing map and overwrites `serviceType` (clinical is
-  // the source of truth). Appended at the END so existing rows are untouched
-  // and positional mapping is preserved (same lesson as `phone` / the reserved
-  // slots). Absent/empty -> serviceType left as-is (back-compat).
+  // the source of truth). Absent/empty -> serviceType left as-is (back-compat).
   'clinicalTreatmentType',
-  // APPEND-ONLY (session accounting + credits): running monthly-credit balance
-  // for the patient. SERVER-MANAGED — mutated only by recordSessionOutcome
-  // (therapist_cancelled -> +1; a happened session beyond the monthly quota
-  // auto-draws -1). _saveAll preserves it by id so a dashboard save never reverts
-  // it. Default 0. Appended at the very END so clinicalTreatmentType and every
-  // earlier column keep their positions.
-  'creditsOwed',
-  // APPEND-ONLY (שינוי חבילה / package change): the date on which the patient's
-  // package was last changed (new price-per-session and/or weekly frequency). When
-  // present it becomes the billing RE-ANCHOR for the next renewal — the client
-  // computes גבייה הבאה = packageChangeDate + 1 month, taking precedence over
-  // paymentDate/startDate (see nextRenewalDueDate / renewalInfo / cycleEndDate).
-  // Carried through verbatim by _saveAll/_writeAll — no server logic reads it.
-  // Appended at the very END so creditsOwed and every earlier column keep their
-  // positions (same append-only lesson as creditsOwed / clinicalTreatmentType).
+  // packageChangeDate (שינוי חבילה / package change): the date on which the
+  // patient's package was last changed (new price-per-session and/or weekly
+  // frequency). When present it becomes the billing RE-ANCHOR for the next
+  // renewal — the client computes גבייה הבאה = packageChangeDate + 1 month,
+  // taking precedence over paymentDate/startDate (see nextRenewalDueDate /
+  // renewalInfo / cycleEndDate). Carried through verbatim by _saveAll/_writeAll.
   'packageChangeDate',
-  // APPEND-ONLY (משוייך ל / assigned-to): staff member responsible for this
+  // assignedTo (משוייך ל / assigned-to): staff member responsible for this
   // patient, copied from the originating lead on conversion so the assignee
-  // follows the person. Appended at the very END (after packageChangeDate) so
-  // every earlier column keeps its position. Carried through verbatim by
-  // _saveAll/_writeAll — no server logic reads it. Old rows read back blank.
-  'assignedTo'
+  // follows the person. Carried through verbatim by _saveAll/_writeAll — no
+  // server logic reads it. Old rows read back blank.
+  'assignedTo',
+  // ── MANDATED PAYMENT TAIL ──────────────────────────────────────────────────
+  // The final five columns are pinned in this exact order: `phone` followed by
+  // the payment/billing tail. `clinicalTreatmentType`, `packageChangeDate` and
+  // `assignedTo` sit ABOVE this line (before `phone`) so the tail stays exactly
+  // 'phone','paymentStatus','paymentDate','nextBillingDate','creditsOwed'.
+  //
+  // `phone` is the durable canonical patient phone (a PHONE_COLUMN). It is the
+  // join key used by cross-app matching (debt, stop-flow), so it stays put.
+  'phone',
+  // paymentStatus / paymentDate / nextBillingDate: persisted so the renewal
+  // alert anchors on the stored nextBillingDate instead of falling back to
+  // startDate after every reload. No backfill — existing rows stay blank until
+  // the next save of that client.
+  'paymentStatus', 'paymentDate', 'nextBillingDate',
+  // creditsOwed: SERVER-MANAGED running monthly-credit balance — mutated only by
+  // recordSessionOutcome (therapist_cancelled -> +1; a happened session beyond
+  // the monthly quota auto-draws -1). _saveAll preserves it by id so a dashboard
+  // save never reverts it. Default 0.
+  'creditsOwed'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -527,30 +533,42 @@ function _monthKey(dateStr) {
 }
 
 function _saveAll(payload) {
-  var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
-  var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
-  var leads = (payload && payload.leads) || [];
-  var clients = (payload && payload.clients) || [];
-  // creditsOwed is SERVER-MANAGED (mutated only by recordSessionOutcome). A
-  // dashboard save carries the balance the client tab last loaded, which may be
-  // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
-  // and only default a brand-new client (no existing row) to its payload/0.
-  var existingCredits = {};
-  var existing = _readAll(clientsSh, CLIENTS_HEADERS);
-  for (var e = 0; e < existing.length; e++) {
-    var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
-    if (eid) existingCredits[eid] = _toCredits(existing[e].creditsOwed);
+  // Serialize full-sheet rewrites so two overlapping saves can't clobber each
+  // other (every other writer already takes this lock). If the lock can't be
+  // acquired we return an error rather than writing lock-less — no write path
+  // bypasses the lock, and it is always released in finally.
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return { ok: false, error: 'Could not acquire lock (another save in progress) — try again' };
   }
-  for (var i = 0; i < clients.length; i++) {
-    _deriveClientServiceType(clients[i]);
-    var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
-    clients[i].creditsOwed = _hasOwn(existingCredits, cid)
-      ? existingCredits[cid]
-      : _toCredits(clients[i].creditsOwed);
+  try {
+    var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var leads = (payload && payload.leads) || [];
+    var clients = (payload && payload.clients) || [];
+    // creditsOwed is SERVER-MANAGED (mutated only by recordSessionOutcome). A
+    // dashboard save carries the balance the client tab last loaded, which may be
+    // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
+    // and only default a brand-new client (no existing row) to its payload/0.
+    var existingCredits = {};
+    var existing = _readAll(clientsSh, CLIENTS_HEADERS);
+    for (var e = 0; e < existing.length; e++) {
+      var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
+      if (eid) existingCredits[eid] = _toCredits(existing[e].creditsOwed);
+    }
+    for (var i = 0; i < clients.length; i++) {
+      _deriveClientServiceType(clients[i]);
+      var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
+      clients[i].creditsOwed = _hasOwn(existingCredits, cid)
+        ? existingCredits[cid]
+        : _toCredits(clients[i].creditsOwed);
+    }
+    _writeAll(leadsSh, LEADS_HEADERS, leads);
+    _writeAll(clientsSh, CLIENTS_HEADERS, clients);
+    return { ok: true, savedLeads: leads.length, savedClients: clients.length };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
   }
-  _writeAll(leadsSh, LEADS_HEADERS, leads);
-  _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-  return { ok: true, savedLeads: leads.length, savedClients: clients.length };
 }
 
 /* ===== Payments =====
@@ -646,6 +664,38 @@ function _removeCharge(chargeId) {
       }
     }
     return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Bulk-delete every ClientCharges row belonging to a deleted patient. Called
+// from the dashboard's patient-delete flow so charge rows never outlive their
+// patient as orphans. Safe and idempotent: a clientId with no rows returns
+// { ok:true, removed:0 }. Deletes bottom-up so row indices stay valid, and
+// logs each removed row for an audit trail in the Apps Script execution log.
+function _removeChargesForClient(clientId) {
+  var cid = String(clientId == null ? '' : clientId).trim();
+  if (!cid) return { ok: false, error: 'missing_clientId' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
+    var cidIdx = CHARGES_HEADERS.indexOf('clientId');
+    var idIdx  = CHARGES_HEADERS.indexOf('id');
+    var rows = sh.getRange(2, 1, lastRow - 1, CHARGES_HEADERS.length).getValues();
+    var removed = 0;
+    // Iterate bottom-up: deleting a lower row never shifts a higher index.
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i][cidIdx]).trim() === cid) {
+        Logger.log('removeChargesForClient: clientId=%s chargeId=%s', cid, String(rows[i][idIdx]));
+        sh.deleteRow(i + 2);
+        removed++;
+      }
+    }
+    return { ok: true, removed: removed, clientId: cid };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -1750,6 +1800,101 @@ function _getExtraSessionRequests() {
   return { ok: true, requests: requests };
 }
 
+/* ===== Create lead (inbound, fail-closed write) =====
+ *
+ * Inbound: the E-Zone Dashboard POSTs { action:'createLead', secret, name,
+ * phone, house, note } directly to this /exec when a patient is discharged with
+ * disposition "released to outpatient care" — pushing that patient in as a new
+ * outpatient lead. FAIL-CLOSED auth (mirrors flagStop, an external write): the
+ * shared secret 'CREATE_LEAD_SECRET' Script Property MUST exist and match —
+ * unlike the read endpoints (open when unset), a missing/empty/wrong secret is
+ * rejected. The secret is read ONLY from Script Properties and is never logged.
+ *
+ * Appends ONE Leads row as a brand-new lead (stage 'new', created = today),
+ * mirroring how addLeadFromForm builds a fresh lead in public/app.js: the lead
+ * starts in the first kanban stage with empty serviceType/location/sessions/
+ * price/startDate. phone MAY be empty (hand-entered patients have no phone);
+ * it is normalized through _recoverPhone and stored as-is when blank. note is
+ * free text (source + notes combined) and may be empty. Clients is never
+ * touched — this only creates a lead for Vered to work.
+ */
+
+/* Known Dashboard houseId keys. They are identical to the Outpatient
+ * house_of_origin keys (HOUSE_OF_ORIGIN_LABELS in public/app.js), so the
+ * mapping is 1:1 / verbatim — no remapping table. Kept only to document the
+ * contract; an UNKNOWN key is still stored as-is and never rejected, so an
+ * unexpected house never fails the write (the lead must still be created). */
+var CREATE_LEAD_HOUSE_KEYS = {
+  raanana: true, ramot: true, efroni: true, rehab: true, external: true
+};
+
+function _mapLeadHouse(house) {
+  // 1:1 with the Outpatient house_of_origin keys; unknown keys pass through
+  // verbatim (guarded: never throw, never reject — the lead still writes).
+  return String(house == null ? '' : house).trim();
+}
+
+/* Trim, strip control characters, and length-cap a free-text field before it
+ * is written to the sheet. */
+function _sanitizeLeadText(v, maxLen) {
+  var s = String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F]/g, ' ').trim();
+  if (maxLen && s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
+/* Mirrors uid() in public/app.js so server-created leads share the in-app id
+ * shape (id_<base36 time>_<base36 rand>). */
+function _leadUid() {
+  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function _createLeadAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('CREATE_LEAD_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _createLead(payload) {
+  var name = _sanitizeLeadText(payload && payload.name, 200);
+  if (!name) return { ok: false, error: 'missing_name' };
+  var phone = _recoverPhone(payload && payload.phone); // '' stays '' (valid)
+  var note  = _sanitizeLeadText(payload && payload.note, 2000);
+  var house = _mapLeadHouse(payload && payload.house);
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    // _ensureSheet applies the '@' plain-text format to the phone column for
+    // the grid rows, so the appended phone keeps its leading zero.
+    var sh = _ensureSheet('Leads', LEADS_HEADERS);
+    var lead = {
+      id: _leadUid(),
+      name: name,
+      phone: phone,
+      serviceType: '',
+      location: '',
+      note: note,
+      stage: 'new',
+      sessionsPerWeek: '',
+      pricePerSession: '',
+      startDate: '',
+      created: Utilities.formatDate(
+        new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd'),
+      introDateTime: '',
+      house_of_origin: house,
+      not_relevant_reason: '',
+      not_relevant_note: ''
+    };
+    sh.appendRow(LEADS_HEADERS.map(function (h) {
+      return lead[h] == null ? '' : lead[h];
+    }));
+    return { ok: true, id: lead.id };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Merge duplicate clients =====
  *
  * Internal dashboard action (open, same trust level as saveAll). Merges one or
@@ -1937,6 +2082,14 @@ function doPost(e) {
       }
       return _json(_flagStop(payload));
     }
+    if (action === 'createLead') {
+      var clParams = (e && e.parameter) || {};
+      if (payload && payload.secret) clParams.secret = payload.secret;
+      if (!_createLeadAuthOk(clParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_createLead(payload));
+    }
     if (action === 'setClinicalType') {
       var ctParams = (e && e.parameter) || {};
       if (payload && payload.secret) ctParams.secret = payload.secret;
@@ -2014,6 +2167,9 @@ function doPost(e) {
     if (action === 'removePayment') {
       var pmtId = payload.id || (payload.payment && payload.payment.id) || '';
       return _json(_removePayment(pmtId));
+    }
+    if (action === 'removeChargesForClient') {
+      return _json(_removeChargesForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
