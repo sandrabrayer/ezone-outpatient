@@ -20,8 +20,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   מטופלים cards, the patient-card two-panel redesign + tint tokens, the סניף
   location dropdown + source-of-truth, session frequency unit (שבוע/חודש), the
   מעקב פסיכיאטרי /חודש fix, extra-charges inside the treatment panel, and the
-  removed role badge. `CLIENTS_HEADERS` is the union of both schemas, ending with
-  `phone, paymentStatus, paymentDate, nextBillingDate, creditsOwed`.
+  removed role badge. `CLIENTS_HEADERS` unifies both schemas **append-only**:
+  volta's exact live column order is preserved verbatim and the three dashboard
+  columns (`paymentStatus`, `paymentDate`, `nextBillingDate`) are appended at the
+  END, after `assignedTo`. Because `_readAll`/`_writeAll` are positional and
+  `_ensureSheet` does not migrate, appending (rather than reordering) means the
+  live Clients sheet needs **no migration** — existing rows read the three new
+  columns back blank until their next save. No deploy blocker.
 
 ### Added
 - **`deactivateClient` cross-app receiver (delete-propagation).** A new

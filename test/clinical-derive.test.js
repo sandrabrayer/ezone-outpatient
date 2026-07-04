@@ -137,16 +137,15 @@ test('unknown clinical value throws and does not blank serviceType', () => {
 });
 
 // --- columns are appended LAST (positional safety) --------------------------
-test('CLIENTS_HEADERS ends with the unified payment tail; volta-line columns precede phone', () => {
+test('CLIENTS_HEADERS keeps volta\'s live order and appends the payment tail', () => {
   const H = clientsHeaders();
-  // Unifying the volta + dashboard lines pinned the tail to the dashboard
-  // payment/renewal fields. clinicalTreatmentType/packageChangeDate/assignedTo
-  // (volta-line columns) were relocated ahead of `phone`; the header now ends:
-  //   ... clinicalTreatmentType, packageChangeDate, assignedTo,
-  //       phone, paymentStatus, paymentDate, nextBillingDate, creditsOwed.
+  // The volta + dashboard unification is APPEND-ONLY: volta's live order is kept
+  // verbatim (phone, clinicalTreatmentType, creditsOwed, packageChangeDate,
+  // assignedTo) and the three dashboard payment columns are appended at the END,
+  // so the live positional sheet needs NO migration.
   assert.deepEqual(H.slice(-8), [
-    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo',
-    'phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'
+    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo',
+    'paymentStatus', 'paymentDate', 'nextBillingDate'
   ]);
 });
 

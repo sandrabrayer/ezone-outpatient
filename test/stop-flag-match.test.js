@@ -137,7 +137,7 @@ test('backfill: existing client with no stored phone inherits it from its lead',
   assert.equal(resolveStopFlagClient({ phone: '0543123276' }, clients).client.id, 'C1');
 });
 
-test('schema guard: Clients headers end with the unified payment tail', () => {
+test('schema guard: Clients headers append the payment tail (append-only, no migration)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const m = src.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'CLIENTS_HEADERS not found');
@@ -145,18 +145,20 @@ test('schema guard: Clients headers end with the unified payment tail', () => {
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n') // strip comments
     .match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  // Unifying the volta (live) and dashboard lines: volta's clinicalTreatmentType,
-  // packageChangeDate and assignedTo columns move ahead of the payment tail so
-  // the header ends with the exact dashboard payment/renewal fields the renewal
-  // alert + credit engine read. Append-only tail order is now:
-  //   ... phone, paymentStatus, paymentDate, nextBillingDate, creditsOwed.
+  // Unifying the volta (live) and dashboard lines is APPEND-ONLY: volta's exact
+  // live column order is preserved verbatim, and the three dashboard payment
+  // columns are appended at the very END — so the live positional sheet needs NO
+  // migration.
   assert.deepEqual(
-    cols.slice(-5),
-    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'],
-    'payment fields + creditsOwed must be the unified tail (after phone)'
+    cols.slice(-3),
+    ['paymentStatus', 'paymentDate', 'nextBillingDate'],
+    'payment columns must be appended LAST (append-only — no live-sheet migration)'
   );
-  // volta-line columns must survive the union (relocated ahead of phone).
-  ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo'].forEach(function (c) {
-    assert.ok(cols.includes(c), c + ' column must survive the union');
-  });
+  // volta's live order through assignedTo is untouched (nothing shifted).
+  const pi = cols.indexOf('phone');
+  assert.deepEqual(
+    cols.slice(pi, pi + 5),
+    ['phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo'],
+    'volta live column order must be preserved verbatim'
+  );
 });

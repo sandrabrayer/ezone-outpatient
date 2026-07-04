@@ -52,11 +52,20 @@ var CLIENTS_HEADERS = [
   // The app no longer reads or writes them; existing cells blank on next save.
   'responsiblePerson', 'serviceScope',
   'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
+  // `phone` is the durable canonical patient phone (a PHONE_COLUMN). It is the
+  // join key used by cross-app matching (debt, stop-flow). Volta's live column
+  // order is preserved EXACTLY through here — nothing before this point moves.
+  'phone',
   // clinicalTreatmentType: clinical treatment type as recorded by the E-Zone
   // Therapists app. When present on save, _deriveClientServiceType() runs it
   // through the clinical→billing map and overwrites `serviceType` (clinical is
   // the source of truth). Absent/empty -> serviceType left as-is (back-compat).
   'clinicalTreatmentType',
+  // creditsOwed: SERVER-MANAGED running monthly-credit balance — mutated only by
+  // recordSessionOutcome (therapist_cancelled -> +1; a happened session beyond
+  // the monthly quota auto-draws -1). _saveAll preserves it by id so a dashboard
+  // save never reverts it. Default 0.
+  'creditsOwed',
   // packageChangeDate (שינוי חבילה / package change): the date on which the
   // patient's package was last changed (new price-per-session and/or weekly
   // frequency). When present it becomes the billing RE-ANCHOR for the next
@@ -69,25 +78,16 @@ var CLIENTS_HEADERS = [
   // follows the person. Carried through verbatim by _saveAll/_writeAll — no
   // server logic reads it. Old rows read back blank.
   'assignedTo',
-  // ── MANDATED PAYMENT TAIL ──────────────────────────────────────────────────
-  // The final five columns are pinned in this exact order: `phone` followed by
-  // the payment/billing tail. `clinicalTreatmentType`, `packageChangeDate` and
-  // `assignedTo` sit ABOVE this line (before `phone`) so the tail stays exactly
-  // 'phone','paymentStatus','paymentDate','nextBillingDate','creditsOwed'.
-  //
-  // `phone` is the durable canonical patient phone (a PHONE_COLUMN). It is the
-  // join key used by cross-app matching (debt, stop-flow), so it stays put.
-  'phone',
-  // paymentStatus / paymentDate / nextBillingDate: persisted so the renewal
-  // alert anchors on the stored nextBillingDate instead of falling back to
-  // startDate after every reload. No backfill — existing rows stay blank until
-  // the next save of that client.
-  'paymentStatus', 'paymentDate', 'nextBillingDate',
-  // creditsOwed: SERVER-MANAGED running monthly-credit balance — mutated only by
-  // recordSessionOutcome (therapist_cancelled -> +1; a happened session beyond
-  // the monthly quota auto-draws -1). _saveAll preserves it by id so a dashboard
-  // save never reverts it. Default 0.
-  'creditsOwed'
+  // ── APPEND-ONLY PAYMENT TAIL ────────────────────────────────────────────────
+  // paymentStatus / paymentDate / nextBillingDate persist the renewal anchor so
+  // the alert reads a stored nextBillingDate instead of falling back to startDate
+  // after every reload. APPEND-ONLY was chosen for the volta+dashboard unification:
+  // these three columns are added at the very END, AFTER assignedTo, so every
+  // existing volta column keeps its EXACT position. _readAll/_writeAll are
+  // positional and _ensureSheet does not migrate — appending (rather than
+  // reordering) means the live Clients sheet needs NO migration. Old rows read
+  // these three back blank until the next save. No backfill.
+  'paymentStatus', 'paymentDate', 'nextBillingDate'
 ];
 
 /* Settings sheet: one row per setting, key/value style.

@@ -73,19 +73,18 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
   // the dead concept is still reserved...
   assert.ok(H.includes('responsiblePerson'), 'responsiblePerson slot was dropped (positional risk!)');
   assert.ok(H.includes('serviceScope'), 'serviceScope slot was dropped (positional risk!)');
-  // ...still sitting exactly between house_of_origin and the kept contact phone
-  // (positions 19–20, unchanged) so the reserved-slot removal keeps those columns
-  // fixed. The volta-line columns clinicalTreatmentType/packageChangeDate/
-  // assignedTo were relocated ahead of `phone` when the two lines were unified,
-  // so the header now ends with the mandated payment tail:
-  //   ... phone, paymentStatus, paymentDate, nextBillingDate, creditsOwed.
+  // ...sitting exactly between house_of_origin and the kept contact phone —
+  // nothing after them shifted. The volta+dashboard unification is APPEND-ONLY:
+  // volta's exact live column order is preserved through assignedTo, and the three
+  // dashboard payment columns are appended at the very END, so the live positional
+  // sheet needs NO migration.
   const tail = H.slice(H.indexOf('house_of_origin'));
   assert.deepEqual(tail, [
     'house_of_origin',
     'responsiblePerson', 'serviceScope',
     'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo',
-    'phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'
+    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo',
+    'paymentStatus', 'paymentDate', 'nextBillingDate'
   ]);
 });
 
