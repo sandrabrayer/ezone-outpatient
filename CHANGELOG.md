@@ -1,3 +1,4 @@
+[CHANGELOG (11).md](https://github.com/user-attachments/files/29659534/CHANGELOG.11.md)
 # Changelog
 
 All notable changes to the E-ZONE Outpatient Dashboard are documented here.
@@ -195,3 +196,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `public/app.js` implements the rule inline (no browser build step). It is
   kept in sync with `public/billing-status.js` by hand; any change to the
   rule must update both, and the tests guard the canonical module.
+
+## 2026-07-04 — Payout follow-ups (visibility, unknown therapists, save speed)
+
+### Fixed
+- **Invisible headings**: the תשלומי מטפלים and שימור לידים tab headings used
+  `#1a2e4a` (dark navy) on the dark theme — now `#9fcfcf` (established light accent).
+- **Credit engine silently no-oping**: `creditsOwed` was missing from
+  `CLIENTS_HEADERS` on this branch (port defect vs the source branch), so the
+  session-quota credit balance was never persisted. Column restored (append-only,
+  schema guard updated); `_ensureSheet` self-heals the header row on first touch.
+- **unknown_therapist on valid therapists**: pay rates were a hardcoded 16-name
+  map — any therapist not listed (or spelled differently than in ezone-therapists)
+  was rejected. Rates now live in a **TherapistRates sheet** (auto-seeded from the
+  old constants on first run, columns: name / flatRate / intakeRate / followupRate).
+  Add a therapist = add a row; no redeploy. Cached 120s, so edits apply within
+  ~2 minutes. Unknown names still fail closed — a pay rate is never invented.
+- **Slow save**: `_recordSessionOutcome` rewrote the entire Clients sheet to
+  persist one credit balance. Now a single-cell write (`_writeCreditsOwed`,
+  id-column scan like the SessionLog upsert).
+
+### Tests
+- `test/payout-followups.test.js` (7 source-guard tests, create-lead pattern).
+- Schema guard in `test/stop-flag-match.test.js` extended for the appended column.
+
+### Deploy notes
+- Frontend: Railway auto-deploy on commit; hard-refresh.
+- **Apps Script: manual redeploy required** (paste Code.gs → Save → new version of
+  the EXISTING deployment). On the next recorded session the TherapistRates sheet
+  is created and seeded automatically — then add the missing therapists' rows.
