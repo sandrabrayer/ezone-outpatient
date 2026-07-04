@@ -5,6 +5,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Housekeeping
+- **Stale `claude/*` branch audit + cleanup.** `2026-07-04` — audited every
+  remote `claude/*` branch against the canonical production branch
+  `claude/youthful-volta-laarnk` using `git log volta..<branch> --no-merges`.
+  **24 branches** carry zero unique non-merge commits (fully contained in volta,
+  safe to delete): `adoring-lamport-bbnb5p`, `amazing-darwin-8y5zh4`,
+  `dazzling-knuth-39fk3j`, `deactivate-client-receiver`, `dreamy-clarke-eu1xp2`,
+  `dup-clients-and-pick`, `epic-pascal-7ea5of`, `ezone-billing-fixes-round2`,
+  `ezone-card-charge-mark-paid`, `ezone-patient-card-redesign`,
+  `ezone-payment-renewal-bugs-wd1xo7`, `ezone-role-badge-remove`,
+  `festive-mccarthy-4w5cft`, `funny-mendel-9o68mu`, `happy-meitner-qjpnj9`,
+  `lead-assignee`, `loving-fermi-70yplo`, `merge-dup-clients`, `nice-edison-5bvwiz`,
+  `quirky-mccarthy-vJ1Td`, `server-side-pin-verification-0vt8b0`,
+  `session-credits-eu1xp2`, `stopflag-phone-match`, `wizardly-brahmagupta-5eddut`.
+  **17 branches** still carry unique non-merge commits (mostly squash-merge
+  duplicates now living on volta under different SHAs) and were **preserved, not
+  deleted**, per the audit rule: `add-psychiatric-service-fyqjF`,
+  `billing-day-picker`, `clinical-treatment-type-receiver`,
+  `compassionate-ramanujan-mkgzt9`, `festive-allen-hb1tbt`, `loving-davinci-9l9ask`,
+  `magical-ptolemy-LPUx2`, `magical-ramanujan-zsum4p`, `patients-mark-paid-toggle`,
+  `practical-goodall-x93nou`, `quirky-franklin-vm5mkm`, `relaxed-cray-l84qqb`,
+  `remove-responsible-person`, `serene-hawking-b6hx4j`, `therapist-pay-table`,
+  `vibrant-shannon-h3qsb4`, `zealous-cray-O7NbR`. **Protected (kept regardless):**
+  `claude/youthful-volta-laarnk` (canonical) and `claude/ezone-outpatient-dashboard-hKjf9`
+  (grace period). `feature/*` branches were out of scope and left untouched. The
+  24 deletions could not be executed from the automation sandbox (egress policy
+  denies delete-pushes with 403); they must be run manually.
+
 ### Changed
 - **Unified the two diverged production lines (volta + dashboard).** `2026-07-04`
   — the live `claude/youthful-volta-laarnk` line (payouts) and the
