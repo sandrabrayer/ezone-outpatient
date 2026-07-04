@@ -3170,7 +3170,31 @@
 
   async function loadAll() {
     try {
-      var data = await apiLoad();
+      // All six reads are independent Apps Script round-trips (~1-3s each).
+      // Fired in PARALLEL: total load = slowest call, not the sum (was serial,
+      // 6-18s worst case). Non-critical reads fall back to empty on failure —
+      // same semantics as before; only the main load (apiLoad) is fatal.
+      var results = await Promise.all([
+        apiLoad(),
+        apiGetPayments().catch(function (pe) {
+          console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
+          return { payments: [] };
+        }),
+        apiGetCharges().catch(function (ce) {
+          console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
+          return { charges: [] };
+        }),
+        apiGetStopFlags().catch(function (sfe) {
+          console.warn('[ezone] getStopFlags failed, assuming empty:', sfe.message);
+          return { stopFlags: [] };
+        }),
+        apiGetExtraRequests().catch(function (ere) {
+          console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
+          return { requests: [] };
+        }),
+        apiLoadSettings().catch(function () { return {}; })
+      ]);
+      var data = results[0];
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
       // One-time cleanup: a converted lead has no further meaning. Remove any lead
@@ -3187,43 +3211,17 @@
         }
       })();
       backfillClientPhones();
-      try {
-        var pr = await apiGetPayments();
-        state.payments = (pr.payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
-      } catch (pe) {
-        console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
-        state.payments = [];
-      }
-      try {
-        var cr = await apiGetCharges();
-        state.charges = (cr.charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
-      } catch (ce) {
-        console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
-        state.charges = [];
-      }
-      try {
-        var sf = await apiGetStopFlags();
-        state.stopFlags = (sf.stopFlags || []).map(normalizeStopFlagFromSheet).filter(function (f) { return !!f.id; });
-      } catch (sfe) {
-        console.warn('[ezone] getStopFlags failed, assuming empty:', sfe.message);
-        state.stopFlags = [];
-      }
-      try {
-        var er = await apiGetExtraRequests();
-        state.extraRequests = (er.requests || []).filter(function (r) { return !!r.id; });
-      } catch (ere) {
-        console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
-        state.extraRequests = [];
-      }
-      try {
-        var s = await apiLoadSettings();
-        state.settings = {
-          bankName: s.bankName || '',
-          bankBranch: s.bankBranch || '',
-          bankAccount: s.bankAccount || '',
-          bankHolder: s.bankHolder || ''
-        };
-      } catch (_) {}
+      state.payments = (results[1].payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
+      state.charges = (results[2].charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
+      state.stopFlags = (results[3].stopFlags || []).map(normalizeStopFlagFromSheet).filter(function (f) { return !!f.id; });
+      state.extraRequests = (results[4].requests || []).filter(function (r) { return !!r.id; });
+      var s = results[5];
+      state.settings = {
+        bankName: s.bankName || '',
+        bankBranch: s.bankBranch || '',
+        bankAccount: s.bankAccount || '',
+        bankHolder: s.bankHolder || ''
+      };
       state.loaded = true;
       render();
     } catch (e) {

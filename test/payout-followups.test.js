@@ -77,3 +77,16 @@ test('html: payouts + retention headings are not dark-on-dark', () => {
   assert.ok(h2s.length >= 2, 'both headings present');
   for (const h of h2s) assert.doesNotMatch(h, /#1a2e4a/, 'dark navy is invisible on the dark theme');
 });
+
+// --- load performance guard ---
+const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+
+test('app: loadAll fires its six reads in parallel (Promise.all), not serially', () => {
+  const m = APP.match(/async function loadAll\(\)[\s\S]*?\n  }/);
+  assert.ok(m, 'loadAll not found');
+  const fn = m[0];
+  assert.match(fn, /Promise\.all\(\[/, 'reads must be parallel');
+  assert.doesNotMatch(fn, /await apiGetPayments/, 'no serial awaits per read');
+  assert.match(fn, /apiLoad\(\)/);
+  assert.match(fn, /apiLoadSettings\(\)/);
+});

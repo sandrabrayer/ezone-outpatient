@@ -1,4 +1,3 @@
-[CHANGELOG (12).md](https://github.com/user-attachments/files/29659702/CHANGELOG.12.md)
 # Changelog
 
 All notable changes to the E-ZONE Outpatient Dashboard are documented here.
@@ -480,3 +479,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Apps Script: manual redeploy required** (paste Code.gs → Save → new version
   of the EXISTING deployment). The TherapistRates sheet is created and seeded on
   the next recorded session — then add missing therapists' rows.
+
+## 2026-07-04 — Load-time fix
+
+### Fixed
+- **Slow app load**: `loadAll` made six SERIAL Apps Script round-trips (main
+  data, payments, charges, stop-flags, extra-requests, settings) — 6–18s worst
+  case. Now fired in parallel via `Promise.all`; total load equals the slowest
+  single call. Same failure semantics (non-critical reads fall back to empty;
+  only the main load is fatal).
+
+### Tests
+- Source guard in `test/payout-followups.test.js`: loadAll must stay parallel.
