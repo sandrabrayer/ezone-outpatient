@@ -373,18 +373,88 @@ function _hasOwn(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); 
 /* _therapistPay(name, treatmentType?) -> pre-VAT rate. Mirror of therapistPay():
  * flat therapist ignores type; psychiatrist REQUIRES a valid type; unknown
  * therapist / bad psych type throws. */
+var THERAPIST_RATES_SHEET = 'TherapistRates';
+var THERAPIST_RATES_HEADERS = ['name', 'flatRate', 'intakeRate', 'followupRate'];
+
+// Sheet-managed rates: add/update a therapist by editing the TherapistRates sheet
+// (no code redeploy). Auto-seeded once from the hardcoded maps. Cached 120s via
+// CacheService so per-session calls don't re-read the sheet; a sheet edit
+// therefore takes effect within ~2 minutes.
+function _loadTherapistRates() {
+  var cached = null;
+  try { cached = CacheService.getScriptCache().get('therapistRates_v1'); } catch (_) {}
+  if (cached) { try { return JSON.parse(cached); } catch (_) {} }
+  var sh = _ensureSheet(THERAPIST_RATES_SHEET, THERAPIST_RATES_HEADERS);
+  var rows = _readAll(sh, THERAPIST_RATES_HEADERS);
+  if (!rows.length) {   // first run: seed from the constants so nothing is lost
+    var seed = [];
+    Object.keys(THERAPIST_FLAT_RATES).forEach(function (n) {
+      seed.push({ name: n, flatRate: THERAPIST_FLAT_RATES[n], intakeRate: '', followupRate: '' });
+    });
+    Object.keys(PSYCHIATRIST_RATES).forEach(function (n) {
+      seed.push({ name: n, flatRate: '',
+                  intakeRate: PSYCHIATRIST_RATES[n]['אינטייק'],
+                  followupRate: PSYCHIATRIST_RATES[n]['מעקב פסיכיאטרי'] });
+    });
+    _writeAll(sh, THERAPIST_RATES_HEADERS, seed);
+    rows = seed;
+  }
+  var map = {};
+  for (var i = 0; i < rows.length; i++) {
+    var n = String(rows[i].name == null ? '' : rows[i].name).trim();
+    if (!n) continue;
+    map[n] = {
+      flat: parseFloat(rows[i].flatRate),
+      intake: parseFloat(rows[i].intakeRate),
+      followup: parseFloat(rows[i].followupRate)
+    };
+  }
+  try { CacheService.getScriptCache().put('therapistRates_v1', JSON.stringify(map), 120); } catch (_) {}
+  return map;
+}
+
 function _therapistPay(therapistName, treatmentType) {
   var name = String(therapistName == null ? '' : therapistName).trim();
+  var type = String(treatmentType == null ? '' : treatmentType).trim();
+  // 1) Sheet-managed rates (TherapistRates) — the operational source of truth.
+  var rates = null;
+  try { rates = _loadTherapistRates(); } catch (_) { rates = null; }
+  if (rates && _hasOwn(rates, name)) {
+    var r = rates[name];
+    if (!isNaN(r.flat) && r.flat > 0) return r.flat;
+    if (type === 'אינטייק' && !isNaN(r.intake) && r.intake > 0) return r.intake;
+    if (type === 'מעקב פסיכיאטרי' && !isNaN(r.followup) && r.followup > 0) return r.followup;
+    throw new Error('Therapist "' + name + '" is in TherapistRates but has no usable rate for type "' + type + '"');
+  }
+  // 2) Fallback: hardcoded seed maps (resilience if the sheet/cache is unavailable).
   if (_hasOwn(THERAPIST_FLAT_RATES, name)) return THERAPIST_FLAT_RATES[name];
   if (_hasOwn(PSYCHIATRIST_RATES, name)) {
-    var type = String(treatmentType == null ? '' : treatmentType).trim();
     var table = PSYCHIATRIST_RATES[name];
     if (!type || !_hasOwn(table, type)) {
       throw new Error('Psychiatrist "' + name + '" requires a valid treatmentType (אינטייק or מעקב פסיכיאטרי)');
     }
     return table[type];
   }
-  throw new Error('Unknown therapist: "' + name + '"');
+  // Fail-closed: never invent a pay rate.
+  throw new Error('Unknown therapist: "' + name + '" — add a row to the TherapistRates sheet');
+}
+
+// Persist one client's creditsOwed without rewriting the whole Clients sheet.
+// Locates the row by scanning the id column (like the SessionLog upsert).
+// Fail-soft: no-hit (client deleted mid-flight) changes nothing.
+function _writeCreditsOwed(clientsSh, clientId, balance) {
+  var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+  var creditCol = CLIENTS_HEADERS.indexOf('creditsOwed') + 1;
+  var lastRow = clientsSh.getLastRow();
+  if (lastRow < 2 || idCol < 1 || creditCol < 1 || !clientId) return false;
+  var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var r = 0; r < ids.length; r++) {
+    if (String(ids[r][0]) === String(clientId)) {
+      clientsSh.getRange(r + 2, creditCol).setValue(balance);
+      return true;
+    }
+  }
+  return false;
 }
 
 function _isDayCenterBilling(billingType) {
@@ -1341,10 +1411,11 @@ function _recordSessionOutcome(payload) {
           }
         }
       }
-      // 3) persist the balance only if it actually changed (whole-sheet write)
+      // 3) persist the balance only if it actually changed (single cell — the old
+      //    whole-sheet _writeAll here was the save-path hotspot)
       if (balance !== origCredits) {
         matchedClient.creditsOwed = balance;
-        _writeAll(clientsSh, CLIENTS_HEADERS, clients);
+        _writeCreditsOwed(clientsSh, clientId, balance);
       }
       rowObj.creditsOwed = balance;
     } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
