@@ -744,3 +744,58 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .dupreport-keep input { margin-inline-end: 3px; vertical-align: middle; }
 .dupreport-actions { margin-top: 6px; }
 .merge-warn { color: var(--amber); font-weight: 600; }
+
+/* ===== MOBILE / PWA PASS (appended — do not reorder earlier rules) =====
+   Goal: usable on phones (≤600px). Existing breakpoints already stack the
+   kanban, KPIs, grid-2 and patient-card halves; this section covers the rest:
+   topbar/tabs, touch targets, toolbars, billing, payouts, modals, safe areas. */
+
+@media (max-width: 600px) {
+  /* Topbar: logo on its own line, tabs become a horizontal swipe strip. */
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .tabs {
+    order: 3; width: 100%;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding-bottom: 2px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; flex: 0 0 auto; }
+
+  .main { padding: 12px; }
+
+  /* Toolbars stack; search takes the full row. */
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .search { max-width: none; width: 100%; }
+
+  /* Pipeline mini-counters: 2 per row instead of 4. */
+  .pipeline-counts { grid-template-columns: repeat(2, 1fr); }
+
+  /* Occupancy bars: label above the track (140px label column is too wide). */
+  .bar-row { grid-template-columns: 1fr auto; }
+  .bar-row .bar-label { grid-column: 1 / -1; }
+
+  /* Billing rows: single column, summary cards → 1. */
+  .billing-row { grid-template-columns: 1fr; }
+  .billing-summary-row { grid-template-columns: 1fr; }
+
+  /* Modals: near-full-width bottom sheet, scrollable, single-column forms. */
+  .modal { padding: 8px; align-items: end; }
+  .modal-card { width: 100%; max-height: 92vh; overflow-y: auto; padding: 14px; }
+  .form-grid { grid-template-columns: 1fr; }
+}
+
+/* Touch targets ≥40px on coarse pointers (phones/tablets), all widths. */
+@media (pointer: coarse) {
+  .btn, .tab, .client-tabs .ct { min-height: 40px; }
+  .client-card .client-actions .btn { min-height: 40px; padding: 8px 12px; }
+  button.month-pay-btn { min-height: 40px; }
+  input, select, textarea { min-height: 40px; font-size: 16px; } /* 16px stops iOS zoom-on-focus */
+  .search { min-height: 40px; }
+  * { -webkit-tap-highlight-color: rgba(41, 212, 136, 0.18); }
+}
+
+/* Standalone (installed) mode: respect notches / home-indicator safe areas. */
+@media (display-mode: standalone) {
+  .topbar { padding-top: calc(10px + env(safe-area-inset-top)); }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+}
