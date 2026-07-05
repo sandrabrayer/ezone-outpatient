@@ -2,8 +2,14 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>E-ZONE Outpatient</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#071410" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Outpatient" />
+  <link rel="apple-touch-icon" href="icon-v1-192.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -624,6 +630,15 @@
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="payout-export.js?v=__BUILD__" defer></script>
+  <script>
+    // PWA: register the service worker so the app is installable to the home
+    // screen and opens standalone. Network-first, so data stays fresh.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+  </script>
   <script src="app.js?v=__BUILD__" defer></script>
 </body>
 </html>
