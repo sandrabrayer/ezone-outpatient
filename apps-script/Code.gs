@@ -166,6 +166,21 @@ var CONTINUATION_HEADERS = [
 ];
 var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
 
+/* Stop-treatment alerts (התראות עצירת טיפול). The OUTPATIENT app CREATES an alert
+ * when Vered decides an unpaid patient's treatment should stop; the E-Zone
+ * THERAPISTS app READS them in its new "עצירת טיפול" tab and marks each one read
+ * after Yarden acts. Alerts PERSIST at status 'unread' until explicitly marked
+ * 'read' there — this backend never auto-resolves them. Auto-created via
+ * _ensureSheet. createStopAlert is INTERNAL (same trust level as saveAll — posted
+ * same-origin through the outpatient Node proxy, no cross-app secret). getStopAlerts
+ * + markStopAlertRead are the CROSS-APP endpoints the therapists app calls: BOTH
+ * are fail-closed behind STOP_ALERTS_SECRET (mirrors SESSION_OUTCOME_SECRET — a
+ * missing Script Property rejects every request). */
+var STOP_ALERTS_SHEET = 'התראות עצירת טיפול';
+var STOP_ALERTS_HEADERS = [
+  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note'
+];
+
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
@@ -1815,6 +1830,90 @@ function _getExtraSessionRequests() {
   return { ok: true, requests: requests };
 }
 
+/* ===== Stop-treatment alerts =====
+ *
+ * createStopAlert is the INTERNAL write the outpatient app fires when Vered hits
+ * "הודעת עצירת טיפול" on an unpaid patient — same trust level as saveAll (posted
+ * same-origin through the Node proxy; NO cross-app secret). One appended row per
+ * alert: id 'stop-<uuid>', status 'unread', createdAt ISO. LockService like every
+ * other write. Clients is never touched. */
+function _createStopAlert(payload) {
+  var clientId = String((payload && payload.clientId) || '').trim();
+  var clientName = String((payload && payload.clientName) || '').trim();
+  if (!clientId) return { ok: false, error: 'missing_client_id' };
+  if (!clientName) return { ok: false, error: 'missing_client_name' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+    var alert = {
+      id: 'stop-' + Utilities.getUuid(),
+      clientId: clientId,
+      clientName: clientName,
+      createdAt: new Date().toISOString(),
+      createdBy: String((payload && payload.createdBy) || '').trim(),
+      status: 'unread',
+      readAt: '',
+      note: String((payload && payload.note) || '').trim().slice(0, 1000)
+    };
+    sh.appendRow(STOP_ALERTS_HEADERS.map(function (h) {
+      return alert[h] == null ? '' : alert[h];
+    }));
+    return { ok: true, alert: alert };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Fail-closed auth for the two CROSS-APP stop-alert endpoints (getStopAlerts,
+ * markStopAlertRead). Mirrors _sessionOutcomeAuthOk exactly: the secret is read
+ * ONLY from the 'STOP_ALERTS_SECRET' Script Property; a missing property rejects
+ * every request (never open), and an empty/wrong secret is rejected too. */
+function _stopAlertsAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('STOP_ALERTS_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+/* Read all stop-treatment alerts (for the therapists app's "עצירת טיפול" tab).
+ * Secured — the caller must have passed _stopAlertsAuthOk in the router. */
+function _getStopAlerts() {
+  var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+  return { ok: true, stopAlerts: _readAll(sh, STOP_ALERTS_HEADERS) };
+}
+
+/* Mark a single alert read by id: status -> 'read' + readAt = now. Single-row
+ * in-place update (never rewrites the sheet), wrapped in a LockService lock like
+ * every other write. Secured — the router enforces _stopAlertsAuthOk first. */
+function _markStopAlertRead(payload) {
+  var id = String((payload && payload.id) || '').trim();
+  if (!id) return { ok: false, error: 'missing_id' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = STOP_ALERTS_HEADERS.indexOf('id');
+    var statusIdx = STOP_ALERTS_HEADERS.indexOf('status');
+    var readAtIdx = STOP_ALERTS_HEADERS.indexOf('readAt');
+    var rows = sh.getRange(2, 1, lastRow - 1, STOP_ALERTS_HEADERS.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][idIdx]) === id) {
+        sh.getRange(i + 2, statusIdx + 1).setValue('read');
+        sh.getRange(i + 2, readAtIdx + 1).setValue(new Date().toISOString());
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Create lead (inbound, fail-closed write) =====
  *
  * Inbound: the E-Zone Dashboard POSTs { action:'createLead', secret, name,
@@ -2103,6 +2202,12 @@ function doGet(e) {
       return _json(_getTreatmentPlans());
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'getStopAlerts') {
+      if (!_stopAlertsAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getStopAlerts());
+    }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveAll') {
@@ -2227,6 +2332,27 @@ function doPost(e) {
       return _json(_markForwarded(payload));
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'createStopAlert') {
+      // INTERNAL write (same trust level as saveAll) — the outpatient app posts it
+      // same-origin through the Node proxy; no cross-app secret.
+      return _json(_createStopAlert(payload));
+    }
+    if (action === 'getStopAlerts') {
+      var gsaParams = (e && e.parameter) || {};
+      if (payload && payload.secret) gsaParams.secret = payload.secret;
+      if (!_stopAlertsAuthOk(gsaParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_getStopAlerts());
+    }
+    if (action === 'markStopAlertRead') {
+      var msaParams = (e && e.parameter) || {};
+      if (payload && payload.secret) msaParams.secret = payload.secret;
+      if (!_stopAlertsAuthOk(msaParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_markStopAlertRead(payload));
+    }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
