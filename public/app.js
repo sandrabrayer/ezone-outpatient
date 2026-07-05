@@ -142,6 +142,7 @@
     payments: [],
     charges: [],
     stopFlags: [],  // stop-treatment flags from the therapists app (await confirmation)
+    stopAlerts: [], // stop-treatment alerts THIS app created for the therapists app (Yarden's "עצירת טיפול" tab); tracked in-session for trivial-duplicate detection
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
@@ -1530,7 +1531,7 @@
       '<div class="renewal-actions">' +
         (kind === 'stop'
           ? '<button class="btn btn-wa" data-action="wa-payer-overdue">💬 בקשת תשלום למשלם</button>' +
-            '<button class="btn btn-wa-stop" data-action="wa-stop">🛑 הודעת עצירת טיפול</button>'
+            '<button class="btn btn-wa-stop" data-action="stop-alert">🛑 הודעת עצירת טיפול</button>'
           : '<button class="btn btn-wa" data-action="wa-payer-renewal">💬 בקשת חידוש למשלם</button>'
         ) +
       '</div>' +
@@ -1554,10 +1555,52 @@
     } else if (action === 'wa-payer-overdue') {
       if (!c.payerPhone) { toast('חסר טלפון של גורם משלם — ערוך מטופל', true); return; }
       openWhatsApp(c.payerPhone, buildPayerOverdueMsg(c));
-    } else if (action === 'wa-stop') {
-      if (!c.treatmentContactPhone) { toast('חסר טלפון של אחראי טיפול — ערוך מטופל', true); return; }
-      openWhatsApp(c.treatmentContactPhone, buildStopTreatmentMsg(c));
+    } else if (action === 'stop-alert') {
+      sendStopAlert(c);
     }
+  }
+
+  // "הודעת עצירת טיפול" now CREATES a persistent stop-treatment alert for the
+  // E-Zone Therapists app (Yarden's "עצירת טיפול" tab) instead of opening a
+  // WhatsApp link — no treatmentContactPhone read is involved. Confirm → optional
+  // note → createStopAlert. Optimistic: the alert is pushed to local state so a
+  // repeat click warns that one is already pending, and removed again on failure.
+  function sendStopAlert(c) {
+    if (state.role !== 'editor') return;
+    var pendingExists = (state.stopAlerts || []).some(function (a) {
+      return a.clientId === c.id && a.status === 'unread';
+    });
+    var head = pendingExists
+      ? 'כבר קיימת התראת עצירה פתוחה עבור ' + c.name + ' שטרם נקראה על ידי ירדן. לשלוח התראה נוספת?'
+      : 'לשלוח התראת עצירת טיפול לירדן עבור ' + c.name + '?';
+    if (!confirm(head)) return;
+    var note = window.prompt('הערה לירדן (רשות):', '');
+    if (note === null) return; // cancelled the note step
+    note = note.trim();
+
+    var optimistic = {
+      id: 'stop-pending-' + Date.now(),
+      clientId: c.id,
+      clientName: c.name,
+      createdAt: new Date().toISOString(),
+      createdBy: 'Vered',
+      status: 'unread',
+      readAt: '',
+      note: note
+    };
+    state.stopAlerts.push(optimistic);
+    apiPostAction('createStopAlert', {
+      clientId: c.id, clientName: c.name, createdBy: 'Vered', note: note
+    })
+      .then(function (res) {
+        if (res && res.alert && res.alert.id) optimistic.id = res.alert.id;
+        toast('נשלחה התראת עצירה לירדן');
+      })
+      .catch(function (err) {
+        var idx = state.stopAlerts.indexOf(optimistic);
+        if (idx !== -1) state.stopAlerts.splice(idx, 1);
+        toast('ההתראה לא נשלחה: ' + err.message, true);
+      });
   }
 
   function lastDayOfMonth(dateISO) {
