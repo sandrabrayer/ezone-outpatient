@@ -45,11 +45,16 @@ test('app source no longer references responsiblePerson / serviceScope', () => {
     'responsiblePerson required-validation still present');
 });
 
-test('the KEPT treatmentContactPhone field is untouched', () => {
+test('treatmentContactPhone survives as a legacy read-only column, no longer edited from the UI', () => {
+  // The column is still read/round-tripped and used for cross-app matching /
+  // WhatsApp in app.js …
   assert.ok(/treatmentContactPhone/.test(read('public/app.js')));
-  assert.ok(/treatmentContactPhone/.test(read('public/index.html')));
-  // its WhatsApp/billing usages survive
   assert.ok(/buildStopTreatmentMsg/.test(read('public/app.js')));
+  // … but the אחראי-טיפול edit-modal field/section was removed (that role was
+  // dropped from the product) — index.html no longer carries the input.
+  const html = read('public/index.html');
+  assert.ok(!/treatmentContactPhone/.test(html), 'treatmentContactPhone input still in index.html');
+  assert.ok(!/אחראי טיפול/.test(html), 'אחראי טיפול section still in index.html');
 });
 
 // --- CLIENTS_HEADERS shape (parsed from Code.gs) ----------------------------

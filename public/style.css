@@ -238,7 +238,9 @@ button, input, select, textarea {
 
 /* Two-column patient card: כספים (right, RTL reads first) | תוכנית טיפול (left). */
 .client-card .cc-top { display: flex; flex-direction: column; gap: 6px; }
-.client-card .cc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+/* כספים (right, DOM-first) is wider — it now holds all money content including
+   the extra-charge rows; the left תוכנית טיפול (clinical) panel is narrower. */
+.client-card .cc-body { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 8px; margin-top: 2px; }
 .client-card .cc-panel {
   border: 1px solid var(--border); border-radius: 10px; padding: 10px;
   display: flex; flex-direction: column; gap: 6px;
@@ -693,6 +695,19 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   padding: 0;
 }
 .client-charges .charge-remove:hover { background: #2a1515; }
+.client-charges .charge-edit {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  border-radius: 6px;
+  width: 22px; height: 22px;
+  line-height: 1;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.client-charges .charge-edit:hover { background: color-mix(in srgb, var(--blue-deep) 22%, transparent); }
 .client-charges .charge-status {
   font-size: 11px;
   padding: 2px 8px;
