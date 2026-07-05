@@ -863,3 +863,24 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   .continuation-ctl, .continuation-note-ctl { width: 100%; }
   .continuation-save { width: 100%; }
 }
+
+/* ===== חידוש ותשלום consolidation (appended — do not reorder earlier rules) =====
+ * The renew modal now folds in the former שינוי חבילה fields. RTL-correct within
+ * the existing .form-grid; the "שולם" quick action sits beside ביטול/שמור. */
+.renew-pkg-hint {
+  color: var(--muted); font-size: 12px; line-height: 1.5;
+  margin: -2px 0 4px; /* tuck under the section title */
+}
+/* Keep the three modal actions readable and tappable in RTL. On phones they wrap
+ * and each spans the full row for a comfortable target. */
+#renewModal .form-actions { flex-wrap: wrap; gap: 8px; }
+#renewMarkPaid { margin-inline-end: auto; } /* push שולם to the start (RTL) edge */
+@media (pointer: coarse) {
+  /* Match the ≥40px touch-target rule used across the mobile/PWA pass. */
+  #renewModal .form-actions .btn { min-height: 40px; padding: 8px 14px; }
+}
+@media (max-width: 600px) {
+  #renewModal .form-actions { flex-direction: column; align-items: stretch; }
+  #renewModal .form-actions .btn { width: 100%; }
+  #renewMarkPaid { margin-inline-end: 0; order: 3; } /* below the primary actions */
+}
