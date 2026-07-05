@@ -3075,12 +3075,23 @@
     if (state.role === 'editor') {
       var actions = $('.client-actions', card);
 
+      // Consolidated card actions — exactly three primary buttons, in this order:
+      //   עריכה | חידוש ותשלום | + הוסף טיפול
+      // The former standalone "שינוי חבילה" button is gone; package changes now live
+      // inside the חידוש ותשלום modal (one save = renewal + any package change).
       var editBtn = document.createElement('button');
       editBtn.className = 'btn btn-ghost';
-      editBtn.textContent = '✏️ ערוך';
+      editBtn.textContent = 'עריכה';
       editBtn.title = 'ערוך פרטי טיפול';
       editBtn.onclick = function () { openEditClientModal(c); };
       actions.appendChild(editBtn);
+
+      var renewBtn = document.createElement('button');
+      renewBtn.className = 'btn btn-ghost edit-only';
+      renewBtn.textContent = 'חידוש ותשלום';
+      renewBtn.title = 'רשום תשלום מראש לחודש הבא, עדכן את הסכום החודשי ואת החבילה';
+      renewBtn.onclick = function () { openRenewModal(c); };
+      actions.appendChild(renewBtn);
 
       var addChargeBtn = document.createElement('button');
       addChargeBtn.className = 'btn btn-ghost edit-only';
@@ -3088,20 +3099,6 @@
       addChargeBtn.title = 'הוסף חיוב חד-פעמי או חודשי';
       addChargeBtn.onclick = function () { openAddChargeModal(c); };
       actions.appendChild(addChargeBtn);
-
-      var renewBtn = document.createElement('button');
-      renewBtn.className = 'btn btn-ghost edit-only';
-      renewBtn.textContent = 'חידוש ותשלום';
-      renewBtn.title = 'רשום תשלום מראש לחודש הבא ועדכן את הסכום החודשי';
-      renewBtn.onclick = function () { openRenewModal(c); };
-      actions.appendChild(renewBtn);
-
-      var changePkgBtn = document.createElement('button');
-      changePkgBtn.className = 'btn btn-ghost edit-only';
-      changePkgBtn.textContent = 'שינוי חבילה';
-      changePkgBtn.title = 'עדכן מחיר למפגש ותדירות שבועית, וקבע תאריך שינוי שמאפס את מועד הגבייה';
-      changePkgBtn.onclick = function () { openChangePackageModal(c); };
-      actions.appendChild(changePkgBtn);
 
       // Wire × buttons on the inline charge list.
       $$('[data-charge-remove]', card).forEach(function (btn) {
@@ -3551,23 +3548,32 @@
     if (m) m.hidden = true;
     addChargeClientId = null;
   }
-  // --- Renew & pay modal -------------------------------------------------
+  // --- Renew & pay modal (חידוש ותשלום) ----------------------------------
   // Records next month's base payment as paid-in-advance with a manual amount,
-  // and sets that amount as the client's new going-forward monthly default.
-  // Service-type / sessions changes stay in the ✏️ ערוך modal — this is amount only.
+  // and sets that amount as the client's new going-forward monthly default. Also
+  // absorbs the former "שינוי חבילה" flow: the per-service weekly-frequency host
+  // is prefilled from the current plan; editing it makes the SAME save apply a
+  // package change (new frequency + packageChangeDate re-anchor). One save =
+  // renewal + any package change. Service TYPES stay in the עריכה modal.
   var renewClientId = null;
   function openRenewModal(client) {
     renewClientId = client.id;
     var form = $('#renewForm');
     if (!form) return;
     form.reset();
-    // The billed month comes from renewalInfo(c).renewalDate via the shared
-    // helper, so the modal can never diverge from the renewal banner.
-    var renewalDate = nextRenewalDueDate(client);
+    // Always show the billed month. Prefer the anchored renewal date (the same
+    // value the גבייה הבאה chip shows); fall back to the current-month base due
+    // date so a client with NO stored anchor still shows a concrete month and can
+    // renew (Bug B: this used to hard-fail with "לא ניתן לחשב תאריך חידוש").
+    var renewalDate = nextRenewalDueDate(client) || currentMonthBaseDueDate(client);
     $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
       (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
     form.renewAmount.value = client.pricePerSession || '';
     if (form.renewDate) form.renewDate.value = today();
+    // Prefill the package/plan frequency from the current plan (former שינוי חבילה
+    // host). Left unchanged → renew only; changed → save also updates the package.
+    var host = $('[data-host="renewSessions"]', form);
+    if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
     $('#renewModal').hidden = false;
   }
   function closeRenewModal() {
@@ -3576,30 +3582,35 @@
     renewClientId = null;
   }
 
-  // --- Change package modal (שינוי חבילה) --------------------------------
-  // Updates the client's pricePerSession + sessionsPerWeek and stamps
-  // packageChangeDate, which re-anchors the renewal cycle (גבייה הבאה =
-  // packageChangeDate + 1 month). paymentDate is left untouched. Weekly sessions
-  // use the SAME per-service host as the ✏️ ערוך modal (one input per existing
-  // service type) so a multi-service breakdown is preserved, not collapsed to a
-  // total. Service TYPES are not editable here — that stays in ✏️ ערוך.
-  var changePackageClientId = null;
-  function openChangePackageModal(client) {
-    changePackageClientId = client.id;
-    var form = $('#changePackageForm');
-    if (!form) return;
-    form.reset();
-    $('#changePackageClientName').textContent = 'שינוי חבילה עבור: ' + (client.name || '');
-    if (form.changeDate) form.changeDate.value = client.packageChangeDate || today();
-    if (form.newPrice) form.newPrice.value = client.pricePerSession || '';
-    var host = $('[data-host="changePackageSessions"]', form);
-    if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
-    $('#changePackageModal').hidden = false;
+  // --- Shared package-change core (single implementation) ----------------
+  // Formerly the body of the standalone שינוי חבילה modal; kept as pure-ish
+  // helpers so the חידוש ותשלום modal reuses ONE implementation of the rule
+  // (no forked second copy). readPackageSessionsFromForm reads the per-service
+  // frequency host keyed by the client's existing services; packageSessionsChanged
+  // reports whether that differs from the stored plan (counts or units).
+  function readPackageSessionsFromForm(client, form) {
+    var services = parseServices(client.serviceType);
+    var host = $('[data-host="renewSessions"]', form);
+    if (!services.length || !host) return null;
+    var raw = readSessionsHost(host);
+    var units = readSessionsUnits(host);
+    var sessions = {};
+    var total = 0;
+    services.forEach(function (s) { sessions[s] = wholeSessions(raw[s] || 0); total += sessions[s]; });
+    if (!total) return null; // nothing meaningful entered → renew without a package change
+    return { sessions: sessions, units: units };
   }
-  function closeChangePackageModal() {
-    var m = $('#changePackageModal');
-    if (m) m.hidden = true;
-    changePackageClientId = null;
+  function packageSessionsChanged(client, pkg) {
+    if (!pkg) return false;
+    var services = parseServices(client.serviceType);
+    var cur = parseSessionsBreakdown(client.sessionsPerWeek, client.serviceType);
+    var curUnits = client.sessionsUnit || parseSessionsUnits(client.sessionsPerWeek);
+    for (var i = 0; i < services.length; i++) {
+      var s = services[i];
+      if (wholeSessions(cur[s] || 0) !== wholeSessions(pkg.sessions[s] || 0)) return true;
+      if (sessionUnitFor(s, curUnits) !== sessionUnitFor(s, pkg.units)) return true;
+    }
+    return false;
   }
 
   function updateAddChargeBillingDayVisibility(form) {
@@ -3867,7 +3878,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeChangePackageModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
       });
     });
 
@@ -3952,8 +3963,10 @@
       if (!renewClientId) return;
       var c = state.clients.find(function (x) { return x.id === renewClientId; });
       if (!c) { toast('מטופל לא נמצא', true); return; }
-      // Same shared helper as the renewal banner — never recompute today()+1mo.
-      var renewalDate = nextRenewalDueDate(c);
+      // Billed month: prefer the anchored renewal date (same value the גבייה הבאה
+      // chip / renewal banner show); fall back to the current-month base due date
+      // so a client with NO stored anchor still renews (Bug B — was a hard fail).
+      var renewalDate = nextRenewalDueDate(c) || currentMonthBaseDueDate(c);
       if (!renewalDate) { toast('לא ניתן לחשב תאריך חידוש', true); return; }
       var fd = new FormData(e.target);
       var amount = toNum(fd.get('renewAmount'));
@@ -3961,18 +3974,34 @@
       // Editable paid date (default today, backdatable) + free-text notes.
       var paidDate = fd.get('renewDate') || today();
       var notes = (fd.get('renewNotes') || '').trim();
+      // Optional package change folded in: read the per-service frequency host and
+      // apply it only if it actually differs from the stored plan. Reuses the
+      // shared package helpers so there is ONE change-package implementation.
+      var pkg = readPackageSessionsFromForm(c, e.target);
+      var pkgChanged = packageSessionsChanged(c, pkg);
       submit.disabled = true;
 
       // ORDERING IS DELIBERATE: persist the client default FIRST, payment
       // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
       // failure mode; the payment row is idempotent (deterministic id) and
       // safely re-clickable, so it is the safer step to leave for retry.
-      var prev = { pricePerSession: c.pricePerSession, paymentDate: c.paymentDate, nextBillingDate: c.nextBillingDate };
+      var prev = {
+        pricePerSession: c.pricePerSession, paymentDate: c.paymentDate,
+        nextBillingDate: c.nextBillingDate, sessionsPerWeek: c.sessionsPerWeek,
+        sessionsUnit: c.sessionsUnit, packageChangeDate: c.packageChangeDate
+      };
       c.pricePerSession = amount;
       // Re-anchor from the paid date (same addDays(x,30) formula as edit/activate),
       // so the renewal alert/גבייה הבאה advance off the date actually entered.
       c.paymentDate = paidDate;
       c.nextBillingDate = addDays(paidDate, 30);
+      if (pkgChanged) {
+        // Same fields the former שינוי חבילה flow wrote: new weekly frequency and
+        // the packageChangeDate re-anchor (stamped to the payment date).
+        c.sessionsPerWeek = pkg.sessions;
+        c.sessionsUnit = pkg.units;
+        c.packageChangeDate = paidDate;
+      }
       persist()
         .then(function () {
           // Single paid-date path: same builder as the edit-modal propagation.
@@ -3983,7 +4012,7 @@
               var idx = state.payments.findIndex(function (p) { return p.id === payment.id; });
               if (idx >= 0) state.payments[idx] = payment;
               else state.payments.push(payment);
-              toast('חודש שולם מראש');
+              toast(pkgChanged ? 'חודש שולם מראש והחבילה עודכנה' : 'חודש שולם מראש');
               closeRenewModal();
               render();
             })
@@ -4005,51 +4034,15 @@
         .finally(function () { submit.disabled = false; });
     });
 
-    var changePackageForm = $('#changePackageForm');
-    if (changePackageForm) changePackageForm.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var submit = $('#changePackageSubmit');
-      if (submit.disabled) return;
-      if (!changePackageClientId) return;
-      var c = state.clients.find(function (x) { return x.id === changePackageClientId; });
+    // "שולם" quick action inside the חידוש ותשלום modal: mark the CURRENT month
+    // paid via the EXACT existing setCurrentMonthPaid path (optimistic + rollback).
+    // Distinct from the renewal save, which pays the upcoming renewal month.
+    var renewMarkPaid = $('#renewMarkPaid');
+    if (renewMarkPaid) renewMarkPaid.addEventListener('click', function () {
+      if (!renewClientId) return;
+      var c = state.clients.find(function (x) { return x.id === renewClientId; });
       if (!c) { toast('מטופל לא נמצא', true); return; }
-      var fd = new FormData(e.target);
-      var changeDate = fmtDate(fd.get('changeDate'));
-      if (!changeDate) { toast('יש לבחור תאריך שינוי', true); return; }
-      var newPrice = toNum(fd.get('newPrice'));
-      if (!newPrice || newPrice <= 0) { toast('יש להזין מחיר', true); return; }
-      // Per-service breakdown from the host, keyed by the client's existing
-      // services (types are fixed in this modal) — same shape as ✏️ ערוך.
-      var host = $('[data-host="changePackageSessions"]', e.target);
-      var services = parseServices(c.serviceType);
-      var raw = host ? readSessionsHost(host) : {};
-      var newSessions = {};
-      services.forEach(function (s) { newSessions[s] = wholeSessions(raw[s] || 0); });
-      var totalSess = services.reduce(function (n, s) { return n + newSessions[s]; }, 0);
-      if (!totalSess) { toast('יש להזין מספר מפגשים', true); return; }
-      submit.disabled = true;
-
-      // Snapshot for rollback if persist fails.
-      var prev = {
-        pricePerSession: c.pricePerSession,
-        sessionsPerWeek: c.sessionsPerWeek,
-        packageChangeDate: c.packageChangeDate
-      };
-      c.pricePerSession = newPrice;
-      c.sessionsPerWeek = newSessions;
-      c.packageChangeDate = changeDate;
-      persist()
-        .then(function () {
-          toast('החבילה עודכנה');
-          closeChangePackageModal();
-          render();
-        })
-        .catch(function (err) {
-          Object.assign(c, prev);
-          toast('שגיאה: ' + err.message, true);
-          render();
-        })
-        .finally(function () { submit.disabled = false; });
+      setCurrentMonthPaid(c, true);
     });
 
     // Direct-add client wiring
@@ -4437,11 +4430,20 @@
       if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
-      // Block on the patient-identity phones (the patient's own number and the
-      // treatment-contact phone), excluding this client. payerPhone is
-      // intentionally not deduped (shared payers).
-      if (duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
-      if (duplicateClientBlock(tcPhone, client.id)) { submit.disabled = false; return; }
+      // Duplicate-identity guard (Bug A fix). Only block when the user actually
+      // CHANGED the patient's OWN phone to a number another client already owns.
+      // Two rules the old code got wrong and that made a card un-saveable:
+      //   1. The treatment-contact phone was also deduped — but, exactly like
+      //      payerPhone, it is a SHAREABLE contact (one parent is the אחראי טיפול
+      //      for siblings), so it must never block. It is excluded here.
+      //   2. The patient phone was re-checked on every save, so an UNCHANGED
+      //      prefilled number that happened to collide with another row (incl.
+      //      that row's treatment-contact phone) aborted an edit that only
+      //      touched name/amount. Gating on an actual change fixes that.
+      // Direct-add already guards only the patient's own phone — this makes edit
+      // consistent with it.
+      var ptPhoneChanged = recoverPhone(ptPhone) !== recoverPhone(client.phone);
+      if (ptPhoneChanged && duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
         name: client.name,
         location: client.location,

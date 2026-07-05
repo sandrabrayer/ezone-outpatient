@@ -547,28 +547,19 @@
           <label class="wide">סכום חודשי (₪)<input name="renewAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">תאריך תשלום<input name="renewDate" type="date" /></label>
           <label class="wide">הערות<textarea name="renewNotes" rows="2"></textarea></label>
-          <div class="form-actions edit-only">
-            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
-            <button type="submit" class="btn btn-primary" id="renewSubmit">חידוש ותשלום</button>
-          </div>
-        </form>
-      </div>
-    </div>
 
-    <!-- Change package modal (שינוי חבילה) -->
-    <div id="changePackageModal" class="modal" hidden>
-      <div class="modal-card">
-        <div class="modal-title">שינוי חבילה</div>
-        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
-          <span id="changePackageClientName"></span>
-        </div>
-        <form id="changePackageForm" class="form-grid">
-          <label class="wide">תאריך שינוי<input name="changeDate" type="date" required /></label>
-          <label class="wide">מחיר חדש למפגש (₪)<input name="newPrice" type="number" min="0" step="1" required /></label>
-          <div class="wide sessions-host" data-host="changePackageSessions"></div>
+          <!-- Package change folded in (was the standalone שינוי חבילה modal). Editing
+               the weekly frequency turns this save into a package change too:
+               it updates the plan and re-anchors גבייה הבאה to the payment date.
+               Leaving it unchanged renews only. -->
+          <div class="wide form-section-title">שינוי חבילה (אופציונלי)</div>
+          <div class="wide renew-pkg-hint">עדכון תדירות המפגשים יעדכן את החבילה ויאפס את מועד הגבייה לפי תאריך התשלום.</div>
+          <div class="wide sessions-host" data-host="renewSessions"></div>
+
           <div class="form-actions edit-only">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
-            <button type="submit" class="btn btn-primary" id="changePackageSubmit">שמור שינוי</button>
+            <button type="button" class="btn btn-ghost" id="renewMarkPaid" title="סמן את החודש הנוכחי כשולם">שולם</button>
+            <button type="submit" class="btn btn-primary" id="renewSubmit">חידוש ותשלום</button>
           </div>
         </form>
       </div>
