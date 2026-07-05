@@ -160,7 +160,7 @@
     continuationLoading: false,
     continuationError: '',
     continuationSearch: '',
-    settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
+    settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '', yardenStopPhone: '' },
     loaded: false
   };
 
@@ -1451,9 +1451,11 @@
       ' יש להסדיר את התשלום בהקדם' + bankPart + link + '. תודה, צוות E-ZONE איזון';
   }
 
+  // Instruction to Yarden (not to the patient): stop the patient's treatment so
+  // she can cancel the sessions in the therapists app. Short, Hebrew, RTL-safe.
   function buildStopTreatmentMsg(c) {
-    return 'שלום, המטופל ' + c.name +
-      ' טרם הסדיר את התשלום החודשי. נא לא להעניק טיפול עד הסדרת התשלום מול ההנהלה. בתודה, צוות E-ZONE איזון';
+    return 'ירדן, יש להפסיק את הטיפול של ' + c.name +
+      ' — התשלום החודשי לא הוסדר. נא לבטל את המפגשים במערכת המטפלים. תודה, צוות E-ZONE איזון';
   }
 
   function openWhatsApp(phone, message) {
@@ -1555,8 +1557,14 @@
       if (!c.payerPhone) { toast('חסר טלפון של גורם משלם — ערוך מטופל', true); return; }
       openWhatsApp(c.payerPhone, buildPayerOverdueMsg(c));
     } else if (action === 'wa-stop') {
-      if (!c.treatmentContactPhone) { toast('חסר טלפון של אחראי טיפול — ערוך מטופל', true); return; }
-      openWhatsApp(c.treatmentContactPhone, buildStopTreatmentMsg(c));
+      // The stop-treatment message goes to Yarden (a single configurable number
+      // in ⚙️ הגדרות), NOT the legacy per-patient contact phone.
+      var yardenPhone = (state.settings && state.settings.yardenStopPhone) || '';
+      if (!normalizePhone(yardenPhone)) {
+        toast('לא הוגדר טלפון של ירדן — יש להגדיר בהגדרות ⚙️', true);
+        return;
+      }
+      openWhatsApp(yardenPhone, buildStopTreatmentMsg(c));
     }
   }
 
@@ -3726,6 +3734,7 @@
     form.bankBranch.value = s.bankBranch || '';
     form.bankAccount.value = s.bankAccount || '';
     form.bankHolder.value = s.bankHolder || '';
+    if (form.yardenStopPhone) form.yardenStopPhone.value = s.yardenStopPhone || '';
     $('#settingsModal').hidden = false;
   }
   function closeSettingsModal() { $('#settingsModal').hidden = true; }
@@ -3844,7 +3853,9 @@
         bankName: s.bankName || '',
         bankBranch: s.bankBranch || '',
         bankAccount: s.bankAccount || '',
-        bankHolder: s.bankHolder || ''
+        bankHolder: s.bankHolder || '',
+        // Recipient for the wa-stop "הודעת עצירת טיפול" WhatsApp (Yarden).
+        yardenStopPhone: s.yardenStopPhone || ''
       };
       state.loaded = true;
       render();
@@ -4662,7 +4673,8 @@
         bankName: (fd.get('bankName') || '').trim(),
         bankBranch: (fd.get('bankBranch') || '').trim(),
         bankAccount: (fd.get('bankAccount') || '').trim(),
-        bankHolder: (fd.get('bankHolder') || '').trim()
+        bankHolder: (fd.get('bankHolder') || '').trim(),
+        yardenStopPhone: (fd.get('yardenStopPhone') || '').trim()
       };
       apiSaveSettings(next)
         .then(function () {
