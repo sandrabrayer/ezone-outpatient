@@ -1253,14 +1253,15 @@
   }
 
   // --- duplicate-client prevention --------------------------------------
-  // Patient-IDENTITY phones: the patient's own number and the treatment-contact
-  // phone. payerPhone is deliberately EXCLUDED — a payer (parent / institution)
-  // is legitimately shared across siblings, so a hard block on it would reject
-  // real patients. Identity uniqueness is what stops the same person being
-  // entered twice (the ליעם בריאר / נועם duplicates).
+  // Patient-IDENTITY phone: the patient's own number. payerPhone is deliberately
+  // EXCLUDED — a payer (parent / institution) is legitimately shared across
+  // siblings, so a hard block on it would reject real patients. The אחראי-טיפול
+  // contact phone is likewise no longer part of identity (that role was removed
+  // from the product). Identity uniqueness on the patient phone is what stops the
+  // same person being entered twice (the ליעם בריאר / נועם duplicates).
   function clientIdentityPhones(c) {
     if (!c) return [];
-    return [c.phone, c.treatmentContactPhone].map(recoverPhone).filter(function (p) { return !!p; });
+    return [c.phone].map(recoverPhone).filter(function (p) { return !!p; });
   }
   function findClientByPhone(rawPhone, exceptId) {
     var key = recoverPhone(rawPhone);
@@ -1288,7 +1289,7 @@
     (clients || []).forEach(function (c) {
       if (!c) return;
       var keys = {};
-      [c.phone, c.treatmentContactPhone].forEach(function (p) {
+      [c.phone].forEach(function (p) {
         var k = recoverPhone(p);
         if (k) keys[k] = true;
       });
@@ -3018,16 +3019,25 @@
         var statusBadge = state.role === 'editor'
           ? '<button type="button" class="charge-status charge-status-' + status + ' charge-status-toggle" data-charge-toggle="' + escapeHtml(ch.id) + '" title="' + (status === 'paid' ? 'בטל סימון תשלום' : 'סמן כשולם') + '">' + statusLabel + '</button>'
           : '<span class="charge-status charge-status-' + status + '">' + statusLabel + '</span>';
+        // Editors also get an ✏️ edit action (correct a wrong amount/type/etc.);
+        // it opens a small modal and saves via the SAME charge row (stable id).
+        var editBtn = state.role === 'editor'
+          ? '<button type="button" class="charge-edit edit-only" title="ערוך חיוב" data-charge-edit="' + escapeHtml(ch.id) + '">✏️</button>'
+          : '';
         return '<li class="charge-row" data-charge-id="' + escapeHtml(ch.id) + '">' +
           '<span class="charge-label">' + label + '</span>' +
           statusBadge +
+          editBtn +
           '<button type="button" class="charge-remove edit-only" title="הסר חיוב" data-charge-remove="' + escapeHtml(ch.id) + '">×</button>' +
           '</li>';
       }).join('');
       chargesHtml = '<ul class="client-charges">' + items + '</ul>';
     }
 
-    // כספים (right, RTL reads first): single amount + paid chip + dated rows.
+    // כספים (right, RTL reads first): ALL money/financial content lives here —
+    // the monthly package amount + paid chip + dated rows AND the extra-charge
+    // rows (חד-פעמי/חודשי chips with paid-toggle + edit/remove). Nothing financial
+    // renders in the left plan panel anymore.
     var moneyPanel =
       '<div class="cc-panel cc-money">' +
         '<div class="cc-panel-title">כספים</div>' +
@@ -3035,16 +3045,17 @@
           '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
         (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
         paidOnRow + nextBillRow + startRow +
+        chargesHtml +
       '</div>';
 
-    // תוכנית טיפול (left): treatment-type rows, session credit, בית מוצא, extra charges.
+    // תוכנית טיפול (left): treatment-type rows, session credit, בית מוצא. Purely
+    // clinical/plan content — money moved out to the right כספים panel.
     var planPanel =
       '<div class="cc-panel cc-plan">' +
         '<div class="cc-panel-title">תוכנית טיפול</div>' +
         planRows +
         creditRow +
         hooRow +
-        chargesHtml +
       '</div>';
 
     // Renewal status banner (overdue / due soon)
@@ -3114,6 +3125,15 @@
           var chargeId = btn.getAttribute('data-charge-toggle');
           var ch = state.charges.find(function (x) { return x.id === chargeId; });
           if (ch) setChargePaid(c, ch);
+        });
+      });
+
+      // Wire the ✏️ edit action on each charge row (editor only) → prefilled modal.
+      $$('[data-charge-edit]', card).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var chargeId = btn.getAttribute('data-charge-edit');
+          var ch = state.charges.find(function (x) { return x.id === chargeId; });
+          if (ch) openEditChargeModal(c, ch);
         });
       });
 
@@ -3494,9 +3514,10 @@
       if (locWrap) locWrap.style.opacity = '';
     }
     // Patient's primary phone (the populated `phone` column, with fallback +
-    // leading-zero recovery). treatmentContactPhone is edited separately below.
+    // leading-zero recovery). The אחראי-טיפול contact phone is no longer edited
+    // here — that role was removed from the product (the legacy sheet column is
+    // kept but never written from the UI).
     if (form.phone) form.phone.value = clientPhone(client);
-    form.treatmentContactPhone.value = client.treatmentContactPhone || '';
     form.payerName.value = client.payerName || '';
     form.payerPhone.value = client.payerPhone || '';
     form.paymentLink.value = client.paymentLink || '';
@@ -3547,6 +3568,55 @@
     var m = $('#addChargeModal');
     if (m) m.hidden = true;
     addChargeClientId = null;
+  }
+
+  // --- Edit an existing extra charge (correct wrong amount/type/date/etc.) ----
+  // Prefills a small modal from the charge and saves back through the SAME charge
+  // row — persistCharge upserts by the charge's stable id (chg-<id> on the card),
+  // so an edit updates the row and never creates a duplicate. Optimistic update +
+  // rollback; the paid-toggle and × delete on the card are unchanged.
+  var editChargeIds = { clientId: null, chargeId: null };
+  function updateEditChargeBillingDayVisibility(form) {
+    if (!form) return;
+    var type = form.billingType && form.billingType.value;
+    var wrap = $('#editChargeBillingDayWrap');
+    var freqWrap = $('#editChargeFreqWrap');
+    if (wrap) wrap.classList.toggle('field-hidden', type !== 'monthly');
+    if (freqWrap) freqWrap.classList.toggle('field-hidden', type !== 'monthly');
+  }
+  function openEditChargeModal(client, charge) {
+    if (state.role !== 'editor') return;
+    if (!client || !charge) return;
+    editChargeIds = { clientId: client.id, chargeId: charge.id };
+    var form = $('#editChargeForm');
+    if (!form) return;
+    form.reset();
+    $('#editChargeClientName').textContent = client.name || '';
+    form.chargeId.value = charge.id;
+    // Populate the treatment-type dropdown from the canonical service list, then
+    // select the charge's current value.
+    var typeSel = $('#editChargeTreatmentType');
+    if (typeSel) {
+      typeSel.innerHTML = '<option value="">—</option>' +
+        SERVICE_TYPES.map(function (s) {
+          return '<option value="' + escapeHtml(s) + '">' + escapeHtml(serviceLabel(s)) + '</option>';
+        }).join('');
+    }
+    form.billingType.value = charge.billingType === 'monthly' ? 'monthly' : 'one_time';
+    if (form.treatmentType) form.treatmentType.value = charge.treatmentType || '';
+    form.amount.value = charge.amount || '';
+    form.description.value = charge.description || '';
+    form.chargeDate.value = charge.chargeDate || '';
+    if (form.billingDay) form.billingDay.value = (charge.billingDay === '' || charge.billingDay == null) ? '' : charge.billingDay;
+    if (form.frequencyPerWeek) form.frequencyPerWeek.value = (charge.frequencyPerWeek === '' || charge.frequencyPerWeek == null) ? '' : charge.frequencyPerWeek;
+    if (form.notes) form.notes.value = charge.notes || '';
+    updateEditChargeBillingDayVisibility(form);
+    $('#editChargeModal').hidden = false;
+  }
+  function closeEditChargeModal() {
+    var m = $('#editChargeModal');
+    if (m) m.hidden = true;
+    editChargeIds = { clientId: null, chargeId: null };
   }
   // --- Renew & pay modal (חידוש ותשלום) ----------------------------------
   // Records next month's base payment as paid-in-advance with a manual amount,
@@ -3878,13 +3948,65 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
       });
     });
 
     var acTypeSel = $('#addChargeForm select[name="billingType"]');
     if (acTypeSel) acTypeSel.addEventListener('change', function () {
       updateAddChargeBillingDayVisibility($('#addChargeForm'));
+    });
+
+    var ecTypeSel = $('#editChargeForm select[name="billingType"]');
+    if (ecTypeSel) ecTypeSel.addEventListener('change', function () {
+      updateEditChargeBillingDayVisibility($('#editChargeForm'));
+    });
+
+    var editChargeForm = $('#editChargeForm');
+    if (editChargeForm) editChargeForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#editChargeSubmit');
+      if (submit.disabled) return;
+      var charge = state.charges.find(function (c) { return c.id === editChargeIds.chargeId; });
+      if (!charge) { toast('חיוב לא נמצא', true); return; }
+      var fd = new FormData(e.target);
+      var billingType = (fd.get('billingType') || 'one_time').toString();
+      var description = (fd.get('description') || '').trim();
+      var amount = toNum(fd.get('amount'));
+      var chargeDate = fd.get('chargeDate') || '';
+      var billingDay = fd.get('billingDay');
+      var notes = (fd.get('notes') || '').trim();
+      var treatmentType = (fd.get('treatmentType') || '').toString().trim();
+      var frequencyPerWeek = fd.get('frequencyPerWeek');
+      if (!description) { toast('חסר תיאור', true); return; }
+      if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+      if (!chargeDate) { toast('יש להזין תאריך', true); return; }
+      submit.disabled = true;
+      // Snapshot the editable fields for rollback; the row's id/clientId/created
+      // (the identity + the paid-row key chg-<id>) are never touched by an edit.
+      var prev = {
+        description: charge.description, amount: charge.amount,
+        billingType: charge.billingType, treatmentType: charge.treatmentType,
+        frequencyPerWeek: charge.frequencyPerWeek, chargeDate: charge.chargeDate,
+        billingDay: charge.billingDay, notes: charge.notes
+      };
+      charge.description = description;
+      charge.amount = amount;
+      charge.billingType = billingType === 'monthly' ? 'monthly' : 'one_time';
+      charge.treatmentType = treatmentType;
+      charge.frequencyPerWeek = (charge.billingType === 'monthly' && frequencyPerWeek) ? toNum(frequencyPerWeek) : '';
+      charge.chargeDate = chargeDate;
+      charge.billingDay = charge.billingType === 'monthly' && billingDay ? toNum(billingDay) : '';
+      charge.notes = notes;
+      render();
+      persistCharge(charge)
+        .then(function () { toast('החיוב עודכן'); closeEditChargeModal(); })
+        .catch(function (err) {
+          Object.assign(charge, prev);
+          render();
+          toast('שגיאה: ' + err.message, true);
+        })
+        .finally(function () { submit.disabled = false; });
     });
 
     var addChargeForm = $('#addChargeForm');
@@ -4426,29 +4548,22 @@
       var fd = new FormData(e.target);
       var ptPhone = acceptPhone(fd.get('phone') || '', 'טלפון מטופל', 'mobile', false);
       if (ptPhone === false) { submit.disabled = false; return; }
-      var tcPhone = acceptPhone(fd.get('treatmentContactPhone') || '', 'טלפון אחראי טיפול', 'mobile', false);
-      if (tcPhone === false) { submit.disabled = false; return; }
       var pyPhone = acceptPhone(fd.get('payerPhone') || '', 'טלפון גורם משלם', 'payer', false);
       if (pyPhone === false) { submit.disabled = false; return; }
       // Duplicate-identity guard (Bug A fix). Only block when the user actually
       // CHANGED the patient's OWN phone to a number another client already owns.
-      // Two rules the old code got wrong and that made a card un-saveable:
-      //   1. The treatment-contact phone was also deduped — but, exactly like
-      //      payerPhone, it is a SHAREABLE contact (one parent is the אחראי טיפול
-      //      for siblings), so it must never block. It is excluded here.
-      //   2. The patient phone was re-checked on every save, so an UNCHANGED
-      //      prefilled number that happened to collide with another row (incl.
-      //      that row's treatment-contact phone) aborted an edit that only
-      //      touched name/amount. Gating on an actual change fixes that.
-      // Direct-add already guards only the patient's own phone — this makes edit
-      // consistent with it.
+      // The patient phone was re-checked on every save, so an UNCHANGED prefilled
+      // number that happened to collide with another row aborted an edit that only
+      // touched name/amount. Gating on an actual change fixes that. Direct-add
+      // already guards only the patient's own phone — this makes edit consistent
+      // with it. (The אחראי-טיפול contact phone is no longer part of identity —
+      // that role was removed from the product.)
       var ptPhoneChanged = recoverPhone(ptPhone) !== recoverPhone(client.phone);
       if (ptPhoneChanged && duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
       var prev = {
         name: client.name,
         location: client.location,
         phone: client.phone,
-        treatmentContactPhone: client.treatmentContactPhone,
         payerName: client.payerName, payerPhone: client.payerPhone,
         paymentLink: client.paymentLink,
         paymentStatus: client.paymentStatus, paymentDate: client.paymentDate,
@@ -4464,7 +4579,6 @@
       if (fd.has('location')) {
         client.location = (fd.get('location') || '').trim();
       }
-      client.treatmentContactPhone = tcPhone;
       client.payerName = (fd.get('payerName') || '').trim();
       client.payerPhone = pyPhone;
       client.paymentLink = (fd.get('paymentLink') || '').trim();

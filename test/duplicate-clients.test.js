@@ -5,8 +5,10 @@
  *   - resolveStopFlagClient now returns the candidate list (powers the manual
  *     picker for an ambiguous stop flag),
  *   - findClientByPhone / duplicateClientBlock — hard duplicate guard on the
- *     patient IDENTITY phones (phone + treatmentContactPhone); payerPhone is
- *     intentionally excluded so shared family payers aren't false-blocked,
+ *     patient IDENTITY phone (the patient's own `phone`); payerPhone is
+ *     intentionally excluded so shared family payers aren't false-blocked, and
+ *     the אחראי-טיפול contact phone is no longer an identity key (that role was
+ *     removed from the product),
  *   - duplicateClientReport — read-only grouping by canonical phone with
  *     payment/charge reference counts.
  * The real homes live in the app.js IIFE; mirrored here, keep in sync.
@@ -35,8 +37,10 @@ function recoverPhone(raw) {
 }
 
 // --- duplicate-guard mirrors ---
+// Identity is the patient's OWN phone only (treatmentContactPhone was dropped
+// as an identity key when the אחראי-טיפול role was removed from the product).
 function clientIdentityPhones(c) {
-  return [c.phone, c.treatmentContactPhone].map(recoverPhone).filter(Boolean);
+  return [c.phone].map(recoverPhone).filter(Boolean);
 }
 function findClientByPhone(clients, rawPhone, exceptId) {
   const key = recoverPhone(rawPhone);
@@ -50,7 +54,7 @@ function duplicateClientReport(clients, payments, charges) {
   (clients || []).forEach(c => {
     if (!c) return;
     const keys = {};
-    [c.phone, c.treatmentContactPhone].forEach(p => { const k = recoverPhone(p); if (k) keys[k] = true; });
+    [c.phone].forEach(p => { const k = recoverPhone(p); if (k) keys[k] = true; });
     Object.keys(keys).forEach(k => { (byKey[k] = byKey[k] || []).push(c); });
   });
   const refCount = (rows, id) => (rows || []).filter(r => r && String(r.clientId) === String(id)).length;
@@ -101,18 +105,19 @@ test('resolveStopFlagClient: ambiguous result exposes the candidate list for the
   assert.deepEqual(res.candidates.map(c => c.id), ['liam1', 'liam2']);
 });
 
-test('findClientByPhone: matches identity phone on phone OR treatmentContactPhone, any format', () => {
+test('findClientByPhone: matches identity on the patient `phone` (any format); the אחראי-טיפול contact phone is NOT an identity key', () => {
   const clients = [
     { id: 'a', name: 'A', phone: '0543123276' },
-    { id: 'b', name: 'B', treatmentContactPhone: '0521111111' }
+    { id: 'b', name: 'B', treatmentContactPhone: '0521111111' } // contact-only, no identity
   ];
   assert.equal(findClientByPhone(clients, '054-312-3276').id, 'a');
-  assert.equal(findClientByPhone(clients, '+972521111111').id, 'b');
+  // matching the removed contact phone no longer finds a client (identity = phone)
+  assert.equal(findClientByPhone(clients, '+972521111111'), null);
   assert.equal(findClientByPhone(clients, '0500000000'), null);
 });
 
 test('findClientByPhone: excludes self (edit), so saving a client over itself is not a duplicate', () => {
-  const clients = [{ id: 'a', name: 'A', treatmentContactPhone: '0543123276' }];
+  const clients = [{ id: 'a', name: 'A', phone: '0543123276' }];
   assert.equal(findClientByPhone(clients, '0543123276', 'a'), null);
   assert.equal(findClientByPhone(clients, '0543123276', 'other').id, 'a');
 });
@@ -127,7 +132,7 @@ test('findClientByPhone: payerPhone is NOT a duplicate key (shared family payer 
 test('duplicateClientReport: groups by canonical phone with payment/charge counts', () => {
   const clients = [
     { id: 'liam1', name: 'ליעם בריאר', status: 'פעיל', phone: '0543123276' },
-    { id: 'liam2', name: 'ליעם בריאר', status: 'הפסקה זמנית', treatmentContactPhone: '054-312-3276' },
+    { id: 'liam2', name: 'ליעם בריאר', status: 'הפסקה זמנית', phone: '054-312-3276' },
     { id: 'solo', name: 'יחיד', phone: '0521111111' }
   ];
   const payments = [{ clientId: 'liam1' }, { clientId: 'liam1' }, { clientId: 'liam2' }];

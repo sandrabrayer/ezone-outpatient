@@ -405,9 +405,6 @@
           </label>
           <div class="wide sessions-host" data-host="editClientSessions"></div>
 
-          <div class="wide form-section-title">אחראי טיפול</div>
-          <label>טלפון אחראי טיפול<input name="treatmentContactPhone" type="tel" placeholder="050-1234567" /></label>
-
           <div class="wide form-section-title">גורם משלם (קרוב משפחה או המטופל עצמו)</div>
           <label>שם גורם משלם<input name="payerName" type="text" /></label>
           <label>טלפון גורם משלם<input name="payerPhone" type="tel" placeholder="050-1234567" /></label>
@@ -531,6 +528,46 @@
           <div class="form-actions edit-only">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="addChargeSubmit">שמור</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit an existing extra charge (correct a wrong amount / type / date /
+         description). Saves through the SAME charge row (stable chg id) — never
+         creates a duplicate. Paid-toggle and delete stay on the card. -->
+    <div id="editChargeModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">עריכת חיוב</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="editChargeClientName"></span>
+        </div>
+        <form id="editChargeForm" class="form-grid">
+          <input type="hidden" name="chargeId" />
+          <label>סוג חיוב
+            <select name="billingType" required>
+              <option value="one_time">חד-פעמי</option>
+              <option value="monthly">חודשי</option>
+            </select>
+          </label>
+          <label>סוג טיפול
+            <select name="treatmentType" id="editChargeTreatmentType">
+              <option value="">—</option>
+            </select>
+          </label>
+          <label id="editChargeFreqWrap" class="field-hidden">מספר טיפולים בשבוע
+            <input name="frequencyPerWeek" type="number" min="1" max="14" step="1" placeholder="למשל 1, 2, 3" />
+          </label>
+          <label>סכום ₪<input name="amount" type="number" min="0" step="1" required /></label>
+          <label class="wide">תיאור<input name="description" type="text" required placeholder="למשל: טיפול CBT נוסף" /></label>
+          <label>תאריך<input name="chargeDate" type="date" required /></label>
+          <label id="editChargeBillingDayWrap">יום גבייה חודשי
+            <input name="billingDay" type="number" min="1" max="31" placeholder="ריק = יום החודש של התאריך" />
+          </label>
+          <label class="wide">הערות<textarea name="notes" rows="2"></textarea></label>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="editChargeSubmit">שמור שינויים</button>
           </div>
         </form>
       </div>

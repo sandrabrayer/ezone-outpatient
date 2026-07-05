@@ -45,9 +45,11 @@ function recoverPhone(raw) {
   if (s.charAt(0) !== '0') s = '0' + s;
   return s;
 }
-// Mirrors clientIdentityPhones + findClientByPhone in public/app.js.
+// Mirrors clientIdentityPhones + findClientByPhone in public/app.js. Identity is
+// the patient's OWN phone only — the אחראי-טיפול contact phone is no longer an
+// identity key (that role was removed from the product).
 function identityPhones(c) {
-  return [c.phone, c.treatmentContactPhone].map(recoverPhone).filter(Boolean);
+  return [c.phone].map(recoverPhone).filter(Boolean);
 }
 function findClientByPhone(clients, rawPhone, exceptId) {
   const key = recoverPhone(rawPhone);
