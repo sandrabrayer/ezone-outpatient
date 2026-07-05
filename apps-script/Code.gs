@@ -151,6 +151,21 @@ var EXTRA_SESSION_HEADERS = [
   'requestedAt', 'status', 'approvedBy', 'approvedAt'
 ];
 
+/* Continuation-track (מסלול המשך) workflow state. Yarden works over the roster of
+ * currently-admitted DASHBOARD patients (potential outpatient leads); this sheet
+ * persists the per-patient meeting date + outcome. The roster itself is NOT
+ * stored here — it is fetched live from the dashboard (server /api/continuation-
+ * roster) and joined to these rows by `key` (name|house|entryDate) in the client.
+ * `outcome` holds a STABLE English key ('' | 'continuing' | 'to_outpatient' |
+ * 'stopping'); Hebrew labels are render-time only. This feature never touches
+ * CLIENTS_HEADERS. */
+var CONTINUATION_SHEET = 'מסלול המשך';
+var CONTINUATION_HEADERS = [
+  'key', 'name', 'house', 'entryDate',
+  'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+];
+var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
+
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
@@ -1988,6 +2003,79 @@ function _mergeClients(payload) {
   }
 }
 
+/* ===== Continuation track (מסלול המשך) — internal workflow read/write ==========
+ *
+ * Auth: NONE — same posture as getData / saveAll / savePayment. These are the
+ * app's own internal actions, reached only through the Railway server; they
+ * carry no cross-app secret (unlike getDebtStatus / createLead / flagStop).
+ *
+ * The sheet is auto-created on first read via _ensureSheet, exactly like every
+ * other sheet in this backend. The roster (patient names/phones) is NOT stored
+ * here — only the workflow state keyed by `key` (name|house|entryDate). */
+function _getContinuation() {
+  var sh = _ensureSheet(CONTINUATION_SHEET, CONTINUATION_HEADERS);
+  return { ok: true, rows: _readAll(sh, CONTINUATION_HEADERS) };
+}
+
+// Accept '' or a strict ISO calendar date 'YYYY-MM-DD'. Anything else fails the
+// write closed (mirrors the client-side continuation-logic validation).
+function _isContinuationDate(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (s === '') return true;
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+/* Single-row UPSERT by `key`: update the matching row in place, else append.
+ * Wrapped in a 30s lock like every other write. Validates fail-closed BEFORE
+ * touching the sheet: a missing key, an out-of-whitelist outcome, or a malformed
+ * date writes nothing. Strings are trimmed; updatedAt is server-stamped. */
+function _saveContinuation(payload) {
+  var key = String((payload && payload.key) || '').trim();
+  if (!key) return { ok: false, reason: 'missing_key' };
+
+  var outcome = String((payload && payload.outcome) || '').trim();
+  if (CONTINUATION_OUTCOMES.indexOf(outcome) === -1) {
+    return { ok: false, reason: 'invalid_outcome' };
+  }
+  var meetingDate = String((payload && payload.meetingDate) || '').trim();
+  var outcomeDate = String((payload && payload.outcomeDate) || '').trim();
+  if (!_isContinuationDate(meetingDate) || !_isContinuationDate(outcomeDate)) {
+    return { ok: false, reason: 'invalid_date' };
+  }
+
+  var row = {
+    key: key,
+    name: String((payload && payload.name) || '').trim(),
+    house: String((payload && payload.house) || '').trim(),
+    entryDate: String((payload && payload.entryDate) || '').trim(),
+    meetingDate: meetingDate,
+    outcome: outcome,
+    outcomeDate: outcomeDate,
+    note: String((payload && payload.note) || '').trim(),
+    updatedAt: new Date().toISOString()
+  };
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: false, reason: 'busy' };
+  try {
+    var sh = _ensureSheet(CONTINUATION_SHEET, CONTINUATION_HEADERS);
+    var rows = _readAll(sh, CONTINUATION_HEADERS);
+    var found = false;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].key || '').trim() === key) {
+        rows[i] = row;
+        found = true;
+        break;
+      }
+    }
+    if (!found) rows.push(row);
+    _writeAll(sh, CONTINUATION_HEADERS, rows);
+    return { ok: true, row: row, created: !found };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
@@ -2016,6 +2104,7 @@ function doGet(e) {
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -2139,6 +2228,8 @@ function doPost(e) {
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    if (action === 'getContinuation') return _json(_getContinuation());
+    if (action === 'saveContinuation') return _json(_saveContinuation(payload));
     if (action === 'resolveStopFlag') {
       // A request carrying a secret is the secured therapists-app receiver
       // (resolve by canonical phone, fail-closed). Without a secret it is the

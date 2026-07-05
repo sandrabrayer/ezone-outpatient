@@ -155,6 +155,11 @@
     sessionLogError: '',
     payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
     payoutExpanded: {},  // therapist name -> expanded session detail (bool)
+    continuationRoster: null, // admitted-patient roster (from dashboard); null = not yet fetched
+    continuationRows: [],     // מסלול המשך workflow rows (from getContinuation)
+    continuationLoading: false,
+    continuationError: '',
+    continuationSearch: '',
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
   };
@@ -883,6 +888,7 @@
     else if (state.view === 'billing') renderBilling();
     else if (state.view === 'retention') renderRetention();
     else if (state.view === 'payouts') renderPayouts();
+    else if (state.view === 'continuation') renderContinuation();
   }
 
   // ---- Dashboard
@@ -2219,6 +2225,351 @@
     ensureSessionLogLoaded();
   }
 
+  // ===== Continuation track (מסלול המשך) ====================================
+  // A roster of currently-admitted DASHBOARD patients (potential outpatient
+  // leads), joined to workflow rows persisted in the OUTPATIENT sheet by
+  // key = name|house|entryDate. Yarden records a meeting date + outcome per
+  // patient. Roster house ids come from the dashboard (arfoni/asher/…); labels
+  // below mirror the dashboard's HOUSES so sections read the same everywhere.
+  var CONTINUATION_HOUSE_LABELS = {
+    arfoni: 'קיסריה עפרוני',
+    rehab:  'קיסריה ריהאב',
+    asher:  'רעננה אשר',
+    pardes: 'רעננה הפרדס',
+    ramot:  'רמות השבים',
+    sde:    'שדה אליעזר'
+  };
+  function continuationHouseLabel(h) {
+    var s = String(h == null ? '' : h).trim();
+    return CONTINUATION_HOUSE_LABELS[s] || s || 'ללא בית';
+  }
+  // Stable outcome key -> Hebrew display label (render-time only).
+  var CONTINUATION_OUTCOME_LABELS = {
+    '': '—',
+    continuing:    'ממשיך באשפוז',
+    to_outpatient: 'מועבר לטיפול חוץ',
+    stopping:      'מפסיק טיפול'
+  };
+  var CONTINUATION_OUTCOME_OPTIONS = [
+    { v: '',              he: '—' },
+    { v: 'continuing',    he: 'ממשיך באשפוז' },
+    { v: 'to_outpatient', he: 'מועבר לטיפול חוץ' },
+    { v: 'stopping',      he: 'מפסיק טיפול' }
+  ];
+
+  // key -> patient view-model, rebuilt each render so save handlers can look up
+  // the roster fields (name/phone/house/entryDate) a row was rendered from.
+  var continuationVM = {};
+
+  async function apiGetContinuationRoster() {
+    var r = await fetch('/api/continuation-roster', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  async function apiGetContinuation() {
+    var r = await fetch('/api/sheets?action=getContinuation', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  async function persistContinuationRow(row) {
+    return apiPostAction('saveContinuation', row);
+  }
+
+  function ensureContinuationLoaded() {
+    if (state.continuationRoster !== null || state.continuationLoading) return;
+    state.continuationLoading = true;
+    state.continuationError = '';
+    Promise.all([
+      apiGetContinuationRoster()
+        .then(function (d) { return { patients: Array.isArray(d.patients) ? d.patients : [] }; })
+        .catch(function (e) { state.continuationError = e.message || String(e); return { patients: [] }; }),
+      apiGetContinuation()
+        .then(function (d) { return { rows: Array.isArray(d.rows) ? d.rows : [] }; })
+        .catch(function () { return { rows: [] }; })
+    ]).then(function (res) {
+      state.continuationRoster = res[0].patients;
+      state.continuationRows = res[1].rows;
+      state.continuationLoading = false;
+      if (state.view === 'continuation') renderContinuation();
+    });
+  }
+
+  function upsertContinuationLocal(row) {
+    var key = String(row.key || '').trim();
+    var i = state.continuationRows.findIndex(function (r) { return String(r.key || '').trim() === key; });
+    if (i === -1) state.continuationRows.push(row);
+    else state.continuationRows[i] = row;
+  }
+
+  function continuationTenureBadge(p) {
+    if (p.months == null) {
+      return '<span class="chip continuation-tenure continuation-tenure-0">—</span>';
+    }
+    var label = p.months === 1 ? '1 חודש' : (p.months + ' חודשים');
+    return '<span class="chip continuation-tenure continuation-tenure-' + p.bucket + '">' +
+      escapeHtml(label) + '</span>';
+  }
+
+  function continuationRowHtml(p, editor) {
+    var badge = continuationTenureBadge(p);
+    var outcomeChip = p.outcome
+      ? '<span class="chip continuation-outcome-chip continuation-oc-' + p.outcome + '">' +
+          escapeHtml(CONTINUATION_OUTCOME_LABELS[p.outcome]) + '</span>'
+      : '';
+    var keyAttr = escapeHtml(p.key);
+    var phoneHtml = p.phone
+      ? '<a class="continuation-phone" href="tel:' + escapeHtml(p.phone) + '">' + escapeHtml(p.phone) + '</a>'
+      : '';
+    var head = '<div class="continuation-main">' +
+      '<span class="continuation-name">' + escapeHtml(p.name) + '</span>' +
+      phoneHtml + badge + outcomeChip +
+    '</div>';
+
+    var body;
+    if (editor) {
+      var options = CONTINUATION_OUTCOME_OPTIONS.map(function (o) {
+        return '<option value="' + o.v + '"' + (o.v === p.outcome ? ' selected' : '') + '>' +
+          escapeHtml(o.he) + '</option>';
+      }).join('');
+      body = '<div class="continuation-controls">' +
+        '<label class="continuation-ctl">תאריך לפגישה' +
+          '<input type="date" data-cfield="meetingDate" value="' + escapeHtml(p.meetingDate) + '"></label>' +
+        '<label class="continuation-ctl">תוצאת פגישה' +
+          '<select data-cfield="outcome">' + options + '</select></label>' +
+        '<label class="continuation-ctl continuation-note-ctl">הערה' +
+          '<input type="text" data-cfield="note" value="' + escapeHtml(p.note) + '" placeholder="הערה קצרה"></label>' +
+        '<button type="button" class="btn btn-primary continuation-save" data-caction="save">שמור</button>' +
+      '</div>';
+    } else {
+      var ro = [];
+      if (p.meetingDate) ro.push('פגישה: ' + escapeHtml(p.meetingDate));
+      if (p.note) ro.push(escapeHtml(p.note));
+      body = ro.length ? '<div class="continuation-controls-ro">' + ro.join(' · ') + '</div>' : '';
+    }
+    return '<div class="continuation-row" data-key="' + keyAttr + '">' + head + body + '</div>';
+  }
+
+  function continuationCollapsedGroup(kind, title, rows, editor) {
+    return '<details class="continuation-collapsed continuation-grp-' + kind + '">' +
+      '<summary>' + escapeHtml(title) + ' (' + rows.length + ')</summary>' +
+      '<div class="continuation-rows">' +
+        rows.map(function (p) { return continuationRowHtml(p, editor); }).join('') +
+      '</div>' +
+    '</details>';
+  }
+
+  // Longest-tenure first; missing entryDate (months == null) sorts last.
+  function continuationSort(a, b) {
+    if (a.months == null && b.months == null) return a.name.localeCompare(b.name, 'he');
+    if (a.months == null) return 1;
+    if (b.months == null) return -1;
+    if (b.months !== a.months) return b.months - a.months;
+    return a.name.localeCompare(b.name, 'he');
+  }
+
+  function continuationSection(house, rows, editor) {
+    var section = document.createElement('div');
+    section.className = 'panel continuation-section';
+    var active = [], toLeads = [], stopped = [];
+    rows.forEach(function (p) {
+      if (p.outcome === 'stopping') stopped.push(p);
+      else if (p.outcome === 'to_outpatient') toLeads.push(p);
+      else active.push(p);
+    });
+    active.sort(continuationSort);
+    toLeads.sort(continuationSort);
+    stopped.sort(continuationSort);
+
+    var html = '<div class="continuation-house-title">' + escapeHtml(continuationHouseLabel(house)) +
+      ' <span class="continuation-house-count">(' + active.length + ')</span></div>';
+    html += '<div class="continuation-rows">' +
+      active.map(function (p) { return continuationRowHtml(p, editor); }).join('') +
+    '</div>';
+    if (toLeads.length) html += continuationCollapsedGroup('to_outpatient', 'הועברו ללידים', toLeads, editor);
+    if (stopped.length) html += continuationCollapsedGroup('stopping', 'הפסיקו טיפול', stopped, editor);
+    section.innerHTML = html;
+    return section;
+  }
+
+  function renderContinuation() {
+    var listEl = $('#continuationList');
+    if (!listEl) return;
+    var CL = (typeof window !== 'undefined' && window.ContinuationLogic) || null;
+    if (!CL) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">מודול הלוגיקה לא נטען</p></div>';
+      return;
+    }
+    if (state.continuationRoster === null) {
+      ensureContinuationLoaded();
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">טוען רוסטר…</p></div>';
+      return;
+    }
+    if (state.continuationError && !state.continuationRoster.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">שגיאה בטעינת הרוסטר: ' +
+        escapeHtml(state.continuationError) + '</p></div>';
+      return;
+    }
+
+    var editor = state.role === 'editor';
+    var q = (state.continuationSearch || '').trim().toLowerCase();
+    var todayISO = today();
+
+    var byKey = {};
+    state.continuationRows.forEach(function (row) {
+      if (row && row.key != null) byKey[String(row.key).trim()] = row;
+    });
+
+    continuationVM = {};
+    var patients = state.continuationRoster.map(function (p) {
+      var name = String(p.name || '').trim();
+      var house = String(p.house || '').trim();
+      var entryDate = String(p.entryDate || '').trim();
+      var key = CL.buildKey(name, house, entryDate);
+      var row = byKey[key] || {};
+      var months = CL.monthsSince(entryDate, todayISO);
+      var vm = {
+        key: key, name: name, phone: String(p.phone || '').trim(),
+        house: house, entryDate: entryDate,
+        months: months, bucket: CL.bucketOf(months),
+        meetingDate: row.meetingDate || '',
+        outcome: CL.isValidOutcome(row.outcome) ? row.outcome : '',
+        note: row.note || ''
+      };
+      continuationVM[key] = vm;
+      return vm;
+    });
+
+    if (q) patients = patients.filter(function (p) { return p.name.toLowerCase().indexOf(q) !== -1; });
+
+    if (!patients.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין מטופלים מאושפזים להצגה</p></div>';
+      return;
+    }
+
+    var groups = {};
+    var houseOrder = [];
+    patients.forEach(function (p) {
+      if (!groups[p.house]) { groups[p.house] = []; houseOrder.push(p.house); }
+      groups[p.house].push(p);
+    });
+    houseOrder.sort(function (a, b) {
+      return continuationHouseLabel(a).localeCompare(continuationHouseLabel(b), 'he');
+    });
+
+    listEl.innerHTML = '';
+    houseOrder.forEach(function (house) {
+      listEl.appendChild(continuationSection(house, groups[house], editor));
+    });
+  }
+
+  // Persist one workflow row (optimistic + rollback). outcomeDate is stamped
+  // server-relative today whenever an outcome is set.
+  function saveContinuationRow(key, patch) {
+    var vm = continuationVM[key];
+    if (!vm) return;
+    var outcome = CONTINUATION_OUTCOME_LABELS[patch.outcome] !== undefined ? patch.outcome : '';
+    var row = {
+      key: key,
+      name: vm.name, house: vm.house, entryDate: vm.entryDate,
+      meetingDate: patch.meetingDate || '',
+      outcome: outcome,
+      outcomeDate: outcome ? today() : '',
+      note: patch.note || ''
+    };
+    var prevRows = state.continuationRows.slice();
+    upsertContinuationLocal(row);
+    renderContinuation();
+    persistContinuationRow(row)
+      .then(function () { toast('נשמר'); })
+      .catch(function (err) {
+        state.continuationRows = prevRows;
+        renderContinuation();
+        toast('שמירה נכשלה: ' + err.message, true);
+      });
+  }
+
+  // to_outpatient: create a lead through the EXACT manual add-lead path (so the
+  // duplicate-phone soft warning + _writeAll semantics apply), then — only if the
+  // lead was actually created — save the outcome row.
+  function continuationCreateLead(vm, meetingDate, done) {
+    var phone = normalizePhone(vm.phone || '');
+    var CL = (typeof window !== 'undefined' && window.ContinuationLogic) || null;
+    // Map the dashboard houseId to the outpatient house_of_origin key. An
+    // unmapped id (e.g. 'sde') → house_of_origin '' and the raw id kept in the
+    // note so the provenance isn't lost.
+    var origin = CL ? CL.houseToOrigin(vm.house) : '';
+    var note = 'מקור: מסלול המשך | פגישה: ' + (meetingDate || '—');
+    if (!origin && vm.house) note += ' | בית: ' + vm.house;
+    var lead = {
+      id: uid(), name: vm.name, phone: phone,
+      serviceType: '', location: '',
+      note: note,
+      stage: 'new', sessionsPerWeek: '', pricePerSession: '',
+      startDate: '', created: today(), introDateTime: '',
+      paymentStatus: '', paymentDate: '', nextBillingDate: '',
+      house_of_origin: origin,
+      source: 'מסלול המשך',
+      assignedTo: ''
+    };
+    function doAdd() {
+      state.leads.push(lead);
+      persist()
+        .then(function () { toast('נוצר ליד חדש'); done(true); })
+        .catch(function (err) {
+          state.leads = state.leads.filter(function (l) { return l.id !== lead.id; });
+          toast('יצירת הליד נכשלה: ' + err.message, true);
+          done(false);
+        });
+    }
+    var existing = phone ? state.leads.find(function (l) {
+      if (!l || l.stage === 'removed') return false;
+      return normalizePhone(l.phone || '') === phone;
+    }) : null;
+    if (existing) openDuplicateLeadModal(existing, doAdd);
+    else doAdd();
+  }
+
+  var pendingContinuationLead = null;
+  function openContinuationToOutpatientModal(vm, meetingDate, note) {
+    pendingContinuationLead = { key: vm.key, meetingDate: meetingDate, note: note };
+    var nameEl = $('#continuationToOutpatientName');
+    if (nameEl) nameEl.textContent = vm.name || '';
+    var m = $('#continuationToOutpatientModal');
+    if (m) m.hidden = false;
+  }
+  function closeContinuationToOutpatientModal() {
+    var m = $('#continuationToOutpatientModal');
+    if (m) m.hidden = true;
+    pendingContinuationLead = null;
+  }
+
+  function handleContinuationListClick(e) {
+    var btn = e.target.closest ? e.target.closest('[data-caction="save"]') : null;
+    if (!btn) return;
+    if (state.role !== 'editor') return;
+    var rowEl = e.target.closest('.continuation-row');
+    if (!rowEl) return;
+    var key = rowEl.getAttribute('data-key');
+    var vm = continuationVM[key];
+    if (!vm) return;
+    var mEl = rowEl.querySelector('[data-cfield="meetingDate"]');
+    var oEl = rowEl.querySelector('[data-cfield="outcome"]');
+    var nEl = rowEl.querySelector('[data-cfield="note"]');
+    var patch = {
+      meetingDate: mEl ? mEl.value : '',
+      outcome: oEl ? oEl.value : '',
+      note: nEl ? nEl.value : ''
+    };
+    // Transition INTO to_outpatient: confirm + create the lead first.
+    if (patch.outcome === 'to_outpatient' && vm.outcome !== 'to_outpatient') {
+      openContinuationToOutpatientModal(vm, patch.meetingDate, patch.note);
+      return;
+    }
+    saveContinuationRow(key, patch);
+  }
+
   // --- Session correct / add-missing modal -----------------------------------
   function populateSessionDropdowns() {
     var tSel = $('#sessionTherapist');
@@ -3483,6 +3834,20 @@
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
     on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
+    on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
+    var continuationListEl = $('#continuationList');
+    if (continuationListEl) continuationListEl.addEventListener('click', handleContinuationListClick);
+    on('#continuationToOutpatientConfirm', 'click', function () {
+      var p = pendingContinuationLead;
+      if (!p) return;
+      closeContinuationToOutpatientModal();
+      var vm = continuationVM[p.key];
+      if (!vm) return;
+      continuationCreateLead(vm, p.meetingDate, function (ok) {
+        if (!ok) return; // lead not created (failed) → do not record the outcome
+        saveContinuationRow(p.key, { meetingDate: p.meetingDate, outcome: 'to_outpatient', note: p.note });
+      });
+    });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
 
@@ -3502,7 +3867,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeChangePackageModal(); closeMergeClientsModal(); closeSessionModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeRenewModal(); closeChangePackageModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
       });
     });
 
