@@ -35,6 +35,7 @@
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="retention">שימור לידים</button>
         <button class="tab" data-view="payouts">תשלומי מטפלים</button>
+        <button class="tab" data-view="continuation">מסלול המשך</button>
       </nav>
       <div class="topbar-right">
         <button id="settingsBtn" class="btn btn-ghost edit-only" title="הגדרות">⚙️</button>
@@ -172,6 +173,15 @@
           <div class="kpi"><div class="kpi-label">סה״כ כולל מע״מ</div><div id="payoutWithVat" class="kpi-value">₪0</div></div>
         </div>
         <div id="payoutList" class="payout-list"></div>
+      </section>
+
+      <!-- Continuation track (מסלול המשך) -->
+      <section id="view-continuation" class="view">
+        <div class="toolbar">
+          <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
+        </div>
+        <div id="continuationList" class="continuation-list"></div>
       </section>
     </main>
 
@@ -624,8 +634,21 @@
         </form>
       </div>
     </div>
+
+    <!-- Continuation → outpatient lead confirm (מסלול המשך) -->
+    <div id="continuationToOutpatientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">העברה לטיפול חוץ</div>
+        <p>ליצור ליד חדש בטאב הלידים עבור <span id="continuationToOutpatientName"></span>?</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+          <button type="button" id="continuationToOutpatientConfirm" class="btn btn-primary">צור ליד</button>
+        </div>
+      </div>
+    </div>
   </div>
 
+  <script src="continuation-logic.js?v=__BUILD__" defer></script>
   <script src="treatment-map.js?v=__BUILD__" defer></script>
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
   <script src="therapist-payout.js?v=__BUILD__" defer></script>

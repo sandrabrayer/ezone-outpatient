@@ -7,6 +7,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SHEETS_URL = process.env.SHEETS_URL || '';
 const APP_PIN = process.env.APP_PIN || '';
+// Continuation-track roster proxy: the currently-admitted patient roster is owned
+// by the E-Zone DASHBOARD Apps Script (action=getAdmittedRoster) and served
+// behind a fail-closed shared secret. We proxy it server-side so the browser
+// never sees the dashboard URL or secret. Empty-string defaults → fail closed.
+const DASHBOARD_SHEETS_URL = process.env.DASHBOARD_SHEETS_URL || '';
+const OCCUPANCY_SECRET = process.env.OCCUPANCY_SECRET || '';
 const BUILD = String(Date.now());
 
 if (!APP_PIN) {
@@ -83,6 +89,27 @@ function requireSheetsUrl(res) {
   }
   return true;
 }
+
+// Fail closed: the roster carries patient names + phones (PII) and the dashboard
+// endpoint requires the secret, so refuse unless BOTH the URL and the secret are
+// configured. Never leak the secret — the message names only which vars.
+function requireContinuationConfig(res) {
+  if (!DASHBOARD_SHEETS_URL || !OCCUPANCY_SECRET) {
+    res.status(500).json({
+      ok: false,
+      error: 'Continuation roster proxy is not configured: DASHBOARD_SHEETS_URL and OCCUPANCY_SECRET must both be set.'
+    });
+    return false;
+  }
+  return true;
+}
+
+// --- Continuation-roster cache ---------------------------------------------
+// The roster is a slow cross-app round-trip and changes at most a few times a
+// day (admissions/releases). A short in-memory cache (<=60s) keeps the tab
+// snappy without going stale; ?fresh=1 forces a live fetch.
+const ROSTER_CACHE_TTL_MS = 60 * 1000;
+const rosterCache = { data: null, status: null, timestamp: 0 };
 
 app.get('/api/sheets', async (req, res) => {
   if (!requireSheetsUrl(res)) return;
@@ -176,6 +203,42 @@ app.post('/api/sheets', async (req, res) => {
   }
 });
 
+// GET /api/continuation-roster — proxy the dashboard's getAdmittedRoster behind
+// the server-held secret. The continuation WORKFLOW rows themselves go through
+// the existing /api/sheets path (getContinuation / saveContinuation), NOT here.
+app.get('/api/continuation-roster', async (req, res) => {
+  if (!requireContinuationConfig(res)) return;
+
+  const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
+  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
+    res.set('X-Cache', 'HIT');
+    return res.status(rosterCache.status || 200).json(rosterCache.data);
+  }
+
+  try {
+    const url = DASHBOARD_SHEETS_URL
+      + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
+      + 'action=getAdmittedRoster'
+      + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
+    const r = await fetch(url, { redirect: 'follow' });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
+
+    if (r.status >= 200 && r.status < 300 && data.ok !== false) {
+      rosterCache.data = data;
+      rosterCache.status = r.status;
+      rosterCache.timestamp = Date.now();
+    }
+
+    res.set('X-Cache', 'MISS');
+    res.status(r.status).json(data);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 app.post('/api/verify-pin', (req, res) => {
   const ip = getClientIp(req);
   const now = Date.now();
@@ -256,6 +319,8 @@ function start(port) {
   return app.listen(port || PORT, () => {
     console.log(`E-ZONE Outpatient listening on :${port || PORT}`);
     console.log(`SHEETS_URL configured: ${!!SHEETS_URL}`);
+    console.log(`DASHBOARD_SHEETS_URL configured: ${!!DASHBOARD_SHEETS_URL}`);
+    console.log(`OCCUPANCY_SECRET configured: ${!!OCCUPANCY_SECRET}`);
     console.log(`Cache TTL: ${CACHE_TTL_MS}ms, stale fallback: ${STALE_FALLBACK_MS}ms`);
   });
 }
