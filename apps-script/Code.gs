@@ -181,9 +181,19 @@ var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
  * are fail-closed behind STOP_ALERTS_SECRET (mirrors SESSION_OUTCOME_SECRET — a
  * missing Script Property rejects every request). */
 var STOP_ALERTS_SHEET = 'התראות עצירת טיפול';
+/* 'reason' was APPENDED at the end (July 6) — the sheet is only days old so no
+ * data migration is needed. _ensureSheet relabels the header row in place; the
+ * one thing that matters is that appending (never inserting mid-array) keeps
+ * every earlier column at its original index. Any pre-'reason' row is shorter
+ * than the header: _readAll requests headers.length columns and Sheets pads the
+ * missing trailing cell to '', so a legacy alert simply reads reason: ''. */
 var STOP_ALERTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note'
+  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason'
 ];
+/* Allowed stop-alert reasons (stable keys; Hebrew labels are render-time only,
+ * in the therapists app + public/app.js). createStopAlert is fail-closed on
+ * this set: a missing or unknown reason is rejected, never written. */
+var STOP_ALERT_REASONS = { no_payment: true, mismatch: true, other: true };
 
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
@@ -1982,6 +1992,10 @@ function _createStopAlert(payload) {
   var clientName = String((payload && payload.clientName) || '').trim();
   if (!clientId) return { ok: false, error: 'missing_client_id' };
   if (!clientName) return { ok: false, error: 'missing_client_name' };
+  // Reason is REQUIRED and fail-closed: reject anything outside the allowed set
+  // (missing/empty/unknown) before taking the lock or touching the sheet.
+  var reason = String((payload && payload.reason) || '').trim();
+  if (!STOP_ALERT_REASONS[reason]) return { ok: false, error: 'invalid_reason' };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -1995,7 +2009,8 @@ function _createStopAlert(payload) {
       createdBy: String((payload && payload.createdBy) || '').trim(),
       status: 'unread',
       readAt: '',
-      note: String((payload && payload.note) || '').trim().slice(0, 1000)
+      note: String((payload && payload.note) || '').trim().slice(0, 1000),
+      reason: reason
     };
     sh.appendRow(STOP_ALERTS_HEADERS.map(function (h) {
       return alert[h] == null ? '' : alert[h];

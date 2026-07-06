@@ -458,6 +458,38 @@
       </div>
     </div>
 
+    <!-- Stop-treatment alert (עצירת טיפול) — a PAUSE signal to Yarden, distinct
+         from סיים טיפול (final discharge). Requires a reason before sending. -->
+    <div id="stopAlertModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">עצירת טיפול</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          התראה לירדן (הפסקה זמנית, לא סיום טיפול) — <span id="stopAlertClientName"></span>
+        </div>
+        <form id="stopAlertForm" class="form-grid">
+          <p id="stopAlertPending" class="wide" hidden style="margin:0;color:#e0b74a;font-size:12px;">
+            כבר קיימת התראת עצירה פתוחה שטרם נקראה על ידי ירדן — שליחה תיצור התראה נוספת.
+          </p>
+          <label>סיבת העצירה
+            <select name="stop_reason" id="stopAlertReason" required>
+              <option value="">—</option>
+              <option value="no_payment">חוסר תשלום</option>
+              <option value="mismatch">אי התאמה</option>
+              <option value="other">אחר</option>
+            </select>
+          </label>
+          <label class="wide">הערה לירדן (רשות)<textarea id="stopAlertNote" name="stop_note" maxlength="1000" rows="3"></textarea></label>
+          <p id="stopAlertOtherHint" class="wide" hidden style="margin:0;color:var(--muted);font-size:12px;">
+            מומלץ לפרט את הסיבה עבור ירדן בשדה ההערה.
+          </p>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="stopAlertSubmit" disabled>שליחת התראה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="notRelevantReasonModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">סיבת אי-רלוונטיות</div>
