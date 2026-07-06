@@ -1560,24 +1560,55 @@
     }
   }
 
-  // "הודעת עצירת טיפול" now CREATES a persistent stop-treatment alert for the
-  // E-Zone Therapists app (Yarden's "עצירת טיפול" tab) instead of opening a
-  // WhatsApp link — no treatmentContactPhone read is involved. Confirm → optional
-  // note → createStopAlert. Optimistic: the alert is pushed to local state so a
-  // repeat click warns that one is already pending, and removed again on failure.
+  // Stable reason keys → render-time Hebrew labels (existing convention, mirrors
+  // NOT_RELEVANT_REASON_LABELS). The keys are the wire format shared with the
+  // backend + therapists app; the Hebrew never leaves the render layer.
+  var STOP_ALERT_REASON_LABELS = {
+    no_payment: 'חוסר תשלום',
+    mismatch:   'אי התאמה',
+    other:      'אחר'
+  };
+
+  // "הודעת עצירת טיפול" CREATES a persistent stop-treatment alert for the E-Zone
+  // Therapists app (Yarden's "עצירת טיפול" tab) — a PAUSE signal, distinct from
+  // סיים טיפול (final discharge). No treatmentContactPhone read, no WhatsApp link.
+  // Opening the confirm modal collects a REQUIRED reason (+ optional note); the
+  // actual createStopAlert fires from the form submit below.
+  var stopAlertClientId = null;
   function sendStopAlert(c) {
     if (state.role !== 'editor') return;
+    openStopAlertModal(c);
+  }
+  function openStopAlertModal(c) {
+    stopAlertClientId = c.id;
+    var form = $('#stopAlertForm');
+    if (form) form.reset();
+    var nameEl = $('#stopAlertClientName');
+    if (nameEl) nameEl.textContent = c.name || '';
+    // Duplicate guard: warn (do not block) if an unread alert is already pending.
     var pendingExists = (state.stopAlerts || []).some(function (a) {
       return a.clientId === c.id && a.status === 'unread';
     });
-    var head = pendingExists
-      ? 'כבר קיימת התראת עצירה פתוחה עבור ' + c.name + ' שטרם נקראה על ידי ירדן. לשלוח התראה נוספת?'
-      : 'לשלוח התראת עצירת טיפול לירדן עבור ' + c.name + '?';
-    if (!confirm(head)) return;
-    var note = window.prompt('הערה לירדן (רשות):', '');
-    if (note === null) return; // cancelled the note step
-    note = note.trim();
-
+    var warn = $('#stopAlertPending');
+    if (warn) warn.hidden = !pendingExists;
+    var hint = $('#stopAlertOtherHint');
+    if (hint) hint.hidden = true;
+    // Save stays disabled until a reason is chosen (empty '—' default).
+    var submit = $('#stopAlertSubmit');
+    if (submit) submit.disabled = true;
+    $('#stopAlertModal').hidden = false;
+  }
+  function closeStopAlertModal() {
+    var m = $('#stopAlertModal');
+    if (m) m.hidden = true;
+    stopAlertClientId = null;
+  }
+  // Actual create — called from the modal's submit once a valid reason is chosen.
+  // Optimistic: the alert is pushed to local state so a repeat click warns that
+  // one is already pending, and removed again on failure.
+  function submitStopAlert(reason, note) {
+    var c = state.clients.find(function (x) { return x.id === stopAlertClientId; });
+    if (!c) return;
     var optimistic = {
       id: 'stop-pending-' + Date.now(),
       clientId: c.id,
@@ -1586,11 +1617,12 @@
       createdBy: 'Vered',
       status: 'unread',
       readAt: '',
-      note: note
+      note: note,
+      reason: reason
     };
     state.stopAlerts.push(optimistic);
     apiPostAction('createStopAlert', {
-      clientId: c.id, clientName: c.name, createdBy: 'Vered', note: note
+      clientId: c.id, clientName: c.name, createdBy: 'Vered', note: note, reason: reason
     })
       .then(function (res) {
         if (res && res.alert && res.alert.id) optimistic.id = res.alert.id;
@@ -3995,7 +4027,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal();
       });
     });
 
@@ -4554,6 +4586,36 @@
           lead.not_relevant_note = prev.not_relevant_note;
           toast('שגיאה: ' + err.message, true);
         });
+    });
+
+    // Stop-alert reason select: enable save only when a valid reason is chosen;
+    // when 'other' is picked, focus the note and reveal the "please detail" hint.
+    var stopReasonSel = $('#stopAlertReason');
+    if (stopReasonSel) stopReasonSel.addEventListener('change', function () {
+      var reason = stopReasonSel.value;
+      var submit = $('#stopAlertSubmit');
+      if (submit) submit.disabled = !STOP_ALERT_REASON_LABELS[reason];
+      var hint = $('#stopAlertOtherHint');
+      if (reason === 'other') {
+        if (hint) hint.hidden = false;
+        var note = $('#stopAlertNote');
+        if (note) note.focus();
+      } else if (hint) {
+        hint.hidden = true;
+      }
+    });
+
+    var saForm = $('#stopAlertForm');
+    if (saForm) saForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var reason = String(fd.get('stop_reason') || '').trim();
+      // Required + fail-closed on the client too (submit is disabled until a
+      // reason is picked; this guards direct/programmatic submits as a fallback).
+      if (!STOP_ALERT_REASON_LABELS[reason]) { toast('יש לבחור סיבת עצירה', true); return; }
+      var note = String(fd.get('stop_note') || '').trim().slice(0, 1000);
+      submitStopAlert(reason, note);
+      closeStopAlertModal();
     });
 
     var rlForm = $('#removeLeadForm');

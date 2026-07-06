@@ -27,11 +27,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// --- mirror of STOP_ALERTS_HEADERS (apps-script/Code.gs) ---
+// --- mirror of STOP_ALERTS_HEADERS (apps-script/Code.gs) — 'reason' appended last ---
 const STOP_ALERTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note'
+  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason'
 ];
 const col = (name) => STOP_ALERTS_HEADERS.indexOf(name);
+
+// --- mirror of STOP_ALERT_REASONS (allowed set; fail-closed) ---
+const STOP_ALERT_REASONS = { no_payment: true, mismatch: true, other: true };
 
 // --- mirror of _createStopAlert writing into an in-memory sheet (row arrays) ---
 let uuidSeq = 0;
@@ -40,6 +43,8 @@ function createStopAlert(sheet, payload, nowISO) {
   const clientName = String((payload && payload.clientName) || '').trim();
   if (!clientId) return { ok: false, error: 'missing_client_id' };
   if (!clientName) return { ok: false, error: 'missing_client_name' };
+  const reason = String((payload && payload.reason) || '').trim();
+  if (!STOP_ALERT_REASONS[reason]) return { ok: false, error: 'invalid_reason' };
   const alert = {
     id: 'stop-' + 'uuid' + (++uuidSeq),
     clientId,
@@ -48,7 +53,8 @@ function createStopAlert(sheet, payload, nowISO) {
     createdBy: String((payload && payload.createdBy) || '').trim(),
     status: 'unread',
     readAt: '',
-    note: String((payload && payload.note) || '').trim().slice(0, 1000)
+    note: String((payload && payload.note) || '').trim().slice(0, 1000),
+    reason
   };
   sheet.push(STOP_ALERTS_HEADERS.map((h) => (alert[h] == null ? '' : alert[h])));
   return { ok: true, alert };
@@ -80,9 +86,9 @@ const SECRET = 's3cr3t-stop-alerts';
 
 // --- createStopAlert behavior ----------------------------------------------
 
-test('createStopAlert appends one unread row with a stop-<id> and ISO createdAt', () => {
+test('createStopAlert appends one unread row with a stop-<id>, ISO createdAt, and reason', () => {
   const sheet = [];
-  const res = createStopAlert(sheet, { clientId: 'c1', clientName: 'אורי', createdBy: 'Vered', note: 'לא שילם' }, NOW);
+  const res = createStopAlert(sheet, { clientId: 'c1', clientName: 'אורי', createdBy: 'Vered', note: 'לא שילם', reason: 'no_payment' }, NOW);
   assert.equal(res.ok, true);
   assert.equal(sheet.length, 1, 'exactly one row appended');
   const row = sheet[0];
@@ -94,30 +100,56 @@ test('createStopAlert appends one unread row with a stop-<id> and ISO createdAt'
   assert.equal(row[col('createdBy')], 'Vered');
   assert.equal(row[col('readAt')], '', 'readAt empty until marked read');
   assert.equal(row[col('note')], 'לא שילם');
+  assert.equal(row[col('reason')], 'no_payment', 'reason persisted as its stable key');
 });
 
 test('createStopAlert needs clientId and clientName (no row otherwise)', () => {
   const sheet = [];
-  assert.equal(createStopAlert(sheet, { clientName: 'אורי' }, NOW).error, 'missing_client_id');
-  assert.equal(createStopAlert(sheet, { clientId: 'c1' }, NOW).error, 'missing_client_name');
+  assert.equal(createStopAlert(sheet, { clientName: 'אורי', reason: 'no_payment' }, NOW).error, 'missing_client_id');
+  assert.equal(createStopAlert(sheet, { clientId: 'c1', reason: 'no_payment' }, NOW).error, 'missing_client_name');
   assert.equal(sheet.length, 0);
+});
+
+test('createStopAlert rejects a missing or unknown reason (fail-closed, no row)', () => {
+  const sheet = [];
+  // missing / empty
+  assert.equal(createStopAlert(sheet, { clientId: 'c1', clientName: 'א' }, NOW).error, 'invalid_reason');
+  assert.equal(createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: '' }, NOW).error, 'invalid_reason');
+  // unknown key
+  assert.equal(createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'whatever' }, NOW).error, 'invalid_reason');
+  assert.equal(sheet.length, 0, 'nothing written for an invalid reason');
+  // every allowed key is accepted
+  ['no_payment', 'mismatch', 'other'].forEach((r) => {
+    assert.equal(createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: r }, NOW).ok, true);
+  });
+  assert.equal(sheet.length, 3);
 });
 
 test('createStopAlert note is optional and caps at 1000 chars', () => {
   const sheet = [];
-  const r1 = createStopAlert(sheet, { clientId: 'c1', clientName: 'א' }, NOW);
+  const r1 = createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'other' }, NOW);
   assert.equal(r1.ok, true);
   assert.equal(sheet[0][col('note')], '');
-  createStopAlert(sheet, { clientId: 'c2', clientName: 'ב', note: 'x'.repeat(2000) }, NOW);
+  createStopAlert(sheet, { clientId: 'c2', clientName: 'ב', reason: 'other', note: 'x'.repeat(2000) }, NOW);
   assert.equal(sheet[1][col('note')].length, 1000);
+});
+
+test('legacy pre-reason rows (shorter than the header) read reason as an empty string', () => {
+  // A row written before 'reason' existed has only the first 8 cells; Sheets pads
+  // the requested headers.length columns with '' — the read path must tolerate it.
+  const legacyRow = ['stop-old', 'c9', 'דנה', NOW, 'Vered', 'unread', '', 'הערה ישנה'];
+  assert.equal(legacyRow.length, STOP_ALERTS_HEADERS.length - 1, 'legacy row is one cell short');
+  const padded = STOP_ALERTS_HEADERS.map((h, i) => (i < legacyRow.length ? legacyRow[i] : ''));
+  assert.equal(padded[col('reason')], '', 'missing trailing reason reads as empty');
+  assert.equal(padded[col('note')], 'הערה ישנה', 'earlier columns keep their index');
 });
 
 // --- markStopAlertRead behavior --------------------------------------------
 
 test('markStopAlertRead flips the matching row to read + stamps readAt, only that row', () => {
   const sheet = [];
-  const a = createStopAlert(sheet, { clientId: 'c1', clientName: 'א' }, NOW).alert;
-  createStopAlert(sheet, { clientId: 'c2', clientName: 'ב' }, NOW);
+  const a = createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'no_payment' }, NOW).alert;
+  createStopAlert(sheet, { clientId: 'c2', clientName: 'ב', reason: 'mismatch' }, NOW);
   const res = markStopAlertRead(sheet, { id: a.id }, '2026-07-06T00:00:00.000Z');
   assert.equal(res.ok, true);
   assert.equal(sheet[0][col('status')], 'read');
@@ -127,7 +159,7 @@ test('markStopAlertRead flips the matching row to read + stamps readAt, only tha
 
 test('markStopAlertRead needs an id and reports not_found for an unknown id', () => {
   const sheet = [];
-  createStopAlert(sheet, { clientId: 'c1', clientName: 'א' }, NOW);
+  createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'other' }, NOW);
   assert.equal(markStopAlertRead(sheet, {}, NOW).error, 'missing_id');
   assert.equal(markStopAlertRead(sheet, { id: 'stop-nope' }, NOW).error, 'not_found');
 });
@@ -150,11 +182,19 @@ test('getStopAlerts / markStopAlertRead auth is fail-closed', () => {
 // ===========================================================================
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
 
-test('source: STOP_ALERTS_HEADERS exact order matches the mirror', () => {
+test('source: STOP_ALERTS_HEADERS exact order matches the mirror, reason LAST', () => {
   const m = SRC.match(/var STOP_ALERTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'STOP_ALERTS_HEADERS not found');
   const cols = m[1].match(/'[^']+'/g).map((s) => s.slice(1, -1));
   assert.deepEqual(cols, STOP_ALERTS_HEADERS);
+  assert.equal(cols[cols.length - 1], 'reason', 'reason must be the LAST (appended) header');
+});
+
+test('source: STOP_ALERT_REASONS is exactly the allowed set', () => {
+  const m = SRC.match(/var STOP_ALERT_REASONS = \{([\s\S]*?)\};/);
+  assert.ok(m, 'STOP_ALERT_REASONS not found');
+  const keys = (m[1].match(/(\w+)\s*:/g) || []).map((s) => s.replace(/\s*:$/, ''));
+  assert.deepEqual(keys.sort(), Object.keys(STOP_ALERT_REASONS).sort());
 });
 
 test('source: createStopAlert is INTERNAL (routed with no secret) and appends one stop-<uuid> row', () => {
@@ -169,6 +209,9 @@ test('source: createStopAlert is INTERNAL (routed with no secret) and appends on
   assert.match(fn, /new Date\(\)\.toISOString\(\)/, 'createdAt must be ISO');
   assert.match(fn, /appendRow/, 'must append a single row');
   assert.doesNotMatch(fn, /STOP_ALERTS_SECRET/, 'createStopAlert must NOT require the secret');
+  // reason is required + fail-closed on the allowed set, and persisted on the row
+  assert.match(fn, /if \(!STOP_ALERT_REASONS\[reason\]\) return \{ ok: false, error: 'invalid_reason' \};/, 'must reject an invalid reason');
+  assert.match(fn, /reason: reason/, 'must persist the reason on the appended alert');
 });
 
 test('source: _stopAlertsAuthOk is fail-closed and reads STOP_ALERTS_SECRET from Script Properties only', () => {
@@ -203,25 +246,70 @@ test('source: markStopAlertRead takes a lock and updates a single row by id in p
 // Frontend wiring guard: the button CREATES an alert, no WhatsApp link.
 // ===========================================================================
 const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+const HTML = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
 test('wiring: the overdue-panel button dispatches stop-alert (not a wa- action)', () => {
   assert.match(APP, /data-action="stop-alert">🛑 הודעת עצירת טיפול/);
   assert.match(APP, /action === 'stop-alert'\) \{\s*sendStopAlert\(c\);/);
 });
 
-test('wiring: sendStopAlert CREATES a stop alert — no wa-link, no treatmentContactPhone read', () => {
-  const m = APP.match(/function sendStopAlert\(c\)\s*\{[\s\S]*?\n  \}/);
-  assert.ok(m, 'sendStopAlert not found');
+test('wiring: the reason label map uses the stable keys + Hebrew labels', () => {
+  const m = APP.match(/var STOP_ALERT_REASON_LABELS = \{([\s\S]*?)\};/);
+  assert.ok(m, 'STOP_ALERT_REASON_LABELS not found');
+  const body = m[1];
+  assert.match(body, /no_payment:\s*'חוסר תשלום'/);
+  assert.match(body, /mismatch:\s*'אי התאמה'/);
+  assert.match(body, /other:\s*'אחר'/);
+});
+
+test('wiring: the confirm modal has a REQUIRED reason select with the stable keys', () => {
+  // the select exists, is required, and has an empty '—' default above the note
+  const m = HTML.match(/<select name="stop_reason" id="stopAlertReason" required>([\s\S]*?)<\/select>/);
+  assert.ok(m, 'stop_reason select not found or not required');
+  const opts = m[1];
+  assert.match(opts, /<option value="">—<\/option>/, 'empty — default option');
+  assert.match(opts, /<option value="no_payment">/);
+  assert.match(opts, /<option value="mismatch">/);
+  assert.match(opts, /<option value="other">/);
+  // the note textarea and the "other" hint both live in the same modal
+  assert.match(HTML, /id="stopAlertNote"/, 'optional note textarea present');
+  assert.match(HTML, /id="stopAlertOtherHint"/, 'other-reason hint present');
+  // save starts disabled (no reason chosen yet)
+  assert.match(HTML, /id="stopAlertSubmit"[^>]*disabled/, 'save disabled until a reason is chosen');
+});
+
+test('wiring: reason select gates save + focuses the note on "other"', () => {
+  // save enabled only for a valid reason key
+  assert.match(APP, /submit\.disabled = !STOP_ALERT_REASON_LABELS\[reason\];/);
+  // choosing 'other' reveals the hint and focuses the note
+  assert.match(APP, /if \(reason === 'other'\) \{[\s\S]*?note\.focus\(\);/);
+});
+
+test('wiring: the form submit validates the reason and posts it in the payload', () => {
+  const m = APP.match(/if \(saForm\) saForm\.addEventListener\('submit', function \(e\) \{[\s\S]*?\n    \}\);/);
+  assert.ok(m, 'stopAlertForm submit handler not found');
+  const fn = m[0];
+  assert.match(fn, /if \(!STOP_ALERT_REASON_LABELS\[reason\]\) \{ toast\(/, 'required-reason guard toasts');
+  assert.match(fn, /submitStopAlert\(reason, note\)/, 'passes the reason through');
+});
+
+test('wiring: submitStopAlert CREATES a stop alert with reason — no wa-link, no treatmentContactPhone read', () => {
+  const m = APP.match(/function submitStopAlert\(reason, note\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(m, 'submitStopAlert not found');
   const fn = m[0];
   assert.match(fn, /apiPostAction\('createStopAlert'/, 'must call createStopAlert');
-  assert.match(fn, /confirm\(/, 'must confirm before sending');
+  assert.match(fn, /reason: reason/, 'payload must include the reason');
   assert.match(fn, /toast\('נשלחה התראת עצירה לירדן'\)/, 'success toast');
   // optimistic push + rollback splice on state.stopAlerts
   assert.match(fn, /state\.stopAlerts\.push\(/, 'optimistic push');
   assert.match(fn, /state\.stopAlerts\.splice\(/, 'rollback on failure');
-  // duplicate guard
-  assert.match(fn, /status === 'unread'/, 'checks for an existing pending alert');
   // the flow must NOT read the treatment contact phone or open WhatsApp
   assert.doesNotMatch(fn, /treatmentContactPhone/, 'stop-alert flow must not read treatmentContactPhone');
   assert.doesNotMatch(fn, /openWhatsApp|wa\.me/, 'stop-alert flow must not build a WhatsApp link');
+});
+
+test('wiring: the duplicate guard still checks for an existing unread alert', () => {
+  const m = APP.match(/function openStopAlertModal\(c\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(m, 'openStopAlertModal not found');
+  assert.match(m[0], /status === 'unread'/, 'checks for an existing pending alert');
 });
