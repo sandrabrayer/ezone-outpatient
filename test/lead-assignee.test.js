@@ -55,16 +55,16 @@ const LEADS_H = headers('LEADS_HEADERS');
 const REMOVED_H = headers('REMOVED_LEADS_HEADERS');
 const CLIENTS_H = headers('CLIENTS_HEADERS');
 
-test('assignedTo is last on the leads arrays; on CLIENTS it precedes the appended payment tail', () => {
+test('assignedTo is last on the leads arrays; on CLIENTS it is the final (trailing) column', () => {
   // Leads sheets were untouched by the volta+dashboard unification.
   assert.equal(LEADS_H[LEADS_H.length - 1], 'assignedTo');
   assert.equal(REMOVED_H[REMOVED_H.length - 1], 'assignedTo');
-  // CLIENTS_HEADERS is APPEND-ONLY: assignedTo keeps its exact volta position (last
-  // of the volta-line columns), immediately before the three appended payment
-  // columns — so the live positional sheet needs no migration.
-  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('paymentStatus') - 1], 'assignedTo');
+  // FROZEN 2026-07-06 physical order: assignedTo is a volta-only column, physically
+  // unwritten on the live (dashboard-line) sheet, so it appends at the very END —
+  // it is now the final CLIENTS column.
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'assignedTo');
   assert.deepEqual(CLIENTS_H.slice(-3),
-    ['paymentStatus', 'paymentDate', 'nextBillingDate']);
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
 });
 
 test('lead assignedTo round-trips positionally without misaligning earlier columns', () => {

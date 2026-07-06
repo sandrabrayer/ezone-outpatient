@@ -293,12 +293,13 @@ test('saveAll preserves the on-sheet creditsOwed by id, ignoring the payload val
 // ============================================================================
 // Positional safety for the new columns.
 // ============================================================================
-test('Clients.creditsOwed round-trips positionally (keeps its volta position before packageChangeDate); legacy blank -> 0', () => {
-  // Append-only unification: creditsOwed keeps its EXACT volta position (before
-  // packageChangeDate/assignedTo); the three dashboard payment columns are
-  // appended after assignedTo, so no existing column moved.
-  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('creditsOwed') + 1], 'packageChangeDate');
-  assert.deepEqual(CLIENTS_H.slice(-3), ['paymentStatus', 'paymentDate', 'nextBillingDate']);
+test('Clients.creditsOwed round-trips positionally (frozen physical order: last of the payment tail); legacy blank -> 0', () => {
+  // FROZEN 2026-07-06 physical order: creditsOwed is the LAST of the payment tail
+  // (paymentStatus/paymentDate/nextBillingDate/creditsOwed) that sits directly after
+  // phone, immediately before the physically-unwritten volta-only columns.
+  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('nextBillingDate') + 1], 'creditsOwed');
+  assert.equal(CLIENTS_H[CLIENTS_H.indexOf('creditsOwed') + 1], 'clinicalTreatmentType');
+  assert.deepEqual(CLIENTS_H.slice(-3), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
   const row = writeRow(CLIENTS_H, { id: 'c1', phone: '0501234567', clinicalTreatmentType: 'פרטני CBT', creditsOwed: 3 });
   assert.equal(row[CLIENTS_H.indexOf('creditsOwed')], 3);
   assert.equal(row[CLIENTS_H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // not shifted

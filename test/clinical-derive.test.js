@@ -68,11 +68,16 @@ function clinicalToBilling(clinical) {
   }
   return CLINICAL_MAP[key];
 }
+// FAIL-SOFT mirror (hardened 2026-07-06): unknown clinical value must NOT throw —
+// it warns and leaves serviceType untouched, so one bad/misaligned row can never
+// abort the whole _saveAll loop. The strict clinicalToBilling primitive above still
+// throws for callers that want validation.
 function deriveServiceType(client) {
   if (!client) return client;
   const clinical = String(client.clinicalTreatmentType == null ? '' : client.clinicalTreatmentType).trim();
   if (!clinical) return client;
-  client.serviceType = clinicalToBilling(clinical);
+  if (!Object.prototype.hasOwnProperty.call(CLINICAL_MAP, clinical)) return client;
+  client.serviceType = CLINICAL_MAP[clinical];
   return client;
 }
 
@@ -129,23 +134,41 @@ test('empty or absent clinicalTreatmentType leaves serviceType untouched', () =>
   assert.equal(nullish.serviceType, 'פרטני CBT');
 });
 
-// --- unknown clinical throws (never silently blanks) ------------------------
-test('unknown clinical value throws and does not blank serviceType', () => {
+// --- unknown clinical is FAIL-SOFT: never throws, leaves serviceType untouched
+// (hardened 2026-07-06 — a single bad/misaligned row must never block all saves) --
+test('unknown clinical value does NOT throw and leaves serviceType untouched', () => {
   const c = { serviceType: 'פרטני', clinicalTreatmentType: 'לא קיים' };
-  assert.throws(() => deriveServiceType(c), /Unknown clinical treatment type/);
-  assert.equal(c.serviceType, 'פרטני'); // unchanged — threw before overwrite
+  assert.doesNotThrow(() => deriveServiceType(c));
+  assert.equal(c.serviceType, 'פרטני'); // unchanged — derive left it as-is
 });
 
-// --- columns are appended LAST (positional safety) --------------------------
-test('CLIENTS_HEADERS keeps volta\'s live order and appends the payment tail', () => {
+// A stray paymentStatus value ('paid'/'unpaid') — the exact 2026-07-06 column-shift
+// symptom — must also fail-soft, never throw, so saveAll is never blocked by it.
+test('a misaligned paymentStatus value fails soft (regression: 2026-07-06 shift)', () => {
+  ['paid', 'unpaid', 'partial'].forEach((bad) => {
+    const c = { serviceType: 'קבוצה', clinicalTreatmentType: bad };
+    assert.doesNotThrow(() => deriveServiceType(c));
+    assert.equal(c.serviceType, 'קבוצה');
+  });
+});
+
+// The strict primitive still throws — validation is preserved for callers that want it.
+test('strict clinicalToBilling primitive still throws on unknown', () => {
+  assert.throws(() => clinicalToBilling('לא קיים'), /Unknown clinical treatment type/);
+});
+
+// --- FROZEN physical order (verified against the live sheet 2026-07-06) ------
+test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)', () => {
   const H = clientsHeaders();
-  // The volta + dashboard unification is APPEND-ONLY: volta's live order is kept
-  // verbatim (phone, clinicalTreatmentType, creditsOwed, packageChangeDate,
-  // assignedTo) and the three dashboard payment columns are appended at the END,
-  // so the live positional sheet needs NO migration.
+  // FROZEN 2026-07-06: this tail mirrors the PHYSICAL live Clients sheet (as written
+  // by the deployed dashboard-hKjf9 script), NOT merely the previous header array.
+  // The payment tail (paymentStatus/paymentDate/nextBillingDate/creditsOwed) sits
+  // directly after `phone`; the volta-only columns (physically unwritten) append at
+  // the END. Append-only from here, verified against the sheet itself.
   assert.deepEqual(H.slice(-8), [
-    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo',
-    'paymentStatus', 'paymentDate', 'nextBillingDate'
+    'phone',
+    'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
+    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
   ]);
 });
 
@@ -164,8 +187,9 @@ function readRow(headers, row) {
 
 test('a legacy row lacking the new column reads back without misaligning phone', () => {
   const H = clientsHeaders();
-  // legacy sheet row has one fewer physical cell (no creditsOwed — the newest
-  // trailing column); _readAll reads headers.length cells, the trailing '' back.
+  // legacy sheet row has one fewer physical cell (no assignedTo — the newest
+  // trailing column after the frozen reorder); _readAll reads headers.length
+  // cells, the trailing '' back.
   const legacy = H.slice(0, -1).map((h) => {
     if (h === 'phone') return '0509998888';
     if (h === 'treatmentContactPhone') return '0501234567';
@@ -178,8 +202,8 @@ test('a legacy row lacking the new column reads back without misaligning phone',
   assert.equal(back.phone, '0509998888');
   assert.equal(back.treatmentContactPhone, '0501234567');
   assert.equal(back.serviceType, 'פרטני');
-  assert.equal(back.clinicalTreatmentType, 'פרטני CBT'); // not misaligned by the append
-  assert.equal(back.creditsOwed, '');                    // new column reads blank
+  assert.equal(back.clinicalTreatmentType, 'פרטני CBT'); // not misaligned by the reorder
+  assert.equal(back.assignedTo, '');                     // new trailing column reads blank
 });
 
 test('writing a client without creditsOwed blanks that cell, leaving earlier columns aligned', () => {

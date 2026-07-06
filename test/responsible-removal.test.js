@@ -79,17 +79,18 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
   assert.ok(H.includes('responsiblePerson'), 'responsiblePerson slot was dropped (positional risk!)');
   assert.ok(H.includes('serviceScope'), 'serviceScope slot was dropped (positional risk!)');
   // ...sitting exactly between house_of_origin and the kept contact phone —
-  // nothing after them shifted. The volta+dashboard unification is APPEND-ONLY:
-  // volta's exact live column order is preserved through assignedTo, and the three
-  // dashboard payment columns are appended at the very END, so the live positional
-  // sheet needs NO migration.
+  // nothing before `phone` shifted. FROZEN 2026-07-06: the tail after `phone`
+  // mirrors the PHYSICAL live sheet — payment tail
+  // (paymentStatus/paymentDate/nextBillingDate/creditsOwed) directly after phone,
+  // then the physically-unwritten volta-only columns appended at the very END.
   const tail = H.slice(H.indexOf('house_of_origin'));
   assert.deepEqual(tail, [
     'house_of_origin',
     'responsiblePerson', 'serviceScope',
     'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
-    'phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo',
-    'paymentStatus', 'paymentDate', 'nextBillingDate'
+    'phone',
+    'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
+    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
   ]);
 });
 
