@@ -1531,7 +1531,9 @@
       '<div class="renewal-actions">' +
         (kind === 'stop'
           ? '<button class="btn btn-wa" data-action="wa-payer-overdue">💬 בקשת תשלום למשלם</button>' +
-            '<button class="btn btn-wa-stop" data-action="stop-alert">🛑 הודעת עצירת טיפול</button>'
+            (hasPendingStopAlert(c.id)
+              ? '<button class="btn btn-wa-stop" data-action="stop-alert" disabled>' + STOP_ALERT_SENT_LABEL + '</button>'
+              : '<button class="btn btn-wa-stop" data-action="stop-alert">🛑 הודעת עצירת טיפול</button>')
           : '<button class="btn btn-wa" data-action="wa-payer-renewal">💬 בקשת חידוש למשלם</button>'
         ) +
       '</div>' +
@@ -1569,6 +1571,37 @@
     other:      'אחר'
   };
 
+  // Overdue-panel button labels. The unsent label is also written as a literal in
+  // renderRenewalRow (so the wiring guard can match it); once an alert has been
+  // sent this session the button flips to the sent label and disables.
+  var STOP_ALERT_UNSENT_LABEL = '🛑 הודעת עצירת טיפול';
+  var STOP_ALERT_SENT_LABEL = 'נשלחה התראה ✓';
+
+  // A stop-alert is "sent" (for this session) when an unread alert for the client
+  // sits in state.stopAlerts — the SAME optimistic list submitStopAlert appends to
+  // and rolls back from. One source of truth for both the duplicate-pending warning
+  // and the button's sent state; a page reload clears it (session-scoped, by design).
+  function hasPendingStopAlert(clientId) {
+    return (state.stopAlerts || []).some(function (a) {
+      return a.clientId === clientId && a.status === 'unread';
+    });
+  }
+  // Reflect the sent/unsent state onto the live overdue-panel button(s) for a
+  // client WITHOUT a full re-render — so an optimistic send (and its rollback)
+  // is visible immediately. A later render() re-derives the same state via
+  // hasPendingStopAlert in renderRenewalRow, so the change also survives re-renders.
+  function applyStopAlertButtonState(clientId) {
+    var box = $('#renewalsAlerts');
+    if (!box) return;
+    var sent = hasPendingStopAlert(clientId);
+    Array.prototype.forEach.call(box.querySelectorAll('[data-action="stop-alert"]'), function (btn) {
+      var row = btn.closest('[data-client-id]');
+      if (!row || row.getAttribute('data-client-id') !== clientId) return;
+      btn.disabled = sent;
+      btn.textContent = sent ? STOP_ALERT_SENT_LABEL : STOP_ALERT_UNSENT_LABEL;
+    });
+  }
+
   // "הודעת עצירת טיפול" CREATES a persistent stop-treatment alert for the E-Zone
   // Therapists app (Yarden's "עצירת טיפול" tab) — a PAUSE signal, distinct from
   // סיים טיפול (final discharge). No treatmentContactPhone read, no WhatsApp link.
@@ -1586,9 +1619,7 @@
     var nameEl = $('#stopAlertClientName');
     if (nameEl) nameEl.textContent = c.name || '';
     // Duplicate guard: warn (do not block) if an unread alert is already pending.
-    var pendingExists = (state.stopAlerts || []).some(function (a) {
-      return a.clientId === c.id && a.status === 'unread';
-    });
+    var pendingExists = hasPendingStopAlert(c.id);
     var warn = $('#stopAlertPending');
     if (warn) warn.hidden = !pendingExists;
     var hint = $('#stopAlertOtherHint');
@@ -1621,6 +1652,10 @@
       reason: reason
     };
     state.stopAlerts.push(optimistic);
+    // Optimistic UX: flip the row's button to the disabled sent state immediately
+    // (the toast alone was too transient — the row looked unchanged, so a real send
+    // read as "nothing happened"). Rolled back below if the write fails.
+    applyStopAlertButtonState(c.id);
     apiPostAction('createStopAlert', {
       clientId: c.id, clientName: c.name, createdBy: 'Vered', note: note, reason: reason
     })
@@ -1631,6 +1666,7 @@
       .catch(function (err) {
         var idx = state.stopAlerts.indexOf(optimistic);
         if (idx !== -1) state.stopAlerts.splice(idx, 1);
+        applyStopAlertButtonState(c.id); // re-enable the button — the send did not land
         toast('ההתראה לא נשלחה: ' + err.message, true);
       });
   }

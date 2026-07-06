@@ -2069,6 +2069,38 @@ function _markStopAlertRead(payload) {
   }
 }
 
+/* Reopen a single alert by id: status -> 'unread' + readAt cleared. Exact mirror
+ * of _markStopAlertRead (single-row in-place update, LockService lock, never
+ * rewrites the sheet) — it just flips the row the other way so the therapists app
+ * can undo a mistaken "mark read". Secured — the router enforces _stopAlertsAuthOk
+ * first. */
+function _markStopAlertUnread(payload) {
+  var id = String((payload && payload.id) || '').trim();
+  if (!id) return { ok: false, error: 'missing_id' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var idIdx = STOP_ALERTS_HEADERS.indexOf('id');
+    var statusIdx = STOP_ALERTS_HEADERS.indexOf('status');
+    var readAtIdx = STOP_ALERTS_HEADERS.indexOf('readAt');
+    var rows = sh.getRange(2, 1, lastRow - 1, STOP_ALERTS_HEADERS.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][idIdx]) === id) {
+        sh.getRange(i + 2, statusIdx + 1).setValue('unread');
+        sh.getRange(i + 2, readAtIdx + 1).setValue('');
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'not_found' };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Create lead (inbound, fail-closed write) =====
  *
  * Inbound: the E-Zone Dashboard POSTs { action:'createLead', secret, name,
@@ -2523,6 +2555,14 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_markStopAlertRead(payload));
+    }
+    if (action === 'markStopAlertUnread') {
+      var msuParams = (e && e.parameter) || {};
+      if (payload && payload.secret) msuParams.secret = payload.secret;
+      if (!_stopAlertsAuthOk(msuParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_markStopAlertUnread(payload));
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());

@@ -81,6 +81,20 @@ function markStopAlertRead(sheet, payload, nowISO) {
   return { ok: false, error: 'not_found' };
 }
 
+// --- mirror of _markStopAlertUnread (exact inverse of markStopAlertRead) ---
+function markStopAlertUnread(sheet, payload) {
+  const id = String((payload && payload.id) || '').trim();
+  if (!id) return { ok: false, error: 'missing_id' };
+  for (let i = 0; i < sheet.length; i++) {
+    if (String(sheet[i][col('id')]) === id) {
+      sheet[i][col('status')] = 'unread';
+      sheet[i][col('readAt')] = '';
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'not_found' };
+}
+
 const NOW = '2026-07-05T09:00:00.000Z';
 const SECRET = 's3cr3t-stop-alerts';
 
@@ -164,6 +178,31 @@ test('markStopAlertRead needs an id and reports not_found for an unknown id', ()
   assert.equal(markStopAlertRead(sheet, { id: 'stop-nope' }, NOW).error, 'not_found');
 });
 
+// --- markStopAlertUnread behavior (exact inverse of markStopAlertRead) -------
+
+test('markStopAlertUnread flips the matching row back to unread + clears readAt, only that row', () => {
+  const sheet = [];
+  const a = createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'no_payment' }, NOW).alert;
+  createStopAlert(sheet, { clientId: 'c2', clientName: 'ב', reason: 'mismatch' }, NOW);
+  // first read both, then reopen only the first
+  markStopAlertRead(sheet, { id: a.id }, '2026-07-06T00:00:00.000Z');
+  const bId = sheet[1][col('id')];
+  markStopAlertRead(sheet, { id: bId }, '2026-07-06T00:00:00.000Z');
+  const res = markStopAlertUnread(sheet, { id: a.id });
+  assert.equal(res.ok, true);
+  assert.equal(sheet[0][col('status')], 'unread', 'reopened row is unread again');
+  assert.equal(sheet[0][col('readAt')], '', 'readAt cleared');
+  assert.equal(sheet[1][col('status')], 'read', 'the other alert is untouched');
+  assert.equal(sheet[1][col('readAt')], '2026-07-06T00:00:00.000Z', 'the other readAt is untouched');
+});
+
+test('markStopAlertUnread needs an id and reports not_found for an unknown id', () => {
+  const sheet = [];
+  createStopAlert(sheet, { clientId: 'c1', clientName: 'א', reason: 'other' }, NOW);
+  assert.equal(markStopAlertUnread(sheet, {}).error, 'missing_id');
+  assert.equal(markStopAlertUnread(sheet, { id: 'stop-nope' }).error, 'not_found');
+});
+
 // --- secret (fail-closed) on the two cross-app endpoints --------------------
 
 test('getStopAlerts / markStopAlertRead auth is fail-closed', () => {
@@ -242,6 +281,22 @@ test('source: markStopAlertRead takes a lock and updates a single row by id in p
   assert.doesNotMatch(fn, /_writeAll/, 'must not rewrite the whole sheet');
 });
 
+test('source: markStopAlertUnread is routed in doPost and gated on _stopAlertsAuthOk (mirrors markStopAlertRead)', () => {
+  assert.match(SRC, /if \(action === 'markStopAlertUnread'\) \{[\s\S]*?if \(!_stopAlertsAuthOk\(msuParams\)\)[\s\S]*?return _json\(_markStopAlertUnread\(payload\)\);/);
+});
+
+test('source: markStopAlertUnread takes a lock and reopens a single row by id in place (readAt cleared)', () => {
+  const m = SRC.match(/function _markStopAlertUnread\(payload\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(m, '_markStopAlertUnread not found');
+  const fn = m[0];
+  assert.match(fn, /if \(!id\) return \{ ok: false, error: 'missing_id' \};/, 'must require an id');
+  assert.match(fn, /LockService\.getScriptLock\(\)/, 'markStopAlertUnread must take a lock');
+  assert.match(fn, /\.setValue\('unread'\)/, "must set status back to 'unread'");
+  assert.match(fn, /readAtIdx \+ 1\)\.setValue\(''\)/, 'must clear readAt');
+  assert.match(fn, /return \{ ok: false, error: 'not_found' \};/, 'must report not_found for an unknown id');
+  assert.doesNotMatch(fn, /_writeAll/, 'must not rewrite the whole sheet');
+});
+
 // ===========================================================================
 // Frontend wiring guard: the button CREATES an alert, no WhatsApp link.
 // ===========================================================================
@@ -311,5 +366,10 @@ test('wiring: submitStopAlert CREATES a stop alert with reason — no wa-link, n
 test('wiring: the duplicate guard still checks for an existing unread alert', () => {
   const m = APP.match(/function openStopAlertModal\(c\)\s*\{[\s\S]*?\n  \}/);
   assert.ok(m, 'openStopAlertModal not found');
-  assert.match(m[0], /status === 'unread'/, 'checks for an existing pending alert');
+  // The guard now delegates to hasPendingStopAlert (shared with the button's
+  // sent-state), which is where the unread check lives.
+  assert.match(m[0], /hasPendingStopAlert\(c\.id\)/, 'guard delegates to hasPendingStopAlert');
+  const h = APP.match(/function hasPendingStopAlert\(clientId\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(h, 'hasPendingStopAlert not found');
+  assert.match(h[0], /status === 'unread'/, 'checks for an existing pending (unread) alert');
 });
