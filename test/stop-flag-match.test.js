@@ -137,7 +137,7 @@ test('backfill: existing client with no stored phone inherits it from its lead',
   assert.equal(resolveStopFlagClient({ phone: '0543123276' }, clients).client.id, 'C1');
 });
 
-test('schema guard: Clients headers append the payment tail (append-only, no migration)', () => {
+test('schema guard: Clients headers mirror the frozen physical order (2026-07-06)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const m = src.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'CLIENTS_HEADERS not found');
@@ -145,20 +145,19 @@ test('schema guard: Clients headers append the payment tail (append-only, no mig
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n') // strip comments
     .match(/'[^']+'/g).map(s => s.slice(1, -1));
   assert.ok(cols.includes('phone'), 'phone column missing');
-  // Unifying the volta (live) and dashboard lines is APPEND-ONLY: volta's exact
-  // live column order is preserved verbatim, and the three dashboard payment
-  // columns are appended at the very END — so the live positional sheet needs NO
-  // migration.
+  // FROZEN 2026-07-06: the tail mirrors the PHYSICAL live sheet (dashboard-line
+  // layout), not the prior header array. The volta-only columns — physically
+  // unwritten on the live sheet — are the true trailing columns now.
   assert.deepEqual(
     cols.slice(-3),
-    ['paymentStatus', 'paymentDate', 'nextBillingDate'],
-    'payment columns must be appended LAST (append-only — no live-sheet migration)'
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo'],
+    'volta-only columns must be the trailing (physically-unwritten) columns'
   );
-  // volta's live order through assignedTo is untouched (nothing shifted).
+  // The payment tail sits directly after `phone`, matching the live physical sheet.
   const pi = cols.indexOf('phone');
   assert.deepEqual(
     cols.slice(pi, pi + 5),
-    ['phone', 'clinicalTreatmentType', 'creditsOwed', 'packageChangeDate', 'assignedTo'],
-    'volta live column order must be preserved verbatim'
+    ['phone', 'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed'],
+    'payment tail must sit directly after phone (frozen physical order)'
   );
 });

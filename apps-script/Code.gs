@@ -56,38 +56,42 @@ var CLIENTS_HEADERS = [
   // join key used by cross-app matching (debt, stop-flow). Volta's live column
   // order is preserved EXACTLY through here — nothing before this point moves.
   'phone',
-  // clinicalTreatmentType: clinical treatment type as recorded by the E-Zone
-  // Therapists app. When present on save, _deriveClientServiceType() runs it
-  // through the clinical→billing map and overwrites `serviceType` (clinical is
-  // the source of truth). Absent/empty -> serviceType left as-is (back-compat).
-  'clinicalTreatmentType',
-  // creditsOwed: SERVER-MANAGED running monthly-credit balance — mutated only by
-  // recordSessionOutcome (therapist_cancelled -> +1; a happened session beyond
-  // the monthly quota auto-draws -1). _saveAll preserves it by id so a dashboard
-  // save never reverts it. Default 0.
-  'creditsOwed',
-  // packageChangeDate (שינוי חבילה / package change): the date on which the
-  // patient's package was last changed (new price-per-session and/or weekly
-  // frequency). When present it becomes the billing RE-ANCHOR for the next
-  // renewal — the client computes גבייה הבאה = packageChangeDate + 1 month,
-  // taking precedence over paymentDate/startDate (see nextRenewalDueDate /
-  // renewalInfo / cycleEndDate). Carried through verbatim by _saveAll/_writeAll.
-  'packageChangeDate',
-  // assignedTo (משוייך ל / assigned-to): staff member responsible for this
-  // patient, copied from the originating lead on conversion so the assignee
-  // follows the person. Carried through verbatim by _saveAll/_writeAll — no
-  // server logic reads it. Old rows read back blank.
-  'assignedTo',
-  // ── APPEND-ONLY PAYMENT TAIL ────────────────────────────────────────────────
-  // paymentStatus / paymentDate / nextBillingDate persist the renewal anchor so
-  // the alert reads a stored nextBillingDate instead of falling back to startDate
-  // after every reload. APPEND-ONLY was chosen for the volta+dashboard unification:
-  // these three columns are added at the very END, AFTER assignedTo, so every
-  // existing volta column keeps its EXACT position. _readAll/_writeAll are
-  // positional and _ensureSheet does not migrate — appending (rather than
-  // reordering) means the live Clients sheet needs NO migration. Old rows read
-  // these three back blank until the next save. No backfill.
-  'paymentStatus', 'paymentDate', 'nextBillingDate'
+  // ── FROZEN PHYSICAL ORDER — verified against the LIVE Clients sheet 2026-07-06 ──
+  // The four columns below occupy the physical positions the DEPLOYED
+  // dashboard-hKjf9 script actually wrote (paymentStatus 27, paymentDate 28,
+  // nextBillingDate 29, creditsOwed 30 — directly after `phone` at 26). PR #56's
+  // "append-only" unification was append-only vs the *volta* header ARRAY but a
+  // MID-ARRAY INSERT vs the *physically-deployed* sheet: it placed the volta-only
+  // columns (clinicalTreatmentType/packageChangeDate/assignedTo) between phone and
+  // this payment tail. Because _ensureSheet relabels the header row but never
+  // migrates data, the deploy shifted every live paid/unpaid + date value under the
+  // wrong header name and made _deriveClientServiceType throw on every save (it read
+  // 'paid' as a clinical type). This order restores alignment WITH THE REAL SHEET —
+  // no data move needed. APPEND-ONLY FROM HERE, verified against the sheet itself
+  // (not merely the prior array). NEVER reorder or remove these; append only.
+  //
+  //   paymentStatus / paymentDate / nextBillingDate: persist the renewal anchor so
+  //     the alert reads a stored nextBillingDate instead of falling back to
+  //     startDate after every reload.
+  //   creditsOwed: SERVER-MANAGED running monthly-credit balance — mutated only by
+  //     recordSessionOutcome (therapist_cancelled -> +1; a happened session beyond
+  //     the monthly quota auto-draws -1). _saveAll preserves it by id so a
+  //     dashboard save never reverts it. Default 0.
+  'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
+  // ── volta-only columns: physically UNWRITTEN on the live (dashboard-line) sheet,
+  // so they append at the END with no migration. Old rows read them back blank
+  // until the next save; no backfill.
+  //   clinicalTreatmentType: clinical treatment type as recorded by the E-Zone
+  //     Therapists app. When present on save, _deriveClientServiceType() runs it
+  //     through the clinical→billing map and overwrites `serviceType` (clinical is
+  //     the source of truth). Absent/empty -> serviceType left as-is (back-compat).
+  //   packageChangeDate (שינוי חבילה): the date the patient's package was last
+  //     changed. When present it becomes the billing RE-ANCHOR for the next renewal
+  //     (גבייה הבאה = packageChangeDate + 1 month), taking precedence over
+  //     paymentDate/startDate (see nextRenewalDueDate / renewalInfo / cycleEndDate).
+  //   assignedTo (משוייך ל): staff member responsible for this patient, copied from
+  //     the originating lead on conversion so the assignee follows the person.
+  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -333,14 +337,150 @@ function _clinicalToBilling(clinicalType) {
 
 /* If a client row carries a clinicalTreatmentType, derive serviceType from it
  * (clinical is authoritative) and overwrite. Absent/empty -> leave serviceType
- * untouched (back-compat for legacy / not-yet-migrated rows). Throws on an
- * unknown clinical value rather than silently blanking. Mutates + returns. */
+ * untouched (back-compat for legacy / not-yet-migrated rows). Mutates + returns.
+ *
+ * FAIL-SOFT (hardened after the 2026-07-06 column-shift incident): an UNKNOWN
+ * clinical value must NEVER throw here. _saveAll derives EVERY client in one loop
+ * *before* it writes, so a single bad or column-misaligned row (e.g. a stray
+ * 'paid' left behind by a header/data mismatch) would abort the entire save and
+ * block the whole app. Warn and leave serviceType as-is instead. The strict
+ * _clinicalToBilling primitive still throws for callers that want validation
+ * (e.g. the explicit setClinicalType admin action, which also pre-validates). */
 function _deriveClientServiceType(client) {
   if (!client) return client;
   var clinical = String(client.clinicalTreatmentType == null ? '' : client.clinicalTreatmentType).trim();
   if (!clinical) return client;
-  client.serviceType = _clinicalToBilling(clinical);
+  if (!Object.prototype.hasOwnProperty.call(CLINICAL_TO_BILLING, clinical)) {
+    try {
+      Logger.log('WARN _deriveClientServiceType: unknown clinicalTreatmentType "' + clinical +
+        '" (id=' + (client && client.id != null ? client.id : '') + ') — leaving serviceType unchanged');
+    } catch (_) {}
+    return client; // one bad row must never block all saves
+  }
+  client.serviceType = CLINICAL_TO_BILLING[clinical];
   return client;
+}
+
+/* ===== Clients column-shift pre-condition scan (2026-07-06 incident) ========
+ *
+ * READ-ONLY forensic gate for the CLIENTS_HEADERS reorder (option a). It reads the
+ * live Clients sheet BY PHYSICAL POSITION (never via _readAll, whose header map was
+ * relabeled by the bad deploy) and confirms the sheet still matches the deployed
+ * dashboard-hKjf9 physical layout — i.e. the reorder can be shipped with NO data
+ * move. It writes NOTHING. Run it (secret-gated, COLUMN_REPAIR_SECRET) BEFORE
+ * deploying the reordered Code.gs; a non-empty `violations` / safeToReorder:false
+ * means some rows carry the post-unification layout (mixed sheet) — STOP and use a
+ * physical data repair instead.
+ *
+ * Physical positions (1-indexed) as written by the deployed dashboard-hKjf9 script:
+ *   phone 26 | paymentStatus 27 | paymentDate 28 | nextBillingDate 29 | creditsOwed 30
+ * Cols 31-33 must be EMPTY: no dashboard column ever wrote there, and had the buggy
+ * post-unification layout ever saved, paymentStatus/date/date would sit in 31/32/33. */
+var _REPAIR_PHYS = {
+  phone: 26,
+  paymentStatus: 27, paymentDate: 28, nextBillingDate: 29, creditsOwed: 30,
+  mustBeEmpty: [31, 32, 33] // relabel targets for the volta-only columns
+};
+
+function _looksPaymentStatus(v) {
+  if (v === '' || v === null) return true;
+  var s = String(v).trim().toLowerCase();
+  return s === 'paid' || s === 'unpaid' || s === 'partial';
+}
+function _looksDateCell(v) {
+  if (v === '' || v === null) return true;
+  if (v instanceof Date) return true;
+  return /^\d{4}-\d{2}-\d{2}/.test(String(v).trim());
+}
+function _looksCredits(v) {
+  if (v === '' || v === null) return true;
+  return isFinite(Number(v));
+}
+function _cellEmpty(v) { return v === '' || v === null; }
+
+function _columnRepairAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('COLUMN_REPAIR_SECRET');
+  if (!expected) return false; // fail-closed: not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  return got !== '' && got === expected;
+}
+
+function _scanClientColumns() {
+  var sh = _ss().getSheetByName('Clients');
+  if (!sh) return { ok: false, error: 'Clients sheet not found' };
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2) {
+    return { ok: true, scannedRows: 0, safeToReorder: true, verdict: 'SAFE: empty sheet', violations: [] };
+  }
+  var vals = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var P = _REPAIR_PHYS;
+  function cell(row, col1) { return col1 <= row.length ? row[col1 - 1] : ''; }
+  var summary = {
+    paymentStatus:   { physCol: P.paymentStatus,   pass: 0, fail: 0 },
+    paymentDate:     { physCol: P.paymentDate,      pass: 0, fail: 0 },
+    nextBillingDate: { physCol: P.nextBillingDate,  pass: 0, fail: 0 },
+    creditsOwed:     { physCol: P.creditsOwed,      pass: 0, fail: 0 },
+    tailEmpty:       { physCols: P.mustBeEmpty,     pass: 0, fail: 0 }
+  };
+  var violations = [];
+  var MAX_V = 100;
+  var scanned = 0;
+  for (var r = 0; r < vals.length; r++) {
+    var row = vals[r];
+    if (row.every(function (c) { return c === '' || c === null; })) continue;
+    scanned++;
+    var rowNum = r + 2;
+    var id = cell(row, 1);
+    var checks = [
+      ['paymentStatus',   P.paymentStatus,   _looksPaymentStatus, 'paid|unpaid|partial|empty'],
+      ['paymentDate',     P.paymentDate,      _looksDateCell,      'date|empty'],
+      ['nextBillingDate', P.nextBillingDate,  _looksDateCell,      'date|empty'],
+      ['creditsOwed',     P.creditsOwed,      _looksCredits,       'number|empty']
+    ];
+    for (var k = 0; k < checks.length; k++) {
+      var name = checks[k][0], col1 = checks[k][1], ok = checks[k][2], kind = checks[k][3];
+      var v = cell(row, col1);
+      if (ok(v)) { summary[name].pass++; }
+      else {
+        summary[name].fail++;
+        if (violations.length < MAX_V) {
+          violations.push({ row: rowNum, id: String(id), field: name, physCol: col1,
+            value: (v instanceof Date ? 'DATE:' + Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd') : String(v)),
+            expected: kind });
+        }
+      }
+    }
+    var tailOk = true;
+    for (var m = 0; m < P.mustBeEmpty.length; m++) {
+      var tv = cell(row, P.mustBeEmpty[m]);
+      if (!_cellEmpty(tv)) {
+        tailOk = false;
+        if (violations.length < MAX_V) {
+          violations.push({ row: rowNum, id: String(id), field: 'postUnificationTail', physCol: P.mustBeEmpty[m],
+            value: (tv instanceof Date ? 'DATE:' + Utilities.formatDate(tv, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd') : String(tv)),
+            expected: 'empty' });
+        }
+      }
+    }
+    if (tailOk) summary.tailEmpty.pass++; else summary.tailEmpty.fail++;
+  }
+  var totalFail = summary.paymentStatus.fail + summary.paymentDate.fail +
+    summary.nextBillingDate.fail + summary.creditsOwed.fail + summary.tailEmpty.fail;
+  return {
+    ok: true,
+    readOnly: true,
+    scannedRows: scanned,
+    lastCol: lastCol,
+    physicalLayoutAssumed: P,
+    summary: summary,
+    safeToReorder: totalFail === 0,
+    verdict: totalFail === 0
+      ? 'SAFE: live sheet matches the dashboard physical layout (cols 27-30 = paymentStatus/paymentDate/nextBillingDate/creditsOwed; cols 31-33 empty). Reorder needs no data move.'
+      : 'STOP: mixed-layout rows found — cells were written under the post-unification layout. Option (a) is unsafe; use a physical data repair (option b).',
+    violations: violations,
+    violationsTruncated: violations.length >= MAX_V
+  };
 }
 
 /* ===== Pay + price mirrors (task 4.8-step3-out) =============================
@@ -2201,6 +2341,13 @@ function doGet(e) {
       }
       return _json(_getTreatmentPlans());
     }
+    if (action === 'scanClientColumns') {
+      // READ-ONLY column-shift pre-condition scan (2026-07-06). Writes nothing.
+      if (!_columnRepairAuthOk(e && e.parameter)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_scanClientColumns());
+    }
     if (action === 'getStopFlags') return _json(_getStopFlags());
     if (action === 'getStopAlerts') {
       if (!_stopAlertsAuthOk(e && e.parameter)) {
@@ -2283,6 +2430,15 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_createLead(payload));
+    }
+    if (action === 'scanClientColumns') {
+      // READ-ONLY column-shift pre-condition scan (2026-07-06). Writes nothing.
+      var scParams = (e && e.parameter) || {};
+      if (payload && payload.secret) scParams.secret = payload.secret;
+      if (!_columnRepairAuthOk(scParams)) {
+        return _json({ ok: false, error: 'unauthorized' });
+      }
+      return _json(_scanClientColumns());
     }
     if (action === 'setClinicalType') {
       var ctParams = (e && e.parameter) || {};
