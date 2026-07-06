@@ -113,6 +113,31 @@
   }
 
   /**
+   * Sort comparator for continuation rows within a house.
+   *   - tenure DESC — longest-admitted first (largest `months`), i.e. the
+   *     patients closest to finishing their stay float to the top;
+   *   - a row with a missing/invalid entryDate (`months == null`) always sorts
+   *     last, regardless of the other row's tenure;
+   *   - ties (equal tenure, or two missing-date rows) break alphabetically by
+   *     name using Hebrew collation.
+   * Pure: reads only `months` and `name` off each row, mutates nothing.
+   * @param {{months:(number|null), name:string}} a
+   * @param {{months:(number|null), name:string}} b
+   * @returns {number} <0, 0, or >0 for Array.prototype.sort
+   */
+  function compareByTenure(a, b) {
+    var am = (a && a.months != null) ? a.months : null;
+    var bm = (b && b.months != null) ? b.months : null;
+    var an = String(a && a.name != null ? a.name : '');
+    var bn = String(b && b.name != null ? b.name : '');
+    if (am == null && bm == null) return an.localeCompare(bn, 'he');
+    if (am == null) return 1;   // a missing -> a after b
+    if (bm == null) return -1;  // b missing -> a before b
+    if (bm !== am) return bm - am; // tenure DESC (longest-admitted first)
+    return an.localeCompare(bn, 'he'); // tiebreak: Hebrew alphabetical
+  }
+
+  /**
    * Map a dashboard houseId to the outpatient house_of_origin key, or '' when
    * the house has no outpatient equivalent (the caller then keeps the raw id in
    * the note instead of persisting an unrecognizable value).
@@ -131,6 +156,7 @@
     monthsSince: monthsSince,
     bucketOf: bucketOf,
     isValidOutcome: isValidOutcome,
+    compareByTenure: compareByTenure,
     houseToOrigin: houseToOrigin
   };
 });

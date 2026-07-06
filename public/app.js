@@ -2358,6 +2358,11 @@
 
   function continuationRowHtml(p, editor) {
     var badge = continuationTenureBadge(p);
+    // Admission date beside the tenure badge (dd/mm/yyyy), blank when the roster
+    // carries no entryDate. Reuses the app-wide displayDate() helper.
+    var entryHtml = p.entryDate
+      ? '<span class="continuation-entrydate">' + escapeHtml(displayDate(p.entryDate)) + '</span>'
+      : '';
     var outcomeChip = p.outcome
       ? '<span class="chip continuation-outcome-chip continuation-oc-' + p.outcome + '">' +
           escapeHtml(CONTINUATION_OUTCOME_LABELS[p.outcome]) + '</span>'
@@ -2368,7 +2373,7 @@
       : '';
     var head = '<div class="continuation-main">' +
       '<span class="continuation-name">' + escapeHtml(p.name) + '</span>' +
-      phoneHtml + badge + outcomeChip +
+      phoneHtml + badge + entryHtml + outcomeChip +
     '</div>';
 
     var body;
@@ -2404,13 +2409,12 @@
     '</details>';
   }
 
-  // Longest-tenure first; missing entryDate (months == null) sorts last.
+  // Longest-tenure first; missing entryDate (months == null) sorts last;
+  // Hebrew-alphabetical tiebreak. The comparator is the single source of truth
+  // in continuation-logic.js (pure + unit-tested); renderContinuation() has
+  // already bailed if the module failed to load, so it is always present here.
   function continuationSort(a, b) {
-    if (a.months == null && b.months == null) return a.name.localeCompare(b.name, 'he');
-    if (a.months == null) return 1;
-    if (b.months == null) return -1;
-    if (b.months !== a.months) return b.months - a.months;
-    return a.name.localeCompare(b.name, 'he');
+    return window.ContinuationLogic.compareByTenure(a, b);
   }
 
   function continuationSection(house, rows, editor) {
