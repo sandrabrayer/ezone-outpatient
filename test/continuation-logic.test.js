@@ -91,6 +91,61 @@ test('isValidOutcome accepts only whitelisted keys', () => {
   assert.equal(CL.isValidOutcome(undefined), false);
 });
 
+// --- compareByTenure --------------------------------------------------------
+// Rows are sorted within a house by tenure DESC (longest-admitted first),
+// missing entryDate (months == null) last, Hebrew-alphabetical tiebreak.
+test('compareByTenure: normal ordering — longest tenure first', () => {
+  const rows = [
+    { name: 'א', months: 1 },
+    { name: 'ב', months: 4 },
+    { name: 'ג', months: 2 }
+  ];
+  rows.sort(CL.compareByTenure);
+  assert.deepEqual(rows.map(r => r.months), [4, 2, 1]);
+});
+
+test('compareByTenure: rows with a missing entryDate sort last', () => {
+  const rows = [
+    { name: 'א', months: null },
+    { name: 'ב', months: 3 },
+    { name: 'ג', months: null },
+    { name: 'ד', months: 1 }
+  ];
+  rows.sort(CL.compareByTenure);
+  // dated rows first (by tenure DESC), then both null-tenure rows.
+  assert.deepEqual(rows.map(r => r.months), [3, 1, null, null]);
+  // a missing-date row always sorts after a dated one regardless of position.
+  assert.ok(CL.compareByTenure({ name: 'x', months: null }, { name: 'y', months: 0 }) > 0);
+  assert.ok(CL.compareByTenure({ name: 'x', months: 0 }, { name: 'y', months: null }) < 0);
+});
+
+test('compareByTenure: equal tenure breaks alphabetically (Hebrew)', () => {
+  const rows = [
+    { name: 'רון', months: 2 },
+    { name: 'אבי', months: 2 },
+    { name: 'גיל', months: 2 }
+  ];
+  rows.sort(CL.compareByTenure);
+  assert.deepEqual(rows.map(r => r.name), ['אבי', 'גיל', 'רון']);
+});
+
+test('compareByTenure: two missing-date rows still break alphabetically', () => {
+  const rows = [
+    { name: 'רון', months: null },
+    { name: 'אבי', months: null }
+  ];
+  rows.sort(CL.compareByTenure);
+  assert.deepEqual(rows.map(r => r.name), ['אבי', 'רון']);
+});
+
+test('compareByTenure: is pure — equal rows compare to 0, inputs unchanged', () => {
+  const a = { name: 'דנה', months: 2 };
+  const b = { name: 'דנה', months: 2 };
+  assert.equal(CL.compareByTenure(a, b), 0);
+  assert.deepEqual(a, { name: 'דנה', months: 2 });
+  assert.deepEqual(b, { name: 'דנה', months: 2 });
+});
+
 // --- houseToOrigin ----------------------------------------------------------
 test('houseToOrigin maps the dashboard houseIds to outpatient house_of_origin keys', () => {
   assert.equal(CL.houseToOrigin('arfoni'), 'efroni');

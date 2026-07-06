@@ -899,3 +899,13 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   #renewModal .form-actions .btn { width: 100%; }
   #renewMarkPaid { margin-inline-end: 0; order: 3; } /* below the primary actions */
 }
+
+/* ===== מסלול המשך: admission date beside the tenure badge (appended) =====
+ * Small, muted date (dd/mm/yyyy) rendered next to each patient's tenure badge.
+ * It is plain text — not a control — so it needs no touch target; it lives in
+ * the flex-wrap .continuation-main, so it wraps with the badge/phone on phones
+ * (the ≤600px row-stacking rule above already handles the layout). */
+.continuation-entrydate {
+  color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
