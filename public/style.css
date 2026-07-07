@@ -657,6 +657,18 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   font-weight: 700;
 }
 .btn-wa-stop:hover { background: #ff7676 !important; }
+/* Two-way treatment-alert controls on an overdue row */
+.btn-resume {
+  background: #1f6f4a !important;
+  color: #eafff4 !important;
+  border: 1px solid #2e9e6c !important;
+  font-weight: 700;
+}
+.btn-resume:hover { background: #278a5c !important; }
+.stop-chip { font-weight: 700; align-self: center; }
+.stop-chip-sent { background: #3a1a1a; color: #ffb3b3; border-color: #6b2a2a; }
+.stop-chip-resumed { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
+.stop-chip-cancelled { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
 
 /* Extra charges (חיובים נוספים) */
 .billing-row-extra {
