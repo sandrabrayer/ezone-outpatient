@@ -181,19 +181,24 @@ var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
  * are fail-closed behind STOP_ALERTS_SECRET (mirrors SESSION_OUTCOME_SECRET — a
  * missing Script Property rejects every request). */
 var STOP_ALERTS_SHEET = 'התראות עצירת טיפול';
-/* 'reason' was APPENDED at the end (July 6) — the sheet is only days old so no
- * data migration is needed. _ensureSheet relabels the header row in place; the
- * one thing that matters is that appending (never inserting mid-array) keeps
- * every earlier column at its original index. Any pre-'reason' row is shorter
- * than the header: _readAll requests headers.length columns and Sheets pads the
- * missing trailing cell to '', so a legacy alert simply reads reason: ''. */
+/* Columns are APPEND-ONLY (like CLIENTS_HEADERS). 'reason' was appended July 6;
+ * 'type' then 'cancelledAt' were appended July 7 for the two-way stop/resume flow.
+ * _ensureSheet relabels the header row in place; appending (never inserting
+ * mid-array) keeps every earlier column at its original index. A row written
+ * before a column existed is shorter than the header: _readAll requests
+ * headers.length columns and Sheets pads the missing trailing cells to '', so a
+ * legacy row reads reason: '', type: '' (treat '' as 'stop'), cancelledAt: ''. */
 var STOP_ALERTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason'
+  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason', 'type', 'cancelledAt'
 ];
 /* Allowed stop-alert reasons (stable keys; Hebrew labels are render-time only,
  * in the therapists app + public/app.js). createStopAlert is fail-closed on
  * this set: a missing or unknown reason is rejected, never written. */
 var STOP_ALERT_REASONS = { no_payment: true, mismatch: true, other: true };
+/* Alert type (stable keys). 'stop' = pause-treatment alert (createStopAlert);
+ * 'resume' = resume-treatment alert (resumeTreatmentAlert, only when the stop was
+ * already READ). A legacy row with an empty type cell is treated as 'stop'. */
+var STOP_ALERT_TYPES = { stop: true, resume: true };
 
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
@@ -2010,7 +2015,9 @@ function _createStopAlert(payload) {
       status: 'unread',
       readAt: '',
       note: String((payload && payload.note) || '').trim().slice(0, 1000),
-      reason: reason
+      reason: reason,
+      type: 'stop',
+      cancelledAt: ''
     };
     sh.appendRow(STOP_ALERTS_HEADERS.map(function (h) {
       return alert[h] == null ? '' : alert[h];
@@ -2099,6 +2106,93 @@ function _markStopAlertUnread(payload) {
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+/* Resume-treatment: the INTERNAL write the outpatient app fires when Vered hits
+ * "חידוש טיפול" on a patient who had a stop alert. Same trust level as
+ * createStopAlert (posted same-origin through the Node proxy; NO cross-app
+ * secret). Atomically, under one LockService lock:
+ *   (a) every UNREAD 'stop' alert for the clientId is cancelled (status
+ *       'cancelled' + cancelledAt now) — Yarden never saw it, so it just vanishes;
+ *   (b) if any 'stop' alert for the clientId was already READ, a NEW row is
+ *       appended (type 'resume', status 'unread', reason '') — Yarden gets a
+ *       resume alert ONLY because she saw the stop.
+ * A legacy row with an empty type cell counts as 'stop'. Clients is never touched.
+ * Returns { ok:true, cancelled:<n>, resumeCreated:<bool> }. */
+function _resumeTreatmentAlert(payload) {
+  var clientId = String((payload && payload.clientId) || '').trim();
+  var clientName = String((payload && payload.clientName) || '').trim();
+  if (!clientId) return { ok: false, error: 'missing_client_id' };
+  if (!clientName) return { ok: false, error: 'missing_client_name' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+    var clientIdIdx = STOP_ALERTS_HEADERS.indexOf('clientId');
+    var statusIdx = STOP_ALERTS_HEADERS.indexOf('status');
+    var typeIdx = STOP_ALERTS_HEADERS.indexOf('type');
+    var cancelledAtIdx = STOP_ALERTS_HEADERS.indexOf('cancelledAt');
+    var cancelled = 0;
+    var hadReadStop = false;
+    var lastRow = sh.getLastRow();
+    if (lastRow >= 2) {
+      var rows = sh.getRange(2, 1, lastRow - 1, STOP_ALERTS_HEADERS.length).getValues();
+      var nowISO = new Date().toISOString();
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][clientIdIdx]) !== clientId) continue;
+        var t = String(rows[i][typeIdx] || '');
+        if (t !== '' && t !== 'stop') continue; // only 'stop' (legacy '' == stop)
+        var st = String(rows[i][statusIdx] || '');
+        if (st === 'unread') {
+          sh.getRange(i + 2, statusIdx + 1).setValue('cancelled');
+          sh.getRange(i + 2, cancelledAtIdx + 1).setValue(nowISO);
+          cancelled++;
+        } else if (st === 'read') {
+          hadReadStop = true;
+        }
+      }
+    }
+    var resumeCreated = false;
+    if (hadReadStop) {
+      var resume = {
+        id: 'stop-' + Utilities.getUuid(),
+        clientId: clientId,
+        clientName: clientName,
+        createdAt: new Date().toISOString(),
+        createdBy: String((payload && payload.createdBy) || '').trim(),
+        status: 'unread',
+        readAt: '',
+        note: '',
+        reason: '',
+        type: 'resume',
+        cancelledAt: ''
+      };
+      sh.appendRow(STOP_ALERTS_HEADERS.map(function (h) {
+        return resume[h] == null ? '' : resume[h];
+      }));
+      resumeCreated = true;
+    }
+    return { ok: true, cancelled: cancelled, resumeCreated: resumeCreated };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Minimal INTERNAL read for the outpatient app's own sent-state (survives a page
+ * reload). Same trust level as createStopAlert — NO cross-app secret — so it is
+ * deliberately lean: id / clientId / status / type ONLY, never notes/reasons/
+ * names. A legacy empty type reads as 'stop'. The therapists app must keep using
+ * the SECRET-gated getStopAlerts (full rows); this is not a substitute. */
+function _getMyStopAlerts() {
+  var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
+  var all = _readAll(sh, STOP_ALERTS_HEADERS);
+  return {
+    ok: true,
+    myStopAlerts: all.map(function (a) {
+      return { id: a.id, clientId: a.clientId, status: a.status, type: (a.type || 'stop') };
+    })
+  };
 }
 
 /* ===== Create lead (inbound, fail-closed write) =====
@@ -2402,6 +2496,11 @@ function doGet(e) {
       }
       return _json(_getStopAlerts());
     }
+    if (action === 'getMyStopAlerts') {
+      // INTERNAL minimal read (same trust level as createStopAlert) — the
+      // outpatient app's own sent-state; no cross-app secret.
+      return _json(_getMyStopAlerts());
+    }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveAll') {
@@ -2563,6 +2662,15 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_markStopAlertUnread(payload));
+    }
+    if (action === 'resumeTreatmentAlert') {
+      // INTERNAL write (same trust level as createStopAlert) — the outpatient app
+      // posts it same-origin through the Node proxy; no cross-app secret.
+      return _json(_resumeTreatmentAlert(payload));
+    }
+    if (action === 'getMyStopAlerts') {
+      // INTERNAL minimal read (same trust level as createStopAlert); no secret.
+      return _json(_getMyStopAlerts());
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());

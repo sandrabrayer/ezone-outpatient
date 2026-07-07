@@ -490,6 +490,26 @@
       </div>
     </div>
 
+    <!-- Resume-treatment (חידוש טיפול) confirm — the resume side of the two-way
+         flow. Explains the branch: cancels the stop alert if Yarden hasn't read it
+         yet, otherwise sends her a resume alert. -->
+    <div id="resumeTreatmentModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">חידוש טיפול</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          עבור <span id="resumeTreatmentClientName"></span>
+        </div>
+        <p style="margin:0 0 12px;color:var(--text-soft);font-size:13px;line-height:1.5;">
+          הפעולה מבטלת את התראת העצירה אם ירדן טרם קראה אותה. אם ההתראה כבר נקראה —
+          תישלח לירדן התראת חידוש טיפול.
+        </p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+          <button type="button" class="btn btn-primary" id="resumeTreatmentConfirm">חידוש טיפול</button>
+        </div>
+      </div>
+    </div>
+
     <div id="notRelevantReasonModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">סיבת אי-רלוונטיות</div>

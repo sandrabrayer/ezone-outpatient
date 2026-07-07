@@ -27,9 +27,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// --- mirror of STOP_ALERTS_HEADERS (apps-script/Code.gs) — 'reason' appended last ---
+// --- mirror of STOP_ALERTS_HEADERS (apps-script/Code.gs) — 'type' then 'cancelledAt' appended last ---
 const STOP_ALERTS_HEADERS = [
-  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason'
+  'id', 'clientId', 'clientName', 'createdAt', 'createdBy', 'status', 'readAt', 'note', 'reason', 'type', 'cancelledAt'
 ];
 const col = (name) => STOP_ALERTS_HEADERS.indexOf(name);
 
@@ -54,7 +54,9 @@ function createStopAlert(sheet, payload, nowISO) {
     status: 'unread',
     readAt: '',
     note: String((payload && payload.note) || '').trim().slice(0, 1000),
-    reason
+    reason,
+    type: 'stop',
+    cancelledAt: ''
   };
   sheet.push(STOP_ALERTS_HEADERS.map((h) => (alert[h] == null ? '' : alert[h])));
   return { ok: true, alert };
@@ -148,13 +150,16 @@ test('createStopAlert note is optional and caps at 1000 chars', () => {
   assert.equal(sheet[1][col('note')].length, 1000);
 });
 
-test('legacy pre-reason rows (shorter than the header) read reason as an empty string', () => {
-  // A row written before 'reason' existed has only the first 8 cells; Sheets pads
-  // the requested headers.length columns with '' — the read path must tolerate it.
+test('legacy pre-reason rows (shorter than the header) read the appended columns as empty strings', () => {
+  // A row written before 'reason'/'type'/'cancelledAt' existed has only the first
+  // 8 cells; Sheets pads the requested headers.length columns with '' — the read
+  // path must tolerate it (a legacy '' type is treated as 'stop' downstream).
   const legacyRow = ['stop-old', 'c9', 'דנה', NOW, 'Vered', 'unread', '', 'הערה ישנה'];
-  assert.equal(legacyRow.length, STOP_ALERTS_HEADERS.length - 1, 'legacy row is one cell short');
+  assert.equal(legacyRow.length, STOP_ALERTS_HEADERS.length - 3, 'legacy row is three cells short (reason/type/cancelledAt)');
   const padded = STOP_ALERTS_HEADERS.map((h, i) => (i < legacyRow.length ? legacyRow[i] : ''));
   assert.equal(padded[col('reason')], '', 'missing trailing reason reads as empty');
+  assert.equal(padded[col('type')], '', 'missing trailing type reads as empty (→ treated as stop)');
+  assert.equal(padded[col('cancelledAt')], '', 'missing trailing cancelledAt reads as empty');
   assert.equal(padded[col('note')], 'הערה ישנה', 'earlier columns keep their index');
 });
 
@@ -221,12 +226,13 @@ test('getStopAlerts / markStopAlertRead auth is fail-closed', () => {
 // ===========================================================================
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
 
-test('source: STOP_ALERTS_HEADERS exact order matches the mirror, reason LAST', () => {
+test('source: STOP_ALERTS_HEADERS exact order matches the mirror, type then cancelledAt LAST', () => {
   const m = SRC.match(/var STOP_ALERTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'STOP_ALERTS_HEADERS not found');
   const cols = m[1].match(/'[^']+'/g).map((s) => s.slice(1, -1));
   assert.deepEqual(cols, STOP_ALERTS_HEADERS);
-  assert.equal(cols[cols.length - 1], 'reason', 'reason must be the LAST (appended) header');
+  assert.equal(cols[cols.length - 2], 'type', "'type' must be the second-to-last (appended) header");
+  assert.equal(cols[cols.length - 1], 'cancelledAt', "'cancelledAt' must be the LAST (appended) header");
 });
 
 test('source: STOP_ALERT_REASONS is exactly the allowed set', () => {
@@ -251,6 +257,8 @@ test('source: createStopAlert is INTERNAL (routed with no secret) and appends on
   // reason is required + fail-closed on the allowed set, and persisted on the row
   assert.match(fn, /if \(!STOP_ALERT_REASONS\[reason\]\) return \{ ok: false, error: 'invalid_reason' \};/, 'must reject an invalid reason');
   assert.match(fn, /reason: reason/, 'must persist the reason on the appended alert');
+  // two-way flow: createStopAlert stamps type 'stop' explicitly
+  assert.match(fn, /type: 'stop'/, "must write type 'stop'");
 });
 
 test('source: _stopAlertsAuthOk is fail-closed and reads STOP_ALERTS_SECRET from Script Properties only', () => {
@@ -355,21 +363,22 @@ test('wiring: submitStopAlert CREATES a stop alert with reason — no wa-link, n
   assert.match(fn, /apiPostAction\('createStopAlert'/, 'must call createStopAlert');
   assert.match(fn, /reason: reason/, 'payload must include the reason');
   assert.match(fn, /toast\('נשלחה התראת עצירה לירדן'\)/, 'success toast');
-  // optimistic push + rollback splice on state.stopAlerts
-  assert.match(fn, /state\.stopAlerts\.push\(/, 'optimistic push');
-  assert.match(fn, /state\.stopAlerts\.splice\(/, 'rollback on failure');
+  // optimistic push + rollback splice on state.myStopAlerts (type 'stop')
+  assert.match(fn, /state\.myStopAlerts\.push\(/, 'optimistic push');
+  assert.match(fn, /state\.myStopAlerts\.splice\(/, 'rollback on failure');
+  assert.match(fn, /type: 'stop'/, 'optimistic row is a stop-type row');
   // the flow must NOT read the treatment contact phone or open WhatsApp
   assert.doesNotMatch(fn, /treatmentContactPhone/, 'stop-alert flow must not read treatmentContactPhone');
   assert.doesNotMatch(fn, /openWhatsApp|wa\.me/, 'stop-alert flow must not build a WhatsApp link');
 });
 
-test('wiring: the duplicate guard still checks for an existing unread alert', () => {
+test('wiring: the duplicate guard checks whether a stop alert is already standing', () => {
   const m = APP.match(/function openStopAlertModal\(c\)\s*\{[\s\S]*?\n  \}/);
   assert.ok(m, 'openStopAlertModal not found');
-  // The guard now delegates to hasPendingStopAlert (shared with the button's
-  // sent-state), which is where the unread check lives.
-  assert.match(m[0], /hasPendingStopAlert\(c\.id\)/, 'guard delegates to hasPendingStopAlert');
-  const h = APP.match(/function hasPendingStopAlert\(clientId\)\s*\{[\s\S]*?\n  \}/);
-  assert.ok(h, 'hasPendingStopAlert not found');
-  assert.match(h[0], /status === 'unread'/, 'checks for an existing pending (unread) alert');
+  // The guard now delegates to stopAlertStanding (shared with the row's chip),
+  // which is where the unread/read check lives.
+  assert.match(m[0], /stopAlertStanding\(c\.id\)/, 'guard delegates to stopAlertStanding');
+  const h = APP.match(/function stopAlertStanding\(clientId\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(h, 'stopAlertStanding not found');
+  assert.match(h[0], /a\.status === 'unread' \|\| a\.status === 'read'/, 'standing = latest stop is unread or read');
 });

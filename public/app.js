@@ -142,7 +142,7 @@
     payments: [],
     charges: [],
     stopFlags: [],  // stop-treatment flags from the therapists app (await confirmation)
-    stopAlerts: [], // stop-treatment alerts THIS app created for the therapists app (Yarden's "עצירת טיפול" tab); tracked in-session for trivial-duplicate detection
+    myStopAlerts: [], // this app's own stop/resume alert rows (id/clientId/status/type), seeded cross-session from getMyStopAlerts and updated optimistically — drives the sent/standing chip on overdue rows
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
     leadSearch: '',
@@ -612,6 +612,15 @@
   }
   async function apiGetSessionLog() {
     var r = await fetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  // Minimal INTERNAL read of this app's own stop/resume alerts (id/clientId/status/
+  // type only — no secret, no notes/reasons). Used to know the sent-state across
+  // sessions, not just the current optimistic one.
+  async function apiGetMyStopAlerts() {
+    var r = await fetch('/api/sheets?action=getMyStopAlerts', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -1531,9 +1540,7 @@
       '<div class="renewal-actions">' +
         (kind === 'stop'
           ? '<button class="btn btn-wa" data-action="wa-payer-overdue">💬 בקשת תשלום למשלם</button>' +
-            (hasPendingStopAlert(c.id)
-              ? '<button class="btn btn-wa-stop" data-action="stop-alert" disabled>' + STOP_ALERT_SENT_LABEL + '</button>'
-              : '<button class="btn btn-wa-stop" data-action="stop-alert">🛑 הודעת עצירת טיפול</button>')
+            renderStopAlertControl(c)
           : '<button class="btn btn-wa" data-action="wa-payer-renewal">💬 בקשת חידוש למשלם</button>'
         ) +
       '</div>' +
@@ -1559,6 +1566,8 @@
       openWhatsApp(c.payerPhone, buildPayerOverdueMsg(c));
     } else if (action === 'stop-alert') {
       sendStopAlert(c);
+    } else if (action === 'resume-treatment') {
+      resumeTreatment(c);
     }
   }
 
@@ -1571,35 +1580,52 @@
     other:      'אחר'
   };
 
-  // Overdue-panel button labels. The unsent label is also written as a literal in
-  // renderRenewalRow (so the wiring guard can match it); once an alert has been
-  // sent this session the button flips to the sent label and disables.
-  var STOP_ALERT_UNSENT_LABEL = '🛑 הודעת עצירת טיפול';
-  var STOP_ALERT_SENT_LABEL = 'נשלחה התראה ✓';
-
-  // A stop-alert is "sent" (for this session) when an unread alert for the client
-  // sits in state.stopAlerts — the SAME optimistic list submitStopAlert appends to
-  // and rolls back from. One source of truth for both the duplicate-pending warning
-  // and the button's sent state; a page reload clears it (session-scoped, by design).
-  function hasPendingStopAlert(clientId) {
-    return (state.stopAlerts || []).some(function (a) {
-      return a.clientId === clientId && a.status === 'unread';
-    });
+  // Two-way treatment alerts — Vered's sent-state is driven by state.myStopAlerts
+  // (id/clientId/status/type rows, seeded cross-session from getMyStopAlerts and
+  // updated optimistically). The LATEST alert row for a client (append order =
+  // chronological) decides the control on its overdue row:
+  //   • latest is a 'stop' still unread/read → standing → 'נשלחה התראת עצירה' chip + חידוש טיפול
+  //   • latest is a 'stop' that was cancelled → 'ההתראה בוטלה' chip + the stop-send button
+  //   • latest is a 'resume' (unread/read)    → 'נשלח חידוש' chip + the stop-send button
+  //   • no alert                              → the stop-send button only
+  function latestAlertFor(clientId) {
+    var list = state.myStopAlerts || [];
+    var latest = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].clientId === clientId) latest = list[i];
+    }
+    return latest;
   }
-  // Reflect the sent/unsent state onto the live overdue-panel button(s) for a
-  // client WITHOUT a full re-render — so an optimistic send (and its rollback)
-  // is visible immediately. A later render() re-derives the same state via
-  // hasPendingStopAlert in renderRenewalRow, so the change also survives re-renders.
-  function applyStopAlertButtonState(clientId) {
-    var box = $('#renewalsAlerts');
-    if (!box) return;
-    var sent = hasPendingStopAlert(clientId);
-    Array.prototype.forEach.call(box.querySelectorAll('[data-action="stop-alert"]'), function (btn) {
-      var row = btn.closest('[data-client-id]');
-      if (!row || row.getAttribute('data-client-id') !== clientId) return;
-      btn.disabled = sent;
-      btn.textContent = sent ? STOP_ALERT_SENT_LABEL : STOP_ALERT_UNSENT_LABEL;
-    });
+  // A stop alert is "standing" (sent, awaiting/seen by Yarden, not yet resolved)
+  // when the latest alert for the client is a 'stop' that is unread or read.
+  function stopAlertStanding(clientId) {
+    var a = latestAlertFor(clientId);
+    return !!a && (a.type || 'stop') === 'stop' && (a.status === 'unread' || a.status === 'read');
+  }
+  // Re-render only the overdue/renewals panel after an optimistic change — cheaper
+  // than a full render() and enough, since the controls live only in that panel.
+  function refreshRenewalsPanel() {
+    var activeOnly = state.clients.filter(function (c) { return c.status === 'פעיל'; });
+    renderRenewalAlerts(activeOnly);
+  }
+  // The stop-alert control (status chip + action) for one overdue row.
+  function renderStopAlertControl(c) {
+    var a = latestAlertFor(c.id);
+    var type = a ? (a.type || 'stop') : '';
+    var active = !!a && (a.status === 'unread' || a.status === 'read');
+    if (a && type === 'stop' && active) {
+      return '<span class="chip stop-chip stop-chip-sent">נשלחה התראת עצירה</span>' +
+        (state.role === 'editor'
+          ? '<button class="btn btn-resume" data-action="resume-treatment">חידוש טיפול</button>'
+          : '');
+    }
+    var chip = '';
+    if (a && type === 'resume' && active) {
+      chip = '<span class="chip stop-chip stop-chip-resumed">נשלח חידוש</span>';
+    } else if (a && type === 'stop' && a.status === 'cancelled') {
+      chip = '<span class="chip stop-chip stop-chip-cancelled">ההתראה בוטלה</span>';
+    }
+    return chip + '<button class="btn btn-wa-stop" data-action="stop-alert">🛑 הודעת עצירת טיפול</button>';
   }
 
   // "הודעת עצירת טיפול" CREATES a persistent stop-treatment alert for the E-Zone
@@ -1618,8 +1644,10 @@
     if (form) form.reset();
     var nameEl = $('#stopAlertClientName');
     if (nameEl) nameEl.textContent = c.name || '';
-    // Duplicate guard: warn (do not block) if an unread alert is already pending.
-    var pendingExists = hasPendingStopAlert(c.id);
+    // Duplicate guard: warn (do not block) if a stop alert is already standing.
+    // (The send button only shows when none is standing, so this is a belt-and-
+    // braces guard for direct/programmatic opens.)
+    var pendingExists = stopAlertStanding(c.id);
     var warn = $('#stopAlertPending');
     if (warn) warn.hidden = !pendingExists;
     var hint = $('#stopAlertOtherHint');
@@ -1640,22 +1668,11 @@
   function submitStopAlert(reason, note) {
     var c = state.clients.find(function (x) { return x.id === stopAlertClientId; });
     if (!c) return;
-    var optimistic = {
-      id: 'stop-pending-' + Date.now(),
-      clientId: c.id,
-      clientName: c.name,
-      createdAt: new Date().toISOString(),
-      createdBy: 'Vered',
-      status: 'unread',
-      readAt: '',
-      note: note,
-      reason: reason
-    };
-    state.stopAlerts.push(optimistic);
-    // Optimistic UX: flip the row's button to the disabled sent state immediately
-    // (the toast alone was too transient — the row looked unchanged, so a real send
-    // read as "nothing happened"). Rolled back below if the write fails.
-    applyStopAlertButtonState(c.id);
+    // Optimistic: append a minimal 'stop' row so the row flips to the sent chip
+    // immediately (the toast alone was too transient). Rolled back on failure.
+    var optimistic = { id: 'stop-pending-' + Date.now(), clientId: c.id, status: 'unread', type: 'stop' };
+    state.myStopAlerts.push(optimistic);
+    refreshRenewalsPanel();
     apiPostAction('createStopAlert', {
       clientId: c.id, clientName: c.name, createdBy: 'Vered', note: note, reason: reason
     })
@@ -1664,10 +1681,58 @@
         toast('נשלחה התראת עצירה לירדן');
       })
       .catch(function (err) {
-        var idx = state.stopAlerts.indexOf(optimistic);
-        if (idx !== -1) state.stopAlerts.splice(idx, 1);
-        applyStopAlertButtonState(c.id); // re-enable the button — the send did not land
+        var idx = state.myStopAlerts.indexOf(optimistic);
+        if (idx !== -1) state.myStopAlerts.splice(idx, 1);
+        refreshRenewalsPanel(); // roll back — the send did not land
         toast('ההתראה לא נשלחה: ' + err.message, true);
+      });
+  }
+
+  // "חידוש טיפול" — the resume side of the two-way flow. Opens a confirm modal
+  // that explains the branch (cancel the stop if Yarden hasn't read it; otherwise
+  // send her a resume alert). The actual write fires from the modal confirm below.
+  var resumeTreatmentClientId = null;
+  function resumeTreatment(c) {
+    if (state.role !== 'editor') return;
+    if (!stopAlertStanding(c.id)) return; // nothing to resume
+    resumeTreatmentClientId = c.id;
+    var nameEl = $('#resumeTreatmentClientName');
+    if (nameEl) nameEl.textContent = c.name || '';
+    var m = $('#resumeTreatmentModal');
+    if (m) m.hidden = false;
+  }
+  function closeResumeTreatmentModal() {
+    var m = $('#resumeTreatmentModal');
+    if (m) m.hidden = true;
+    resumeTreatmentClientId = null;
+  }
+  function submitResumeTreatment() {
+    var c = state.clients.find(function (x) { return x.id === resumeTreatmentClientId; });
+    if (!c) { closeResumeTreatmentModal(); return; }
+    // Optimistic mirror of _resumeTreatmentAlert on the local minimal rows: cancel
+    // this client's UNREAD 'stop' rows; if any 'stop' was already READ, append an
+    // optimistic 'resume' row. Snapshot (deep copy) for a clean rollback.
+    var snapshot = (state.myStopAlerts || []).map(function (a) { return Object.assign({}, a); });
+    var hadReadStop = false;
+    (state.myStopAlerts || []).forEach(function (a) {
+      if (a.clientId !== c.id) return;
+      if ((a.type || 'stop') !== 'stop') return;
+      if (a.status === 'unread') a.status = 'cancelled';
+      else if (a.status === 'read') hadReadStop = true;
+    });
+    if (hadReadStop) {
+      state.myStopAlerts.push({ id: 'resume-pending-' + Date.now(), clientId: c.id, status: 'unread', type: 'resume' });
+    }
+    refreshRenewalsPanel();
+    closeResumeTreatmentModal();
+    apiPostAction('resumeTreatmentAlert', { clientId: c.id, clientName: c.name, createdBy: 'Vered' })
+      .then(function (res) {
+        toast(res && res.resumeCreated ? 'נשלח חידוש טיפול לירדן' : 'התראת העצירה בוטלה');
+      })
+      .catch(function (err) {
+        state.myStopAlerts = snapshot; // roll back to the pre-click state
+        refreshRenewalsPanel();
+        toast('חידוש הטיפול נכשל: ' + err.message, true);
       });
   }
 
@@ -3926,7 +3991,11 @@
           console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
           return { requests: [] };
         }),
-        apiLoadSettings().catch(function () { return {}; })
+        apiLoadSettings().catch(function () { return {}; }),
+        apiGetMyStopAlerts().catch(function (mse) {
+          console.warn('[ezone] getMyStopAlerts failed, assuming empty:', mse.message);
+          return { myStopAlerts: [] };
+        })
       ]);
       var data = results[0];
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
@@ -3961,6 +4030,10 @@
         bankAccount: s.bankAccount || '',
         bankHolder: s.bankHolder || ''
       };
+      // This app's own stop/resume alerts (minimal fields) — sent-state source of
+      // truth across sessions. Replaces any in-session optimistic entries with the
+      // real server rows on each load.
+      state.myStopAlerts = (results[6].myStopAlerts || []).filter(function (a) { return a && a.clientId; });
       state.loaded = true;
       render();
     } catch (e) {
@@ -4063,7 +4136,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal();
       });
     });
 
@@ -4652,6 +4725,11 @@
       var note = String(fd.get('stop_note') || '').trim().slice(0, 1000);
       submitStopAlert(reason, note);
       closeStopAlertModal();
+    });
+
+    var resumeConfirmBtn = $('#resumeTreatmentConfirm');
+    if (resumeConfirmBtn) resumeConfirmBtn.addEventListener('click', function () {
+      submitResumeTreatment();
     });
 
     var rlForm = $('#removeLeadForm');
