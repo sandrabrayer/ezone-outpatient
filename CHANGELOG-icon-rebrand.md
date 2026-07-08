@@ -152,3 +152,51 @@ recolour approach entirely and **draws a bold geometric E from scratch**.
 - Measured ink coverage: **any-purpose ≈ 35%**, **maskable ≈ 22.7%**.
 - Service-worker cache kept at **`ezone-outpatient-v3`** (no bump this pass).
 - Full suite: **478 pass / 0 fail** (`npm test`).
+
+---
+
+## Correction: restore the ORIGINAL logo, recolour to fluorescent green (2026-07-08)
+
+- **Branch:** `claude/bold-e-icon-color-9p18sr` (PR base: `claude/youthful-volta-laarnk`)
+
+The two prior passes on this branch were wrong direction: the recolour landed
+on the old thin glyph, and the from-scratch pass replaced the real mark with a
+block **E**. This restores the **original E-ZONE logo glyph** and recolours it
+in place — **no block E, no white ground**.
+
+### What changed
+
+- **`public/icon-v1-192.png`, `public/icon-v1-512.png`,
+  `public/icon-v1-maskable.png`** — the **original** glyph PNGs (dark `#071410`
+  ground, `#29d488` logo) were recovered from git history (`c7d5773^`, the state
+  **before** PR #69's green-on-white recolour), then recoloured via the
+  blend-remap.
+- **`scripts/gen-icons.js`** — back to the **recolour** generator (decode →
+  blend-remap → encode; no from-scratch drawing). Colours:
+
+  | role       | before            | after                    |
+  |------------|-------------------|--------------------------|
+  | background | `#071410` (dark)  | `#071410` (dark, kept)   |
+  | logo       | `#29d488` (green) | `#39ff14` (fluorescent)  |
+
+  Each source pixel is read as a blend `t·logo + (1-t)·background`, `t` recovered
+  from its RGB, and re-emitted as `t·#39ff14 + (1-t)·#071410` — anti-aliasing
+  preserved, the mark never redrawn. The two `any` icons keep their transparent
+  corners; the **maskable** icon is flattened to a fully-opaque **dark** square
+  so its safe-zone padding stays dark to the edge.
+- **`test/pwa.test.js`** — palette guards updated for **dark ground + green
+  logo** (test 10 now asserts the dark ground dominates, the green logo is
+  present, blends stay a small minority, and there is **no leftover white
+  ground**; test 11 asserts the maskable is a fully-opaque **dark** square with
+  dark corners). Test 12 replaced with a **logo-presence guard**: the
+  fluorescent-green logo must occupy **≥ 5%** of an any-purpose icon and **≥ 3%**
+  of the maskable icon.
+
+### Verification
+
+- Rendered at **48 / 64 / 96 px** (any-purpose and maskable) — the original
+  logo glyph is intact and legible; nothing is a block E.
+- Measured logo coverage: **any ≈ 10-11%**, **maskable ≈ 6.9%**.
+- Service-worker cache kept at **`ezone-outpatient-v3`** (still bumped; no change
+  this pass).
+- Full suite: **478 pass / 0 fail** (`npm test`).
