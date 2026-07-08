@@ -129,7 +129,7 @@ test('8. the service-worker registration is inline (no src on that <script>)', (
   assert.ok(!head.includes('src='), 'registration <script> has no src attribute');
 });
 
-// ---- Icon colour rebrand (green letter on white ground) ------------------
+// ---- Icon art: BOLD letter-E, green on white -----------------------------
 
 // Classify each opaque pixel as white ground, green letter, or a blend edge.
 function near(px, target, tol) {
@@ -138,40 +138,54 @@ function near(px, target, tol) {
 const WHITE = [255, 255, 255];
 const GREEN = [45, 212, 122]; // #2dd47a
 
-test('9. sw.js cache version was bumped past v1 so old icons purge on activate', () => {
+// Green ink coverage of an icon, as a fraction of its opaque pixels.
+function greenCoverage(src) {
+  const { data } = decodePngRGBA(src);
+  let white = 0, green = 0, opaque = 0, other = 0, dark = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue; // ignore any transparent corners
+    opaque++;
+    const px = [data[i], data[i + 1], data[i + 2]];
+    if (near(px, WHITE, 12)) white++;
+    else if (near(px, GREEN, 24)) green++;
+    else other++;
+    if (px[0] < 40 && px[1] < 60 && px[2] < 50) dark++;
+  }
+  return { white, green, opaque, other, dark, frac: green / opaque };
+}
+
+test('9. sw.js cache version was bumped to v3 so old icons purge on activate', () => {
   const m = swRaw.match(/var CACHE = 'ezone-outpatient-v(\d+)'/);
   assert.ok(m, 'CACHE version string present');
-  assert.ok(Number(m[1]) >= 2, `cache version bumped to v2+ (got v${m[1]})`);
+  assert.ok(Number(m[1]) >= 3, `cache version bumped to v3+ (got v${m[1]})`);
 });
 
-test('10. every icon is recoloured to a white ground with a green letter', () => {
+test('10. every icon is a green letter on a white ground, no leftover dark background', () => {
   const m = JSON.parse(manifestRaw);
   for (const icon of m.icons) {
-    const { data } = decodePngRGBA(icon.src);
-    let white = 0, green = 0, opaque = 0, other = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 200) continue; // ignore transparent corners
-      opaque++;
-      const px = [data[i], data[i + 1], data[i + 2]];
-      if (near(px, WHITE, 12)) white++;
-      else if (near(px, GREEN, 24)) green++;
-      else other++;
-    }
-    assert.ok(white > green, `${icon.src}: white ground dominates (white=${white}, green=${green})`);
-    assert.ok(green > opaque * 0.02, `${icon.src}: green letter present (green=${green})`);
-    // Anti-aliased edge pixels are the only "other"; they must stay a small minority.
-    assert.ok(other < opaque * 0.10, `${icon.src}: colours are white+green, few blends (other=${other}/${opaque})`);
-    // No leftover dark #071410 background anywhere.
-    let dark = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 200) continue;
-      if (data[i] < 40 && data[i + 1] < 60 && data[i + 2] < 50) dark++;
-    }
-    assert.strictEqual(dark, 0, `${icon.src}: no leftover dark background pixels`);
+    const c = greenCoverage(icon.src);
+    assert.ok(c.white > c.green, `${icon.src}: white ground dominates (white=${c.white}, green=${c.green})`);
+    assert.ok(c.green > c.opaque * 0.02, `${icon.src}: green letter present (green=${c.green})`);
+    // Anti-aliased edge pixels are the only "other"; they must stay a minority.
+    assert.ok(c.other < c.opaque * 0.10, `${icon.src}: colours are white+green, few blends (other=${c.other}/${c.opaque})`);
+    assert.strictEqual(c.dark, 0, `${icon.src}: no leftover dark background pixels`);
   }
 });
 
-test('11. the maskable icon is a fully-opaque white square (safe-zone padding not cropped)', () => {
+test('11. the letter-E glyph is BOLD (heavy ink coverage, not a thin logo)', () => {
+  const m = JSON.parse(manifestRaw);
+  for (const icon of m.icons) {
+    const c = greenCoverage(icon.src);
+    // A bold glyph filling most of the canvas paints a large share of the icon
+    // in ink; the old thin logo covered far less. Maskable sits in its safe
+    // zone so it covers proportionally less, but is still visibly heavy.
+    const floor = icon.purpose === 'maskable' ? 0.12 : 0.20;
+    assert.ok(c.frac >= floor && c.frac <= 0.45,
+      `${icon.src}: bold ink coverage ${(c.frac * 100).toFixed(1)}% (expected ${(floor * 100)}%–45%)`);
+  }
+});
+
+test('12. the maskable icon is a fully-opaque white square (safe-zone padding not cropped)', () => {
   const m = JSON.parse(manifestRaw);
   const maskable = m.icons.find((i) => i.purpose === 'maskable');
   assert.ok(maskable, 'maskable icon declared');

@@ -1,5 +1,49 @@
 # PWA icon rebrand (ecosystem colour scheme)
 
+## Update — bold letter-E redraw (SW cache v3)
+
+- **Date:** 2026-07-08
+- **Branch:** `claude/pwa-icon-rebrand-swc2e6` (PR base: `claude/youthful-volta-laarnk`)
+- Follows the merged colour recolour below (PR #69, SW cache v2).
+
+The icons no longer reuse the thin logo glyph. `scripts/gen-icons.js` now
+**draws a bold, heavy geometric letter-E from scratch** — a thick vertical stem
+plus top / middle / bottom arms — on the same colours (**green `#2dd47a` on a
+white `#ffffff` ground**). Pure front-end: no `Code.gs` change, no Apps Script
+redeploy.
+
+### Glyph geometry
+
+- Stroke width **≈18.4 % of the canvas** height (27 % of the glyph's own height)
+  — a genuinely heavy stroke.
+- The glyph fills **~68 % of the canvas** on the `any` icons, centred.
+- Middle arm is 80 % of the glyph width (classic slightly-short middle bar).
+- Edges are anti-aliased by 4×4 supersampling.
+- Green ink coverage: **26 % (192 / 512)**, **17 % (maskable)** of the icon —
+  visibly bold, verified by eye at 48 / 64 / 96 px and guarded by a test.
+- **Maskable**: the glyph is pulled into the safe zone (~55 % of the canvas) and
+  the rest is padded with the **background colour** (opaque white), so nothing
+  looks cropped under a launcher mask.
+
+### What changed (this update)
+
+- **`public/icon-v1-192/512/maskable.png`** — redrawn as the bold E (same
+  `icon-v1-*` filenames, in place).
+- **`scripts/gen-icons.js`** — rewritten to draw the bold E procedurally
+  (self-contained, built-in `zlib` only, no new dependencies).
+  Re-runnable: `node scripts/gen-icons.js`.
+- **`public/sw.js`** — **`CACHE` bumped `ezone-outpatient-v2` → `-v3`** so the
+  old (thin-glyph) icon bytes are evicted on the service worker's `activate`.
+- **`test/pwa.test.js`** — cache-version guard raised to `v3+`; added a
+  **boldness guard** (ink coverage ≥20 % on `any`, ≥12 % on maskable, ≤45 %) so
+  a future thin glyph can't slip back in. Full suite: **478 pass / 0 fail**.
+
+**No name change.** No `Code.gs` change / no Apps Script redeploy.
+
+---
+
+## Original — colour recolour (SW cache v2, PR #69, merged)
+
 - **Date:** 2026-07-08
 - **Branch:** `claude/pwa-icon-rebrand-swc2e6` (PR base: `claude/youthful-volta-laarnk`)
 
