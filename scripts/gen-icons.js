@@ -4,19 +4,21 @@
  * Self-contained PWA icon (re)generator — no external dependencies.
  *
  * Uses only Node's built-in `zlib` to decode and re-encode 8-bit RGBA PNGs.
- * It re-colours the EXISTING letter-E glyph PNGs in place, preserving the exact
- * glyph shape and anti-aliasing, so a colour rebrand never redraws the mark.
+ * It re-colours the EXISTING original logo-glyph PNGs in place, preserving the
+ * exact glyph shape and anti-aliasing, so a colour pass never redraws the mark.
  *
- * Rebrand (ecosystem-wide colour scheme):
- *   background  #071410  ->  #ffffff (white)
- *   letter      #29d488  ->  #2dd47a (green)
+ * Colour pass. OLD_* are the colours baked into the ORIGINAL icon-v1-*.png
+ * (the glyph as first shipped, recovered from git history before any recolour),
+ * so the remap reads the source pixels correctly:
+ *   background  #071410  ->  #071410 (dark, unchanged)
+ *   logo        #29d488  ->  #39ff14 (fluorescent green)
  *
- * Every source pixel is treated as a blend  t*letter + (1-t)*background.
- * We recover t from the pixel's RGB, then emit  t*newLetter + (1-t)*newBg.
+ * Every source pixel is treated as a blend  t*logo + (1-t)*background.
+ * We recover t from the pixel's RGB, then emit  t*newLogo + (1-t)*newBg.
  * That keeps every soft edge smooth instead of hard-thresholding the glyph.
  *
- * The maskable icon is flattened to a fully-opaque white square (alpha forced
- * to 255) so the safe-zone padding is white to the very edge and the launcher
+ * The maskable icon is flattened to a fully-opaque DARK square (alpha forced
+ * to 255) so the safe-zone padding stays dark to the very edge and the launcher
  * mask never reveals a transparent — cropped-looking — corner.
  *
  * Run:  node scripts/gen-icons.js
@@ -28,12 +30,12 @@ const path = require('node:path');
 
 const PUB = path.join(__dirname, '..', 'public');
 
-// Old (source) colours currently baked into icon-v1-*.png.
-const OLD_BG = [7, 20, 16];      // #071410
-const OLD_LETTER = [41, 212, 136]; // #29d488
-// New (rebrand) colours.
-const NEW_BG = [255, 255, 255];  // #ffffff
-const NEW_LETTER = [45, 212, 122]; // #2dd47a
+// Old (source) colours baked into the ORIGINAL icon-v1-*.png.
+const OLD_BG = [7, 20, 16];        // #071410
+const OLD_LOGO = [41, 212, 136];   // #29d488
+// New colours.
+const NEW_BG = [7, 20, 16];        // #071410 (dark, unchanged)
+const NEW_LOGO = [57, 255, 20];    // #39ff14 (fluorescent green)
 
 // ---- CRC32 (PNG chunk checksums) -----------------------------------------
 const CRC_TABLE = (() => {
@@ -127,7 +129,7 @@ function encodeRGBA(w, h, data) {
 }
 
 // ---- colour remap --------------------------------------------------------
-const DBG = [OLD_LETTER[0] - OLD_BG[0], OLD_LETTER[1] - OLD_BG[1], OLD_LETTER[2] - OLD_BG[2]];
+const DBG = [OLD_LOGO[0] - OLD_BG[0], OLD_LOGO[1] - OLD_BG[1], OLD_LOGO[2] - OLD_BG[2]];
 const DBG_LEN2 = DBG[0] * DBG[0] + DBG[1] * DBG[1] + DBG[2] * DBG[2];
 
 function remap(img, { flattenAlpha }) {
@@ -135,12 +137,12 @@ function remap(img, { flattenAlpha }) {
   const out = Buffer.alloc(data.length);
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-    // blend fraction toward the letter colour
+    // blend fraction toward the logo colour
     let t = ((r - OLD_BG[0]) * DBG[0] + (g - OLD_BG[1]) * DBG[1] + (b - OLD_BG[2]) * DBG[2]) / DBG_LEN2;
     if (t < 0) t = 0; else if (t > 1) t = 1;
-    out[i] = Math.round(NEW_BG[0] + t * (NEW_LETTER[0] - NEW_BG[0]));
-    out[i + 1] = Math.round(NEW_BG[1] + t * (NEW_LETTER[1] - NEW_BG[1]));
-    out[i + 2] = Math.round(NEW_BG[2] + t * (NEW_LETTER[2] - NEW_BG[2]));
+    out[i] = Math.round(NEW_BG[0] + t * (NEW_LOGO[0] - NEW_BG[0]));
+    out[i + 1] = Math.round(NEW_BG[1] + t * (NEW_LOGO[1] - NEW_BG[1]));
+    out[i + 2] = Math.round(NEW_BG[2] + t * (NEW_LOGO[2] - NEW_BG[2]));
     out[i + 3] = flattenAlpha ? 255 : a;
   }
   return { w, h, data: out };
@@ -150,6 +152,8 @@ function remap(img, { flattenAlpha }) {
 const JOBS = [
   { file: 'icon-v1-192.png', flattenAlpha: false },
   { file: 'icon-v1-512.png', flattenAlpha: false },
+  // Maskable: flatten to an opaque DARK square so the safe-zone padding is dark
+  // to the edge and never looks cropped under a launcher mask.
   { file: 'icon-v1-maskable.png', flattenAlpha: true },
 ];
 
@@ -160,6 +164,6 @@ for (const job of JOBS) {
   const png = encodeRGBA(recolored.w, recolored.h, recolored.data);
   fs.writeFileSync(src, png);
   console.log('wrote', job.file, `${recolored.w}x${recolored.h}`, png.length, 'bytes',
-    job.flattenAlpha ? '(opaque)' : '');
+    job.flattenAlpha ? '(opaque dark)' : '');
 }
 console.log('done');

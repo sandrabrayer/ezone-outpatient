@@ -129,14 +129,15 @@ test('8. the service-worker registration is inline (no src on that <script>)', (
   assert.ok(!head.includes('src='), 'registration <script> has no src attribute');
 });
 
-// ---- Icon colour rebrand (green letter on white ground) ------------------
+// ---- Icon colour palette (fluorescent-green logo on a dark ground) --------
 
-// Classify each opaque pixel as white ground, green letter, or a blend edge.
+// Classify each opaque pixel as dark ground, green logo, or a blend edge.
 function near(px, target, tol) {
   return Math.abs(px[0] - target[0]) <= tol && Math.abs(px[1] - target[1]) <= tol && Math.abs(px[2] - target[2]) <= tol;
 }
+const DARK = [7, 20, 16];    // #071410 background
+const LOGO = [57, 255, 20];  // #39ff14 fluorescent-green logo
 const WHITE = [255, 255, 255];
-const GREEN = [45, 212, 122]; // #2dd47a
 
 test('9. sw.js cache version was bumped past v1 so old icons purge on activate', () => {
   const m = swRaw.match(/var CACHE = 'ezone-outpatient-v(\d+)'/);
@@ -144,34 +145,29 @@ test('9. sw.js cache version was bumped past v1 so old icons purge on activate',
   assert.ok(Number(m[1]) >= 2, `cache version bumped to v2+ (got v${m[1]})`);
 });
 
-test('10. every icon is recoloured to a white ground with a green letter', () => {
+test('10. every icon carries a dark ground with a fluorescent-green logo', () => {
   const m = JSON.parse(manifestRaw);
   for (const icon of m.icons) {
     const { data } = decodePngRGBA(icon.src);
-    let white = 0, green = 0, opaque = 0, other = 0;
+    let dark = 0, logo = 0, opaque = 0, other = 0, white = 0;
     for (let i = 0; i < data.length; i += 4) {
       if (data[i + 3] < 200) continue; // ignore transparent corners
       opaque++;
       const px = [data[i], data[i + 1], data[i + 2]];
-      if (near(px, WHITE, 12)) white++;
-      else if (near(px, GREEN, 24)) green++;
-      else other++;
+      if (near(px, DARK, 18)) dark++;
+      else if (near(px, LOGO, 40)) logo++;
+      else { other++; if (near(px, WHITE, 20)) white++; }
     }
-    assert.ok(white > green, `${icon.src}: white ground dominates (white=${white}, green=${green})`);
-    assert.ok(green > opaque * 0.02, `${icon.src}: green letter present (green=${green})`);
+    assert.ok(dark > logo, `${icon.src}: dark ground dominates (dark=${dark}, logo=${logo})`);
+    assert.ok(logo > opaque * 0.02, `${icon.src}: green logo present (logo=${logo})`);
     // Anti-aliased edge pixels are the only "other"; they must stay a small minority.
-    assert.ok(other < opaque * 0.10, `${icon.src}: colours are white+green, few blends (other=${other}/${opaque})`);
-    // No leftover dark #071410 background anywhere.
-    let dark = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 200) continue;
-      if (data[i] < 40 && data[i + 1] < 60 && data[i + 2] < 50) dark++;
-    }
-    assert.strictEqual(dark, 0, `${icon.src}: no leftover dark background pixels`);
+    assert.ok(other < opaque * 0.10, `${icon.src}: colours are dark+green, few blends (other=${other}/${opaque})`);
+    // No leftover white ground from the earlier green-on-white recolour.
+    assert.strictEqual(white, 0, `${icon.src}: no leftover white ground pixels`);
   }
 });
 
-test('11. the maskable icon is a fully-opaque white square (safe-zone padding not cropped)', () => {
+test('11. the maskable icon is a fully-opaque dark square (safe-zone padding not cropped)', () => {
   const m = JSON.parse(manifestRaw);
   const maskable = m.icons.find((i) => i.purpose === 'maskable');
   assert.ok(maskable, 'maskable icon declared');
@@ -180,9 +176,32 @@ test('11. the maskable icon is a fully-opaque white square (safe-zone padding no
   for (let i = 3; i < data.length; i += 4) {
     assert.strictEqual(data[i], 255, 'maskable pixel fully opaque');
   }
-  // The four corners (safe-zone padding) must be white.
+  // The four corners (safe-zone padding) must be the dark ground.
   const corners = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + (w - 1)) * 4];
   for (const c of corners) {
-    assert.ok(near([data[c], data[c + 1], data[c + 2]], WHITE, 6), 'maskable corner is white');
+    assert.ok(near([data[c], data[c + 1], data[c + 2]], DARK, 8), 'maskable corner is dark');
+  }
+});
+
+// Logo-presence guard: the recoloured original logo glyph must survive the
+// colour pass — the fluorescent-green mark has to occupy a real share of each
+// icon. A blank/near-empty ground (e.g. a remap that clamped the whole glyph to
+// background) would fall below these floors and fail. A pixel counts as "logo"
+// when it is closer to the fluorescent green than to the dark ground.
+test('12. logo-presence guard: fluorescent-green logo occupies the icon (any >= 5%, maskable >= 3%)', () => {
+  const m = JSON.parse(manifestRaw);
+  const dist2 = (px, c) => (px[0] - c[0]) ** 2 + (px[1] - c[1]) ** 2 + (px[2] - c[2]) ** 2;
+  for (const icon of m.icons) {
+    const { data } = decodePngRGBA(icon.src);
+    let logo = 0, opaque = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue; // ignore transparent corners
+      opaque++;
+      const px = [data[i], data[i + 1], data[i + 2]];
+      if (dist2(px, LOGO) < dist2(px, DARK)) logo++;
+    }
+    const cov = logo / opaque;
+    const floor = icon.purpose === 'maskable' ? 0.03 : 0.05;
+    assert.ok(cov >= floor, `${icon.src} (${icon.purpose}): logo coverage ${(cov * 100).toFixed(1)}% >= ${floor * 100}%`);
   }
 });

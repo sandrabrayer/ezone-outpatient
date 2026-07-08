@@ -13,8 +13,11 @@
  * - v2 (2026-07-08): ecosystem colour rebrand — the icon-v1-* PNGs were
  *   recoloured in place (green letter on a white ground). CACHE bumped so the
  *   old shell + cached icon bytes are evicted on activate.
+ * - v3 (2026-07-08): letter recoloured to a fiercer green (#2dd47a -> #00c853),
+ *   white ground and glyph geometry unchanged. CACHE bumped to evict the
+ *   previously-cached icon bytes.
  */
-var CACHE = 'ezone-outpatient-v2';
+var CACHE = 'ezone-outpatient-v3';
 var SHELL = [
   './',
   './index.html',
