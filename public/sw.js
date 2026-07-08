@@ -16,8 +16,10 @@
  * - v3 (2026-07-08): icon-v1-* PNGs redrawn as a BOLD geometric letter-E
  *   (thick strokes, glyph fills ~68% of canvas) replacing the thin logo glyph.
  *   CACHE bumped again so the old icon bytes are evicted on activate.
+ * - v4 (2026-07-08): letter colour changed #2dd47a -> #00c853 (fiercer green);
+ *   bold glyph geometry unchanged. CACHE bumped so old icon bytes are evicted.
  */
-var CACHE = 'ezone-outpatient-v3';
+var CACHE = 'ezone-outpatient-v4';
 var SHELL = [
   './',
   './index.html',

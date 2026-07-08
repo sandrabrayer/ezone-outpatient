@@ -136,7 +136,7 @@ function near(px, target, tol) {
   return Math.abs(px[0] - target[0]) <= tol && Math.abs(px[1] - target[1]) <= tol && Math.abs(px[2] - target[2]) <= tol;
 }
 const WHITE = [255, 255, 255];
-const GREEN = [45, 212, 122]; // #2dd47a
+const GREEN = [0, 200, 83]; // #00c853
 
 // Green ink coverage of an icon, as a fraction of its opaque pixels.
 function greenCoverage(src) {
@@ -154,10 +154,10 @@ function greenCoverage(src) {
   return { white, green, opaque, other, dark, frac: green / opaque };
 }
 
-test('9. sw.js cache version was bumped to v3 so old icons purge on activate', () => {
+test('9. sw.js cache version was bumped to v4 so old icons purge on activate', () => {
   const m = swRaw.match(/var CACHE = 'ezone-outpatient-v(\d+)'/);
   assert.ok(m, 'CACHE version string present');
-  assert.ok(Number(m[1]) >= 3, `cache version bumped to v3+ (got v${m[1]})`);
+  assert.ok(Number(m[1]) >= 4, `cache version bumped to v4+ (got v${m[1]})`);
 });
 
 test('10. every icon is a green letter on a white ground, no leftover dark background', () => {

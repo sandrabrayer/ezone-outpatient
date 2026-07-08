@@ -1,5 +1,33 @@
 # PWA icon rebrand (ecosystem colour scheme)
 
+## Update — fiercer green letter (SW cache v4)
+
+- **Date:** 2026-07-08
+- **Branch:** `claude/pwa-icon-rebrand-swc2e6` (PR base: `claude/youthful-volta-laarnk`)
+- Colour tweak on the bold E from PR #70 (below). Same branch/PR.
+
+Only the letter colour changed — the **bold glyph geometry is untouched**.
+
+| role       | before             | after                       |
+|------------|--------------------|-----------------------------|
+| background | `#ffffff` (white)  | `#ffffff` (white, unchanged)|
+| letter     | `#2dd47a`          | `#00c853` (fiercer green)   |
+
+### What changed (this update)
+
+- **`scripts/gen-icons.js`** — `FG` letter colour `#2dd47a` → `#00c853`.
+- **`public/icon-v1-192/512/maskable.png`** — regenerated (identical geometry,
+  new letter colour). Green ink coverage still 26 % (192/512), 17 % (maskable).
+- **`public/sw.js`** — **`CACHE` bumped `ezone-outpatient-v3` → `-v4`** so the
+  old icon bytes are evicted on the service worker's `activate`.
+- **`test/pwa.test.js`** — the letter-colour constant asserted by the icon
+  guards updated `#2dd47a` → `#00c853`; cache-version guard raised to `v4+`.
+  The boldness guard is unchanged. Full suite: **478 pass / 0 fail**.
+
+**No name change.** No `Code.gs` change / no Apps Script redeploy.
+
+---
+
 ## Update — bold letter-E redraw (SW cache v3)
 
 - **Date:** 2026-07-08

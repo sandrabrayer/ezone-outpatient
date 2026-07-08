@@ -9,7 +9,7 @@
  *
  * Ecosystem colour scheme:
  *   background  BG_HEX = #ffffff (white)
- *   letter      FG_HEX = #2dd47a (green)
+ *   letter      FG_HEX = #00c853 (fiercer green)
  *
  * Geometry (relative to the glyph's own height Eh):
  *   stroke width  S       = 0.27 * Eh   (~18.5% of a 0.68-canvas glyph height)
@@ -31,7 +31,7 @@ const path = require('node:path');
 const PUB = path.join(__dirname, '..', 'public');
 
 const BG = [0xff, 0xff, 0xff]; // BG_HEX #ffffff
-const FG = [0x2d, 0xd4, 0x7a]; // FG_HEX #2dd47a
+const FG = [0x00, 0xc8, 0x53]; // FG_HEX #00c853 (fiercer green)
 
 // Glyph internal proportions (fractions of the glyph height Eh).
 const STROKE_OF_EH = 0.27; // stroke width; with Eh=0.68·canvas => ~18.4% of canvas
