@@ -63,3 +63,44 @@ Full suite: **477 pass / 0 fail** (`npm test`).
   `CACHE` bump evicts the stale bytes; an already-installed Android home-screen
   shortcut may keep its cached launcher icon until re-add (the documented
   filename-versioning trap), an accepted trade-off for this internal tool.
+
+---
+
+## Follow-up: fiercer letter green (2026-07-08)
+
+- **Branch:** `claude/bold-e-icon-color-9p18sr` (PR base: `claude/youthful-volta-laarnk`)
+
+Second colour pass over the same in-place recolour pipeline. The letter is
+pushed to a **fiercer green**; the white ground and the exact letter-E glyph
+geometry are untouched (recolour reads the currently-baked pixels and re-emits
+`t·newLetter + (1-t)·white`, so the green letter-pixel count is unchanged).
+
+### Colour change
+
+| role       | before            | after             |
+|------------|-------------------|-------------------|
+| background | `#ffffff` (white) | `#ffffff` (white) |
+| letter     | `#2dd47a` (green) | `#00c853` (green) |
+
+### What changed
+
+- **`scripts/gen-icons.js`** — `OLD_*` re-pointed to the colours currently baked
+  into the committed PNGs (`#ffffff` ground, `#2dd47a` letter) so a re-run reads
+  the live pixels correctly, and `NEW_LETTER` set to `#00c853`.
+- **`public/icon-v1-192.png`, `public/icon-v1-512.png`,
+  `public/icon-v1-maskable.png`** — regenerated in place (`node scripts/gen-icons.js`).
+  Glyph geometry and the fully-opaque white maskable square are preserved.
+- **`public/sw.js`** — `CACHE` bumped `ezone-outpatient-v2` → `-v3` so the
+  previously-cached icon bytes are evicted on the service worker's `activate`.
+- **`test/pwa.test.js`** — the icon-colour guard's `GREEN` reference updated
+  `#2dd47a` → `#00c853`. The letter-presence (boldness) guard
+  (`green > opaque * 0.02`) and the maskable/opacity/no-dark-pixel guards are
+  unchanged.
+
+### Note
+
+The repo's live state at the time of this change had the service-worker cache at
+`-v2` (not `-v3`), so "bump by one" lands on `-v3`. Any cache name that differs
+from the previous one busts the stale icon bytes.
+
+Full suite: green (`npm test`).

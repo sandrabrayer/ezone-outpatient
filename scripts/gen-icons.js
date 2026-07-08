@@ -7,9 +7,10 @@
  * It re-colours the EXISTING letter-E glyph PNGs in place, preserving the exact
  * glyph shape and anti-aliasing, so a colour rebrand never redraws the mark.
  *
- * Rebrand (ecosystem-wide colour scheme):
- *   background  #071410  ->  #ffffff (white)
- *   letter      #29d488  ->  #2dd47a (green)
+ * Colour pass (ecosystem-wide scheme). OLD_* are the colours currently baked
+ * into the committed icon-v1-*.png so a re-run reads the live pixels correctly:
+ *   background  #ffffff  ->  #ffffff (white, unchanged)
+ *   letter      #2dd47a  ->  #00c853 (fiercer green)
  *
  * Every source pixel is treated as a blend  t*letter + (1-t)*background.
  * We recover t from the pixel's RGB, then emit  t*newLetter + (1-t)*newBg.
@@ -29,11 +30,11 @@ const path = require('node:path');
 const PUB = path.join(__dirname, '..', 'public');
 
 // Old (source) colours currently baked into icon-v1-*.png.
-const OLD_BG = [7, 20, 16];      // #071410
-const OLD_LETTER = [41, 212, 136]; // #29d488
+const OLD_BG = [255, 255, 255];    // #ffffff
+const OLD_LETTER = [45, 212, 122]; // #2dd47a
 // New (rebrand) colours.
 const NEW_BG = [255, 255, 255];  // #ffffff
-const NEW_LETTER = [45, 212, 122]; // #2dd47a
+const NEW_LETTER = [0, 200, 83]; // #00c853
 
 // ---- CRC32 (PNG chunk checksums) -----------------------------------------
 const CRC_TABLE = (() => {

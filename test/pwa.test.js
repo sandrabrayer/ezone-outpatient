@@ -136,7 +136,7 @@ function near(px, target, tol) {
   return Math.abs(px[0] - target[0]) <= tol && Math.abs(px[1] - target[1]) <= tol && Math.abs(px[2] - target[2]) <= tol;
 }
 const WHITE = [255, 255, 255];
-const GREEN = [45, 212, 122]; // #2dd47a
+const GREEN = [0, 200, 83]; // #00c853
 
 test('9. sw.js cache version was bumped past v1 so old icons purge on activate', () => {
   const m = swRaw.match(/var CACHE = 'ezone-outpatient-v(\d+)'/);
