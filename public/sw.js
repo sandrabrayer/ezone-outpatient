@@ -10,8 +10,11 @@
  * - Icon-cache trap: icon filenames are VERSIONED (icon-v1-*). When icons
  *   change, ship icon-v2-* AND bump CACHE below — Android caches launcher
  *   icons aggressively and will not refresh otherwise.
+ * - v2 (2026-07-08): ecosystem colour rebrand — the icon-v1-* PNGs were
+ *   recoloured in place (green letter on a white ground). CACHE bumped so the
+ *   old shell + cached icon bytes are evicted on activate.
  */
-var CACHE = 'ezone-outpatient-v1';
+var CACHE = 'ezone-outpatient-v2';
 var SHELL = [
   './',
   './index.html',
