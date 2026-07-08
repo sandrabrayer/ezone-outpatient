@@ -1,24 +1,30 @@
 'use strict';
 
 /**
- * Self-contained PWA icon (re)generator — no external dependencies.
+ * Self-contained PWA icon generator — no external dependencies.
  *
- * Uses only Node's built-in `zlib` to decode and re-encode 8-bit RGBA PNGs.
- * It re-colours the EXISTING letter-E glyph PNGs in place, preserving the exact
- * glyph shape and anti-aliasing, so a colour rebrand never redraws the mark.
+ * DRAWS a bold geometric letter-E from scratch (it no longer recolours a
+ * pre-existing glyph). Uses only Node's built-in `zlib` to encode 8-bit RGBA
+ * PNGs. The mark is a heavy block E: a thick vertical stem plus top / middle /
+ * bottom arms, centred on a white square.
  *
- * Colour pass (ecosystem-wide scheme). OLD_* are the colours currently baked
- * into the committed icon-v1-*.png so a re-run reads the live pixels correctly:
- *   background  #ffffff  ->  #ffffff (white, unchanged)
- *   letter      #2dd47a  ->  #00c853 (fiercer green)
+ * Geometry (as a fraction of the canvas, before the per-icon scale):
+ *   glyph height  0.68   (E fills ~65-70% of the canvas)
+ *   glyph width   0.64
+ *   stroke        0.185  (thick strokes, ~18-20% of canvas height)
+ *   middle arm    0.80 x glyph width (slightly shorter, reads as an E)
  *
- * Every source pixel is treated as a blend  t*letter + (1-t)*background.
- * We recover t from the pixel's RGB, then emit  t*newLetter + (1-t)*newBg.
- * That keeps every soft edge smooth instead of hard-thresholding the glyph.
+ * Colours:
+ *   background  #ffffff (white)
+ *   letter      #00c853 (fierce green)
  *
- * The maskable icon is flattened to a fully-opaque white square (alpha forced
- * to 255) so the safe-zone padding is white to the very edge and the launcher
- * mask never reveals a transparent — cropped-looking — corner.
+ * Edges are all axis-aligned, so coverage is computed ANALYTICALLY per pixel
+ * (exact pixel-rectangle overlap, inclusion-exclusion over the stem/arm rects).
+ * That gives clean anti-aliasing without supersampling.
+ *
+ * The maskable icon draws the same glyph at a smaller scale so it sits inside
+ * the launcher safe zone with white padding all the way to the edge; every
+ * icon is a fully-opaque white square.
  *
  * Run:  node scripts/gen-icons.js
  */
@@ -29,12 +35,14 @@ const path = require('node:path');
 
 const PUB = path.join(__dirname, '..', 'public');
 
-// Old (source) colours currently baked into icon-v1-*.png.
-const OLD_BG = [255, 255, 255];    // #ffffff
-const OLD_LETTER = [45, 212, 122]; // #2dd47a
-// New (rebrand) colours.
-const NEW_BG = [255, 255, 255];  // #ffffff
-const NEW_LETTER = [0, 200, 83]; // #00c853
+const BG = [255, 255, 255];     // #ffffff
+const LETTER = [0, 200, 83];    // #00c853
+
+// Glyph proportions (fraction of canvas), before the per-icon scale.
+const GLYPH_H = 0.68;   // E fills ~68% of the canvas height
+const GLYPH_W = 0.64;
+const STROKE = 0.185;   // ~18.5% of canvas height
+const MID_ARM = 0.80;   // middle arm length as a fraction of glyph width
 
 // ---- CRC32 (PNG chunk checksums) -----------------------------------------
 const CRC_TABLE = (() => {
@@ -50,48 +58,6 @@ function crc32(buf) {
   let c = 0xffffffff;
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
-}
-
-// ---- PNG decode (8-bit RGBA only) ----------------------------------------
-function decodeRGBA(file) {
-  const buf = fs.readFileSync(file);
-  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG: ' + file);
-  let off = 8, w = 0, h = 0, bd = 0, ct = 0;
-  const idat = [];
-  while (off < buf.length) {
-    const len = buf.readUInt32BE(off);
-    const type = buf.toString('ascii', off + 4, off + 8);
-    const data = buf.slice(off + 8, off + 8 + len);
-    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bd = data[8]; ct = data[9]; }
-    else if (type === 'IDAT') idat.push(data);
-    else if (type === 'IEND') break;
-    off += 12 + len;
-  }
-  if (bd !== 8 || ct !== 6) throw new Error('expected 8-bit RGBA, got bd=' + bd + ' ct=' + ct);
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const bpp = 4, stride = w * bpp;
-  const out = Buffer.alloc(h * stride);
-  let pos = 0;
-  for (let y = 0; y < h; y++) {
-    const ft = raw[pos++];
-    for (let x = 0; x < stride; x++) {
-      const v = raw[pos++];
-      const a = x >= bpp ? out[y * stride + x - bpp] : 0;
-      const b = y > 0 ? out[(y - 1) * stride + x] : 0;
-      const c = (x >= bpp && y > 0) ? out[(y - 1) * stride + x - bpp] : 0;
-      let recon;
-      if (ft === 0) recon = v;
-      else if (ft === 1) recon = v + a;
-      else if (ft === 2) recon = v + b;
-      else if (ft === 3) recon = v + ((a + b) >> 1);
-      else if (ft === 4) {
-        const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        recon = v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
-      } else throw new Error('bad filter type ' + ft);
-      out[y * stride + x] = recon & 0xff;
-    }
-  }
-  return { w, h, data: out };
 }
 
 // ---- PNG encode (8-bit RGBA, filter 0 / None per scanline) ---------------
@@ -127,40 +93,79 @@ function encodeRGBA(w, h, data) {
   ]);
 }
 
-// ---- colour remap --------------------------------------------------------
-const DBG = [OLD_LETTER[0] - OLD_BG[0], OLD_LETTER[1] - OLD_BG[1], OLD_LETTER[2] - OLD_BG[2]];
-const DBG_LEN2 = DBG[0] * DBG[0] + DBG[1] * DBG[1] + DBG[2] * DBG[2];
+// ---- glyph geometry ------------------------------------------------------
+// Returns the rectangles that make up the E (in pixel coordinates) for an
+// N x N canvas at the given scale (1 = any-purpose, <1 = maskable safe zone).
+function glyphRects(N, scale) {
+  const gh = GLYPH_H * scale * N;
+  const gw = GLYPH_W * scale * N;
+  const s = STROKE * scale * N;
+  const x0 = (N - gw) / 2, y0 = (N - gh) / 2;
+  const x1 = x0 + gw, y1 = y0 + gh;
+  const midLen = MID_ARM * gw;
+  const ymid = (y0 + y1) / 2;
+  return [
+    [x0, y0, x0 + s, y1],           // stem (vertical)
+    [x0, y0, x1, y0 + s],           // top arm
+    [x0, y1 - s, x1, y1],           // bottom arm
+    [x0, ymid - s / 2, x0 + midLen, ymid + s / 2], // middle arm (shorter)
+  ];
+}
 
-function remap(img, { flattenAlpha }) {
-  const { w, h, data } = img;
-  const out = Buffer.alloc(data.length);
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-    // blend fraction toward the letter colour
-    let t = ((r - OLD_BG[0]) * DBG[0] + (g - OLD_BG[1]) * DBG[1] + (b - OLD_BG[2]) * DBG[2]) / DBG_LEN2;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    out[i] = Math.round(NEW_BG[0] + t * (NEW_LETTER[0] - NEW_BG[0]));
-    out[i + 1] = Math.round(NEW_BG[1] + t * (NEW_LETTER[1] - NEW_BG[1]));
-    out[i + 2] = Math.round(NEW_BG[2] + t * (NEW_LETTER[2] - NEW_BG[2]));
-    out[i + 3] = flattenAlpha ? 255 : a;
+// Exact overlap area between pixel (px,py)->(px+1,py+1) and an axis-aligned rect.
+function rectCover(px, py, r) {
+  const xo = Math.min(r[2], px + 1) - Math.max(r[0], px);
+  const yo = Math.min(r[3], py + 1) - Math.max(r[1], py);
+  if (xo <= 0 || yo <= 0) return 0;
+  return (xo < 1 ? xo : 1) * (yo < 1 ? yo : 1);
+}
+// Intersection of two axis-aligned rects, or null if they don't overlap.
+function rectIsect(a, b) {
+  const x0 = Math.max(a[0], b[0]), y0 = Math.max(a[1], b[1]);
+  const x1 = Math.min(a[2], b[2]), y1 = Math.min(a[3], b[3]);
+  return (x1 > x0 && y1 > y0) ? [x0, y0, x1, y1] : null;
+}
+
+function draw(N, scale) {
+  const [stem, top, bottom, middle] = glyphRects(N, scale);
+  // The stem overlaps each arm; arms never overlap each other (vertical gaps).
+  const overlaps = [rectIsect(stem, top), rectIsect(stem, bottom), rectIsect(stem, middle)];
+  const stride = N * 4;
+  const data = Buffer.alloc(N * stride);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      // Union coverage via inclusion-exclusion over axis-aligned rectangles.
+      let cov = rectCover(x, y, stem) + rectCover(x, y, top)
+              + rectCover(x, y, bottom) + rectCover(x, y, middle);
+      for (const o of overlaps) if (o) cov -= rectCover(x, y, o);
+      if (cov < 0) cov = 0; else if (cov > 1) cov = 1;
+      const i = y * stride + x * 4;
+      data[i] = Math.round(BG[0] + cov * (LETTER[0] - BG[0]));
+      data[i + 1] = Math.round(BG[1] + cov * (LETTER[1] - BG[1]));
+      data[i + 2] = Math.round(BG[2] + cov * (LETTER[2] - BG[2]));
+      data[i + 3] = 255; // fully opaque white square
+    }
   }
-  return { w, h, data: out };
+  return { w: N, h: N, data };
 }
 
 // ---- run -----------------------------------------------------------------
 const JOBS = [
-  { file: 'icon-v1-192.png', flattenAlpha: false },
-  { file: 'icon-v1-512.png', flattenAlpha: false },
-  { file: 'icon-v1-maskable.png', flattenAlpha: true },
+  { file: 'icon-v1-192.png', size: 192, scale: 1 },
+  { file: 'icon-v1-512.png', size: 512, scale: 1 },
+  // Maskable: glyph shrunk into the safe zone, white padding to the edge.
+  { file: 'icon-v1-maskable.png', size: 512, scale: 0.8 },
 ];
 
-for (const job of JOBS) {
-  const src = path.join(PUB, job.file);
-  const img = decodeRGBA(src);
-  const recolored = remap(img, job);
-  const png = encodeRGBA(recolored.w, recolored.h, recolored.data);
-  fs.writeFileSync(src, png);
-  console.log('wrote', job.file, `${recolored.w}x${recolored.h}`, png.length, 'bytes',
-    job.flattenAlpha ? '(opaque)' : '');
+if (require.main === module) {
+  for (const job of JOBS) {
+    const img = draw(job.size, job.scale);
+    const png = encodeRGBA(img.w, img.h, img.data);
+    fs.writeFileSync(path.join(PUB, job.file), png);
+    console.log('wrote', job.file, `${img.w}x${img.h}`, png.length, 'bytes',
+      job.scale === 1 ? '' : `(safe-zone scale ${job.scale})`);
+  }
+  console.log('done');
 }
-console.log('done');
+
+module.exports = { draw, glyphRects, encodeRGBA, BG, LETTER };

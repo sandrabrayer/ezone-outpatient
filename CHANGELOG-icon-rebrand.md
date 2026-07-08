@@ -104,3 +104,51 @@ The repo's live state at the time of this change had the service-worker cache at
 from the previous one busts the stale icon bytes.
 
 Full suite: green (`npm test`).
+
+---
+
+## Follow-up: from-scratch BOLD geometric E (2026-07-08)
+
+- **Branch:** `claude/bold-e-icon-color-9p18sr` (PR base: `claude/youthful-volta-laarnk`)
+
+The earlier "bold E" (PR #70) was **closed unmerged**, so the previous recolour
+pass above was applied to the *old thin* glyph. This change abandons the
+recolour approach entirely and **draws a bold geometric E from scratch**.
+
+### What changed
+
+- **`scripts/gen-icons.js`** — rewritten to **DRAW** the glyph (no longer
+  recolours an existing PNG). The E is a heavy block letter: a thick vertical
+  stem plus top / middle / bottom arms, centred on a white square.
+  - stroke thickness **`0.185`** of the canvas (~18-20% of canvas height)
+  - glyph height **`0.68`** of the canvas (E fills ~65-70%)
+  - middle arm shortened to `0.80` of the glyph width so it reads as an E
+  - edges are axis-aligned, so per-pixel coverage is computed **analytically**
+    (exact pixel-rectangle overlap, inclusion-exclusion over the stem/arm
+    rects) — clean anti-aliasing with no supersampling
+  - `draw()` / `glyphRects()` are exported so the tests and preview tooling can
+    reuse the exact same geometry
+- **`public/icon-v1-192.png`, `public/icon-v1-512.png`,
+  `public/icon-v1-maskable.png`** — regenerated (`node scripts/gen-icons.js`).
+  The maskable icon draws the same glyph at scale `0.8` so it sits inside the
+  launcher **safe zone** with white padding all the way to the edge; every icon
+  is a fully-opaque white square.
+- **`test/pwa.test.js`** — added test **12**, a real **boldness guard**: green
+  letter ink coverage must stay **≥ 20%** on any-purpose icons and **≥ 12%** on
+  the maskable icon (a pixel is "ink" when it is closer to the letter green than
+  to white). A regression to a thin/hairline glyph fails this.
+
+### Colours (unchanged from the previous pass)
+
+| role       | value             |
+|------------|-------------------|
+| background | `#ffffff` (white) |
+| letter     | `#00c853` (green) |
+
+### Verification
+
+- Rendered at **48 / 64 / 96 px** (both any-purpose and maskable scales) — the
+  E stays a legible, heavy block glyph at every size.
+- Measured ink coverage: **any-purpose ≈ 35%**, **maskable ≈ 22.7%**.
+- Service-worker cache kept at **`ezone-outpatient-v3`** (no bump this pass).
+- Full suite: **478 pass / 0 fail** (`npm test`).

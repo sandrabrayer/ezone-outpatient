@@ -186,3 +186,24 @@ test('11. the maskable icon is a fully-opaque white square (safe-zone padding no
     assert.ok(near([data[c], data[c + 1], data[c + 2]], WHITE, 6), 'maskable corner is white');
   }
 });
+
+// Boldness guard: the drawn E is a HEAVY block glyph, so the green letter must
+// cover a large share of the canvas. A thin/light glyph (e.g. an accidental
+// regression to a hairline stroke) would fall below these floors and fail.
+// Each pixel is inked if it is closer to the letter green than to white, which
+// bisects the anti-aliased edge ramp and estimates the geometric coverage.
+test('12. bold-glyph guard: letter ink coverage stays heavy (any >= 20%, maskable >= 12%)', () => {
+  const m = JSON.parse(manifestRaw);
+  const dist2 = (px, c) => (px[0] - c[0]) ** 2 + (px[1] - c[1]) ** 2 + (px[2] - c[2]) ** 2;
+  for (const icon of m.icons) {
+    const { data } = decodePngRGBA(icon.src);
+    let ink = 0, total = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      total++;
+      if (dist2([data[i], data[i + 1], data[i + 2]], GREEN) < dist2([data[i], data[i + 1], data[i + 2]], WHITE)) ink++;
+    }
+    const cov = ink / total;
+    const floor = icon.purpose === 'maskable' ? 0.12 : 0.20;
+    assert.ok(cov >= floor, `${icon.src} (${icon.purpose}): ink coverage ${(cov * 100).toFixed(1)}% >= ${floor * 100}%`);
+  }
+});
