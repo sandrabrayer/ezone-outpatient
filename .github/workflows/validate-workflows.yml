@@ -1,0 +1,63 @@
+name: Validate workflows
+
+# Guards against a broken workflow file being merged. Parses every YAML file
+# under .github/workflows/ and asserts each one has the keys GitHub Actions
+# requires (`on` and `jobs`). Runs on any change to the workflows folder.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  yaml-valid:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate workflow YAML
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+
+          files = sorted(glob.glob(".github/workflows/*.yml") +
+                         glob.glob(".github/workflows/*.yaml"))
+          if not files:
+              print("No workflow files found.")
+              sys.exit(1)
+
+          failed = False
+          for path in files:
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      doc = yaml.safe_load(fh)
+              except yaml.YAMLError as exc:
+                  print(f"::error file={path}::Invalid YAML: {exc}")
+                  failed = True
+                  continue
+
+              if not isinstance(doc, dict):
+                  print(f"::error file={path}::Top level is not a mapping.")
+                  failed = True
+                  continue
+
+              # PyYAML parses the bare `on:` key as the boolean True.
+              if "on" not in doc and True not in doc:
+                  print(f"::error file={path}::Missing required 'on:' trigger.")
+                  failed = True
+              if "jobs" not in doc:
+                  print(f"::error file={path}::Missing required 'jobs:' block.")
+                  failed = True
+
+              if not failed:
+                  print(f"OK: {path}")
+
+          sys.exit(1 if failed else 0)
+          PY

@@ -1,0 +1,98 @@
+name: Deploy Apps Script
+
+# Auto-push the Apps Script source to the Google Apps Script project and
+# publish a NEW VERSION of the EXISTING web-app deployment (the /exec URL must
+# never change — every consumer shares that single deployment).
+#
+# NOTE: This repo has no `main` branch. The canonical, Railway-deployed
+# production branch is `claude/youthful-volta-laarnk`, so that is the trigger.
+#
+# Requires two GitHub secrets (see DEPLOY.md):
+#   - CLASPRC_JSON   full contents of your local ~/.clasprc.json (OAuth token)
+#   - DEPLOYMENT_ID  the existing deployment's ID (Deploy → Manage deployments)
+
+on:
+  push:
+    branches:
+      - claude/youthful-volta-laarnk
+    paths:
+      - 'apps-script/**'
+      - '.clasp.json'
+      - '.github/workflows/deploy-apps-script.yml'
+  # Allow a manual redeploy from the Actions tab without touching files.
+  workflow_dispatch:
+
+# Never let two deploys race — they'd fight over the same deployment version.
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Fail LOUDLY and early if either secret is missing, rather than letting
+      # clasp emit a confusing auth error halfway through.
+      - name: Verify required secrets are present
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          missing=0
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error title=Missing secret::CLASPRC_JSON is not set. Run 'clasp login' locally and copy ~/.clasprc.json into the CLASPRC_JSON GitHub secret. See DEPLOY.md."
+            missing=1
+          fi
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::error title=Missing secret::DEPLOYMENT_ID is not set. Apps Script editor → Deploy → Manage deployments → copy the existing deployment's ID into the DEPLOYMENT_ID GitHub secret. See DEPLOY.md."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Refusing to deploy without credentials." >&2
+            exit 1
+          fi
+          # Validate that CLASPRC_JSON is actually JSON before we rely on it.
+          if ! printf '%s' "$CLASPRC_JSON" | python3 -c 'import json,sys; json.load(sys.stdin)'; then
+            echo "::error title=Invalid secret::CLASPRC_JSON is not valid JSON. Re-copy the full contents of ~/.clasprc.json (see DEPLOY.md)."
+            exit 1
+          fi
+
+      # Pin clasp to the 2.x line — its auth lives in ~/.clasprc.json, which is
+      # exactly the file the CLASPRC_JSON secret carries. (clasp 3.x changed the
+      # credential storage, so do not bump the major without updating DEPLOY.md.)
+      - name: Install clasp
+        run: npm install -g @google/clasp@2.4.2
+
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+
+      # Push the source (Code.gs + appsscript.json from rootDir=apps-script).
+      # -f skips the interactive "overwrite manifest?" prompt.
+      - name: Push source to Apps Script
+        run: clasp push -f
+
+      # Re-version the EXISTING deployment. `-i <DEPLOYMENT_ID>` updates that
+      # deployment in place → the /exec URL is preserved. This is NOT a new
+      # deployment.
+      - name: Redeploy existing deployment (keeps /exec URL)
+        env:
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: clasp deploy -i "$DEPLOYMENT_ID" -d "CI deploy ${{ github.sha }}"
+
+      - name: Done
+        run: echo "Pushed and re-deployed existing deployment ${{ secrets.DEPLOYMENT_ID }} (/exec URL unchanged)."

@@ -3,3 +3,8 @@ node_modules/
 .env.local
 .DS_Store
 npm-debug.log*
+
+# clasp OAuth token — NEVER commit. Provided to CI via the CLASPRC_JSON secret.
+.clasprc.json
+*.clasprc.json
+.clasp-*.json
