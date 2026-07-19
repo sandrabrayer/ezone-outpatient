@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Automated Apps Script deploy via clasp in CI.** `2026-07-19` — merges to the
+  canonical production branch `claude/youthful-volta-laarnk` that touch
+  `apps-script/**` now auto-push `Code.gs`/`appsscript.json` to the Apps Script
+  project and publish a **new version of the EXISTING deployment**
+  (`clasp deploy -i <DEPLOYMENT_ID>`), so the `/exec` URL never changes. New
+  files: `.clasp.json` (Script ID + `rootDir`), `apps-script/appsscript.json`
+  (manifest, `ANYONE_ANONYMOUS` web-app access), and
+  `.github/workflows/deploy-apps-script.yml`. Credentials live only in GitHub
+  Secrets (`CLASPRC_JSON`, `DEPLOYMENT_ID`); `.clasprc.json` is git-ignored; the
+  workflow fails loudly if a secret is missing. Added
+  `.github/workflows/validate-workflows.yml` to keep workflow YAML valid, and
+  `DEPLOY.md` documenting the flow, one-time secret setup, and token refresh.
+  This replaces the error-prone manual "paste Code.gs → redeploy" step that
+  repeatedly minted new `/exec` URLs or flipped access off "Anyone". See
+  `CHANGELOG-apps-script-ci-deploy.md`. **Requires two GitHub secrets before it
+  can succeed (see DEPLOY.md).**
+
 ### Housekeeping
 - **Stale `claude/*` branch audit + cleanup.** `2026-07-04` — audited every
   remote `claude/*` branch against the canonical production branch
