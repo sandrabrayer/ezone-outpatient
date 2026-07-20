@@ -3,3 +3,7 @@ node_modules/
 .env.local
 .DS_Store
 npm-debug.log*
+
+# clasp / Apps Script credentials — NEVER commit. These hold OAuth tokens.
+.clasprc.json
+.clasp.local.json
