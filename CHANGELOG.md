@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs
+- clasp CI rollout marked COMPLETE (verified 22/07/2026). `EZONE-ECOSYSTEM-STATUS.md` updated to the July 22 version — new "Apps Script deployment" section (automatic via GitHub Actions, clasp 3.3.0, hardened; trigger = merge to the deployed branch `claude/youthful-volta-laarnk` touching `apps-script/**`; redeploys the EXISTING deployment so the `/exec` URL is unchanged; per-repo secrets `CLASPRC_JSON` + `DEPLOYMENT_ID`; token-refresh = `clasp login` → update `CLASPRC_JSON` in all six repos with the same value), a per-app deployed-branch table verified 22/07/2026, and ezone-kitchen + ezone-coordinators added to the app table. All manual copy-paste redeploy instructions marked OBSOLETE (superseded by clasp CI; emergency fallback only), in the doc and `DEPLOY.md`.
+- CI: bumped `actions/checkout` and `actions/setup-node` to **v5** in the Deploy Apps Script workflow, clearing the Node 20 deprecation warning (both v5 run on Node 24; clasp `node-version` pin stays `22`).
+
 ### Housekeeping
 - **Stale `claude/*` branch audit + cleanup.** `2026-07-04` — audited every
   remote `claude/*` branch against the canonical production branch
@@ -227,7 +231,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `public/therapist-pay.js` and its `THERAPIST_FLAT_RATES` mirror in
   `apps-script/Code.gs` are now **16 therapists** (₪180–₪250: thirteen at ₪250,
   דליה מלמד ₪230, נועה זיפמן ₪210, אסתר ₪180); `PSYCHIATRIST_RATES` is now **3**
-  (ד״ר שפרינץ, ד״ר נטליה, ד״ר דנגור — אינטייק ₪900 / מעקב פסיכיאטרי ₪700). All
+  (ד″ר שפרינץ, ד″ר נטליה, ד″ר דנגור — אינטייק ₪900 / מעקב פסיכיאטרי ₪700). All
   earlier names not on the final list were removed from both the module and the
   mirror. `test/therapist-pay.test.js` and the `Code.gs` sync-guard in
   `test/session-outcome.test.js` were updated to the new roster and stay green
@@ -395,7 +399,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   structures: (1) **flat per-session keyed per therapist** — the rate follows
   the individual, not a grade, so two grade-A therapists differ (מעיין דלומי
   ₪250 vs דליה מלמד ₪230); 15 therapists from ₪180–₪250. (2) **psychiatrists
-  pay by type** — ד״ר שפרינץ / ד״ר דנגור: אינטייק ₪900, מעקב פסיכיאטרי ₪700, so
+  pay by type** — ד″ר שפרינץ / ד″ר דנגור: אינטייק ₪900, מעקב פסיכיאטרי ₪700, so
   a psychiatrist lookup requires a valid treatment type (throws otherwise).
   `therapistPay(name, treatmentType?)` throws on an unknown therapist.
   `test/therapist-pay.test.js` (12 cases) locks every rate, per-person (not
