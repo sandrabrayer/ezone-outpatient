@@ -38,6 +38,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   denies delete-pushes with 403); they must be run manually.
 
 ### Changed
+- **Topbar header rebrand.** `2026-07-27` — dropped the "E-ZONE" text from the
+  topbar logo; the header now shows the app's existing emblem (manifest icon
+  `icon-v1-192.png`, 30px desktop / 28px mobile) next to the Hebrew name
+  **"טיפולי חוץ"**. Cosmetic only — icon and colours unchanged, RTL-correct,
+  no-wrap. Guarded by `test/header-branding.test.js`. See
+  `CHANGELOG-header-ezone-removal.md`.
 - **Unified the two diverged production lines (volta + dashboard).** `2026-07-04`
   — the live `claude/youthful-volta-laarnk` line (payouts) and the
   `claude/ezone-outpatient-dashboard-hKjf9` line (~26 orphaned feature commits,

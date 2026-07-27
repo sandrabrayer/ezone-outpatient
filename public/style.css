@@ -109,7 +109,12 @@ button, input, select, textarea {
   position: sticky; top: 0; z-index: 5;
   backdrop-filter: blur(8px);
 }
-.logo { font-weight: 700; color: var(--green-2); font-size: 18px; }
+.logo {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; color: var(--green-2); font-size: 18px;
+  white-space: nowrap; flex: 0 0 auto;
+}
+.logo-mark { width: 30px; height: 30px; border-radius: 6px; flex: 0 0 auto; }
 .logo span { color: var(--muted); font-weight: 500; }
 .tabs { display: flex; gap: 6px; }
 .tab {
@@ -780,6 +785,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 @media (max-width: 600px) {
   /* Topbar: logo on its own line, tabs become a horizontal swipe strip. */
   .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .logo-mark { width: 28px; height: 28px; }
   .tabs {
     order: 3; width: 100%;
     overflow-x: auto; -webkit-overflow-scrolling: touch;
