@@ -155,6 +155,7 @@
     sessionLogLoading: false,
     sessionLogError: '',
     payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
+    payoutSearch: '',    // per-tab name search (therapist name) for the payout view
     payoutExpanded: {},  // therapist name -> expanded session detail (bool)
     continuationRoster: null, // admitted-patient roster (from dashboard); null = not yet fetched
     continuationRows: [],     // מסלול המשך workflow rows (from getContinuation)
@@ -2367,6 +2368,9 @@
 
     var summary = TPay.monthlyPayoutSummary(state.sessionLog, state.payoutMonth);
     lastPayoutSummary = summary;
+    // KPIs stay GLOBAL — they are the month overview (therapist count, paid
+    // sessions, totals) and, like the billing-tab KPIs, must not move when the
+    // user types a name. Only the rendered card list narrows.
     setPayoutKpis(summary.therapists.length, summary.totals.paidCount,
       summary.totals.preVatTotal, summary.totals.vatTotal);
 
@@ -2378,18 +2382,29 @@
       return;
     }
 
-    summary.therapists.forEach(function (t) {
+    // Per-tab name search: match the therapist name (the card's identity).
+    // Empty query -> every card, exactly as before.
+    var byName = function (t) { return t.therapist; };
+    var visibleTherapists = NameSearch.filterByName(summary.therapists, state.payoutSearch, byName);
+    var visibleDiffs = NameSearch.filterByName(diffs, state.payoutSearch, byName);
+
+    if (!visibleTherapists.length && !visibleDiffs.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין מטפלים התואמים לחיפוש</p></div>';
+      return;
+    }
+
+    visibleTherapists.forEach(function (t) {
       listEl.appendChild(payoutTherapistCard(t, { isDiff: false }));
     });
 
-    if (diffs.length) {
+    if (visibleDiffs.length) {
       var header = document.createElement('div');
       header.style.cssText = 'margin:22px 0 10px;display:flex;align-items:baseline;gap:10px;';
       header.innerHTML =
         '<span style="font-size:1.05rem;font-weight:700;color:#e0b15a;">הפרשים</span>' +
         '<span style="font-size:0.85rem;color:#7d93b0;">סשנים מחודשים שכבר הועברו לחשבת שכר (תשלום משלים)</span>';
       listEl.appendChild(header);
-      diffs.forEach(function (t) {
+      visibleDiffs.forEach(function (t) {
         listEl.appendChild(payoutTherapistCard(t, { isDiff: true }));
       });
     }
@@ -4126,6 +4141,7 @@
       state.payoutMonth = e.target.value || currentMonthStr();
       renderPayouts();
     });
+    on('#payoutSearch', 'input', function (e) { state.payoutSearch = e.target.value; renderPayouts(); });
     on('#payoutList', 'click', handlePayoutListClick);
     on('#payoutExportBtn', 'click', exportPayoutCsv);
     on('#payoutAddSessionBtn', 'click', function () { openSessionModal(null); });
