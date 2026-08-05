@@ -156,6 +156,7 @@
     sessionLogError: '',
     payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
     payoutExpanded: {},  // therapist name -> expanded session detail (bool)
+    payoutSearch: '',    // per-tab name filter for the payout view (therapist name)
     continuationRoster: null, // admitted-patient roster (from dashboard); null = not yet fetched
     continuationRows: [],     // מסלול המשך workflow rows (from getContinuation)
     continuationLoading: false,
@@ -2371,14 +2372,29 @@
       summary.totals.preVatTotal, summary.totals.vatTotal);
 
     listEl.innerHTML = '';
-    var diffs = (summary.differences && summary.differences.therapists) || [];
+    var allTherapists = summary.therapists;
+    var allDiffs = (summary.differences && summary.differences.therapists) || [];
 
-    if (!summary.therapists.length && !diffs.length) {
+    if (!allTherapists.length && !allDiffs.length) {
       listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין סשנים לחודש זה</p></div>';
       return;
     }
 
-    summary.therapists.forEach(function (t) {
+    // Per-tab name filter: narrow the therapist cards by therapist name. KPIs
+    // above stay GLOBAL (whole-month payroll roll-up) and lastPayoutSummary —
+    // reused by the Excel export — stays UNFILTERED, so the export always
+    // covers the full month regardless of what is typed in the search box.
+    var byTherapistName = function (t) { return t.therapist; };
+    var NS = (typeof window !== 'undefined' && window.NameSearch) || null;
+    var therapists = NS ? NS.filterByName(allTherapists, state.payoutSearch, byTherapistName) : allTherapists;
+    var diffs = NS ? NS.filterByName(allDiffs, state.payoutSearch, byTherapistName) : allDiffs;
+
+    if (!therapists.length && !diffs.length) {
+      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין תוצאות לחיפוש</p></div>';
+      return;
+    }
+
+    therapists.forEach(function (t) {
       listEl.appendChild(payoutTherapistCard(t, { isDiff: false }));
     });
 
@@ -4104,6 +4120,7 @@
     on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
+    on('#payoutSearch', 'input', function (e) { state.payoutSearch = e.target.value; renderPayouts(); });
     var continuationListEl = $('#continuationList');
     if (continuationListEl) continuationListEl.addEventListener('click', handleContinuationListClick);
     on('#continuationToOutpatientConfirm', 'click', function () {
