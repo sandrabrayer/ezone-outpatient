@@ -195,13 +195,17 @@ test('the render side uses effectivePaymentAmount for the row and the monthly to
   const nOutstanding = (APP.match(/effectivePaymentAmount\(p, p\.amountDue/g) || []).length;
   assert.ok(nOutstanding >= 2, 'both monthly-summary totals must use the effective amount');
 });
-test('the ✏️ appears only on open-balance (carry) rows for editors', () => {
-  assert.ok(/canEditAmount = isCarry && state\.role === 'editor'/.test(APP),
-    'edit affordance must be gated to carry rows + editor');
+test('the ✏️ appears on every billing row for editors, beside the amount it edits', () => {
+  // Editor-gated (not carry-gated) so the main due list (סכום חודשי) is editable too.
+  assert.ok(/canEditAmount = state\.role === 'editor'/.test(APP),
+    'edit affordance must be gated to editor only');
   assert.ok(/billing-amount-edit/.test(APP), 'edit button class present');
-  // the button is only emitted when canEditAmount is true
-  assert.ok(/canEditAmount[\s\S]{0,120}billing-amount-edit/.test(APP),
+  // one reusable snippet, emitted only when canEditAmount is true
+  assert.ok(/var amountEditHtml = canEditAmount[\s\S]{0,200}billing-amount-edit/.test(APP),
     'the ✏️ button must be behind the canEditAmount gate');
+  // placed next to "סכום חודשי" on due rows and next to "יתרה" on carry rows
+  assert.ok(/isCarry \? '' : amountEditHtml/.test(APP), 'due rows show the ✏️ next to סכום חודשי');
+  assert.ok(/isCarry \? amountEditHtml : ''/.test(APP), 'carry rows show the ✏️ next to יתרה');
   assert.ok(/openEditAmountModal\(client, payment, amount, computedAmount\)/.test(APP),
     'click opens the prefilled edit modal');
 });

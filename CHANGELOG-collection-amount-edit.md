@@ -62,6 +62,17 @@ migrates). Old rows read back blank → `{}`.
   in-memory map and re-renders, then persists via `savePaymentAmountOverride`,
   **rolling back** the map on failure.
 
+### Follow-up: ✏️ on the main due list too
+
+The first cut placed the ✏️ only on the lower "יתרות פתוחות מתאריכים קודמים"
+(open-balance / carry) rows, so the amounts on the **main גבייה due list** — the
+rows used day-to-day — had no edit affordance and read as "not editable". The edit
+affordance is now **editor-gated instead of carry-gated** and rendered on every
+billing row, beside the amount it edits: next to **סכום חודשי** on due rows and
+next to **יתרה** on open-balance rows (one pencil per row). The override key is the
+row's deterministic payment id, so a due-row override applies to that month's base
+(or that charge's) collection and carries through when the row is later marked paid.
+
 ## Tests
 
 `test/collection-amount-override.test.js`:
