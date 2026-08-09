@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`getTreatmentPlans`: project the treatment period (`startDate` + `exitDate`).**
+  The cross-app projection now includes each client's treatment start date and
+  end date, consumed by the E-Zone Therapists patient card. Both columns already
+  exist on the Clients sheet and are already read by `_readAll` (a Date cell
+  comes back as a `yyyy-MM-dd` string; `exitDate` is blank for still-active
+  patients), so this is an additive projection change — **no sheet schema change,
+  no new secret, the minimal no-payer/no-billing contract is unchanged.** The
+  mirror test in `test/treatment-plans.test.js` is updated in lockstep. See
+  `CHANGELOG-treatment-plans-dates.md`.
+
 ### Docs
 - clasp CI rollout marked COMPLETE (verified 22/07/2026). `EZONE-ECOSYSTEM-STATUS.md` updated to the July 22 version — new "Apps Script deployment" section (automatic via GitHub Actions, clasp 3.3.0, hardened; trigger = merge to the deployed branch `claude/youthful-volta-laarnk` touching `apps-script/**`; redeploys the EXISTING deployment so the `/exec` URL is unchanged; per-repo secrets `CLASPRC_JSON` + `DEPLOYMENT_ID`; token-refresh = `clasp login` → update `CLASPRC_JSON` in all six repos with the same value), a per-app deployed-branch table verified 22/07/2026, and ezone-kitchen + ezone-coordinators added to the app table. All manual copy-paste redeploy instructions marked OBSOLETE (superseded by clasp CI; emergency fallback only), in the doc and `DEPLOY.md`.
 - CI: bumped `actions/checkout` and `actions/setup-node` to **v5** in the Deploy Apps Script workflow, clearing the Node 20 deprecation warning (both v5 run on Node 24; clasp `node-version` pin stays `22`).
