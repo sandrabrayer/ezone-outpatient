@@ -1929,8 +1929,14 @@
     var computedAmount = payment.amountDue || (isExtra ? toNum(charge && charge.amount) : clientAmountDue(client)) || 0;
     var amount = effectivePaymentAmount(payment, computedAmount);
     var isOverridden = overrideAmountFor(payment) != null;
-    // ✏️ to edit the collection amount — only on open-balance (carry) rows, editors.
-    var canEditAmount = isCarry && state.role === 'editor';
+    // ✏️ to edit the collection amount (סכום גבייה) — on every billing row for
+    // editors: next to "סכום חודשי" on due rows, next to "יתרה" on open-balance
+    // (carry) rows. One pencil per row, beside the amount it edits.
+    var canEditAmount = state.role === 'editor';
+    var amountEditHtml = canEditAmount
+      ? ' <button type="button" class="billing-amount-edit edit-only" title="עריכת סכום גבייה">✏️</button>'
+        + (isOverridden ? '<span class="billing-amount-overridden" title="סכום גבייה עודכן ידנית">✎</span>' : '')
+      : '';
     var disabled = state.role === 'editor' ? '' : ' disabled';
     var statusSelect = PAYMENT_STATUSES.map(function (s) {
       return '<option value="' + s.id + '"' + (payment.status === s.id ? ' selected' : '') + '>' + s.he + '</option>';
@@ -1951,17 +1957,16 @@
     }
     row.innerHTML =
       '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(nameDisplay) + '</span></div>' +
-      '<div><span class="p-label">' + dateCellLabel + '</span><span class="p-val">' + escapeHtml(dateCellVal) + '</span></div>' +
+      '<div><span class="p-label">' + dateCellLabel + '</span><span class="p-val">' + escapeHtml(dateCellVal) + '</span>' +
+        (isCarry ? '' : amountEditHtml) +
+      '</div>' +
       '<div><span class="p-label">סטטוס</span><select class="billing-status"' + disabled + '>' + statusSelect + '</select></div>' +
       '<div class="billing-paid-wrap ' + (payment.status === 'partial' ? '' : 'hidden') + '">' +
         '<span class="p-label">שולם בפועל</span>' +
         '<input class="billing-paid" type="number" min="0" step="1" value="' + (payment.amountPaid || 0) + '"' + disabled + ' />' +
       '</div>' +
       '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span>' +
-        (canEditAmount
-          ? ' <button type="button" class="billing-amount-edit edit-only" title="עריכת סכום גבייה">✏️</button>'
-          + (isOverridden ? '<span class="billing-amount-overridden" title="סכום גבייה עודכן ידנית">✎</span>' : '')
-          : '') +
+        (isCarry ? amountEditHtml : '') +
       '</div>' +
       '<div class="billing-paid-date-wrap"><span class="p-label">תאריך תשלום</span>' +
         '<input class="billing-paid-date" type="date" value="' + (payment.paymentDate || today()) + '"' + disabled + ' /></div>' +
