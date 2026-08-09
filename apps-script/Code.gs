@@ -1218,7 +1218,13 @@ function _getTreatmentPlans() {
       phone:       phone,
       serviceType: cl.serviceType || '',
       sessions:    cl.sessionsPerWeek || '',
-      status:      cl.status || ''
+      status:      cl.status || '',
+      // Treatment period for the therapists app's patient card. Both columns
+      // already exist on Clients and are read by _readAll (a Date cell comes back
+      // as a 'yyyy-MM-dd' string); exitDate is blank for still-active patients.
+      // No payer/billing data — the minimal-projection contract is unchanged.
+      startDate:   cl.startDate || '',
+      exitDate:    cl.exitDate || ''
     });
   }
   return { ok: true, clients: out };

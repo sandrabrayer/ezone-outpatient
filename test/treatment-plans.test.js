@@ -37,7 +37,10 @@ function projectPlans(clients) {
     sourceApp: 'ezone-outpatient', clientId: String(cl.id), name: cl.name || '',
     phone: recoverPhone(cl.phone) || recoverPhone(cl.treatmentContactPhone),
     serviceType: cl.serviceType || '',
-    sessions: cl.sessionsPerWeek || '', status: cl.status || ''
+    sessions: cl.sessionsPerWeek || '', status: cl.status || '',
+    // Treatment period — consumed by the therapists app's patient card. Blank
+    // (esp. exitDate for active patients) defaults to ''.
+    startDate: cl.startDate || '', exitDate: cl.exitDate || ''
   }));
 }
 
@@ -68,8 +71,27 @@ test('treatment plans: rows without an id are skipped; blanks default to empty s
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0], {
     sourceApp: 'ezone-outpatient', clientId: 'c1', name: 'דנה',
-    phone: '', serviceType: '', sessions: '', status: ''
+    phone: '', serviceType: '', sessions: '', status: '',
+    startDate: '', exitDate: ''
   });
+});
+
+test('treatment plans: project the treatment period (startDate + exitDate)', () => {
+  const rows = projectPlans([
+    { id: 'c1', name: 'אורי', phone: '0501234567',
+      startDate: '2026-01-15', exitDate: '2026-06-30', status: 'סיים טיפול' }
+  ]);
+  assert.equal(rows[0].startDate, '2026-01-15');
+  assert.equal(rows[0].exitDate, '2026-06-30');
+});
+
+test('treatment plans: an active patient projects an empty exitDate, never undefined', () => {
+  const rows = projectPlans([
+    { id: 'c1', name: 'דנה', phone: '0501234567', startDate: '2026-01-15', status: 'פעיל' }
+  ]);
+  assert.equal(rows[0].startDate, '2026-01-15');
+  assert.equal(rows[0].exitDate, '');           // blank while still in treatment
+  assert.equal('exitDate' in rows[0], true);     // present as '', not missing
 });
 
 test('treatment plans: phone comes from the populated `phone` column (the live-data case)', () => {
