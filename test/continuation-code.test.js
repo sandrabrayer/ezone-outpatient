@@ -71,8 +71,9 @@ test('both continuation actions are routed', () => {
 
 test('CLIENTS_HEADERS is untouched: append-only tail intact, phone join key preserved', () => {
   const CLIENTS_H = headers('CLIENTS_HEADERS');
-  // FROZEN 2026-07-06 physical order: the volta-only columns are the exact tail.
-  assert.deepEqual(CLIENTS_H.slice(-3), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
+  // Physical order: the volta-only columns, followed by the appended
+  // paymentAmountOverrides, are the exact tail.
+  assert.deepEqual(CLIENTS_H.slice(-4), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides']);
   // The continuation sheet is separate — CLIENTS_HEADERS must never mention it.
   assert.ok(CLIENTS_H.indexOf('meetingDate') === -1, 'continuation column leaked into CLIENTS_HEADERS');
   assert.ok(CLIENTS_H.indexOf('outcome') === -1, 'continuation column leaked into CLIENTS_HEADERS');

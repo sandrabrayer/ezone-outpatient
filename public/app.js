@@ -498,8 +498,26 @@
       // cycle (see nextRenewalDueDate / renewalInfo). Blank for never-changed rows.
       packageChangeDate: fmtDate(row.packageChangeDate),
       // משוייך ל (assigned-to): staff member responsible, carried from the lead.
-      assignedTo: row.assignedTo || ''
+      assignedTo: row.assignedTo || '',
+      // סכום גבייה ידני: manual collection-amount overrides, a { paymentId: amount }
+      // map layered over the computed amount on גבייה open-balance rows. Parsed from
+      // the JSON cell; blank/garbage -> {}. Read via effectivePaymentAmount(); the
+      // package price / charge source rows are never touched.
+      paymentAmountOverrides: parseAmountOverrides(row.paymentAmountOverrides)
     };
+  }
+
+  // Parse a paymentAmountOverrides cell (JSON string) into a plain map. Tolerates
+  // blank, an already-parsed object, or malformed JSON (-> {}).
+  function parseAmountOverrides(v) {
+    if (v == null || v === '') return {};
+    if (typeof v === 'object') return v;
+    try {
+      var o = JSON.parse(String(v));
+      return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+    } catch (_) {
+      return {};
+    }
   }
 
   function leadForSheet(l) {
@@ -565,7 +583,15 @@
       // שינוי חבילה passthrough: preserve the package-change re-anchor date on save.
       packageChangeDate: c.packageChangeDate || '',
       // משוייך ל (assigned-to): preserve the patient's assignee on save.
-      assignedTo: c.assignedTo || ''
+      assignedTo: c.assignedTo || '',
+      // סכום גבייה ידני: serialize the override map back to a JSON string so a full
+      // client save keeps the column aligned. The server preserves its own on-sheet
+      // value by id (like creditsOwed), so this is only authoritative for a brand-new
+      // client with no existing row. Empty map -> '' (blank cell).
+      paymentAmountOverrides: (function () {
+        var m = c.paymentAmountOverrides;
+        return (m && typeof m === 'object' && Object.keys(m).length) ? JSON.stringify(m) : '';
+      })()
     };
   }
 
@@ -696,6 +722,15 @@
     await apiPostAction('removePayment', { id: paymentId });
   }
 
+  // Persist one manual collection-amount override (single-cell server write). Pass
+  // amount === '' / null to clear the override and revert the row to computed.
+  async function persistPaymentAmountOverride(clientId, paymentId, amount) {
+    await apiPostAction('savePaymentAmountOverride', {
+      clientId: clientId, paymentId: paymentId,
+      amount: (amount === '' || amount == null) ? '' : toNum(amount)
+    });
+  }
+
   // Remove every payment row tied to a clientId (used when a patient is deleted).
   async function removePaymentsForClient(clientId) {
     var theirs = state.payments.filter(function (p) { return p.clientId === clientId; });
@@ -783,6 +818,29 @@
     return d.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
   }
   function clientAmountDue(c) { return toNum(c.pricePerSession); }
+
+  // --- Manual collection-amount override (סכום גבייה) -------------------------
+  // The override is an append-only LAYER keyed by payment id, stored as a JSON map
+  // on the owning client's row (paymentAmountOverrides). The read side prefers the
+  // override over the computed/billed amount; nothing here mutates the package price
+  // or a charge source row.
+  function overrideAmountFor(payment) {
+    if (!payment || !payment.clientId) return null;
+    var c = state.clients.find(function (x) { return x.id === payment.clientId; });
+    if (!c || !c.paymentAmountOverrides) return null;
+    var v = c.paymentAmountOverrides[payment.id];
+    if (v == null || v === '') return null;
+    var n = toNum(v);
+    return isFinite(n) ? n : null;
+  }
+  // Effective collection amount for a payment: override if present, else the given
+  // computed fallback (or the payment's own amountDue when no fallback is passed).
+  function effectivePaymentAmount(payment, computedFallback) {
+    var o = overrideAmountFor(payment);
+    if (o != null) return o;
+    if (computedFallback != null) return computedFallback;
+    return toNum(payment && payment.amountDue);
+  }
 
   // Payment id scheme — see CHANGELOG-extra-charges.md for the full design.
   //   base monthly:    pay::<clientId>::base::<YYYY-MM>
@@ -1867,7 +1925,12 @@
     row.className = 'billing-row'
       + (isCarry ? ' carry' : '')
       + (isExtra ? ' billing-row-extra' : '');
-    var amount = payment.amountDue || (isExtra ? toNum(charge && charge.amount) : clientAmountDue(client)) || 0;
+    // Computed/billed amount, then the effective amount (manual override wins).
+    var computedAmount = payment.amountDue || (isExtra ? toNum(charge && charge.amount) : clientAmountDue(client)) || 0;
+    var amount = effectivePaymentAmount(payment, computedAmount);
+    var isOverridden = overrideAmountFor(payment) != null;
+    // ✏️ to edit the collection amount — only on open-balance (carry) rows, editors.
+    var canEditAmount = isCarry && state.role === 'editor';
     var disabled = state.role === 'editor' ? '' : ' disabled';
     var statusSelect = PAYMENT_STATUSES.map(function (s) {
       return '<option value="' + s.id + '"' + (payment.status === s.id ? ' selected' : '') + '>' + s.he + '</option>';
@@ -1894,7 +1957,12 @@
         '<span class="p-label">שולם בפועל</span>' +
         '<input class="billing-paid" type="number" min="0" step="1" value="' + (payment.amountPaid || 0) + '"' + disabled + ' />' +
       '</div>' +
-      '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span></div>' +
+      '<div><span class="p-label">יתרה</span><span class="p-val billing-balance">' + money(Math.max(0, amount - (payment.amountPaid || 0))) + '</span>' +
+        (canEditAmount
+          ? ' <button type="button" class="billing-amount-edit edit-only" title="עריכת סכום גבייה">✏️</button>'
+          + (isOverridden ? '<span class="billing-amount-overridden" title="סכום גבייה עודכן ידנית">✎</span>' : '')
+          : '') +
+      '</div>' +
       '<div class="billing-paid-date-wrap"><span class="p-label">תאריך תשלום</span>' +
         '<input class="billing-paid-date" type="date" value="' + (payment.paymentDate || today()) + '"' + disabled + ' /></div>' +
       nextBillHtml;
@@ -1942,6 +2010,13 @@
     if (paidDateInput) paidDateInput.addEventListener('change', function () {
       if (statusSel.value !== 'paid') return;
       saveBillingRow(recompute('paid', paidInput.value));
+    });
+
+    // ✏️ edit the collection amount (open-balance rows, editor only). Opens the
+    // small edit-amount modal prefilled with the current EFFECTIVE amount.
+    var amountEditBtn = row.querySelector('.billing-amount-edit');
+    if (amountEditBtn) amountEditBtn.addEventListener('click', function () {
+      openEditAmountModal(client, payment, amount, computedAmount);
     });
 
     // Orphan row: the payment's patient no longer exists (e.g. a deleted test
@@ -2069,8 +2144,10 @@
     // per-client breakdown below honors state.billingSearch.
     var thisMonth = state.payments.filter(function (p) { return monthKey(p.dueDate) === mk; });
     var collected = thisMonth.reduce(function (s, p) { return s + (p.amountPaid || 0); }, 0);
+    // Outstanding uses the EFFECTIVE amount (manual override wins over computed) so
+    // the monthly summary matches what each open-balance row shows.
     var outstanding = thisMonth.filter(function (p) { return p.status !== 'paid'; })
-      .reduce(function (s, p) { return s + Math.max(0, (p.amountDue || 0) - (p.amountPaid || 0)); }, 0);
+      .reduce(function (s, p) { return s + Math.max(0, effectivePaymentAmount(p, p.amountDue || 0) - (p.amountPaid || 0)); }, 0);
     $('#billMonthCollected').textContent = money(collected);
     $('#billMonthOutstanding').textContent = money(outstanding);
     var q = state.billingSearch.trim().toLowerCase();
@@ -2080,7 +2157,7 @@
       var key = p.clientId || p.clientName || '—';
       if (!byClient[key]) byClient[key] = { name: p.clientName || '—', collected: 0, outstanding: 0 };
       byClient[key].collected += (p.amountPaid || 0);
-      if (p.status !== 'paid') byClient[key].outstanding += Math.max(0, (p.amountDue || 0) - (p.amountPaid || 0));
+      if (p.status !== 'paid') byClient[key].outstanding += Math.max(0, effectivePaymentAmount(p, p.amountDue || 0) - (p.amountPaid || 0));
     });
     var clientEl = $('#billMonthByClient');
     clientEl.innerHTML = '';
@@ -3813,6 +3890,70 @@
     if (m) m.hidden = true;
     editChargeIds = { clientId: null, chargeId: null };
   }
+
+  // --- Edit collection amount (סכום גבייה) on an open-balance row -------------
+  // Writes a manual override keyed by payment id (append-only LAYER on the client
+  // row) — never rewrites the package price or a charge source row. Optimistic
+  // update of the in-memory override map + re-render, single-cell server write,
+  // rollback on failure. Mirrors the openEditChargeModal pattern.
+  var editAmountCtx = { clientId: null, paymentId: null, computed: 0 };
+  function openEditAmountModal(client, payment, currentEffective, computedAmount) {
+    if (state.role !== 'editor') return;
+    if (!client || !payment) return;
+    editAmountCtx = { clientId: client.id, paymentId: payment.id, computed: toNum(computedAmount) };
+    var form = $('#editAmountForm');
+    if (!form) return;
+    form.reset();
+    $('#editAmountClientName').textContent = client.name || payment.clientName || '';
+    var hint = $('#editAmountComputedHint');
+    if (hint) hint.textContent = 'סכום מחושב: ' + money(toNum(computedAmount));
+    var isOv = overrideAmountFor(payment) != null;
+    var revertBtn = $('#editAmountRevert');
+    if (revertBtn) revertBtn.hidden = !isOv;
+    if (form.amount) form.amount.value = toNum(currentEffective);
+    $('#editAmountModal').hidden = false;
+  }
+  function closeEditAmountModal() {
+    var m = $('#editAmountModal');
+    if (m) m.hidden = true;
+    editAmountCtx = { clientId: null, paymentId: null, computed: 0 };
+  }
+  // Apply an override value (a positive number to set, or '' to revert to computed)
+  // optimistically and persist it. Shared by the form submit and the revert button.
+  function applyAmountOverride(newAmount) {
+    var ctx = editAmountCtx;
+    if (!ctx.clientId || !ctx.paymentId) return;
+    var client = state.clients.find(function (c) { return c.id === ctx.clientId; });
+    if (!client) { toast('מטופל לא נמצא', true); return; }
+    var submit = $('#editAmountSubmit');
+    var revertBtn = $('#editAmountRevert');
+    if (submit) submit.disabled = true;
+    if (revertBtn) revertBtn.disabled = true;
+    if (!client.paymentAmountOverrides || typeof client.paymentAmountOverrides !== 'object') {
+      client.paymentAmountOverrides = {};
+    }
+    var prev = Object.prototype.hasOwnProperty.call(client.paymentAmountOverrides, ctx.paymentId)
+      ? client.paymentAmountOverrides[ctx.paymentId] : undefined;
+    if (newAmount === '' || newAmount == null) {
+      delete client.paymentAmountOverrides[ctx.paymentId];
+    } else {
+      client.paymentAmountOverrides[ctx.paymentId] = toNum(newAmount);
+    }
+    renderBilling();
+    persistPaymentAmountOverride(ctx.clientId, ctx.paymentId, newAmount)
+      .then(function () { toast('סכום הגבייה עודכן'); closeEditAmountModal(); })
+      .catch(function (err) {
+        if (prev === undefined) delete client.paymentAmountOverrides[ctx.paymentId];
+        else client.paymentAmountOverrides[ctx.paymentId] = prev;
+        renderBilling();
+        toast('שגיאה: ' + err.message, true);
+      })
+      .finally(function () {
+        if (submit) submit.disabled = false;
+        if (revertBtn) revertBtn.disabled = false;
+      });
+  }
+
   // --- Renew & pay modal (חידוש ותשלום) ----------------------------------
   // Records next month's base payment as paid-in-advance with a manual amount,
   // and sets that amount as the client's new going-forward monthly default. Also
@@ -4152,7 +4293,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal();
       });
     });
 
@@ -4211,6 +4352,20 @@
           toast('שגיאה: ' + err.message, true);
         })
         .finally(function () { submit.disabled = false; });
+    });
+
+    var editAmountForm = $('#editAmountForm');
+    if (editAmountForm) editAmountForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submit = $('#editAmountSubmit');
+      if (submit && submit.disabled) return;
+      var amount = toNum(new FormData(e.target).get('amount'));
+      if (!amount || amount <= 0) { toast('יש להזין סכום חיובי', true); return; }
+      applyAmountOverride(amount);
+    });
+    var editAmountRevert = $('#editAmountRevert');
+    if (editAmountRevert) editAmountRevert.addEventListener('click', function () {
+      applyAmountOverride('');   // clear the override -> revert to the computed amount
     });
 
     var addChargeForm = $('#addChargeForm');

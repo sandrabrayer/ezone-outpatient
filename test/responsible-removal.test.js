@@ -90,7 +90,7 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
     'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
     'phone',
     'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
-    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
+    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'
   ]);
 });
 

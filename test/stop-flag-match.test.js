@@ -147,11 +147,12 @@ test('schema guard: Clients headers mirror the frozen physical order (2026-07-06
   assert.ok(cols.includes('phone'), 'phone column missing');
   // FROZEN 2026-07-06: the tail mirrors the PHYSICAL live sheet (dashboard-line
   // layout), not the prior header array. The volta-only columns — physically
-  // unwritten on the live sheet — are the true trailing columns now.
+  // unwritten on the live sheet — followed by the appended paymentAmountOverrides
+  // are the trailing columns now.
   assert.deepEqual(
-    cols.slice(-3),
-    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo'],
-    'volta-only columns must be the trailing (physically-unwritten) columns'
+    cols.slice(-4),
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'],
+    'volta-only + paymentAmountOverrides must be the trailing (physically-unwritten) columns'
   );
   // The payment tail sits directly after `phone`, matching the live physical sheet.
   const pi = cols.indexOf('phone');

@@ -91,7 +91,16 @@ var CLIENTS_HEADERS = [
   //     paymentDate/startDate (see nextRenewalDueDate / renewalInfo / cycleEndDate).
   //   assignedTo (משוייך ל): staff member responsible for this patient, copied from
   //     the originating lead on conversion so the assignee follows the person.
-  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
+  //   paymentAmountOverrides (סכום גבייה ידני): APPEND-ONLY, physically unwritten on
+  //     the live sheet so it lands at the very END with no migration. A JSON map
+  //     { "<paymentId>": <amount> } of MANUAL collection-amount corrections for this
+  //     client's open-balance rows (גבייה). It is an override LAYER — the read side
+  //     prefers it over the computed/billed amount, and it NEVER rewrites the package
+  //     price or a charge source row. Written one cell at a time by
+  //     _writePaymentAmountOverride (mirrors _writeCreditsOwed); preserved by id on
+  //     _saveAll so a stale full-sheet save can't clobber a newer override. Old rows
+  //     read back blank -> {}.
+  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -648,6 +657,46 @@ function _writeCreditsOwed(clientsSh, clientId, balance) {
   return false;
 }
 
+/* Parse a paymentAmountOverrides cell into a plain map. Blank/garbage -> {}. A
+ * value that is already an object (defensive) is returned as-is. */
+function _parseAmountOverrides(v) {
+  if (v == null || v === '') return {};
+  if (typeof v === 'object') return v;
+  try {
+    var o = JSON.parse(String(v));
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+/* Persist ONE manual collection-amount override without rewriting the whole
+ * Clients sheet. Locates the client row by scanning the id column (like
+ * _writeCreditsOwed / the SessionLog upsert), reads+merges that single JSON cell,
+ * and writes it back. amount === null/'' deletes the key (revert to computed).
+ * Fail-soft: no-hit (client deleted mid-flight) changes nothing and returns false. */
+function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount) {
+  var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+  var ovCol = CLIENTS_HEADERS.indexOf('paymentAmountOverrides') + 1;
+  var lastRow = clientsSh.getLastRow();
+  if (lastRow < 2 || idCol < 1 || ovCol < 1 || !clientId || !paymentId) return false;
+  var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var r = 0; r < ids.length; r++) {
+    if (String(ids[r][0]) === String(clientId)) {
+      var cell = clientsSh.getRange(r + 2, ovCol);
+      var map = _parseAmountOverrides(cell.getValue());
+      if (amount === null || amount === undefined || amount === '') {
+        delete map[paymentId];
+      } else {
+        map[paymentId] = Number(amount);
+      }
+      cell.setValue(Object.keys(map).length ? JSON.stringify(map) : '');
+      return true;
+    }
+  }
+  return false;
+}
+
 function _isDayCenterBilling(billingType) {
   return String(billingType == null ? '' : billingType).trim() === DAY_CENTER_BILLING;
 }
@@ -735,11 +784,19 @@ function _saveAll(payload) {
     // dashboard save carries the balance the client tab last loaded, which may be
     // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
     // and only default a brand-new client (no existing row) to its payload/0.
+    // paymentAmountOverrides is written one cell at a time by the dedicated
+    // savePaymentAmountOverride path. A full-sheet save carries whatever the tab
+    // last loaded, which may be stale — so preserve the on-sheet map by id and only
+    // let a brand-new client (no existing row) seed from its payload value.
     var existingCredits = {};
+    var existingOverrides = {};
     var existing = _readAll(clientsSh, CLIENTS_HEADERS);
     for (var e = 0; e < existing.length; e++) {
       var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
-      if (eid) existingCredits[eid] = _toCredits(existing[e].creditsOwed);
+      if (eid) {
+        existingCredits[eid] = _toCredits(existing[e].creditsOwed);
+        existingOverrides[eid] = existing[e].paymentAmountOverrides == null ? '' : existing[e].paymentAmountOverrides;
+      }
     }
     for (var i = 0; i < clients.length; i++) {
       _deriveClientServiceType(clients[i]);
@@ -747,6 +804,9 @@ function _saveAll(payload) {
       clients[i].creditsOwed = _hasOwn(existingCredits, cid)
         ? existingCredits[cid]
         : _toCredits(clients[i].creditsOwed);
+      clients[i].paymentAmountOverrides = _hasOwn(existingOverrides, cid)
+        ? existingOverrides[cid]
+        : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
     }
     _writeAll(leadsSh, LEADS_HEADERS, leads);
     _writeAll(clientsSh, CLIENTS_HEADERS, clients);
@@ -790,6 +850,30 @@ function _upsertPayment(payment) {
     }
     sh.appendRow(row);
     return { ok: true, payment: payment, created: true };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Set (or clear) a manual collection-amount override for one open-balance row.
+ * Append-only override LAYER on the client row — never touches the package price
+ * or a charge source row. Single-cell write under the script lock, consistent
+ * with the savePayment / creditsOwed paths. Pass a blank/missing amount to revert
+ * a row to its computed amount. */
+function _setPaymentAmountOverride(payload) {
+  var clientId  = String(payload && payload.clientId  == null ? '' : payload.clientId).trim();
+  var paymentId = String(payload && payload.paymentId == null ? '' : payload.paymentId).trim();
+  if (!clientId)  return { ok: false, error: 'missing_clientId' };
+  if (!paymentId) return { ok: false, error: 'missing_paymentId' };
+  var hasAmount = payload && payload.amount !== undefined && payload.amount !== null && payload.amount !== '';
+  var amount = hasAmount ? Number(payload.amount) : null;
+  if (hasAmount && (!isFinite(amount) || amount < 0)) return { ok: false, error: 'invalid_amount' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var ok = _writePaymentAmountOverride(sh, clientId, paymentId, amount);
+    return ok ? { ok: true } : { ok: false, error: 'client_not_found' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -2692,6 +2776,11 @@ function doPost(e) {
     }
     if (action === 'savePayment' || action === 'updatePayment') {
       return _json(_upsertPayment(payload.payment));
+    }
+    if (action === 'savePaymentAmountOverride') {
+      // INTERNAL write (same trust level as savePayment) — the outpatient app posts
+      // it same-origin through the Node proxy; no cross-app secret.
+      return _json(_setPaymentAmountOverride(payload));
     }
     if (action === 'saveCharge' || action === 'updateCharge') {
       return _json(_upsertCharge(payload.charge));

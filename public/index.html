@@ -626,6 +626,25 @@
       </div>
     </div>
 
+    <!-- Edit collection amount (סכום גבייה) on an open-balance row -->
+    <div id="editAmountModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">עריכת סכום גבייה</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="editAmountClientName"></span>
+        </div>
+        <form id="editAmountForm" class="form-grid">
+          <label class="wide">סכום גבייה (₪)<input name="amount" type="number" min="0" step="1" required /></label>
+          <div class="wide" id="editAmountComputedHint" style="color:#7a9bbf;font-size:0.82rem;"></div>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="button" class="btn btn-ghost" id="editAmountRevert" hidden>שחזר לסכום מחושב</button>
+            <button type="submit" class="btn btn-primary" id="editAmountSubmit">שמור סכום</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Renew & pay modal -->
     <div id="renewModal" class="modal" hidden>
       <div class="modal-card">
