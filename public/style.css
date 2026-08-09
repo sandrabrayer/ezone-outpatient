@@ -399,6 +399,25 @@ body.viewer .edit-only { display: none !important; }
   border-radius: 8px; color: var(--text); font-size: 13px;
 }
 .billing-row .billing-balance { color: var(--amber); }
+.billing-row .billing-amount-edit {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  border-radius: 6px;
+  width: 22px; height: 22px;
+  line-height: 1;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+}
+.billing-row .billing-amount-edit:hover { background: color-mix(in srgb, var(--blue-deep) 22%, transparent); }
+.billing-row .billing-amount-overridden {
+  margin-inline-start: 4px;
+  color: var(--green-deep);
+  font-size: 12px;
+}
 .billing-row .billing-paid-wrap.hidden { visibility: hidden; }
 .bt-chip {
   display: inline-block; padding: 2px 8px; border-radius: 999px;

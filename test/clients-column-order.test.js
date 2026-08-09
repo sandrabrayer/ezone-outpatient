@@ -50,13 +50,25 @@ const FROZEN_CLIENTS_HEADERS = [
   // payment tail — physical live positions 27-30 (directly after phone at 26)
   'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
   // volta-only, physically unwritten -> appended at the END (positions 31-33)
-  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
+  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo',
+  // APPEND-ONLY: manual collection-amount overrides (סכום גבייה). Physically
+  // unwritten on the live sheet -> lands at the very END (position 34), no migration.
+  'paymentAmountOverrides'
 ];
 
-test('CLIENTS_HEADERS equals the frozen physical order (2026-07-06)', () => {
+test('CLIENTS_HEADERS equals the frozen physical order', () => {
   const H = namedArray('CLIENTS_HEADERS');
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
-  assert.equal(H.length, 33, 'Clients has 33 columns');
+  assert.equal(H.length, 34, 'Clients has 34 columns');
+});
+
+test('paymentAmountOverrides is APPEND-ONLY: the trailing column, everything before it unchanged', () => {
+  const H = namedArray('CLIENTS_HEADERS');
+  assert.equal(H[H.length - 1], 'paymentAmountOverrides', 'the new column is last');
+  // every earlier column keeps the frozen pre-append order
+  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -1);
+  assert.deepEqual(H.slice(0, -1), PRE_APPEND);
+  assert.equal(PRE_APPEND.length, 33, 'exactly one column was appended (33 -> 34)');
 });
 
 test('phone (join key) stays at physical column 26 (index 25)', () => {
@@ -71,9 +83,9 @@ test('the payment tail sits directly after phone, in physical live order', () =>
     ['paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed']);
 });
 
-test('the volta-only (physically-unwritten) columns are the trailing columns', () => {
+test('the volta-only (physically-unwritten) columns sit at positions 31-33', () => {
   const H = namedArray('CLIENTS_HEADERS');
-  assert.deepEqual(H.slice(-3), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
+  assert.deepEqual(H.slice(30, 33), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
 });
 
 // --- the read-only scan's physical constants must match the frozen order -----

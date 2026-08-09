@@ -164,11 +164,12 @@ test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)',
   // by the deployed dashboard-hKjf9 script), NOT merely the previous header array.
   // The payment tail (paymentStatus/paymentDate/nextBillingDate/creditsOwed) sits
   // directly after `phone`; the volta-only columns (physically unwritten) append at
-  // the END. Append-only from here, verified against the sheet itself.
-  assert.deepEqual(H.slice(-8), [
+  // the END, followed by paymentAmountOverrides (also append-only). Verified against
+  // the sheet itself; append-only from here.
+  assert.deepEqual(H.slice(-9), [
     'phone',
     'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
-    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo'
+    'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'
   ]);
 });
 
