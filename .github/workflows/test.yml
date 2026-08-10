@@ -10,7 +10,7 @@ name: Test
 on:
   push:
     branches:
-      - main
+      - claude/youthful-volta-laarnk
   pull_request:
 
 permissions:
