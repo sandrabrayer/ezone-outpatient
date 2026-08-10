@@ -61,6 +61,28 @@ npm start
 # open http://localhost:3000
 ```
 
+## Testing
+
+```bash
+npm install
+npm test        # Node's built-in runner (node --test) — no external test deps
+```
+
+The suite (`test/**`) runs entirely offline: it **never calls the live Google
+Apps Script backends or any other live app**. Server-route tests stub
+`global.fetch` before requiring `server.js`; Apps Script (`apps-script/Code.gs`)
+logic is mirrored in-file (it can't be `require`d in Node) with a "keep in sync"
+note. No real secrets appear in any test — dummy values only.
+
+Coverage highlights: billing rules (`billing-status`, `charges`, `debt-status`),
+renewal/credit alerts (`vered-alerts`), the shared-secret `getWinbackSource`
+endpoint auth + projection (`winback-source`, caller mocked), and HTTP-level
+route/auth behaviour including the `/api/verify-pin` gate and fail-closed
+config (`server-routes`, `server-fail-closed`).
+
+CI (`.github/workflows/test.yml`) runs `npm ci && npm test` on every pull
+request and every push to `main`.
+
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
