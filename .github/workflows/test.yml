@@ -1,0 +1,40 @@
+name: Test
+
+# Runs the Node test suite (node --test) on every pull request and on every
+# push to main, so a change that breaks server routes, billing/renewal logic,
+# or the shared-secret cross-app endpoints is caught before it merges/deploys.
+#
+# The suite mocks all external HTTP (global.fetch is stubbed and Apps Script
+# logic is mirrored) — it never calls the live Google Apps Script backends.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test

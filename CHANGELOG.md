@@ -16,7 +16,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   mirror test in `test/treatment-plans.test.js` is updated in lockstep. See
   `CHANGELOG-treatment-plans-dates.md`.
 
+### Testing / CI
+- **Automated test CI + coverage for the priority modules.** Added
+  `.github/workflows/test.yml` — runs `npm ci && npm test` (Node 22, the
+  built-in `node --test` runner) on **every pull request and every push to
+  `main`**, with a `concurrency` group so re-pushes cancel superseded runs.
+  New tests, all offline (no live Apps Script call; `global.fetch` stubbed and
+  Code.gs logic mirrored; dummy secrets only): `test/winback-source.test.js`
+  (the shared-secret `getWinbackSource` endpoint — `_winbackAuthOk` fail-closed
+  on a configured secret / open when unset, plus the lost-lead + discharged
+  projection, with the doGet/doPost caller mocked), `test/server-routes.test.js`
+  (`/healthz`, `/api/debug/env` no-leak, and the `/api/verify-pin` auth gate:
+  200 / 401 / 429 rate-limit), and `test/server-fail-closed.test.js`
+  (`/api/sheets` and `/api/continuation-roster` return 500 fail-closed and never
+  reach upstream when their env is unset; `/api/verify-pin` rejects when
+  `APP_PIN` is unset). Suite: 521 → 538 tests. See `CHANGELOG-billing-test-automation.md`.
+
 ### Docs
+- README: added a **Testing** section (how to run the suite, the offline/mock
+  guarantee, coverage highlights, and the CI trigger).
 - clasp CI rollout marked COMPLETE (verified 22/07/2026). `EZONE-ECOSYSTEM-STATUS.md` updated to the July 22 version — new "Apps Script deployment" section (automatic via GitHub Actions, clasp 3.3.0, hardened; trigger = merge to the deployed branch `claude/youthful-volta-laarnk` touching `apps-script/**`; redeploys the EXISTING deployment so the `/exec` URL is unchanged; per-repo secrets `CLASPRC_JSON` + `DEPLOYMENT_ID`; token-refresh = `clasp login` → update `CLASPRC_JSON` in all six repos with the same value), a per-app deployed-branch table verified 22/07/2026, and ezone-kitchen + ezone-coordinators added to the app table. All manual copy-paste redeploy instructions marked OBSOLETE (superseded by clasp CI; emergency fallback only), in the doc and `DEPLOY.md`.
 - CI: bumped `actions/checkout` and `actions/setup-node` to **v5** in the Deploy Apps Script workflow, clearing the Node 20 deprecation warning (both v5 run on Node 24; clasp `node-version` pin stays `22`).
 
