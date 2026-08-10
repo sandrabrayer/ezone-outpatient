@@ -6,6 +6,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **CI test automation — the suite now runs on every PR and every push to the mainline.**
+  New `.github/workflows/test.yml` (**Tests**) checks out, sets up Node 22, runs
+  `npm ci` then `npm test` (`node --test`). "Passing" = every test under `test/`
+  passes (538 today); the job fails on any test failure or a non-clean install.
+  Two coverage gaps in the priority areas are closed alongside it:
+  `test/winback-source.test.js` (the shared-secret `getWinbackSource` endpoint —
+  auth gate with the caller mocked, projection with no billing/payer leak, plus
+  source-scan guards that both `doGet` and `doPost` gate before returning data)
+  and `test/verify-pin-route.test.js` (HTTP-route edit-mode auth: `200` correct
+  PIN, `401` wrong/missing, `429` after 10 attempts, `/healthz`). Every test is
+  self-contained — `global.fetch` is stubbed or the committed `Code.gs` is
+  regex-scanned, so **no live Apps Script / sibling-app call happens** and no
+  real secret appears in any test. See `CHANGELOG-test-automation.md`.
 - **`getTreatmentPlans`: project the treatment period (`startDate` + `exitDate`).**
   The cross-app projection now includes each client's treatment start date and
   end date, consumed by the E-Zone Therapists patient card. Both columns already

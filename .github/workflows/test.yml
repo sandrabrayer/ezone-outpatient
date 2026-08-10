@@ -1,0 +1,46 @@
+name: Tests
+
+# Runs the Node test suite (node --test, see package.json "test" script) on
+# every pull request and every push to main, so a change that breaks the billing
+# rules, the renewal alerts, the shared-secret cross-app endpoints, or the PIN
+# auth is caught in CI instead of in production.
+#
+# The suite is fully self-contained: every test stubs global.fetch or scans the
+# committed apps-script/Code.gs source — nothing here calls the live Google Apps
+# Script backends or any other live app, and no real secret is needed to run it.
+
+on:
+  push:
+    branches:
+      # This repo's mainline is the default/deployed branch (per
+      # EZONE-ECOSYSTEM-STATUS.md), with `main` kept for the conventional name.
+      - main
+      - claude/youthful-volta-laarnk
+  pull_request:
+
+# Cancel an in-flight run when a newer commit is pushed to the same ref.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies (clean, from package-lock.json)
+        run: npm ci
+
+      - name: Run test suite
+        run: npm test

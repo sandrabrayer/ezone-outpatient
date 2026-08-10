@@ -61,6 +61,31 @@ npm start
 # open http://localhost:3000
 ```
 
+## Testing / CI
+
+```bash
+npm ci
+npm test        # node --test — runs every test under test/
+```
+
+- The suite is plain `node --test` (Node >= 18), no extra deps.
+- **`.github/workflows/test.yml`** runs `npm ci` + `npm test` on **every pull
+  request** and **every push to the mainline** (`main` and the default/deployed
+  branch `claude/youthful-volta-laarnk`) — a green check means the whole suite
+  passed. It installs cleanly from `package-lock.json`, needs no secrets, and
+  uses only `contents: read` permissions.
+- Every test is self-contained: the route tests stub `global.fetch`, and the
+  Apps Script tests scan/mirror the committed `apps-script/Code.gs`. **No test
+  calls the live Google Apps Script backend or any sibling app**, and all
+  PINs/secrets in test files are dummy values.
+- Priority coverage: billing (`test/billing-status.test.js`,
+  `test/debt-status*.test.js`, `test/charges*.test.js`,
+  `test/collection-amount-override.test.js`), renewal alerts
+  (`test/vered-alerts.test.js`, `test/card-*-renewal*.test.js`), the
+  shared-secret `getWinbackSource` endpoint (`test/winback-source.test.js`,
+  caller mocked), and edit-mode PIN auth (`test/verify-pin-route.test.js`,
+  `test/pin.test.js`).
+
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
