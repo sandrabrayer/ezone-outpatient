@@ -6,6 +6,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **מטופלים לא פעילים — dedicated top-level tab + the לא פעיל fix.** A lead
+  is someone who has not started treatment, so discharged patients no longer
+  sit in שימור לידים (now leads-only): both inactive kinds — `סיים טיפול`
+  (manual discharge) and `לא פעיל` (deleted in the therapists app) — moved to
+  a new eighth nav tab with per-kind sections, badges and per-tab search.
+  Fixes the live inconsistency where `לא פעיל` patients still appeared in the
+  main patients list and kept generating גבייה due items: `renderClients`,
+  `clientsDueOn` and `renewalInfo` now exclude both inactive statuses
+  (`הפסקה זמנית` still bills). The שחזר לטיפול restore now covers `לא פעיל`
+  too — flipping the status re-adds the patient to the cross-app projections,
+  so the therapists roster picks them up again with no sender call. Still
+  frontend-only (no Code.gs change, no new column, no redeploy). New
+  `test/inactive-patients-tab.test.js` (11 cases);
+  `test/restore-client.test.js` updated in lockstep. See
+  `CHANGELOG-inactive-patients-tab.md`.
 - **שחזר לטיפול — restore a discharged patient from the retention tab.** The
   "סיימו טיפול" cards in שימור לידים (previously display-only) now carry an
   editor-only restore button, mirroring the שחזר לליד pattern. A confirm modal
