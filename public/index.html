@@ -511,6 +511,28 @@
       </div>
     </div>
 
+    <!-- Restore-to-treatment (שחזר לטיפול) confirm — reverses סיים טיפול from the
+         retention tab: status back to פעיל, exitDate cleared, billing re-anchored
+         to the restore date (packageChangeDate = today; the stale nextBillingDate
+         is cleared so the re-anchor wins). Lists the patient's active extra
+         charges, which resume billing untouched. -->
+    <div id="restoreClientModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">שחזור לטיפול</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          עבור <span id="restoreClientName"></span>
+        </div>
+        <p style="margin:0 0 12px;color:var(--text-soft);font-size:13px;line-height:1.5;">
+          המטופל יחזור לסטטוס פעיל והגבייה תתחדש מהיום — החיוב הבא בעוד חודש.
+        </p>
+        <div id="restoreClientCharges" style="margin:0 0 12px;font-size:13px;line-height:1.5;"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+          <button type="button" class="btn btn-primary" id="restoreClientConfirm">שחזר לטיפול</button>
+        </div>
+      </div>
+    </div>
+
     <div id="notRelevantReasonModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">סיבת אי-רלוונטיות</div>

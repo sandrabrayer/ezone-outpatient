@@ -1795,6 +1795,65 @@
       });
   }
 
+  // "שחזר לטיפול" — reverses סיים טיפול from the retention tab (mirrors the
+  // שחזר לליד pattern on not-relevant leads). Opens a confirm modal that also
+  // lists the patient's ACTIVE extra charges: restore leaves them untouched and
+  // they resume billing, so Vered sees them up front and can remove stale ones.
+  // The actual write fires from the modal confirm below.
+  var restoreClientId = null;
+  function openRestoreClientModal(c) {
+    if (state.role !== 'editor') return;
+    restoreClientId = c.id;
+    $('#restoreClientName').textContent = c.name || '';
+    var host = $('#restoreClientCharges');
+    if (host) {
+      var activeCharges = state.charges.filter(function (ch) {
+        return ch.clientId === c.id && ch.active !== false;
+      });
+      host.innerHTML = activeCharges.length
+        ? '<div style="font-weight:600;color:#f0ad4e;margin-bottom:4px;">חיובים נוספים פעילים שימשיכו להיגבות:</div>' +
+          activeCharges.map(function (ch) {
+            return '<div>• ' + escapeHtml(ch.description || 'חיוב נוסף') + ' — ' +
+              money(toNum(ch.amount)) + (ch.billingType === 'monthly' ? ' (חודשי)' : ' (חד פעמי)') + '</div>';
+          }).join('')
+        : '';
+    }
+    $('#restoreClientModal').hidden = false;
+  }
+  function closeRestoreClientModal() {
+    var m = $('#restoreClientModal');
+    if (m) m.hidden = true;
+    restoreClientId = null;
+  }
+  function submitRestoreClient() {
+    var c = state.clients.find(function (x) { return x.id === restoreClientId; });
+    closeRestoreClientModal();
+    if (!c || c.status !== 'סיים טיפול') return; // only a discharged patient restores
+    // Optimistic: flip + re-anchor now, persist in background, roll back on
+    // failure. packageChangeDate = today re-anchors גבייה הבאה to the restore
+    // date + 1 month (anchor precedence in nextRenewalDueDate); the stale
+    // nextBillingDate must be cleared or it would outrank the re-anchor and
+    // flag the patient overdue immediately. exitDate is cleared — a future
+    // discharge re-sets it from the exit modal.
+    var prev = {
+      status: c.status, exitDate: c.exitDate,
+      packageChangeDate: c.packageChangeDate, nextBillingDate: c.nextBillingDate
+    };
+    c.status = 'פעיל';
+    c.exitDate = '';
+    c.packageChangeDate = today();
+    c.nextBillingDate = '';
+    render();
+    persist()
+      .then(function () { toast('המטופל שוחזר לטיפול'); })
+      .catch(function (err) {
+        c.status = prev.status; c.exitDate = prev.exitDate;
+        c.packageChangeDate = prev.packageChangeDate; c.nextBillingDate = prev.nextBillingDate;
+        render();
+        toast('שחזור נכשל: ' + err.message, true);
+      });
+  }
+
   function lastDayOfMonth(dateISO) {
     var parts = String(dateISO).slice(0, 10).split('-');
     if (parts.length < 3) return null;
@@ -2287,6 +2346,14 @@
           retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : '') +
           retRow('הערות', c.notes ? escapeHtml(c.notes) : '');
         card.innerHTML = header + body;
+        if (state.role === 'editor') {
+          var restorePatientBtn = document.createElement('button');
+          restorePatientBtn.className = 'btn btn-ghost';
+          restorePatientBtn.style.marginTop = '10px';
+          restorePatientBtn.textContent = 'שחזר לטיפול';
+          restorePatientBtn.onclick = function () { openRestoreClientModal(c); };
+          card.appendChild(restorePatientBtn);
+        }
         list.appendChild(card);
       });
     }
@@ -4298,7 +4365,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal();
       });
     });
 
@@ -4901,6 +4968,11 @@
       var note = String(fd.get('stop_note') || '').trim().slice(0, 1000);
       submitStopAlert(reason, note);
       closeStopAlertModal();
+    });
+
+    var restoreClientConfirmBtn = $('#restoreClientConfirm');
+    if (restoreClientConfirmBtn) restoreClientConfirmBtn.addEventListener('click', function () {
+      submitRestoreClient();
     });
 
     var resumeConfirmBtn = $('#resumeTreatmentConfirm');
