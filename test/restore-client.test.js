@@ -14,10 +14,13 @@
  *      pwa.test.js / card-edit-renewal-fix.test.js) — they lock the inline
  *      handler to that contract so it can't silently regress.
  *
- * Contract (decisions locked at design time):
- *   - restore applies ONLY to a discharged (סיים טיפול) patient — פעיל,
- *     הפסקה זמנית and the cross-app לא פעיל are all no-ops (לא פעיל restore is
- *     deliberately out of v1 scope: it would undo a therapists-app delete)
+ * Contract (decisions locked at design time; לא פעיל restore added with the
+ * מטופלים לא פעילים tab):
+ *   - restore applies to BOTH inactive kinds — discharged (סיים טיפול) and
+ *     cross-app deactivated (לא פעיל). פעיל / הפסקה זמנית / blank are no-ops.
+ *     Restoring a לא פעיל patient needs no sender call: flipping the status
+ *     re-adds them to the getTreatmentPlans/getDebtStatus projections, which
+ *     the therapists roster unions as base sources.
  *   - status -> 'פעיל'; exitDate cleared (the exit modal re-sets it on any
  *     future discharge)
  *   - billing re-anchor: packageChangeDate = restore date AND the stale
@@ -40,13 +43,13 @@ const { nextRenewalDueDate } = require('../public/charges-logic');
 const DISCHARGED = 'סיים טיפול';
 const ACTIVE = 'פעיל';
 const PAUSED = 'הפסקה זמנית';
-const DEACTIVATED = 'לא פעיל'; // cross-app status — NOT restorable in v1
+const DEACTIVATED = 'לא פעיל'; // cross-app status — restorable like discharge
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure mirror of submitRestoreClient's write (minus DOM/persist plumbing)
 // ─────────────────────────────────────────────────────────────────────────────
 function restoreClient(c, todayISO) {
-  if (!c || c.status !== DISCHARGED) return false; // guard: discharged only
+  if (!c || (c.status !== DISCHARGED && c.status !== DEACTIVATED)) return false;
   c.status = ACTIVE;
   c.exitDate = '';
   c.packageChangeDate = todayISO;
@@ -89,8 +92,16 @@ test('restore touches ONLY the four contract fields — package/price/frequency/
   }
 });
 
-test('restore is a no-op for non-discharged statuses (incl. the cross-app לא פעיל)', () => {
-  for (const status of [ACTIVE, PAUSED, DEACTIVATED, '']) {
+test('restore also flips a cross-app deactivated (לא פעיל) patient', () => {
+  const c = dischargedClient({ status: DEACTIVATED, exitDate: '' });
+  assert.equal(restoreClient(c, '2026-08-18'), true);
+  assert.equal(c.status, ACTIVE);
+  assert.equal(c.packageChangeDate, '2026-08-18');
+  assert.equal(c.nextBillingDate, '');
+});
+
+test('restore is a no-op for non-inactive statuses', () => {
+  for (const status of [ACTIVE, PAUSED, '']) {
     const c = dischargedClient({ status });
     const before = Object.assign({}, c);
     assert.equal(restoreClient(c, '2026-08-18'), false, `status "${status}" must not restore`);
@@ -141,11 +152,12 @@ test('restore never touches charge rows', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Source-scan guards: lock the real inline handler + markup to the contract
 // ─────────────────────────────────────────────────────────────────────────────
-test('app.js: submitRestoreClient guards on סיים טיפול and writes the four contract fields', () => {
+test('app.js: submitRestoreClient guards on the two inactive statuses and writes the four contract fields', () => {
   const fn = APP.match(/function submitRestoreClient\(\) \{[\s\S]*?\n  \}/);
   assert.ok(fn, 'submitRestoreClient not found in public/app.js');
   const src = fn[0];
-  assert.match(src, /c\.status !== 'סיים טיפול'/, 'must restore ONLY discharged patients');
+  assert.match(src, /c\.status !== 'סיים טיפול' && c\.status !== 'לא פעיל'/,
+    'must restore only discharged or cross-app-deactivated patients');
   assert.match(src, /c\.status = 'פעיל'/);
   assert.match(src, /c\.exitDate = ''/);
   assert.match(src, /c\.packageChangeDate = today\(\)/);
@@ -156,14 +168,16 @@ test('app.js: submitRestoreClient guards on סיים טיפול and writes the f
   }
 });
 
-test('app.js: retention tab offers שחזר לטיפול on discharged cards, editor-only', () => {
+test('app.js: the inactive-patients tab offers שחזר לטיפול on its cards, editor-only', () => {
   const idx = APP.indexOf("restorePatientBtn.textContent = 'שחזר לטיפול'");
   assert.ok(idx !== -1, 'שחזר לטיפול button not found');
-  // The button block sits inside the finished.forEach card builder behind the
-  // same editor gate the שחזר לליד button uses.
+  // The button block sits inside renderInactive's shared card builder behind
+  // the same editor gate the שחזר לליד button uses.
   const before = APP.slice(Math.max(0, idx - 400), idx);
   assert.match(before, /state\.role === 'editor'/, 'restore button must be editor-only');
-  assert.match(before, /card\.innerHTML = header \+ body;/, 'button must attach to the discharged retention card');
+  assert.match(before, /card\.innerHTML = header \+ body;/, 'button must attach to the inactive-patient card');
+  const renderInactiveIdx = APP.indexOf('function renderInactive(');
+  assert.ok(renderInactiveIdx !== -1 && renderInactiveIdx < idx, 'button must live inside renderInactive');
 });
 
 test('app.js: modal wiring — confirm button and the global data-close chain', () => {

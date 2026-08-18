@@ -148,6 +148,7 @@
     leadSearch: '',
     clientSearch: '',
     retentionSearch: '',
+    inactiveSearch: '',
     billingSearch: '',
     clientTab: 'all',
     billingDate: '',
@@ -330,7 +331,7 @@
   //     negative gap to 0, and is NEVER overdue.
   //   - Otherwise: stored next-billing date + hasBillingProblem.
   function renewalInfo(c) {
-    if (!c || c.status === 'סיים טיפול') return { status: 'unknown' };
+    if (!c || c.status === 'סיים טיפול' || c.status === 'לא פעיל') return { status: 'unknown' };
     var renewal = nextRenewalDueDate(c);
     if (!renewal) return { status: 'unknown' };
     var daysLeft = daysBetween(today(), renewal);
@@ -956,6 +957,7 @@
     else if (state.view === 'clients') renderClients();
     else if (state.view === 'billing') renderBilling();
     else if (state.view === 'retention') renderRetention();
+    else if (state.view === 'inactive') renderInactive();
     else if (state.view === 'payouts') renderPayouts();
     else if (state.view === 'continuation') renderContinuation();
   }
@@ -1828,7 +1830,11 @@
   function submitRestoreClient() {
     var c = state.clients.find(function (x) { return x.id === restoreClientId; });
     closeRestoreClientModal();
-    if (!c || c.status !== 'סיים טיפול') return; // only a discharged patient restores
+    // Both inactive kinds restore: סיים טיפול (manual discharge) and לא פעיל
+    // (cross-app deactivated — flipping the status re-adds the patient to the
+    // getTreatmentPlans/getDebtStatus projections, so the therapists roster
+    // union picks them up again on its next build; no sender call needed).
+    if (!c || (c.status !== 'סיים טיפול' && c.status !== 'לא פעיל')) return;
     // Optimistic: flip + re-anchor now, persist in background, roll back on
     // failure. packageChangeDate = today re-anchors גבייה הבאה to the restore
     // date + 1 month (anchor precedence in nextRenewalDueDate); the stale
@@ -1886,7 +1892,9 @@
     var selectedMonthKey = monthKey(dateISO);
     var out = [];
     state.clients.forEach(function (c) {
-      if (c.status === 'סיים טיפול') return;
+      // No due items for either inactive kind — a לא פעיל patient (deleted in
+      // the therapists app) must stop billing exactly like a discharged one.
+      if (c.status === 'סיים טיפול' || c.status === 'לא פעיל') return;
       // Base monthly
       var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
       if (bd) {
@@ -2269,6 +2277,9 @@
       '</div>';
   }
 
+  // Leads ONLY — a lead is someone who has not started treatment. Patients who
+  // left (discharged or cross-app deactivated) live in the dedicated
+  // מטופלים לא פעילים tab (renderInactive), not here.
   function renderRetention() {
     var list = $('#retentionList');
     list.innerHTML = '';
@@ -2279,13 +2290,8 @@
       if (rq && l.name.toLowerCase().indexOf(rq) === -1) return false;
       return true;
     });
-    var finished = state.clients.filter(function (c) {
-      if (c.status !== 'סיים טיפול') return false;
-      if (rq && c.name.toLowerCase().indexOf(rq) === -1) return false;
-      return true;
-    });
 
-    if (!notRel.length && !finished.length) {
+    if (!notRel.length) {
       list.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין רשומות בשימור לידים</p></div>';
       return;
     }
@@ -2325,25 +2331,54 @@
         list.appendChild(card);
       });
     }
+  }
 
-    if (finished.length) {
-      var h2 = document.createElement('div');
-      h2.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      h2.textContent = 'סיימו טיפול';
-      list.appendChild(h2);
-      finished.forEach(function (c) {
+  // ---- Inactive patients (מטופלים לא פעילים) ----
+  // Patients only — never leads. Two sections:
+  //   סיימו טיפול — Vered's manual discharge (exit modal), win-back candidates.
+  //   לא פעיל     — cross-app deactivated: the patient was DELETED in the
+  //                 E-Zone Therapists app and the deactivateClient receiver
+  //                 soft-marked the Client row here.
+  // Both card kinds carry the שחזר לטיפול button (editor-only) into the same
+  // restore confirm modal.
+  function renderInactive() {
+    var list = $('#inactiveList');
+    if (!list) return;
+    list.innerHTML = '';
+
+    var iq = state.inactiveSearch.trim().toLowerCase();
+    function matches(c) { return !iq || c.name.toLowerCase().indexOf(iq) !== -1; }
+    var finished = state.clients.filter(function (c) {
+      return c.status === 'סיים טיפול' && matches(c);
+    });
+    var deactivated = state.clients.filter(function (c) {
+      return c.status === 'לא פעיל' && matches(c);
+    });
+
+    if (!finished.length && !deactivated.length) {
+      list.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין מטופלים לא פעילים</p></div>';
+      return;
+    }
+
+    function inactiveSection(title, patients, badgeHtml, extraRowsFor) {
+      if (!patients.length) return;
+      var h = document.createElement('div');
+      h.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
+      h.textContent = title;
+      list.appendChild(h);
+      patients.forEach(function (c) {
         var card = document.createElement('div');
         card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
         var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
           '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(c.name) + '</span>' +
-          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#d4edda;color:#155724;font-weight:600;">סיים טיפול</span>' +
+          badgeHtml +
           '</div>';
         var body = retRow('טלפון', c.phone ? escapeHtml(String(c.phone)) : '') +
           retRow('סוג טיפול', c.serviceType ? escapeHtml(formatServices(parseServices(c.serviceType))) : '') +
           retRow('סניף', c.location ? escapeHtml(c.location) : '') +
           retRow('בית מוצא', escapeHtml(houseOfOriginLabel(c.house_of_origin))) +
           retRow('תחילת טיפול', c.startDate ? displayDate(c.startDate) : '') +
-          retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : '') +
+          extraRowsFor(c) +
           retRow('הערות', c.notes ? escapeHtml(c.notes) : '');
         card.innerHTML = header + body;
         if (state.role === 'editor') {
@@ -2357,6 +2392,14 @@
         list.appendChild(card);
       });
     }
+
+    inactiveSection('סיימו טיפול', finished,
+      '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#d4edda;color:#155724;font-weight:600;">סיים טיפול</span>',
+      function (c) { return retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : ''); });
+
+    inactiveSection('לא פעילים', deactivated,
+      '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא פעיל</span>',
+      function () { return retRow('מקור', 'הוסר באפליקציית המטפלים'); });
   }
 
   // ---- Therapist payouts (read-only, step 1 of 4) ----
@@ -3251,7 +3294,8 @@
     list.innerHTML = '';
     var q = state.clientSearch.trim().toLowerCase();
     var visible = state.clients.filter(function (c) {
-      if (c.status === 'סיים טיפול') return false; // finished go to retention
+      // Both inactive kinds live in the מטופלים לא פעילים tab, not here.
+      if (c.status === 'סיים טיפול' || c.status === 'לא פעיל') return false;
       if (state.clientTab !== 'all') {
         // Day-center tab carries the new label; match old "מרכז יום" rows too.
         var matchesTab = state.clientTab === DAY_CENTER_LABEL
@@ -4330,6 +4374,7 @@
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
     on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
+    on('#inactiveSearch', 'input', function (e) { state.inactiveSearch = e.target.value; renderInactive(); });
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
     var continuationListEl = $('#continuationList');

@@ -34,6 +34,7 @@
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="retention">שימור לידים</button>
+        <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
         <button class="tab" data-view="payouts">תשלומי מטפלים</button>
         <button class="tab" data-view="continuation">מסלול המשך</button>
       </nav>
@@ -149,9 +150,21 @@
       <section id="view-retention" class="view">
         <div class="toolbar">
           <input id="retentionSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">שימור לידים — לא רלוונטים וסיימו טיפול</h2>
+          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">שימור לידים — לא רלוונטים</h2>
         </div>
         <div id="retentionList"></div>
+      </section>
+
+      <!-- Inactive patients (מטופלים לא פעילים): patients only, never leads —
+           a lead is someone who has not started treatment. Two sections:
+           סיימו טיפול (Vered's manual discharge) and לא פעיל (deleted in the
+           therapists app via the deactivateClient receiver). Both restorable. -->
+      <section id="view-inactive" class="view">
+        <div class="toolbar">
+          <input id="inactiveSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
+        </div>
+        <div id="inactiveList"></div>
       </section>
 
       <!-- Therapist payouts -->
