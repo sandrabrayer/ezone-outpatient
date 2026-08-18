@@ -6,6 +6,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **שחזר לטיפול — restore a discharged patient from the retention tab.** The
+  "סיימו טיפול" cards in שימור לידים (previously display-only) now carry an
+  editor-only restore button, mirroring the שחזר לליד pattern. A confirm modal
+  lists the patient's active extra charges (they resume billing untouched),
+  then an optimistic write sets `status='פעיל'`, clears `exitDate`, and
+  re-anchors billing to the restore date (`packageChangeDate=today` + clearing
+  the stale `nextBillingDate`, so גבייה הבאה = restore + 1 month instead of an
+  instant months-overdue flag). Discharge-only by design — the cross-app
+  `'לא פעיל'` status is not restorable from the UI. Frontend-only: rides the
+  ordinary `saveAll`; **no Code.gs change, no new column, no redeploy.** New
+  `test/restore-client.test.js` (12 cases). See `CHANGELOG-restore-client.md`.
 - **`getTreatmentPlans`: project the treatment period (`startDate` + `exitDate`).**
   The cross-app projection now includes each client's treatment start date and
   end date, consumed by the E-Zone Therapists patient card. Both columns already
