@@ -15,8 +15,10 @@
  *   { secret, name, phone, house, note }
  *   - secret: validated against CREATE_LEAD_SECRET, FAIL-CLOSED on missing/wrong
  *   - phone : MAY be empty
- *   - house : a Dashboard houseId key, stored verbatim into house_of_origin
- *             (1:1 with the Outpatient keys; unknown keys stored as-is, never fail)
+ *   - house : a Dashboard houseId key, stored into house_of_origin — 1:1 /
+ *             verbatim for the classic keys; the canonical ecosystem id
+ *             'pardes' translates to the Outpatient stable key
+ *             'raanana_pardes'; unknown keys stored as-is, never fail
  *   - note  : free text, may be empty
  *   → { ok:true, id } on success; { ok:false, error } on failure.
  */
@@ -46,9 +48,12 @@ function sanitizeLeadText(v, maxLen) {
   return s;
 }
 
-// --- mirror of _mapLeadHouse (1:1 verbatim, unknown passes through) ---
+// --- mirror of _mapLeadHouse (aliases translate to the Outpatient stable
+//     key; everything else — known 1:1 keys and unknown keys — verbatim) ---
+const CREATE_LEAD_HOUSE_ALIASES = { pardes: 'raanana_pardes' };
 function mapLeadHouse(house) {
-  return String(house == null ? '' : house).trim();
+  const s = String(house == null ? '' : house).trim();
+  return CREATE_LEAD_HOUSE_ALIASES[s] || s;
 }
 
 // --- mirror of _createLeadAuthOk (fail-closed) ---
@@ -174,12 +179,25 @@ test('blank name is rejected after auth passes (no row)', () => {
   assert.equal(sheet.length, 0);
 });
 
-test('all five known Dashboard house keys map 1:1 verbatim', () => {
+test('the five classic Dashboard house keys map 1:1 verbatim', () => {
   ['raanana', 'ramot', 'efroni', 'rehab', 'external'].forEach(k => {
     const sheet = [];
     createLead(sheet, SECRET, { secret: SECRET, name: 'N', house: k }, TODAY);
     assert.equal(sheet[0][col('house_of_origin')], k);
   });
+});
+
+test("canonical house id 'pardes' translates to the stable key 'raanana_pardes'", () => {
+  const sheet = [];
+  const res = createLead(sheet, SECRET, {
+    secret: SECRET, name: 'P', phone: '', house: 'pardes', note: ''
+  }, TODAY);
+  assert.equal(res.ok, true);
+  assert.equal(sheet[0][col('house_of_origin')], 'raanana_pardes');
+  // trims before translating, like every other key
+  const sheet2 = [];
+  createLead(sheet2, SECRET, { secret: SECRET, name: 'P', house: ' pardes ' }, TODAY);
+  assert.equal(sheet2[0][col('house_of_origin')], 'raanana_pardes');
 });
 
 // --- source-guard: the real Code.gs still matches this contract ---
@@ -212,6 +230,18 @@ test('source: secret is never logged', () => {
   // No Logger.log / console.log anywhere in the createLead region should echo a secret.
   const region = SRC.slice(SRC.indexOf('Create lead (inbound'), SRC.indexOf('Merge duplicate clients'));
   assert.doesNotMatch(region, /Logger\.log[\s\S]*secret/i, 'secret must never be logged');
+});
+
+test('source: Code.gs knows pardes and remaps it to raanana_pardes', () => {
+  const m = SRC.match(/var CREATE_LEAD_HOUSE_KEYS = \{([\s\S]*?)\};/);
+  assert.ok(m, 'CREATE_LEAD_HOUSE_KEYS not found');
+  assert.match(m[1], /pardes: true/, "pardes must be a known Dashboard house key");
+  const a = SRC.match(/var CREATE_LEAD_HOUSE_ALIASES = \{([\s\S]*?)\};/);
+  assert.ok(a, 'CREATE_LEAD_HOUSE_ALIASES not found');
+  assert.match(a[1], /pardes: 'raanana_pardes'/, 'pardes must alias to raanana_pardes');
+  const fn = SRC.match(/function _mapLeadHouse\(house\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(fn, '_mapLeadHouse not found');
+  assert.match(fn[0], /CREATE_LEAD_HOUSE_ALIASES\[s\] \|\| s/, 'aliases first, verbatim otherwise');
 });
 
 test('source: mirror lead keys equal LEADS_HEADERS in Code.gs (row shape in sync)', () => {

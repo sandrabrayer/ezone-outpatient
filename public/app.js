@@ -46,7 +46,12 @@
     kisaria_gmila: 'קיסריה גמילה',
     efroni:   'קיסריה עפרוני',
     rehab:    'קיסריה ריהאב',
-    external: 'חיצוני'
+    external: 'חיצוני',
+    // 'pardes' is the ecosystem's canonical id for רעננה הפרדס (what the
+    // dashboard sends); the stable stored key here is raanana_pardes
+    // (Code.gs remaps inbound createLead). Display alias so rows written
+    // verbatim before the remap still label.
+    pardes:   'רעננה הפרדס'
   };
   function houseOfOriginLabel(v) {
     var s = String(v == null ? '' : v).trim();
