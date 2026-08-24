@@ -2304,19 +2304,29 @@ function _getMyStopAlerts() {
  * touched — this only creates a lead for Vered to work.
  */
 
-/* Known Dashboard houseId keys. They are identical to the Outpatient
- * house_of_origin keys (HOUSE_OF_ORIGIN_LABELS in public/app.js), so the
- * mapping is 1:1 / verbatim — no remapping table. Kept only to document the
- * contract; an UNKNOWN key is still stored as-is and never rejected, so an
- * unexpected house never fails the write (the lead must still be created). */
+/* Known Dashboard houseId keys. Most are identical to the Outpatient
+ * house_of_origin keys (HOUSE_OF_ORIGIN_LABELS in public/app.js) and map 1:1 /
+ * verbatim. The exception is 'pardes' (רעננה הפרדס): its canonical ecosystem
+ * id is 'pardes', but this repo's stable house_of_origin key for that house is
+ * 'raanana_pardes' (stable code keys are never renamed), so it is translated —
+ * the same mapping the continuation tab applies (HOUSE_TO_ORIGIN in
+ * public/continuation-logic.js). An UNKNOWN key is still stored as-is and
+ * never rejected, so an unexpected house never fails the write (the lead must
+ * still be created). */
 var CREATE_LEAD_HOUSE_KEYS = {
-  raanana: true, ramot: true, efroni: true, rehab: true, external: true
+  raanana: true, ramot: true, efroni: true, rehab: true, external: true,
+  pardes: true
+};
+var CREATE_LEAD_HOUSE_ALIASES = {
+  pardes: 'raanana_pardes'
 };
 
 function _mapLeadHouse(house) {
-  // 1:1 with the Outpatient house_of_origin keys; unknown keys pass through
+  // Aliases translate a canonical ecosystem id to the Outpatient stable key;
+  // every other key — known 1:1 keys and unknown keys alike — passes through
   // verbatim (guarded: never throw, never reject — the lead still writes).
-  return String(house == null ? '' : house).trim();
+  var s = String(house == null ? '' : house).trim();
+  return CREATE_LEAD_HOUSE_ALIASES[s] || s;
 }
 
 /* Trim, strip control characters, and length-cap a free-text field before it
