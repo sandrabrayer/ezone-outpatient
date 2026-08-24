@@ -6,6 +6,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **רעננה הפרדס (canonical id `pardes`) — new house wired in.** The dashboard's
+  `createLead` for pardes discharges (`house:'pardes'`) now stores this repo's
+  stable key `raanana_pardes` (Code.gs alias — matches the continuation tab's
+  existing mapping), and `HOUSE_OF_ORIGIN_LABELS` labels verbatim-stored
+  `'pardes'` rows written before the redeploy. All other house surfaces
+  (LOCATIONS, בית מוצא selects, continuation labels/mapping) already carried
+  the house. New guard `test/house-enumerations.test.js` asserts every house
+  enumeration covers the canonical 5-house list; no per-house sheet tabs,
+  parameters, PINs or digests exist in this repo. Apps Script redeploys
+  automatically via clasp CI on merge (new version, same `/exec` URL). See
+  `CHANGELOG-add-pardes-house.md`.
 - **מטופלים לא פעילים — dedicated top-level tab + the לא פעיל fix.** A lead
   is someone who has not started treatment, so discharged patients no longer
   sit in שימור לידים (now leads-only): both inactive kinds — `סיים טיפול`
