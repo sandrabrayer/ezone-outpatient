@@ -905,6 +905,72 @@ function _saveAll(payload) {
   }
 }
 
+/* ===== Clients-removed tombstones: admin read + restore ====================
+ * The recovery surface over the Clients-removed sheet written by
+ * _appendClientTombstones. Internal dashboard actions (same trust level as
+ * getData / mergeClients — posted same-origin through the Node proxy). */
+
+/* Read every un-restored tombstone (restoredAt blank), in sheet order (oldest
+ * first — a row removed twice appears twice; the restore below always picks
+ * the LATEST). */
+function _getRemovedClients() {
+  var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+  var rows = _readAll(sh, CLIENTS_REMOVED_HEADERS);
+  var open = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].restoredAt) open.push(rows[i]);
+  }
+  return { ok: true, removed: open };
+}
+
+/* Restore ONE tombstoned client by id: copy the client columns of the LATEST
+ * un-restored tombstone back to Clients (appendRow) and stamp that
+ * tombstone's restoredAt. Guards: a live Clients row with the id →
+ * 'already_active' (never a duplicate); no un-restored tombstone →
+ * 'not_found'. The row comes back EXACTLY as it was removed — status
+ * included. Tombstones stay append-only: restore never deletes or rewrites a
+ * tombstone beyond the restoredAt stamp, so the audit trail survives. */
+function _restoreRemovedClient(payload) {
+  var id = String(payload && payload.id != null ? payload.id : '').trim();
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: false, error: 'busy' };
+  try {
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    for (var c = 0; c < clients.length; c++) {
+      if (String(clients[c].id) === id) return { ok: false, error: 'already_active' };
+    }
+    var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var vals = sh.getRange(2, 1, lastRow - 1, CLIENTS_REMOVED_HEADERS.length).getValues();
+    var idIdx  = CLIENTS_REMOVED_HEADERS.indexOf('id');
+    var resIdx = CLIENTS_REMOVED_HEADERS.indexOf('restoredAt');
+    // Bottom-up: a row can be removed + restored more than once — the latest
+    // un-restored tombstone is the one to bring back.
+    var rowIdx = -1;
+    for (var r = vals.length - 1; r >= 0; r--) {
+      var restored = vals[r][resIdx];
+      if (String(vals[r][idIdx]) === id && (restored === '' || restored === null)) { rowIdx = r; break; }
+    }
+    if (rowIdx === -1) return { ok: false, error: 'not_found' };
+    var tomb = {};
+    for (var h = 0; h < CLIENTS_REMOVED_HEADERS.length; h++) {
+      tomb[CLIENTS_REMOVED_HEADERS[h]] = vals[rowIdx][h];
+    }
+    clientsSh.appendRow(CLIENTS_HEADERS.map(function (hh) {
+      var v = tomb[hh];
+      return (v === undefined || v === null) ? '' : v;
+    }));
+    sh.getRange(rowIdx + 2, resIdx + 1).setValue(new Date().toISOString());
+    Logger.log('restoreRemovedClient: id=%s name=%s', id, String(tomb.name || ''));
+    return { ok: true, restored: true, id: id, name: String(tomb.name || '') };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 /* ===== Payments =====
  * id is deterministic (built on the client) so the same monthly /
  * single / bundle bill always upserts into the same row. */
@@ -2692,6 +2758,9 @@ function doGet(e) {
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
+    // INTERNAL dashboard read (same trust level as getData): un-restored
+    // Clients-removed tombstones, for the admin restore surface.
+    if (action === 'getRemovedClients') return _json(_getRemovedClients());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -2879,6 +2948,10 @@ function doPost(e) {
     if (action === 'mergeClients') {
       return _json(_mergeClients(payload));
     }
+    // INTERNAL dashboard actions (same trust level as mergeClients): the
+    // Clients-removed tombstone recovery surface.
+    if (action === 'getRemovedClients') return _json(_getRemovedClients());
+    if (action === 'restoreRemovedClient') return _json(_restoreRemovedClient(payload));
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
     }

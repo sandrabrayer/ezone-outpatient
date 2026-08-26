@@ -150,6 +150,7 @@
     myStopAlerts: [], // this app's own stop/resume alert rows (id/clientId/status/type), seeded cross-session from getMyStopAlerts and updated optimistically — drives the sent/standing chip on overdue rows
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
+    removedClients: null, // un-restored Clients-removed tombstones; null = not yet fetched, 'loading' = in flight
     leadSearch: '',
     clientSearch: '',
     retentionSearch: '',
@@ -662,6 +663,14 @@
   // sessions, not just the current optimistic one.
   async function apiGetMyStopAlerts() {
     var r = await fetch('/api/sheets?action=getMyStopAlerts', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  // Un-restored Clients-removed tombstones (the _saveAll row-loss guard's
+  // audit sheet). INTERNAL read, same trust level as the main load.
+  async function apiGetRemovedClients() {
+    var r = await fetch('/api/sheets?action=getRemovedClients', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -2346,6 +2355,38 @@
     }
   }
 
+  // Lazily fetch the Clients-removed tombstones the first time a surface
+  // needs them; onDone re-renders the calling view once they arrive.
+  // state.removedClients: null = not fetched, 'loading' = in flight,
+  // array = loaded (empty on failure so the calling view still renders).
+  function ensureRemovedClients(onDone) {
+    if (state.removedClients !== null) return;
+    state.removedClients = 'loading';
+    apiGetRemovedClients()
+      .then(function (d) { state.removedClients = d.removed || []; })
+      .catch(function (e) {
+        console.warn('[ezone] getRemovedClients failed:', e.message);
+        state.removedClients = [];
+      })
+      .then(function () { if (onDone) onDone(); });
+  }
+
+  // Restore one tombstoned client (editor-only): confirm → the server copies
+  // the latest un-restored tombstone back to Clients and stamps restoredAt →
+  // full reload so the restored card shows everywhere. The tombstone row
+  // itself is never deleted (append-only audit trail).
+  function performRestoreRemovedClient(id, name) {
+    if (state.role !== 'editor') return;
+    if (!confirm('לשחזר את ' + (name || 'המטופל') + ' לרשימת המטופלים?')) return;
+    apiPostAction('restoreRemovedClient', { id: id })
+      .then(function () {
+        state.removedClients = null; // refetch on next need
+        return loadAll();
+      })
+      .then(function () { toast('שוחזר'); })
+      .catch(function (e) { toast('שגיאה בשחזור: ' + e.message, true); });
+  }
+
   // ---- Inactive patients (מטופלים לא פעילים) ----
   // Patients only — never leads. Two sections:
   //   סיימו טיפול — Vered's manual discharge (exit modal), win-back candidates.
@@ -2354,6 +2395,9 @@
   //                 soft-marked the Client row here.
   // Both card kinds carry the שחזר לטיפול button (editor-only) into the same
   // restore confirm modal.
+  // A third section, מטופלים שנמחקו, lists un-restored Clients-removed
+  // tombstones (patients with NO Clients row anymore — deleted or clobbered);
+  // their שחזר מטופל goes through restoreRemovedClient instead.
   function renderInactive() {
     var list = $('#inactiveList');
     if (!list) return;
@@ -2367,8 +2411,16 @@
     var deactivated = state.clients.filter(function (c) {
       return c.status === 'לא פעיל' && matches(c);
     });
+    // Deleted patients: un-restored Clients-removed tombstones (the _saveAll
+    // row-loss guard). Lazily fetched on first render of this tab.
+    ensureRemovedClients(function () { if (state.view === 'inactive') renderInactive(); });
+    var removedRows = Array.isArray(state.removedClients)
+      ? state.removedClients.filter(function (t) {
+          return !iq || String(t.name || '').toLowerCase().indexOf(iq) !== -1;
+        })
+      : [];
 
-    if (!finished.length && !deactivated.length) {
+    if (!finished.length && !deactivated.length && !removedRows.length) {
       list.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין מטופלים לא פעילים</p></div>';
       return;
     }
@@ -2413,6 +2465,44 @@
     inactiveSection('לא פעילים', deactivated,
       '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא פעיל</span>',
       function () { return retRow('מקור', 'הוסר באפליקציית המטפלים'); });
+
+    // מטופלים שנמחקו — Clients-removed tombstones. Same card look as the two
+    // sections above, but the restore path is different: these patients have
+    // NO Clients row anymore, so שחזר מטופל goes through restoreRemovedClient
+    // (the server copies the tombstone back to Clients), not the status-based
+    // restore modal.
+    if (removedRows.length) {
+      var rh = document.createElement('div');
+      rh.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
+      rh.textContent = 'מטופלים שנמחקו';
+      list.appendChild(rh);
+      removedRows.forEach(function (t) {
+        var card = document.createElement('div');
+        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
+        var viaLabel = t.removedVia === 'explicit-delete' ? 'נמחק ידנית (✕)' : 'נשמט בשמירה — שחזור זמין';
+        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(t.name || '') + '</span>' +
+          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#e2d6f8;color:#4a2a80;font-weight:600;">נמחק</span>' +
+          '</div>';
+        var body = retRow('טלפון', t.phone ? escapeHtml(String(t.phone)) : '') +
+          retRow('סוג טיפול', t.serviceType ? escapeHtml(formatServices(parseServices(t.serviceType))) : '') +
+          retRow('סניף', t.location ? escapeHtml(t.location) : '') +
+          retRow('סטטוס בעת המחיקה', t.status ? escapeHtml(t.status) : '') +
+          retRow('נמחק ב', t.removedAt ? displayDate(t.removedAt) : '') +
+          retRow('אופן המחיקה', viaLabel) +
+          retRow('הערות', t.notes ? escapeHtml(t.notes) : '');
+        card.innerHTML = header + body;
+        if (state.role === 'editor') {
+          var restoreRemovedBtn = document.createElement('button');
+          restoreRemovedBtn.className = 'btn btn-ghost';
+          restoreRemovedBtn.style.marginTop = '10px';
+          restoreRemovedBtn.textContent = 'שחזר מטופל';
+          restoreRemovedBtn.onclick = function () { performRestoreRemovedClient(String(t.id), t.name); };
+          card.appendChild(restoreRemovedBtn);
+        }
+        list.appendChild(card);
+      });
+    }
   }
 
   // ---- Therapist payouts (read-only, step 1 of 4) ----
