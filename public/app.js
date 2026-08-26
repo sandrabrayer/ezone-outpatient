@@ -152,6 +152,7 @@
     retained: [],   // lead-retention list (not_relevant + finished)
     removedClients: null, // un-restored Clients-removed tombstones; null = not yet fetched, 'loading' = in flight
     leadSearch: '',
+    dashSearch: '',   // cross-tab patient locator on the dashboard (איתור מטופל)
     clientSearch: '',
     retentionSearch: '',
     inactiveSearch: '',
@@ -1029,6 +1030,103 @@
     renderRenewalAlerts(activeOnly);
     renderStopFlags();
     renderExtraRequests();
+    renderDashPatientSearch();
+  }
+
+  // ---- Cross-tab patient locator (איתור מטופל, dashboard) ----
+  // Searches Clients (any status), the Clients-removed tombstones and orphan
+  // billing rows AT ONCE via the pure PatientSearch module, so a patient is
+  // findable even when no tab shows a card (the 2026-08-26 dropped-row
+  // incident: orphan payments in גבייה, no card anywhere). This layer does
+  // rendering + navigation only — classification lives in
+  // public/patient-search.js.
+  function dashStatusChip(row) {
+    var bg = '#d4edda', fg = '#155724', label = row.status || 'פעיל';
+    if (row.kind === 'removed') { bg = '#e2d6f8'; fg = '#4a2a80'; label = 'נמחק'; }
+    else if (row.kind === 'billing-only') { bg = '#f8d7da'; fg = '#721c24'; label = 'גבייה בלבד'; }
+    else if (row.status === 'סיים טיפול') { bg = '#e2e3e5'; fg = '#41464b'; }
+    else if (row.status === 'לא פעיל') { bg = '#f8d7da'; fg = '#721c24'; }
+    else if (row.status === 'הפסקה זמנית') { bg = '#fff3cd'; fg = '#856404'; }
+    return '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:' + bg +
+      ';color:' + fg + ';font-weight:600;">' + escapeHtml(label) + '</span>';
+  }
+
+  // Jump to the tab that owns this result, with its per-tab search prefilled
+  // so the patient is already isolated when the tab opens.
+  function dashOpenInTab(row) {
+    var name = row.name || '';
+    if (row.tab === 'clients') {
+      state.clientSearch = name;
+      state.clientTab = 'all';
+      var ci = $('#clientsSearch'); if (ci) ci.value = name;
+      setView('clients');
+    } else if (row.tab === 'inactive') {
+      state.inactiveSearch = name;
+      var ii = $('#inactiveSearch'); if (ii) ii.value = name;
+      setView('inactive');
+    } else {
+      state.billingSearch = name;
+      var bi = $('#billingSearch'); if (bi) bi.value = name;
+      setView('billing');
+    }
+  }
+
+  function dashSearchRow(row) {
+    var el = document.createElement('div');
+    el.className = 'bd-line';
+    var detail = '';
+    if (row.kind === 'removed') {
+      var viaLabel = row.removedVia === 'explicit-delete' ? 'נמחק ידנית (✕)' : 'נשמט בשמירה';
+      detail = '<span class="bd-out">' + viaLabel +
+        (row.removedAt ? ' · ' + displayDate(row.removedAt) : '') + '</span> ';
+    } else if (row.kind === 'billing-only') {
+      detail = '<span class="bd-out">מטופל ללא כרטיס — ' + row.paymentsCount +
+        ' רשומות גבייה, נגבה ' + money(row.collected) + '</span> ';
+    }
+    el.innerHTML =
+      '<span>' + escapeHtml(row.name || '—') + ' ' + dashStatusChip(row) + '</span>' +
+      '<span>' + detail + '</span>';
+    var actions = el.lastChild;
+    if (row.kind === 'removed') {
+      // No card to open — the recovery action IS the destination.
+      if (state.role === 'editor') {
+        var rb = document.createElement('button');
+        rb.className = 'btn btn-ghost';
+        rb.textContent = 'שחזר מטופל';
+        rb.onclick = function () { performRestoreRemovedClient(String(row.id), row.name); };
+        actions.appendChild(rb);
+      }
+    } else {
+      var ob = document.createElement('button');
+      ob.className = 'btn btn-ghost';
+      ob.textContent = row.tab === 'clients' ? 'פתח במטופלים'
+        : row.tab === 'inactive' ? 'פתח בלא פעילים'
+        : 'פתח בגבייה';
+      ob.onclick = function () { dashOpenInTab(row); };
+      actions.appendChild(ob);
+    }
+    return el;
+  }
+
+  function renderDashPatientSearch() {
+    var box = $('#dashPatientResults');
+    if (!box) return;
+    var q = state.dashSearch.trim();
+    if (!q) { box.innerHTML = ''; return; }
+    // Deleted patients must be findable here too → lazily pull the tombstones
+    // on the first search and re-render when they land.
+    ensureRemovedClients(function () { if (state.view === 'dashboard') renderDashPatientSearch(); });
+    var rows = PatientSearch.searchPatients(q, {
+      clients: state.clients,
+      removedClients: Array.isArray(state.removedClients) ? state.removedClients : [],
+      payments: state.payments
+    });
+    box.innerHTML = '';
+    if (!rows.length) {
+      box.innerHTML = '<div class="bd-line muted">לא נמצא מטופל בשם הזה — בשום לשונית</div>';
+      return;
+    }
+    rows.forEach(function (rw) { box.appendChild(dashSearchRow(rw)); });
   }
 
   // Credit alert: active patients who owe a make-up session (creditsOwed > 0),
@@ -4473,6 +4571,7 @@
     if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
     var mergeConfirmBtn = $('#mergeClientsConfirm');
     if (mergeConfirmBtn) mergeConfirmBtn.addEventListener('click', performMergeClients);
+    on('#dashPatientSearch', 'input', function (e) { state.dashSearch = e.target.value; renderDashPatientSearch(); });
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
     on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });

@@ -54,6 +54,16 @@
           <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
         </div>
 
+        <!-- Cross-tab patient locator: searches Clients (any status), the
+             Clients-removed tombstones AND orphan billing rows at once, so a
+             patient is findable even when no tab shows a card (the 2026-08-26
+             dropped-row incident). -->
+        <div class="panel">
+          <div class="panel-title">🔎 איתור מטופל</div>
+          <input id="dashPatientSearch" class="search" placeholder="חיפוש מטופל בכל הלשוניות — כולל מטופלים שנמחקו…" />
+          <div id="dashPatientResults" class="billing-breakdown"></div>
+        </div>
+
         <!-- Session-credit make-ups owed -->
         <div class="panel renewals-panel">
           <div class="panel-title">🎟️ קרדיט מפגשים להשלמה</div>
@@ -784,6 +794,7 @@
   </div>
 
   <script src="name-search.js?v=__BUILD__" defer></script>
+  <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
   <script src="treatment-map.js?v=__BUILD__" defer></script>
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
