@@ -601,11 +601,19 @@
     };
   }
 
-  async function persist() {
+  async function persist(opts) {
     var payload = {
       leads: state.leads.map(leadForSheet),
       clients: state.clients.map(clientForSheet)
     };
+    // Client ids removed ON PURPOSE by this save (the ✕ permanent-delete
+    // flow). The server tombstones EVERY client row missing from the payload
+    // (Clients-removed sheet); declaring the deliberate ones here records them
+    // as removedVia='explicit-delete' instead of the stale-tab clobber
+    // signature 'saveAll-diff'.
+    if (opts && opts.explicitRemovedIds && opts.explicitRemovedIds.length) {
+      payload.explicitRemovedIds = opts.explicitRemovedIds;
+    }
     await apiSave(payload);
   }
 
@@ -3576,7 +3584,7 @@
         state.clients = state.clients.filter(function (x) { return x.id !== deletedId; });
         // Also drop this patient's charge rows so they can't become orphans.
         state.charges = state.charges.filter(function (ch) { return ch.clientId !== deletedId; });
-        persist()
+        persist({ explicitRemovedIds: [deletedId] })
           .then(function () { return persistRemoveChargesForClient(deletedId); })
           .then(function () { return removePaymentsForClient(deletedId); })
           .then(function () { toast('נמחק'); render(); })
