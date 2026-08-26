@@ -103,6 +103,43 @@ var CLIENTS_HEADERS = [
   'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'
 ];
 
+/* Tombstone sheet ("Clients-removed") for rows removed from Clients — the
+ * recovery net for the stale-tab clobber incident (2026-08-26): _saveAll is a
+ * clear-and-rewrite of the whole Clients sheet from whatever client list the
+ * browser sent, so a browser holding a stale list silently erased a patient
+ * row while their Payments rows survived as orphans. Before ANY row is
+ * dropped (diffed away by a save, or deleted on purpose) its full current row
+ * is appended here first, so a drop is always recoverable.
+ *
+ * This sheet has ITS OWN headers — deliberately a full literal, NOT a concat
+ * of CLIENTS_HEADERS: the tombstone sheet is decoupled from the frozen
+ * Clients positional rule, so a future CLIENTS_HEADERS append can never
+ * shift removedAt/removedVia/restoredAt under existing tombstone rows. This
+ * array is append-only like every other header array — a new Clients column
+ * is mirrored here by appending it at the very END (after restoredAt).
+ *   removedAt  — ISO timestamp of the removal.
+ *   removedVia — 'saveAll-diff' (row missing from a saveAll payload that did
+ *                not declare it as an explicit delete: the stale-tab clobber
+ *                signature) | 'explicit-delete' (the ✕ permanent-delete flow
+ *                declared the id in explicitRemovedIds).
+ *   restoredAt — blank until restoreRemovedClient copies the row back to
+ *                Clients; then stamped so a tombstone is never restored twice.
+ * Tombstone ROWS are append-only: an audit trail — never rewritten, never
+ * deleted; restore only stamps restoredAt. */
+var CLIENTS_REMOVED_HEADERS = [
+  'id', 'name', 'serviceType', 'location', 'sessionsPerWeek',
+  'pricePerSession', 'startDate', 'status', 'exitDate', 'fromLead',
+  'source', 'notes', 'billingType', 'billingDay',
+  'bundleSize', 'bundlePrice', 'sessionsUsed', 'bundlePaid',
+  'house_of_origin',
+  'responsiblePerson', 'serviceScope',
+  'treatmentContactPhone', 'payerName', 'payerPhone', 'paymentLink',
+  'phone',
+  'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
+  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides',
+  'removedAt', 'removedVia', 'restoredAt'
+];
+
 /* Settings sheet: one row per setting, key/value style.
  * Currently used for bank transfer details. */
 var SETTINGS_HEADERS = ['key', 'value'];
@@ -766,6 +803,34 @@ function _monthKey(dateStr) {
   return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
 }
 
+/* Append one tombstone row to "Clients-removed" per client row about to be
+ * dropped from Clients. `rows` are _readAll(Clients) objects (dates already
+ * ISO strings, phones recovered) — the row is preserved exactly as the app
+ * reads it, so a restore writes back the same shape _writeAll would.
+ * `explicitSet` maps the ids a caller declared as deliberate deletes; every
+ * other drop is recorded as 'saveAll-diff' — the stale-tab clobber signature.
+ * appendRow per row (the לידים שהוסרו pattern); MUST be called under the
+ * caller's script lock — this helper takes none of its own. */
+function _appendClientTombstones(rows, explicitSet) {
+  if (!rows || !rows.length) return 0;
+  var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+  var now = new Date().toISOString();
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var id = row.id != null ? String(row.id) : '';
+    var via = (explicitSet && explicitSet[id]) ? 'explicit-delete' : 'saveAll-diff';
+    sh.appendRow(CLIENTS_REMOVED_HEADERS.map(function (h) {
+      if (h === 'removedAt') return now;
+      if (h === 'removedVia') return via;
+      if (h === 'restoredAt') return '';
+      var v = row[h];
+      return (v === undefined || v === null) ? '' : v;
+    }));
+    Logger.log('clientTombstone: id=%s name=%s via=%s', id, String(row.name || ''), via);
+  }
+  return rows.length;
+}
+
 function _saveAll(payload) {
   // Serialize full-sheet rewrites so two overlapping saves can't clobber each
   // other (every other writer already takes this lock). If the lock can't be
@@ -808,9 +873,99 @@ function _saveAll(payload) {
         ? existingOverrides[cid]
         : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
     }
+    // Row-loss guard (stale-tab clobber): any id currently on the sheet but
+    // MISSING from the incoming array is about to be erased by the
+    // clear-and-rewrite below. Tombstone its full current row FIRST so the
+    // drop is always recoverable. explicitRemovedIds carries the ids the ✕
+    // permanent-delete flow removed on purpose; every other missing id is
+    // recorded as 'saveAll-diff' — the signature of a stale tab overwriting
+    // a list it never loaded.
+    var incomingIds = {};
+    for (var n = 0; n < clients.length; n++) {
+      var nid = (clients[n] && clients[n].id != null) ? String(clients[n].id) : '';
+      if (nid) incomingIds[nid] = true;
+    }
+    var explicitSet = {};
+    var explicitList = (payload && payload.explicitRemovedIds) || [];
+    for (var x = 0; x < explicitList.length; x++) {
+      var xid = explicitList[x] == null ? '' : String(explicitList[x]);
+      if (xid) explicitSet[xid] = true;
+    }
+    var droppedRows = [];
+    for (var d = 0; d < existing.length; d++) {
+      var did = (existing[d] && existing[d].id != null) ? String(existing[d].id) : '';
+      if (did && !incomingIds[did]) droppedRows.push(existing[d]);
+    }
+    var tombstoned = _appendClientTombstones(droppedRows, explicitSet);
     _writeAll(leadsSh, LEADS_HEADERS, leads);
     _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-    return { ok: true, savedLeads: leads.length, savedClients: clients.length };
+    return { ok: true, savedLeads: leads.length, savedClients: clients.length, tombstoned: tombstoned };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* ===== Clients-removed tombstones: admin read + restore ====================
+ * The recovery surface over the Clients-removed sheet written by
+ * _appendClientTombstones. Internal dashboard actions (same trust level as
+ * getData / mergeClients — posted same-origin through the Node proxy). */
+
+/* Read every un-restored tombstone (restoredAt blank), in sheet order (oldest
+ * first — a row removed twice appears twice; the restore below always picks
+ * the LATEST). */
+function _getRemovedClients() {
+  var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+  var rows = _readAll(sh, CLIENTS_REMOVED_HEADERS);
+  var open = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].restoredAt) open.push(rows[i]);
+  }
+  return { ok: true, removed: open };
+}
+
+/* Restore ONE tombstoned client by id: copy the client columns of the LATEST
+ * un-restored tombstone back to Clients (appendRow) and stamp that
+ * tombstone's restoredAt. Guards: a live Clients row with the id →
+ * 'already_active' (never a duplicate); no un-restored tombstone →
+ * 'not_found'. The row comes back EXACTLY as it was removed — status
+ * included. Tombstones stay append-only: restore never deletes or rewrites a
+ * tombstone beyond the restoredAt stamp, so the audit trail survives. */
+function _restoreRemovedClient(payload) {
+  var id = String(payload && payload.id != null ? payload.id : '').trim();
+  if (!id) return { ok: false, error: 'missing_id' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: false, error: 'busy' };
+  try {
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    for (var c = 0; c < clients.length; c++) {
+      if (String(clients[c].id) === id) return { ok: false, error: 'already_active' };
+    }
+    var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'not_found' };
+    var vals = sh.getRange(2, 1, lastRow - 1, CLIENTS_REMOVED_HEADERS.length).getValues();
+    var idIdx  = CLIENTS_REMOVED_HEADERS.indexOf('id');
+    var resIdx = CLIENTS_REMOVED_HEADERS.indexOf('restoredAt');
+    // Bottom-up: a row can be removed + restored more than once — the latest
+    // un-restored tombstone is the one to bring back.
+    var rowIdx = -1;
+    for (var r = vals.length - 1; r >= 0; r--) {
+      var restored = vals[r][resIdx];
+      if (String(vals[r][idIdx]) === id && (restored === '' || restored === null)) { rowIdx = r; break; }
+    }
+    if (rowIdx === -1) return { ok: false, error: 'not_found' };
+    var tomb = {};
+    for (var h = 0; h < CLIENTS_REMOVED_HEADERS.length; h++) {
+      tomb[CLIENTS_REMOVED_HEADERS[h]] = vals[rowIdx][h];
+    }
+    clientsSh.appendRow(CLIENTS_HEADERS.map(function (hh) {
+      var v = tomb[hh];
+      return (v === undefined || v === null) ? '' : v;
+    }));
+    sh.getRange(rowIdx + 2, resIdx + 1).setValue(new Date().toISOString());
+    Logger.log('restoreRemovedClient: id=%s name=%s', id, String(tomb.name || ''));
+    return { ok: true, restored: true, id: id, name: String(tomb.name || '') };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -960,6 +1115,41 @@ function _removeChargesForClient(clientId) {
     for (var i = rows.length - 1; i >= 0; i--) {
       if (String(rows[i][cidIdx]).trim() === cid) {
         Logger.log('removeChargesForClient: clientId=%s chargeId=%s', cid, String(rows[i][idIdx]));
+        sh.deleteRow(i + 2);
+        removed++;
+      }
+    }
+    return { ok: true, removed: removed, clientId: cid };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Bulk-delete every Payments row belonging to a deleted patient. Mirrors
+// _removeChargesForClient exactly: called from the dashboard's patient-delete
+// flow so payment rows never outlive their patient as orphans — and, unlike
+// the old client-side per-row loop, it works off the SHEET, so it removes
+// every row even when the deleting browser never managed to load payments.
+// Safe and idempotent: a clientId with no rows returns { ok:true, removed:0 }.
+// Deletes bottom-up so row indices stay valid, and logs each removed row for
+// an audit trail in the Apps Script execution log.
+function _removePaymentsForClient(clientId) {
+  var cid = String(clientId == null ? '' : clientId).trim();
+  if (!cid) return { ok: false, error: 'missing_clientId' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
+    var cidIdx = PAYMENTS_HEADERS.indexOf('clientId');
+    var idIdx  = PAYMENTS_HEADERS.indexOf('id');
+    var rows = sh.getRange(2, 1, lastRow - 1, PAYMENTS_HEADERS.length).getValues();
+    var removed = 0;
+    // Iterate bottom-up: deleting a lower row never shifts a higher index.
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i][cidIdx]).trim() === cid) {
+        Logger.log('removePaymentsForClient: clientId=%s paymentId=%s', cid, String(rows[i][idIdx]));
         sh.deleteRow(i + 2);
         removed++;
       }
@@ -2603,6 +2793,9 @@ function doGet(e) {
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
+    // INTERNAL dashboard read (same trust level as getData): un-restored
+    // Clients-removed tombstones, for the admin restore surface.
+    if (action === 'getRemovedClients') return _json(_getRemovedClients());
     if (action === 'saveAll') {
       var payload = { leads: [], clients: [] };
       if (e.parameter.payload) {
@@ -2630,7 +2823,10 @@ function doPost(e) {
     if (action === 'saveAll') {
       return _json(_saveAll({
         leads:   Array.isArray(payload.leads)   ? payload.leads   : [],
-        clients: Array.isArray(payload.clients) ? payload.clients : []
+        clients: Array.isArray(payload.clients) ? payload.clients : [],
+        // ids the ✕ permanent-delete flow removed on purpose this save; any
+        // other id missing from `clients` is tombstoned as 'saveAll-diff'.
+        explicitRemovedIds: Array.isArray(payload.explicitRemovedIds) ? payload.explicitRemovedIds : []
       }));
     }
     if (action === 'getData')     return _json(_getData());
@@ -2787,6 +2983,10 @@ function doPost(e) {
     if (action === 'mergeClients') {
       return _json(_mergeClients(payload));
     }
+    // INTERNAL dashboard actions (same trust level as mergeClients): the
+    // Clients-removed tombstone recovery surface.
+    if (action === 'getRemovedClients') return _json(_getRemovedClients());
+    if (action === 'restoreRemovedClient') return _json(_restoreRemovedClient(payload));
     if (action === 'saveSettings') {
       return _json(_saveSettings(payload.settings || {}));
     }
@@ -2811,6 +3011,9 @@ function doPost(e) {
     }
     if (action === 'removeChargesForClient') {
       return _json(_removeChargesForClient(payload.clientId));
+    }
+    if (action === 'removePaymentsForClient') {
+      return _json(_removePaymentsForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
