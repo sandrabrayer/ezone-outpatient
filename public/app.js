@@ -755,14 +755,16 @@
     });
   }
 
-  // Remove every payment row tied to a clientId (used when a patient is deleted).
+  // Remove every payment row tied to a clientId (used when a patient is
+  // deleted). One server-side bulk round-trip against the SHEET — the old
+  // client-side loop iterated state.payments (empty whenever getPayments had
+  // failed at load, leaving every row orphaned) and console.warn-swallowed
+  // per-row failures. A failure now PROPAGATES to the caller's catch so the
+  // delete flow surfaces it instead of silently leaving orphans.
   async function removePaymentsForClient(clientId) {
-    var theirs = state.payments.filter(function (p) { return p.clientId === clientId; });
     state.payments = state.payments.filter(function (p) { return p.clientId !== clientId; });
-    for (var i = 0; i < theirs.length; i++) {
-      try { await removePayment(theirs[i].id); } catch (e) { console.warn('[ezone] removePayment failed:', theirs[i].id, e.message); }
-    }
-    return theirs.length;
+    var res = await apiPostAction('removePaymentsForClient', { clientId: clientId });
+    return res.removed || 0;
   }
 
   function normalizeChargeFromSheet(row) {

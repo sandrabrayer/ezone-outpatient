@@ -1125,6 +1125,41 @@ function _removeChargesForClient(clientId) {
   }
 }
 
+// Bulk-delete every Payments row belonging to a deleted patient. Mirrors
+// _removeChargesForClient exactly: called from the dashboard's patient-delete
+// flow so payment rows never outlive their patient as orphans — and, unlike
+// the old client-side per-row loop, it works off the SHEET, so it removes
+// every row even when the deleting browser never managed to load payments.
+// Safe and idempotent: a clientId with no rows returns { ok:true, removed:0 }.
+// Deletes bottom-up so row indices stay valid, and logs each removed row for
+// an audit trail in the Apps Script execution log.
+function _removePaymentsForClient(clientId) {
+  var cid = String(clientId == null ? '' : clientId).trim();
+  if (!cid) return { ok: false, error: 'missing_clientId' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
+    var cidIdx = PAYMENTS_HEADERS.indexOf('clientId');
+    var idIdx  = PAYMENTS_HEADERS.indexOf('id');
+    var rows = sh.getRange(2, 1, lastRow - 1, PAYMENTS_HEADERS.length).getValues();
+    var removed = 0;
+    // Iterate bottom-up: deleting a lower row never shifts a higher index.
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i][cidIdx]).trim() === cid) {
+        Logger.log('removePaymentsForClient: clientId=%s paymentId=%s', cid, String(rows[i][idIdx]));
+        sh.deleteRow(i + 2);
+        removed++;
+      }
+    }
+    return { ok: true, removed: removed, clientId: cid };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _removePayment(paymentId) {
   if (!paymentId) return { ok: false, error: 'missing_id' };
   var lock = LockService.getScriptLock();
@@ -2976,6 +3011,9 @@ function doPost(e) {
     }
     if (action === 'removeChargesForClient') {
       return _json(_removeChargesForClient(payload.clientId));
+    }
+    if (action === 'removePaymentsForClient') {
+      return _json(_removePaymentsForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead));
     return _json({ ok: false, error: 'unknown action: ' + action });
