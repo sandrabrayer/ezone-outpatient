@@ -3119,3 +3119,387 @@ function doPost(e) {
     return _json({ ok: false, error: String(err) });
   }
 }
+
+/* ===== Nightly integrity job (detection + backup) ===========================
+ *
+ * Second layer of defense after the _saveAll row-loss guard (2026-08-26
+ * incident): a time-driven job (2:00 AM, project timezone Asia/Jerusalem —
+ * pinned in appsscript.json) that DETECTS silent patient-row loss and keeps a
+ * daily off-spreadsheet backup, independent of any save path.
+ *
+ * READ-ONLY contract: this job NEVER writes to the live Clients or Payments
+ * sheets — not even a header relabel, which is why every live read goes
+ * through getSheetByName (never _ensureSheet). Its only writes are Script
+ * Properties, the separate EZONE-Backups spreadsheet, and the alert email.
+ *
+ * Three checks, in a FIXED ORDER (locked by test/nightly-integrity.test.js):
+ *   1. Row-count sentinel — compare live row count/ids to the previous run's
+ *      (Script Properties); a decrease whose ids lack a Clients-removed
+ *      tombstone is the silent-loss signature. Runs BEFORE check 3: the
+ *      missing rows' names are resolved from the NEWEST EXISTING snapshot
+ *      (yesterday's), which the same-day snapshot overwrite would replace
+ *      with a copy that no longer contains them.
+ *   2. Orphan-payment sweep — every clientId across Payments must match a
+ *      Clients row or a tombstone (orphaned payments were how the original
+ *      incident surfaced).
+ *   3. Daily snapshot — values-only copy of Clients into the EZONE-Backups
+ *      spreadsheet, one sheet per day ('outpatient-YYYY-MM-DD' — prefixed so
+ *      the Dashboard app's job can later share the same backup spreadsheet),
+ *      then delete snapshot sheets older than 30 days.
+ *
+ * Alerting: ONE email per run, ONLY when something is wrong (no daily noise),
+ * to the ALERT_EMAIL Script Property. Fail-open: no property / send failure
+ * -> Logger.log the full report, never throw.
+ *
+ * Install once by running setupIntegrityTrigger() from the editor. */
+
+var INTEGRITY_PROP_LAST_COUNT  = 'INTEGRITY_LAST_COUNT';
+var INTEGRITY_PROP_LAST_IDS    = 'INTEGRITY_LAST_IDS';
+var INTEGRITY_PROP_LAST_RUN    = 'INTEGRITY_LAST_RUN';
+var INTEGRITY_PROP_BACKUP_SSID = 'INTEGRITY_BACKUP_SSID';
+var INTEGRITY_PROP_ALERT_EMAIL = 'ALERT_EMAIL';
+var INTEGRITY_BACKUP_NAME      = 'EZONE-Backups';
+var INTEGRITY_RETENTION_DAYS   = 30;
+var INTEGRITY_ALERT_SUBJECT    = '⚠️ E-ZONE: אי-התאמה בנתוני מטופלים';
+/* Snapshot sheet names are app-prefixed: the backup spreadsheet will be
+ * shared with the Dashboard app's own job later, so each app's snapshots and
+ * retention must never collide. Keep the prefix and the STRICT matcher in
+ * sync — the round-trip test locks them together. */
+var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
+var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
+
+/* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
+
+/* Ids present in the previous run's list but absent from the current one. */
+function _integrityDiffMissingIds(prevIds, currentIds) {
+  var cur = {};
+  for (var i = 0; i < (currentIds || []).length; i++) {
+    var cid = currentIds[i] == null ? '' : String(currentIds[i]);
+    if (cid) cur[cid] = true;
+  }
+  var missing = [];
+  for (var j = 0; j < (prevIds || []).length; j++) {
+    var pid = prevIds[j] == null ? '' : String(prevIds[j]);
+    if (pid && !cur[pid]) missing.push(pid);
+  }
+  return missing;
+}
+
+/* clientId out of a payment id. Shapes (public/charges-logic.js):
+ *   base monthly:    pay::<clientId>::base::<YYYY-MM>
+ *   extra monthly:   pay::<clientId>::chg-<chargeId>::<YYYY-MM>
+ *   one-time extra:  pay::<clientId>::chg-<chargeId>::once
+ *   legacy (3-seg):  pay::<clientId>::<YYYY-MM>
+ * Anything not shaped like pay::<clientId>::… -> '' (caller falls back to the
+ * row's clientId column). */
+function _integrityParsePaymentClientId(paymentId) {
+  var parts = String(paymentId == null ? '' : paymentId).split('::');
+  if (parts.length < 3 || parts[0] !== 'pay') return '';
+  return parts[1] || '';
+}
+
+/* Unique payment clientIds with NEITHER a live Clients row NOR a tombstone.
+ * clientId is parsed from the payment id (authoritative — it was built from
+ * the client row), falling back to the row's clientId column. */
+function _integrityOrphanClientIds(paymentRows, liveIdSet, tombstoneIdSet) {
+  var seen = {};
+  var orphans = [];
+  for (var i = 0; i < (paymentRows || []).length; i++) {
+    var row = paymentRows[i] || {};
+    var cid = _integrityParsePaymentClientId(row.id);
+    if (!cid) cid = row.clientId == null ? '' : String(row.clientId);
+    if (!cid || seen[cid]) continue;
+    seen[cid] = true;
+    if (!liveIdSet[cid] && !tombstoneIdSet[cid]) orphans.push(cid);
+  }
+  return orphans;
+}
+
+/* 'outpatient-YYYY-MM-DD' from a Date's LOCAL parts — the runtime clock is
+ * the project timezone (Asia/Jerusalem), so the day rolls at local midnight. */
+function _integritySnapshotName(date) {
+  var m = date.getMonth() + 1;
+  var d = date.getDate();
+  return INTEGRITY_SNAPSHOT_PREFIX + date.getFullYear() +
+    '-' + (m < 10 ? '0' + m : String(m)) +
+    '-' + (d < 10 ? '0' + d : String(d));
+}
+
+/* Retention date math over SHEET NAMES. Strict: only names matching the
+ * prefixed snapshot format can ever expire — every other sheet (another
+ * app's snapshots, a manual tab) is untouchable. Expired = strictly older
+ * than retentionDays days before today. */
+function _integrityIsExpiredSnapshot(sheetName, todayName, retentionDays) {
+  var m = INTEGRITY_SNAPSHOT_RE.exec(String(sheetName == null ? '' : sheetName));
+  if (!m) return false;
+  var t = INTEGRITY_SNAPSHOT_RE.exec(String(todayName == null ? '' : todayName));
+  if (!t) return false;
+  var ageDays = (Date.UTC(+t[1], +t[2] - 1, +t[3]) - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 86400000;
+  return ageDays > retentionDays;
+}
+
+/* ---- GAS-facing helpers ---------------------------------------------------- */
+
+/* Newest existing snapshot sheet in the backup spreadsheet (zero-padded ISO
+ * names under a fixed prefix -> lexicographic order is chronological). */
+function _integrityLatestSnapshotSheet(backupSs) {
+  if (!backupSs) return null;
+  var sheets = backupSs.getSheets();
+  var best = null, bestName = '';
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    if (INTEGRITY_SNAPSHOT_RE.test(name) && name > bestName) { best = sheets[i]; bestName = name; }
+  }
+  return best;
+}
+
+/* id -> name map for the given ids, read from one snapshot sheet (columns
+ * located via the snapshot's own header row, so a future CLIENTS_HEADERS
+ * append can't break old snapshots). Unresolvable -> ''. */
+function _integrityLookupNames(snapshotSheet, ids) {
+  var names = {};
+  for (var i = 0; i < ids.length; i++) names[ids[i]] = '';
+  if (!snapshotSheet || !ids.length) return names;
+  try {
+    var vals = snapshotSheet.getDataRange().getValues();
+    if (vals.length < 2) return names;
+    var idCol = vals[0].indexOf('id');
+    var nameCol = vals[0].indexOf('name');
+    if (idCol === -1 || nameCol === -1) return names;
+    for (var r = 1; r < vals.length; r++) {
+      var id = String(vals[r][idCol]);
+      if (Object.prototype.hasOwnProperty.call(names, id) && !names[id]) {
+        names[id] = vals[r][nameCol] == null ? '' : String(vals[r][nameCol]);
+      }
+    }
+  } catch (_) {}
+  return names;
+}
+
+/* Write today's values-only snapshot into the BACKUP spreadsheet (only —
+ * never the live one). Idempotent for a same-day re-run: an existing sheet
+ * with today's name is cleared and rewritten in place (never deleted first,
+ * so this also works when it is the spreadsheet's only sheet). */
+function _integrityWriteSnapshot(backupSs, snapName, grid) {
+  var sh = backupSs.getSheetByName(snapName);
+  if (sh) sh.clear();
+  else sh = backupSs.insertSheet(snapName);
+  if (grid && grid.length) {
+    sh.getRange(1, 1, grid.length, grid[0].length).setValues(grid);
+  }
+  // A just-created backup spreadsheet's default sheet is dead weight once a
+  // snapshot exists; drop it (guarded — never a snapshot, never the last sheet).
+  var def = backupSs.getSheetByName('Sheet1') || backupSs.getSheetByName('גיליון1');
+  if (def && !INTEGRITY_SNAPSHOT_RE.test(def.getName()) && backupSs.getSheets().length > 1) {
+    backupSs.deleteSheet(def);
+  }
+  return sh;
+}
+
+/* Delete OUR expired snapshot sheets from the backup spreadsheet. Strictly
+ * name-matched via _integrityIsExpiredSnapshot; never deletes the last
+ * remaining sheet (Sheets requires >= 1). */
+function _integrityApplyRetention(backupSs, todayName, retentionDays) {
+  var sheets = backupSs.getSheets();
+  var deleted = [];
+  for (var i = 0; i < sheets.length; i++) {
+    if (backupSs.getSheets().length <= 1) break;
+    var name = sheets[i].getName();
+    if (_integrityIsExpiredSnapshot(name, todayName, retentionDays)) {
+      backupSs.deleteSheet(sheets[i]);
+      deleted.push(name);
+    }
+  }
+  return deleted;
+}
+
+/* Hebrew alert body from a plain report object (pure — unit-tested). */
+function _integrityAlertBody(report) {
+  var lines = [];
+  lines.push('בדיקת שלמות הנתונים הלילית (nightlyIntegrityJob) מצאה אי-התאמות:');
+  if (report.missing && report.missing.length) {
+    lines.push('');
+    lines.push('שורות מטופלים שנעלמו מגיליון Clients ללא רישום מחיקה (Clients-removed):');
+    for (var i = 0; i < report.missing.length; i++) {
+      lines.push('  • ' + report.missing[i].id + (report.missing[i].name ? ' — ' + report.missing[i].name : ''));
+    }
+    lines.push('ספירת שורות בריצה הקודמת: ' + report.prevCount + ' | ספירה נוכחית: ' + report.currentCount);
+  }
+  if (report.orphans && report.orphans.length) {
+    lines.push('');
+    lines.push('תשלומים (Payments) ללא שורת מטופל תואמת וללא רישום מחיקה:');
+    for (var j = 0; j < report.orphans.length; j++) {
+      lines.push('  • ' + report.orphans[j].id + (report.orphans[j].name ? ' — ' + report.orphans[j].name : ''));
+    }
+  }
+  if (report.errors && report.errors.length) {
+    lines.push('');
+    lines.push('שגיאות פנימיות במהלך הבדיקה:');
+    for (var k = 0; k < report.errors.length; k++) {
+      lines.push('  • ' + report.errors[k]);
+    }
+  }
+  return lines.join('\n');
+}
+
+/* One email per run, only when called (i.e. something is wrong). Fail-open:
+ * no ALERT_EMAIL property, or a send failure -> Logger.log the report and
+ * return false; NEVER throw (an alerting failure must not kill the job). */
+function _integritySendAlert(body) {
+  var email = '';
+  try {
+    email = PropertiesService.getScriptProperties().getProperty(INTEGRITY_PROP_ALERT_EMAIL) || '';
+  } catch (_) {}
+  if (!email) {
+    Logger.log('INTEGRITY ALERT (no ' + INTEGRITY_PROP_ALERT_EMAIL + ' Script Property — email not sent):\n' + body);
+    return false;
+  }
+  try {
+    MailApp.sendEmail(email, INTEGRITY_ALERT_SUBJECT, body);
+    return true;
+  } catch (err) {
+    Logger.log('INTEGRITY ALERT send failed (' + err + '):\n' + body);
+    return false;
+  }
+}
+
+/* The 2:00 AM trigger handler. Each check runs in its own try/catch so one
+ * failure never silences the others; internal errors join the alert. */
+function nightlyIntegrityJob() {
+  var props = PropertiesService.getScriptProperties();
+  var errors = [];
+
+  // ---- read-only reads of the live data (getSheetByName, NEVER _ensureSheet:
+  //      this job must not write to Clients/Payments, not even a header
+  //      relabel) ----
+  var clients = [], clientsGrid = null, clientsReadOk = false;
+  try {
+    var clientsSh = _ss().getSheetByName('Clients');
+    if (clientsSh) {
+      clients = _readAll(clientsSh, CLIENTS_HEADERS);
+      clientsGrid = clientsSh.getDataRange().getValues();
+    }
+    clientsReadOk = true;
+  } catch (err) { errors.push('קריאת Clients נכשלה: ' + err); }
+
+  var payments = [];
+  try {
+    var paymentsSh = _ss().getSheetByName('Payments');
+    if (paymentsSh) payments = _readAll(paymentsSh, PAYMENTS_HEADERS);
+  } catch (err) { errors.push('קריאת Payments נכשלה: ' + err); }
+
+  var tombstoneIdSet = {};
+  try {
+    var tombSh = _ss().getSheetByName('Clients-removed');
+    var tombs = tombSh ? _readAll(tombSh, CLIENTS_REMOVED_HEADERS) : [];
+    for (var t = 0; t < tombs.length; t++) {
+      var tid = tombs[t] && tombs[t].id != null ? String(tombs[t].id) : '';
+      if (tid) tombstoneIdSet[tid] = true;
+    }
+  } catch (err) { errors.push('קריאת Clients-removed נכשלה: ' + err); }
+
+  var currentIds = [], liveIdSet = {};
+  for (var c = 0; c < clients.length; c++) {
+    var cid = clients[c] && clients[c].id != null ? String(clients[c].id) : '';
+    if (cid) { currentIds.push(cid); liveIdSet[cid] = true; }
+  }
+
+  // ---- open (never create yet) the backup spreadsheet: check 1 resolves
+  //      names from the NEWEST EXISTING snapshot (yesterday's), so this open
+  //      and the lookup MUST happen before check 3 overwrites today's sheet ----
+  var backupSs = null;
+  var backupSsid = props.getProperty(INTEGRITY_PROP_BACKUP_SSID);
+  if (backupSsid) {
+    try { backupSs = SpreadsheetApp.openById(backupSsid); }
+    catch (err) {
+      backupSs = null; // trashed/gone -> check 3 recreates it
+      errors.push('פתיחת גיליון הגיבוי (' + backupSsid + ') נכשלה: ' + err);
+    }
+  }
+
+  // ---- CHECK 1: row-count sentinel (ALWAYS before the check-3 snapshot
+  //      overwrite — see ordering note above) ----
+  var missing = [];
+  var prevCountRaw = props.getProperty(INTEGRITY_PROP_LAST_COUNT);
+  try {
+    if (clientsReadOk && prevCountRaw !== null && clients.length < Number(prevCountRaw)) {
+      var prevIds = [];
+      try { prevIds = JSON.parse(props.getProperty(INTEGRITY_PROP_LAST_IDS) || '[]'); } catch (_) {}
+      if (!Array.isArray(prevIds)) prevIds = [];
+      var missingIds = _integrityDiffMissingIds(prevIds, currentIds);
+      var names = _integrityLookupNames(_integrityLatestSnapshotSheet(backupSs), missingIds);
+      for (var m = 0; m < missingIds.length; m++) {
+        // A tombstone (restored or not) means the drop was RECORDED — only an
+        // unrecorded disappearance is the silent-loss signature.
+        if (!tombstoneIdSet[missingIds[m]]) {
+          missing.push({ id: missingIds[m], name: names[missingIds[m]] || '' });
+        }
+      }
+    }
+  } catch (err) { errors.push('בדיקת ספירת השורות נכשלה: ' + err); }
+
+  // ---- CHECK 2: orphan-payment sweep ----
+  var orphans = [];
+  try {
+    var orphanIds = _integrityOrphanClientIds(payments, liveIdSet, tombstoneIdSet);
+    for (var o = 0; o < orphanIds.length; o++) {
+      var oname = '';
+      for (var p = 0; p < payments.length; p++) {
+        var pcid = _integrityParsePaymentClientId(payments[p].id) ||
+          (payments[p].clientId == null ? '' : String(payments[p].clientId));
+        if (pcid === orphanIds[o] && payments[p].clientName) { oname = String(payments[p].clientName); break; }
+      }
+      orphans.push({ id: orphanIds[o], name: oname });
+    }
+  } catch (err) { errors.push('בדיקת תשלומים יתומים נכשלה: ' + err); }
+
+  // ---- CHECK 3: daily snapshot + retention (AFTER check 1's name lookup) ----
+  try {
+    if (clientsGrid && clientsGrid.length) {
+      if (!backupSs) {
+        backupSs = SpreadsheetApp.create(INTEGRITY_BACKUP_NAME);
+        props.setProperty(INTEGRITY_PROP_BACKUP_SSID, backupSs.getId());
+      }
+      var todayName = _integritySnapshotName(new Date());
+      _integrityWriteSnapshot(backupSs, todayName, clientsGrid);
+      var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
+      if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
+    }
+  } catch (err) { errors.push('הגיבוי היומי נכשל: ' + err); }
+
+  // ---- alert: one email per run, ONLY when something is wrong ----
+  if (missing.length || orphans.length || errors.length) {
+    _integritySendAlert(_integrityAlertBody({
+      missing: missing,
+      orphans: orphans,
+      errors: errors,
+      prevCount: prevCountRaw === null ? '?' : String(prevCountRaw),
+      currentCount: String(clients.length)
+    }));
+  } else {
+    Logger.log('nightlyIntegrityJob: ok (clients=%s, payments=%s)', String(clients.length), String(payments.length));
+  }
+
+  // ---- persist the sentinel state for tomorrow's run — but only off a
+  //      SUCCESSFUL Clients read: seeding count 0 after a failed read would
+  //      fire a false full-loss alert tomorrow ----
+  if (clientsReadOk) {
+    props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
+    props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
+    props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+  }
+}
+
+/* One-time installer (run from the Apps Script editor). Idempotent: deletes
+ * every existing trigger bound to nightlyIntegrityJob before creating the
+ * single 2:00 AM daily trigger (project timezone: Asia/Jerusalem). */
+function setupIntegrityTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'nightlyIntegrityJob') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('nightlyIntegrityJob').timeBased().everyDays(1).atHour(2).create();
+  return { ok: true, installed: 'nightlyIntegrityJob @ 02:00' };
+}
