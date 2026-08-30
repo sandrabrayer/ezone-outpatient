@@ -151,6 +151,7 @@
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
     removedClients: null, // un-restored Clients-removed tombstones; null = not yet fetched, 'loading' = in flight
+    dataVersion: null, // Clients data version from getData, echoed back on saveAll (staleness signal); null = server didn't send one (fail-open: save never flagged stale)
     leadSearch: '',
     dashSearch: '',   // cross-tab patient locator on the dashboard (איתור מטופל)
     clientSearch: '',
@@ -616,7 +617,17 @@
     if (opts && opts.explicitRemovedIds && opts.explicitRemovedIds.length) {
       payload.explicitRemovedIds = opts.explicitRemovedIds;
     }
-    await apiSave(payload);
+    // Staleness signal: echo the version this tab loaded. The server flags
+    // the response staleSave:true when another device wrote Clients since —
+    // the save itself is safe (merge-don't-drop preserves the rows this tab
+    // never loaded), but the tab is showing an incomplete picture.
+    if (state.dataVersion != null) payload.dataVersion = state.dataVersion;
+    var data = await apiSave(payload);
+    if (data && data.dataVersion != null) state.dataVersion = Number(data.dataVersion);
+    if (data && data.staleSave) {
+      toast('הנתונים עודכנו ממכשיר אחר — רענני לראות את המצב המלא');
+      loadAll().catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
+    }
   }
 
   // --- Payments API / serialization -------------------------------------
@@ -4473,6 +4484,9 @@
         })
       ]);
       var data = results[0];
+      // Staleness signal: remember the version this tab loaded; persist()
+      // echoes it back so the server can flag a save from a stale tab.
+      state.dataVersion = (data.dataVersion == null || data.dataVersion === '') ? null : Number(data.dataVersion);
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
       // One-time cleanup: a converted lead has no further meaning. Remove any lead

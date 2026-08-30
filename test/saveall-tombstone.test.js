@@ -12,6 +12,13 @@
  * "Clients-removed" tombstone sheet BEFORE writing, so no drop is ever
  * silent or unrecoverable.
  *
+ * Prevention layer on top (stale-save prevention, after 2026-08-09 repeat):
+ * an id missing from the payload WITHOUT an explicitRemovedIds declaration
+ * is no longer dropped at all — merge-don't-drop keeps its current on-sheet
+ * row in the rewrite and logs it as removedVia='saveAll-diff-preserved'
+ * (visibility, not a removal). Only declared ids are actually deleted. See
+ * test/stale-save-prevention.test.js for the full prevention contract.
+ *
  * Two styles, matching the passing tests in this suite: a pure MIRROR of the
  * diff/attribution logic, and SOURCE-SCAN guards over Code.gs + app.js
  * locking the real wiring to the contract.
@@ -41,8 +48,10 @@ function namedArray(name) {
 // Pure mirror of the _saveAll diff + removedVia attribution
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Mirrors the row-loss guard inside _saveAll: which existing rows are dropped,
-// and how each drop is attributed.
+// Mirrors the row-loss guard inside _saveAll: which existing rows are missing
+// from the payload, how each is attributed, and — since merge-don't-drop —
+// whether it is preserved in the rewrite (undeclared) or actually dropped
+// (declared in explicitRemovedIds).
 function diffDroppedClients(existing, incoming, explicitRemovedIds) {
   const incomingIds = {};
   incoming.forEach((c) => {
@@ -57,7 +66,12 @@ function diffDroppedClients(existing, incoming, explicitRemovedIds) {
   existing.forEach((row) => {
     const id = row && row.id != null ? String(row.id) : '';
     if (id && !incomingIds[id]) {
-      dropped.push({ row, removedVia: explicitSet[id] ? 'explicit-delete' : 'saveAll-diff' });
+      const explicit = !!explicitSet[id];
+      dropped.push({
+        row,
+        removedVia: explicit ? 'explicit-delete' : 'saveAll-diff-preserved',
+        preserved: !explicit
+      });
     }
   });
   return dropped;
@@ -74,23 +88,25 @@ test('no rows missing → nothing tombstoned', () => {
   assert.deepEqual(diffDroppedClients(EXISTING, EXISTING, []), []);
 });
 
-test('a row missing without explicit declaration → saveAll-diff (the clobber signature)', () => {
+test('a row missing without explicit declaration → PRESERVED, logged saveAll-diff-preserved (the clobber signature)', () => {
   const dropped = diffDroppedClients(EXISTING, [EXISTING[0], EXISTING[2]], []);
   assert.equal(dropped.length, 1);
   assert.equal(dropped[0].row.id, 'b');
-  assert.equal(dropped[0].removedVia, 'saveAll-diff');
+  assert.equal(dropped[0].removedVia, 'saveAll-diff-preserved');
+  assert.equal(dropped[0].preserved, true);
 });
 
-test('a declared id → explicit-delete; an undeclared one in the SAME save stays saveAll-diff', () => {
+test('a declared id → explicit-delete (actually dropped); an undeclared one in the SAME save is preserved', () => {
   const dropped = diffDroppedClients(EXISTING, [EXISTING[0]], ['c']);
   const byId = {};
-  dropped.forEach((d) => { byId[d.row.id] = d.removedVia; });
-  assert.deepEqual(byId, { b: 'saveAll-diff', c: 'explicit-delete' });
+  dropped.forEach((d) => { byId[d.row.id] = d.removedVia + (d.preserved ? '+kept' : ''); });
+  assert.deepEqual(byId, { b: 'saveAll-diff-preserved+kept', c: 'explicit-delete' });
 });
 
-test('an empty incoming list tombstones EVERY id-carrying row (full wipe stays recoverable)', () => {
+test('an empty incoming list preserves EVERY id-carrying row (full wipe prevented, fully logged)', () => {
   const dropped = diffDroppedClients(EXISTING, [], []);
   assert.deepEqual(dropped.map((d) => d.row.id), ['a', 'b', 'c']);
+  assert.ok(dropped.every((d) => d.preserved), 'undeclared missing rows must all be preserved');
 });
 
 test('blank-id rows cannot be diffed and are never tombstoned', () => {
