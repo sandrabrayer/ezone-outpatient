@@ -120,8 +120,15 @@ var CLIENTS_HEADERS = [
  *   removedAt  — ISO timestamp of the removal.
  *   removedVia — 'saveAll-diff' (row missing from a saveAll payload that did
  *                not declare it as an explicit delete: the stale-tab clobber
- *                signature) | 'explicit-delete' (the ✕ permanent-delete flow
- *                declared the id in explicitRemovedIds).
+ *                signature — historical rows only, from before merge-don't-
+ *                drop; _saveAll no longer drops these rows)
+ *              | 'saveAll-diff-preserved' (same signature, but the row was
+ *                KEPT in the rewrite by merge-don't-drop: this tombstone is
+ *                a stale-save visibility log entry, NOT a removal — the
+ *                client row is still live on Clients, so the admin restore
+ *                surface filters these out)
+ *              | 'explicit-delete' (the ✕ permanent-delete flow declared the
+ *                id in explicitRemovedIds — still actually dropped).
  *   restoredAt — blank until restoreRemovedClient copies the row back to
  *                Clients; then stamped so a tombstone is never restored twice.
  * Tombstone ROWS are append-only: an audit trail — never rewritten, never
@@ -358,7 +365,10 @@ function _getData() {
   return {
     ok: true,
     leads: _readAll(leadsSh, LEADS_HEADERS),
-    clients: _readAll(clientsSh, CLIENTS_HEADERS)
+    clients: _readAll(clientsSh, CLIENTS_HEADERS),
+    // Staleness signal: the tab echoes this back on saveAll; an echo older
+    // than the then-current value flags that save's response staleSave:true.
+    dataVersion: _readDataVersion()
   };
 }
 
@@ -803,22 +813,51 @@ function _monthKey(dateStr) {
   return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
 }
 
-/* Append one tombstone row to "Clients-removed" per client row about to be
- * dropped from Clients. `rows` are _readAll(Clients) objects (dates already
- * ISO strings, phones recovered) — the row is preserved exactly as the app
- * reads it, so a restore writes back the same shape _writeAll would.
+/* Clients data version — the staleness signal (stale-save prevention,
+ * 2026-08-30). A script-property integer counter bumped by every Clients
+ * rewrite path a stale tab should be told about: _saveAll and
+ * _restoreRemovedClient (both under the script lock — callers of these
+ * helpers MUST hold it). getData returns the current value; the frontend
+ * echoes it back on saveAll; an echo older than current flags the response
+ * staleSave:true (the save still proceeds — merge-don't-drop makes it safe).
+ * FAIL-OPEN: a payload with no echoed version (old clients) is never flagged.
+ * Cell-level writers (creditsOwed, paymentAmountOverrides, …) deliberately do
+ * NOT bump: those columns are already preserved by id on every save, so a
+ * stale full save can't clobber them. */
+var CLIENTS_DATA_VERSION_PROP = 'CLIENTS_DATA_VERSION';
+
+function _readDataVersion() {
+  var raw = PropertiesService.getScriptProperties().getProperty(CLIENTS_DATA_VERSION_PROP);
+  var n = parseInt(raw, 10);
+  return (isNaN(n) || n < 0) ? 0 : n;
+}
+
+function _bumpDataVersion() {
+  var next = _readDataVersion() + 1;
+  PropertiesService.getScriptProperties().setProperty(CLIENTS_DATA_VERSION_PROP, String(next));
+  return next;
+}
+
+/* Append one tombstone row to "Clients-removed" per client row dropped from
+ * (or, for the preserved-log, missing from a stale save of) Clients. `rows`
+ * are _readAll(Clients) objects (dates already ISO strings, phones
+ * recovered) — the row is preserved exactly as the app reads it, so a
+ * restore writes back the same shape _writeAll would.
  * `explicitSet` maps the ids a caller declared as deliberate deletes; every
- * other drop is recorded as 'saveAll-diff' — the stale-tab clobber signature.
+ * other row is recorded as `viaFallback` — 'saveAll-diff-preserved' for the
+ * merge-don't-drop visibility log, defaulting to 'saveAll-diff' (the
+ * historical stale-tab clobber signature) when not given.
  * appendRow per row (the לידים שהוסרו pattern); MUST be called under the
  * caller's script lock — this helper takes none of its own. */
-function _appendClientTombstones(rows, explicitSet) {
+function _appendClientTombstones(rows, explicitSet, viaFallback) {
   if (!rows || !rows.length) return 0;
+  var fallback = viaFallback || 'saveAll-diff';
   var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
   var now = new Date().toISOString();
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i] || {};
     var id = row.id != null ? String(row.id) : '';
-    var via = (explicitSet && explicitSet[id]) ? 'explicit-delete' : 'saveAll-diff';
+    var via = (explicitSet && explicitSet[id]) ? 'explicit-delete' : fallback;
     sh.appendRow(CLIENTS_REMOVED_HEADERS.map(function (h) {
       if (h === 'removedAt') return now;
       if (h === 'removedVia') return via;
@@ -873,13 +912,25 @@ function _saveAll(payload) {
         ? existingOverrides[cid]
         : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
     }
-    // Row-loss guard (stale-tab clobber): any id currently on the sheet but
-    // MISSING from the incoming array is about to be erased by the
-    // clear-and-rewrite below. Tombstone its full current row FIRST so the
-    // drop is always recoverable. explicitRemovedIds carries the ids the ✕
-    // permanent-delete flow removed on purpose; every other missing id is
-    // recorded as 'saveAll-diff' — the signature of a stale tab overwriting
-    // a list it never loaded.
+    // Staleness signal (stale-save prevention): the frontend echoes back the
+    // dataVersion it loaded; an echo older than current means another device
+    // wrote Clients since this tab loaded. The save still proceeds — merge-
+    // don't-drop below makes it safe — but the response carries
+    // staleSave:true so the tab can toast + reload. FAIL-OPEN: a payload with
+    // no echoed version (old clients) is never flagged.
+    var curVersion = _readDataVersion();
+    var echoedRaw = payload ? payload.dataVersion : null;
+    var echoed = (echoedRaw === undefined || echoedRaw === null || echoedRaw === '') ? NaN : Number(echoedRaw);
+    var staleSave = isFinite(echoed) && echoed < curVersion;
+    // Row-loss guard + merge-don't-drop (stale-tab clobber): any id currently
+    // on the sheet but MISSING from the incoming array would be erased by the
+    // clear-and-rewrite below. explicitRemovedIds carries the ids the ✕
+    // permanent-delete flow removed on purpose — those are tombstoned
+    // 'explicit-delete' and actually dropped, exactly as before. Every OTHER
+    // missing id is the stale-tab clobber signature (2026-08-09: a stale
+    // tab's save dropped 2 patients): its row is PRESERVED in the rewrite
+    // with its current on-sheet values, and logged to Clients-removed as
+    // 'saveAll-diff-preserved' for visibility — a log entry, not a removal.
     var incomingIds = {};
     for (var n = 0; n < clients.length; n++) {
       var nid = (clients[n] && clients[n].id != null) ? String(clients[n].id) : '';
@@ -891,15 +942,51 @@ function _saveAll(payload) {
       var xid = explicitList[x] == null ? '' : String(explicitList[x]);
       if (xid) explicitSet[xid] = true;
     }
-    var droppedRows = [];
+    var explicitDropRows = [];
+    var preservedRows = [];
     for (var d = 0; d < existing.length; d++) {
       var did = (existing[d] && existing[d].id != null) ? String(existing[d].id) : '';
-      if (did && !incomingIds[did]) droppedRows.push(existing[d]);
+      if (did && !incomingIds[did]) {
+        if (explicitSet[did]) explicitDropRows.push(existing[d]);
+        else preservedRows.push(existing[d]);
+      }
     }
-    var tombstoned = _appendClientTombstones(droppedRows, explicitSet);
+    var tombstoned = _appendClientTombstones(explicitDropRows, explicitSet);
+    // Preserved-log dedupe: a tab that stays stale re-sends the same short
+    // list on every save. Skip the log row when the NEWEST tombstone for the
+    // id is already an open (restoredAt blank) 'saveAll-diff-preserved' —
+    // one log entry per stale episode, not one per keystroke.
+    var preservedToLog = preservedRows;
+    if (preservedRows.length) {
+      var tombSh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
+      var tombRows = _readAll(tombSh, CLIENTS_REMOVED_HEADERS);
+      var latestTomb = {};
+      for (var t = 0; t < tombRows.length; t++) {
+        var tIt = (tombRows[t] && tombRows[t].id != null) ? String(tombRows[t].id) : '';
+        if (tIt) latestTomb[tIt] = tombRows[t];
+      }
+      preservedToLog = preservedRows.filter(function (r) {
+        var lt = latestTomb[String(r.id)];
+        return !(lt && lt.removedVia === 'saveAll-diff-preserved' && !lt.restoredAt);
+      });
+      tombstoned += _appendClientTombstones(preservedToLog, null, 'saveAll-diff-preserved');
+      // Merge: keep the preserved rows in the rewrite, current on-sheet
+      // values untouched — the payload never knew them, so the payload
+      // cannot rewrite them.
+      for (var p = 0; p < preservedRows.length; p++) clients.push(preservedRows[p]);
+    }
     _writeAll(leadsSh, LEADS_HEADERS, leads);
     _writeAll(clientsSh, CLIENTS_HEADERS, clients);
-    return { ok: true, savedLeads: leads.length, savedClients: clients.length, tombstoned: tombstoned };
+    var newVersion = _bumpDataVersion();
+    return {
+      ok: true,
+      savedLeads: leads.length,
+      savedClients: clients.length,
+      tombstoned: tombstoned,
+      preserved: preservedRows.length,
+      staleSave: staleSave,
+      dataVersion: newVersion
+    };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -918,7 +1005,10 @@ function _getRemovedClients() {
   var rows = _readAll(sh, CLIENTS_REMOVED_HEADERS);
   var open = [];
   for (var i = 0; i < rows.length; i++) {
-    if (!rows[i].restoredAt) open.push(rows[i]);
+    // 'saveAll-diff-preserved' rows are merge-don't-drop LOG entries — the
+    // client row is still live on Clients, nothing to restore. Listing them
+    // here would show live patients under מטופלים שנמחקו.
+    if (!rows[i].restoredAt && rows[i].removedVia !== 'saveAll-diff-preserved') open.push(rows[i]);
   }
   return { ok: true, removed: open };
 }
@@ -964,8 +1054,12 @@ function _restoreRemovedClient(payload) {
       return (v === undefined || v === null) ? '' : v;
     }));
     sh.getRange(rowIdx + 2, resIdx + 1).setValue(new Date().toISOString());
+    // Restore is a Clients write a stale tab should be told about — bump the
+    // staleness counter so tabs loaded before the restore get staleSave:true
+    // on their next save (still under this function's lock).
+    var newVersion = _bumpDataVersion();
     Logger.log('restoreRemovedClient: id=%s name=%s', id, String(tomb.name || ''));
-    return { ok: true, restored: true, id: id, name: String(tomb.name || '') };
+    return { ok: true, restored: true, id: id, name: String(tomb.name || ''), dataVersion: newVersion };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -2825,8 +2919,12 @@ function doPost(e) {
         leads:   Array.isArray(payload.leads)   ? payload.leads   : [],
         clients: Array.isArray(payload.clients) ? payload.clients : [],
         // ids the ✕ permanent-delete flow removed on purpose this save; any
-        // other id missing from `clients` is tombstoned as 'saveAll-diff'.
-        explicitRemovedIds: Array.isArray(payload.explicitRemovedIds) ? payload.explicitRemovedIds : []
+        // other id missing from `clients` is PRESERVED (merge-don't-drop)
+        // and logged as 'saveAll-diff-preserved'.
+        explicitRemovedIds: Array.isArray(payload.explicitRemovedIds) ? payload.explicitRemovedIds : [],
+        // the dataVersion the tab loaded, echoed back — _saveAll validates
+        // (fail-open on absent/non-numeric).
+        dataVersion: payload.dataVersion
       }));
     }
     if (action === 'getData')     return _json(_getData());
