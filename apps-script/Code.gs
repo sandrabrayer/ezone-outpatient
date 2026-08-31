@@ -1549,7 +1549,8 @@ function _getDebtStatus() {
  *
  * Consumed by E-Zone Therapists to show each outpatient's treatment plan.
  * Minimal projection: clientId, name, phone (treatmentContactPhone),
- * serviceType, sessions (sessionsPerWeek), status. NO billing/payer data.
+ * serviceType, sessions (sessionsPerWeek), status, startDate, exitDate,
+ * renewalDate (date only). NO billing/payer data.
  *
  * Auth: optional shared secret 'TREATMENT_PLANS_SECRET', same model as
  * getWinbackSource / getDebtStatus.
@@ -1559,6 +1560,33 @@ function _treatmentPlansAuthOk(params) {
   if (!expected) return true; // not configured -> open
   var got = (params && params.secret) ? String(params.secret) : '';
   return got === expected;
+}
+
+/* Add 1 calendar month to a 'yyyy-MM-dd' ISO date string, clamping to the last
+ * day of the target month (Jan 31 + 1mo -> Feb 28). SAME clamp rule as addMonth
+ * in public/charges-logic.js / public/app.js — keep in sync. */
+function _addMonthIso(isoDate) {
+  if (!isoDate) return '';
+  var d = new Date(isoDate);
+  if (isNaN(d)) return '';
+  var origDay = d.getDate();
+  d.setMonth(d.getMonth() + 1);
+  if (d.getDate() !== origDay) d.setDate(0);
+  return d.getFullYear() +
+    '-' + ('0' + (d.getMonth() + 1)).slice(-2) +
+    '-' + ('0' + d.getDate()).slice(-2);
+}
+
+/* Renewal/package-end due date for a client: the stored nextBillingDate, else
+ * anchor (packageChangeDate → paymentDate → startDate) + 1 month, '' when no
+ * anchor. Mirrors nextRenewalDueDate in public/app.js / public/charges-logic.js
+ * — keep in sync. */
+function _renewalDueDate(cl) {
+  if (!cl) return '';
+  if (cl.nextBillingDate) return cl.nextBillingDate;
+  var anchor = cl.packageChangeDate || cl.paymentDate || cl.startDate || '';
+  if (!anchor) return '';
+  return _addMonthIso(anchor);
 }
 
 function _getTreatmentPlans() {
@@ -1592,7 +1620,13 @@ function _getTreatmentPlans() {
       // as a 'yyyy-MM-dd' string); exitDate is blank for still-active patients.
       // No payer/billing data — the minimal-projection contract is unchanged.
       startDate:   cl.startDate || '',
-      exitDate:    cl.exitDate || ''
+      exitDate:    cl.exitDate || '',
+      // Renewal/package-end date for the therapists app's "renew next week" alert.
+      // SAME value the גבייה הבאה chip shows: stored nextBillingDate, else anchor
+      // (packageChangeDate → paymentDate → startDate) + 1 month. Mirrors
+      // nextRenewalDueDate in public/app.js / public/charges-logic.js — keep in sync.
+      // Date only ('yyyy-MM-dd' or ''); no billing/payment data crosses here.
+      renewalDate: _renewalDueDate(cl)
     });
   }
   return { ok: true, clients: out };
