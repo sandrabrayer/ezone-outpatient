@@ -115,11 +115,15 @@ request and every push to `main`.
   open (URL-obscurity). The Node proxy forwards `?secret=` automatically. See
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
-  `{ ok, clients:[{ clientId, name, phone, serviceType, sessions, status }] }`
+  `{ ok, clients:[{ clientId, name, phone, serviceType, sessions, status,
+  startDate, exitDate, renewalDate }] }`
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the
   canonical patient phone (the `phone` column, falling back to
   `treatmentContactPhone`, leading-zero recovered) — the cross-app join key, so
-  it is non-blank for any client with a number; `sessions` is `sessionsPerWeek`. A minimal,
+  it is non-blank for any client with a number; `sessions` is `sessionsPerWeek`;
+  `renewalDate` is the package-end/renewal date (the SAME value the גבייה הבאה
+  chip shows: stored `nextBillingDate`, else anchor + 1 month; `'yyyy-MM-dd'`
+  or `''`), date only. A minimal,
   read-only projection — no `payerName`/`payerPhone`/`paymentLink`/prices/
   bundles. Auth mirrors the above: optional `TREATMENT_PLANS_SECRET` Script
   Property (separate from `DEBT_STATUS_SECRET` so the two rotate

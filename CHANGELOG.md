@@ -6,6 +6,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`getTreatmentPlans`: project `renewalDate` (date only).** The cross-app
+  projection now includes each client's package-end/renewal date so the E-Zone
+  Therapists app can prompt a "renew next week" conversation. SAME value Vered's
+  גבייה הבאה chip and renewal banner show: the stored `nextBillingDate`, else
+  anchor (`packageChangeDate` → `paymentDate` → `startDate`) + 1 calendar month
+  with the short-month clamp — new Code.gs helpers `_renewalDueDate` /
+  `_addMonthIso` mirror `nextRenewalDueDate` / `addMonth` in
+  `public/charges-logic.js` (clamp equality is asserted against the real
+  charges-logic function in `test/treatment-plans.test.js`). `''` when no
+  anchor. **Date only — the `nextBillingDate` key itself is NOT projected and
+  no payment rows/amounts/statuses cross**; a contract-guard test locks the key
+  set to exactly the previous projection + `renewalDate`. No sheet schema
+  change, no new secret. Apps Script redeploys automatically via clasp CI on
+  merge.
 - **רעננה הפרדס (canonical id `pardes`) — new house wired in.** The dashboard's
   `createLead` for pardes discharges (`house:'pardes'`) now stores this repo's
   stable key `raanana_pardes` (Code.gs alias — matches the continuation tab's
