@@ -129,9 +129,10 @@ test('app.js: renew / intake / activate / agreement / derive all use the cycle r
 test('app.js: the edit modal no longer recomputes nextBillingDate unconditionally', () => {
   assert.doesNotMatch(APP, /if \(client\.paymentDate\) \{\s*\n\s*client\.nextBillingDate/);
   // The only edit-path recompute sits behind the deliberate paid-date change
-  // (propagatePaid) and anchors on the month's DUE date.
+  // (propagatePaid) and anchors on the CYCLE due date — the same
+  // cyclePaymentDueDate the chip settles, resolved before the anchor moves.
   assert.match(APP,
-    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,600}if \(propagatePaid\) \{\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, currentMonthBaseDueDate\(client\)\);/);
+    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,900}if \(propagatePaid\) \{\s*\n\s*cycleDueISO = cyclePaymentDueDate\(client, today\(\)\);\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, cycleDueISO\);/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,7 +177,7 @@ test('app.js wiring: setCurrentMonthPaid advances, remembers, and reloads before
   assert.match(fn, /paymentDate: today\(\)/);
   // pre-mark values remembered per client; unmark falls back to the due date
   assert.match(APP, /var monthPaidPrevClient = \{\}/);
-  assert.match(fn, /monthPaidPrevClient\[c\.id\] = \{ nextBillingDate: c\.nextBillingDate, paymentDate: c\.paymentDate \}/);
+  assert.match(fn, /monthPaidPrevClient\[c\.id\] = \{ nextBillingDate: c\.nextBillingDate, paymentDate: c\.paymentDate, dueDateISO: dueDateISO \}/);
   assert.match(fn, /\{ nextBillingDate: dueDateISO, paymentDate: c\.paymentDate \}/);
   // client save happens ONLY after a fresh reload (never saveAll from stale state)
   const reload = fn.indexOf('loadAll()');
@@ -191,22 +192,19 @@ test('app.js wiring: setCurrentMonthPaid advances, remembers, and reloads before
 // 2 — the chip label names the month (MM/YYYY), tooltips unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('the chip label carries MM/YYYY from the current-month base due date', () => {
-  assert.match(APP, /var chipMk = monthKey\(currentMonthBaseDueDate\(c\)\)/);
-  assert.match(APP, /'חבילה' \+ \(\/\^\\d\{4\}-\\d\{2\}\$\/\.test\(chipMk\) \? ' ' \+ chipMk\.slice\(5, 7\) \+ '\/' \+ chipMk\.slice\(0, 4\) : ''\)/);
-  // all three chip variants (mark / unmark / viewer) use the month-bearing name
-  const uses = APP.match(/chipName \+ ': ' \+ psLabel/g) || [];
-  assert.equal(uses.length, 3, 'mark, unmark and viewer chips must all name the month');
-  assert.doesNotMatch(APP, />חבילה: ' \+ psLabel/);
-  // tooltips unchanged
-  assert.match(APP, /title="סמן את החודש הנוכחי כשולם"/);
-  assert.match(APP, /title="בטל סימון תשלום לחודש הנוכחי"/);
+test('the chip state and label come from packagePaidState (billing cycle, not calendar month)', () => {
+  // Superseded by the cycle fix: the chip no longer reads the calendar-month
+  // Payments row. Full coverage lives in test/package-chip-cycle.test.js.
+  assert.match(APP, /var pkg = packagePaidState\(c, today\(\)\)/);
+  assert.match(APP, /שולם עד ' \+ untilDM \+ ' ✓/);
+  assert.match(APP, />לא שולם ✓</);
+  assert.doesNotMatch(APP, /chipName/);
 });
 
-test('label format sanity: 2026-09 renders as 09/2026', () => {
-  const mk = '2026-09';
-  const label = 'חבילה' + (/^\d{4}-\d{2}$/.test(mk) ? ' ' + mk.slice(5, 7) + '/' + mk.slice(0, 4) : '');
-  assert.equal(label, 'חבילה 09/2026');
+test('label format sanity: 2026-09-30 renders as שולם עד 30/09', () => {
+  const until = '2026-09-30';
+  const label = 'שולם עד ' + until.slice(8, 10) + '/' + until.slice(5, 7);
+  assert.equal(label, 'שולם עד 30/09');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +250,10 @@ function renewalInfoAt(c, payments, todayIso) {
   }
   let daysLeft = daysBetween(todayIso, renewal);
   const curDue = currentMonthBaseDueDateAt(c, todayIso);
-  const paidThisMonth = paymentForClientOnAt(payments, c, curDue).status === 'paid';
+  // Paid-up follows the billing CYCLE (packagePaidState: nextBillingDate still
+  // ahead), not a calendar-month Payments row.
+  const nbd = String(c.nextBillingDate || '').slice(0, 10);
+  const paidThisMonth = !!nbd && nbd >= todayIso;
   let status;
   if (paidThisMonth) {
     if (daysLeft === null) status = 'unknown';
@@ -301,11 +302,17 @@ test('explicit unpaid/partial paymentStatus -> overdue regardless of the grace w
   assert.equal(r.status, 'overdue');
 });
 
-test('unchanged: current month paid is never overdue; negative gap clamps to 0', () => {
+test('unchanged: a paid-up cycle is never overdue (counts to the anchor)', () => {
+  // Cycle semantics: paid-up ⇔ the anchor is still ahead — a September
+  // calendar row alone no longer decides. עידו: paid until 30/09 on the 1st.
+  const r = renewalInfoAt(chipPaidClient({ nextBillingDate: '2026-09-30' }), [], SEPT1);
+  assert.equal(r.status, 'ok'); // 29 days out
+  assert.equal(r.renewalDate, '2026-09-30');
+  // A calendar-Sept row without an advanced anchor is an un-advanced payment:
+  // the grace window (paid Aug, before the due day) keeps it off the red list.
   const paidSep = { id: 'pay::c1::base::2026-09', clientId: 'c1', status: 'paid' };
-  const r = renewalInfoAt(chipPaidClient(), [paidSep, paidAug], SEPT1);
-  assert.notEqual(r.status, 'overdue');
-  assert.equal(r.daysLeft, 0); // stale stored date clamps to "renew today"
+  const r2 = renewalInfoAt(chipPaidClient(), [paidSep, paidAug], SEPT1);
+  assert.equal(r2.status, 'due_soon');
 });
 
 test('unchanged: past the due day the stored date still drives ok / due_soon by distance', () => {

@@ -368,6 +368,7 @@ body.viewer .edit-only { display: none !important; }
 }
 
 .billing-list { display: flex; flex-direction: column; gap: 8px; }
+.billing-list-note { color: var(--text-soft); font-size: 12px; margin: -4px 0 8px; }
 .billing-empty {
   text-align: center; color: var(--text-soft); font-size: 13px;
   padding: 14px; background: var(--bg-elev);

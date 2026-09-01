@@ -350,12 +350,15 @@
     if (!renewal) return { status: 'unknown' };
     var daysLeft = daysBetween(today(), renewal);
     var curDue = currentMonthBaseDueDate(c);
-    var paidThisMonth = paymentForClientOn(c, curDue).status === 'paid';
+    // Paid-up follows the billing CYCLE (packagePaidState: nextBillingDate
+    // still ahead), not a calendar-month Payments row — a cycle paid across a
+    // month boundary has no current-calendar-month row yet is fully settled.
+    var paidThisMonth = packagePaidState(c, today()).paid;
     var status;
     if (paidThisMonth) {
-      // Current month is settled. Clamp a negative gap to 0 ("renew today") so
-      // stale data can't produce nonsense like "renew in -5 days", and so paid
-      // never => overdue.
+      // The current cycle is settled. Clamp a negative gap to 0 ("renew today")
+      // so stale data can't produce nonsense like "renew in -5 days", and so
+      // paid never => overdue.
       if (daysLeft === null) {
         status = 'unknown';
       } else {
@@ -2029,11 +2032,11 @@
     return new Date(y, m, 0).getDate();
   }
 
-  // ISO date of the CURRENT month's base billing day for a client, matching the
-  // day clientsDueOn() uses (c.billingDay, else the start-date day-of-month),
-  // clamped to the last day of the month. Falls back to today() when neither is
-  // known. The payment id keys only on the month, but we keep the day aligned so
-  // the row matches what the גבייה tab renders for the same client.
+  // ISO date of the CURRENT month's base billing day for a client
+  // (c.billingDay, else the start-date day-of-month), clamped to the last day
+  // of the month. Falls back to today() when neither is known. Used as the
+  // blank-anchor fallback for the cycle row (cyclePaymentDueDate) — the גבייה
+  // tab itself is due-dated by the stored nextBillingDate since the cycle fix.
   function currentMonthBaseDueDate(c) {
     var t = today();
     var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
@@ -2100,6 +2103,50 @@
     return nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || addMonth(due);
   }
 
+  // Package paid-up state from the SINGLE source of truth. Packages are billing
+  // CYCLES (paid date -> next billing date), not calendar months, and every
+  // payment path (month-paid chip, חידוש ותשלום, intake, activation, agreement)
+  // advances nextBillingDate exactly when a payment is recorded. Therefore:
+  //   paid-up ⇔ nextBillingDate non-blank AND >= today   (until = that date)
+  //   unpaid  ⇔ blank or < today
+  // renewalInfo counts to the same date, so chip and banner agree. Mirrors
+  // packagePaidState in public/charges-logic.js — keep both in sync.
+  function packagePaidState(c, todayIso) {
+    var until = fmtDate(c && c.nextBillingDate);
+    var paid = !!until && until >= todayIso;
+    return { paid: paid, until: paid ? until : '' };
+  }
+
+  // The due date of the CYCLE a payment settles right now: the stored
+  // nextBillingDate when it is already due (past/today), else the current
+  // month's base due date (blank/legacy anchor fallback). This is the SAME
+  // date חידוש ותשלום bills when the anchor is due (nextRenewalDueDate prefers
+  // the stored nextBillingDate), so the chip, the edit-modal propagation and
+  // the renew modal all converge on ONE Payments row id.
+  function cyclePaymentDueDate(c, todayIso) {
+    var nbd = fmtDate(c && c.nextBillingDate);
+    if (nbd && nbd <= todayIso) return nbd;
+    return currentMonthBaseDueDate(c);
+  }
+
+  // The cycle due date one month BEFORE the given anchor (billing day kept,
+  // clamped) — the inverse of nextCycleDueDateAfter. Used to find the row that
+  // covers the CURRENT cycle once the anchor has been advanced (the שולם ב
+  // line, and the chip's unmark after a reload lost the pre-mark memory).
+  function prevCycleDueDateBefore(c, anchorIso) {
+    var a = fmtDate(anchorIso);
+    var p = a.split('-');
+    if (p.length < 3) return '';
+    var y = parseInt(p[0], 10);
+    var m = parseInt(p[1], 10);
+    var day = parseInt(p[2], 10);
+    if (!isFinite(y) || !isFinite(m)) return '';
+    m -= 1;
+    if (m < 1) { m = 12; y -= 1; }
+    return nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') ||
+      clampedCycleIso(y, m, isFinite(day) ? day : 1);
+  }
+
   // ---- Billing
   // Returns an array of due items for the selected date:
   //   { client, kind: 'base'|'extra', charge?, dueDate, amount }
@@ -2112,13 +2159,13 @@
       // No due items for either inactive kind — a לא פעיל patient (deleted in
       // the therapists app) must stop billing exactly like a discharged one.
       if (c.status === 'סיים טיפול' || c.status === 'לא פעיל') return;
-      // Base monthly
-      var bd = c.billingDay ? toNum(c.billingDay) : dayOfMonth(c.startDate);
-      if (bd) {
-        var effective = (last && bd > last) ? last : bd;
-        if (effective === d) {
-          out.push({ client: c, kind: 'base', dueDate: dateISO, amount: clientAmountDue(c) });
-        }
+      // Base monthly: a client is due on X iff their גבייה הבאה is X — the
+      // stored nextBillingDate (the billing-cycle anchor every payment path
+      // advances), NOT a billing-day calendar match. The base row lookup then
+      // resolves to the cycle row automatically (dueDate = the anchor).
+      // Mirrors dueItemsOn in public/charges-logic.js — keep both in sync.
+      if (fmtDate(c.nextBillingDate) === dateISO) {
+        out.push({ client: c, kind: 'base', dueDate: dateISO, amount: clientAmountDue(c) });
       }
       // Extra charges
       state.charges.forEach(function (charge) {
@@ -2356,19 +2403,35 @@
   // Marking paid ALSO advances the client (this was the stale-nextBillingDate
   // bug: the chip settled the month but the stored renewal anchor never moved,
   // so on the 1st every such card turned red 🛑):
-  //   nextBillingDate -> the next cycle due date AFTER the month being marked
+  //   nextBillingDate -> the next cycle due date AFTER the cycle being marked
   //                      (nextCycleDueDateAfter — anchored on the due date)
   //   paymentDate     -> today()
   // Unmarking restores the pre-mark values, remembered per client below for
-  // this session; after a reload the fallback is the month's own due date
-  // (the month is unpaid again, so that IS the next collection). Client fields
+  // this session; after a reload the fallback is the settled cycle's own due
+  // date (the cycle is unpaid again, so that IS the next collection). Client fields
   // persist only through the saveAll path, so the client list is RELOADED
   // first (loadAll) and the advance re-applied to the fresh row — a possibly
   // stale tab never clear-and-rewrites Clients from old state.
-  var monthPaidPrevClient = {}; // clientId -> { nextBillingDate, paymentDate } before the mark
+  var monthPaidPrevClient = {}; // clientId -> { nextBillingDate, paymentDate, dueDateISO } before the mark
   function setCurrentMonthPaid(c, makePaid) {
     if (state.role !== 'editor') return;
-    var dueDateISO = currentMonthBaseDueDate(c);
+    var todayIso = today();
+    // The row settled/reverted is the CYCLE row — the same one חידוש ותשלום
+    // writes — not the calendar-month row (packages are cycles; a cycle that
+    // straddles a month boundary has no current-calendar-month row at all):
+    //   mark   -> the due cycle (cyclePaymentDueDate: the stored
+    //             nextBillingDate when past/today, else the month's base due)
+    //   unmark -> the row the mark wrote: remembered from this session's mark,
+    //             else the cycle one month before the advanced anchor
+    var prevRemembered = monthPaidPrevClient[c.id];
+    var dueDateISO;
+    if (makePaid) {
+      dueDateISO = cyclePaymentDueDate(c, todayIso);
+    } else {
+      dueDateISO = (prevRemembered && prevRemembered.dueDateISO) ||
+        prevCycleDueDateBefore(c, c.nextBillingDate) ||
+        currentMonthBaseDueDate(c);
+    }
     var base = paymentForClientOn(c, dueDateISO);
     var newStatus = makePaid ? 'paid' : 'unpaid';
     if (base.status === newStatus) return;
@@ -2388,10 +2451,9 @@
     };
     // Client advance/revert, computed ONCE so the optimistic update and the
     // post-reload save write the same values.
-    var prevRemembered = monthPaidPrevClient[c.id];
     var clientPatch;
     if (makePaid) {
-      monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate };
+      monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate, dueDateISO: dueDateISO };
       clientPatch = { nextBillingDate: nextCycleDueDateAfter(c, dueDateISO), paymentDate: today() };
     } else {
       clientPatch = prevRemembered
@@ -3718,22 +3780,32 @@
     var paidChipHtml = '';
     var paidOnRow = '';
     if (c.status !== 'סיים טיפול') {
-      var basePay = paymentForClientOn(c, currentMonthBaseDueDate(c));
-      var psId = basePay.status === 'paid' ? 'paid' : basePay.status === 'partial' ? 'partial' : 'unpaid';
-      var psLabel = psId === 'paid' ? 'שולם' : psId === 'partial' ? 'שולם חלקית' : 'לא שולם';
-      // The chip names the month it settles (MM/YYYY from the current month's
-      // base due date) so "שולם" can never be misread as some other month.
-      var chipMk = monthKey(currentMonthBaseDueDate(c));
-      var chipName = 'חבילה' + (/^\d{4}-\d{2}$/.test(chipMk) ? ' ' + chipMk.slice(5, 7) + '/' + chipMk.slice(0, 4) : '');
+      // Paid-up follows the BILLING CYCLE, not the calendar month: a cycle
+      // paid on 31/8 that runs to 30/09 has no September calendar-month row,
+      // yet the package is fully paid. packagePaidState reads the same
+      // nextBillingDate anchor the renewal banner counts to, so the chip and
+      // the banner can never disagree again.
+      var pkg = packagePaidState(c, today());
+      var untilDM = pkg.until ? pkg.until.slice(8, 10) + '/' + pkg.until.slice(5, 7) : '';
       if (state.role === 'editor') {
-        paidChipHtml = psId === 'paid'
-          ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="בטל סימון תשלום לחודש הנוכחי">' + chipName + ': ' + psLabel + ' ↺</button>'
-          : '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">' + chipName + ': ' + psLabel + ' ✓</button>';
+        paidChipHtml = pkg.paid
+          ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="החבילה הנוכחית שולמה; גבייה הבאה ' + displayDate(pkg.until) + '">שולם עד ' + untilDM + ' ✓</button>'
+          : '<button type="button" class="chip chip-unpaid month-pay-btn" data-action="mark-month-paid" title="סמן את החבילה כשולמה — יזיז את גבייה הבאה למחזור הבא">לא שולם ✓</button>';
       } else {
-        paidChipHtml = '<span class="chip chip-' + psId + '">' + chipName + ': ' + psLabel + '</span>';
+        paidChipHtml = pkg.paid
+          ? '<span class="chip chip-paid">שולם עד ' + untilDM + '</span>'
+          : '<span class="chip chip-unpaid">לא שולם</span>';
       }
-      paidOnRow = (psId === 'paid' && basePay.paymentDate)
-        ? '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' + displayDate(basePay.paymentDate) + '</span></div>'
+      // שולם ב: the payment date of the row covering the CURRENT cycle — the
+      // cycle one month before the advanced anchor (that row's due date is the
+      // pre-advance anchor). Falls back to the client's own stamped paymentDate.
+      var cyclePaidOn = '';
+      if (pkg.paid) {
+        var cycleRow = paymentForClientOn(c, prevCycleDueDateBefore(c, pkg.until) || pkg.until);
+        cyclePaidOn = (cycleRow.status === 'paid' && cycleRow.paymentDate) || c.paymentDate || '';
+      }
+      paidOnRow = cyclePaidOn
+        ? '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' + displayDate(cyclePaidOn) + '</span></div>'
         : '';
     }
     var nextBillRow = c.nextBillingDate
@@ -5502,24 +5574,26 @@
         }
       }
       // Bug A: a deliberately changed paid-date with status=paid must reach the
-      // per-month base payment row (the single source the card chip + גבייה read)
+      // per-cycle base payment row (the single source the card chip + גבייה read)
       // via persistPayment — otherwise the chip keeps showing the old/today date.
       var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
       // nextBillingDate is recomputed ONLY on that same deliberate change: an
       // ordinary edit must never touch the stored renewal anchor (it used to
       // unconditionally re-stamp paymentDate + 30 days, silently dragging the
-      // billing day around). The advance anchors on the month's DUE date —
-      // the next cycle after it — never on the paid date.
+      // billing day around). The row written and the advance are the SAME
+      // cycle the chip settles (cyclePaymentDueDate, resolved BEFORE the
+      // anchor moves) — one implementation, one row id, never the paid date.
+      var cycleDueISO = '';
       if (propagatePaid) {
-        client.nextBillingDate = nextCycleDueDateAfter(client, currentMonthBaseDueDate(client));
+        cycleDueISO = cyclePaymentDueDate(client, today());
+        client.nextBillingDate = nextCycleDueDateAfter(client, cycleDueISO);
       }
       // Optimistic base-payment propagation: apply to state.payments NOW so the
       // card chip reflects it immediately; snapshot for rollback on failure.
       var basePay = null;
       var payPrev = null;   // { index, value } — value null means the row was newly pushed
       if (propagatePaid) {
-        var dueISO = currentMonthBaseDueDate(client);
-        basePay = basePaymentPaidOn(client, dueISO, clientAmountDue(client) || 0, client.paymentDate, '');
+        basePay = basePaymentPaidOn(client, cycleDueISO, clientAmountDue(client) || 0, client.paymentDate, '');
         var pi = state.payments.findIndex(function (p) { return p.id === basePay.id; });
         var existing = pi >= 0 ? state.payments[pi] : null;
         // Keep any existing notes/method when re-stamping the paid date.
