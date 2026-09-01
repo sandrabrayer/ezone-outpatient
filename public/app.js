@@ -337,7 +337,13 @@
   //   - If the current month's base row is paid: that month is settled. The
   //     banner counts toward the stored next-billing date (ok/due_soon), clamps a
   //     negative gap to 0, and is NEVER overdue.
-  //   - Otherwise: stored next-billing date + hasBillingProblem.
+  //   - If the current month is not yet due (today < its base due date) and the
+  //     PREVIOUS month's base row is paid: the client is simply between cycles —
+  //     due_soon counting to the current-month due date, never overdue. Without
+  //     this, a stale stored date turned every card red on the 1st.
+  //   - Otherwise: stored next-billing date + hasBillingProblem. Overdue stays
+  //     reserved for an explicit unpaid/partial paymentStatus, or a due date
+  //     that already passed without a paid row.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול' || c.status === 'לא פעיל') return { status: 'unknown' };
     var renewal = nextRenewalDueDate(c);
@@ -360,6 +366,13 @@
       if (hasBillingProblem(c)) {
         // Explicitly marked partial/unpaid - overdue
         status = 'overdue';
+      } else if (today() < curDue && prevMonthBasePaid(c)) {
+        // Between cycles: this month's payment simply hasn't come due yet and
+        // last month is settled. Count to the CURRENT month's due date (the
+        // stored renewal anchor may be stale — repaired separately server-side).
+        renewal = curDue;
+        daysLeft = daysBetween(today(), curDue);
+        status = 'due_soon';
       } else if (daysLeft === null) {
         status = 'unknown';
       } else if (daysLeft < 0) {
@@ -371,6 +384,20 @@
       }
     }
     return { renewalDate: renewal, daysLeft: daysLeft, status: status };
+  }
+
+  // Is the PREVIOUS month's base package row paid? The base payment id keys on
+  // the month only, so the 1st of the previous month addresses the same row as
+  // any other day of it.
+  function prevMonthBasePaid(c) {
+    var t = today();
+    var y = parseInt(t.slice(0, 4), 10);
+    var m = parseInt(t.slice(5, 7), 10);
+    if (!isFinite(y) || !isFinite(m)) return false;
+    m -= 1;
+    if (m < 1) { m = 12; y -= 1; }
+    var prevIso = y + '-' + ('0' + m).slice(-2) + '-01';
+    return paymentForClientOn(c, prevIso).status === 'paid';
   }
 
   // Urgency tier from a renewalInfo() status: 0 = overdue/red, 1 = due_soon,
@@ -2016,6 +2043,63 @@
     return t.slice(0, 7) + '-' + String(eff).padStart(2, '0');
   }
 
+  // 'yyyy-MM-dd' for (year, month 1-12, day), day clamped to the month's last
+  // day — the same clamp currentMonthBaseDueDate applies.
+  function clampedCycleIso(y, m, day) {
+    var last = new Date(y, m, 0).getDate();
+    var d = day > last ? last : day;
+    return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
+
+  // Next cycle due date ON OR AFTER fromIso: the client's billing day (numeric
+  // billingDay, else the startDate day-of-month; neither -> '') in fromIso's
+  // month, clamped to the month's last day; a candidate before fromIso rolls to
+  // the same day next month (clamped again). Mirrors _nextCycleDueDate in
+  // apps-script/Code.gs and nextCycleDueDate in public/charges-logic.js — keep
+  // all three in sync.
+  function nextCycleDueDate(c, fromIso) {
+    var bd = null;
+    var raw = c && c.billingDay;
+    if (raw !== '' && raw != null && isFinite(Number(raw)) && Number(raw) >= 1) {
+      bd = Math.floor(Number(raw));
+    }
+    if (!bd) {
+      var d = dayOfMonth(c && c.startDate);
+      if (d && d >= 1) bd = d;
+    }
+    if (!bd) return '';
+    var t = String(fromIso || '').slice(0, 10).split('-');
+    var y = parseInt(t[0], 10);
+    var m = parseInt(t[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return '';
+    var candidate = clampedCycleIso(y, m, bd);
+    if (candidate < fromIso) {
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+      candidate = clampedCycleIso(y, m, bd);
+    }
+    return candidate;
+  }
+
+  // The next cycle due date AFTER the cycle billed at cycleDueIso: the billing
+  // day in the month AFTER cycleDueIso's month, clamped. Anchors on the DUE
+  // date being paid, NEVER on the paid date, so the billing day stops drifting
+  // (paying the 04/09 cycle on 30/08 advances to 04/10, not 29/09). A client
+  // with no billing-day anchor falls back to due date + 1 calendar month
+  // (keeps its day-of-month, short-month clamp). Mirrors nextCycleDueDateAfter
+  // in public/charges-logic.js — keep both in sync.
+  function nextCycleDueDateAfter(c, cycleDueIso) {
+    var due = fmtDate(cycleDueIso);
+    var p = due.split('-');
+    if (p.length < 3) return '';
+    var y = parseInt(p[0], 10);
+    var m = parseInt(p[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return '';
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+    return nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || addMonth(due);
+  }
+
   // ---- Billing
   // Returns an array of due items for the selected date:
   //   { client, kind: 'base'|'extra', charge?, dueDate, amount }
@@ -2268,6 +2352,20 @@
   //   unpaid -> amountPaid = 0,        paymentDate kept (base.paymentDate || '')
   // Writes through the same single path — persistPayment / savePayment — with an
   // optimistic update + rollback. Re-renders the active view. No separate path.
+  //
+  // Marking paid ALSO advances the client (this was the stale-nextBillingDate
+  // bug: the chip settled the month but the stored renewal anchor never moved,
+  // so on the 1st every such card turned red 🛑):
+  //   nextBillingDate -> the next cycle due date AFTER the month being marked
+  //                      (nextCycleDueDateAfter — anchored on the due date)
+  //   paymentDate     -> today()
+  // Unmarking restores the pre-mark values, remembered per client below for
+  // this session; after a reload the fallback is the month's own due date
+  // (the month is unpaid again, so that IS the next collection). Client fields
+  // persist only through the saveAll path, so the client list is RELOADED
+  // first (loadAll) and the advance re-applied to the fresh row — a possibly
+  // stale tab never clear-and-rewrites Clients from old state.
+  var monthPaidPrevClient = {}; // clientId -> { nextBillingDate, paymentDate } before the mark
   function setCurrentMonthPaid(c, makePaid) {
     if (state.role !== 'editor') return;
     var dueDateISO = currentMonthBaseDueDate(c);
@@ -2288,16 +2386,60 @@
       method: base.method || '', notes: base.notes || '',
       bundleSize: 0, sessionsUsed: 0
     };
+    // Client advance/revert, computed ONCE so the optimistic update and the
+    // post-reload save write the same values.
+    var prevRemembered = monthPaidPrevClient[c.id];
+    var clientPatch;
+    if (makePaid) {
+      monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate };
+      clientPatch = { nextBillingDate: nextCycleDueDateAfter(c, dueDateISO), paymentDate: today() };
+    } else {
+      clientPatch = prevRemembered
+        ? { nextBillingDate: prevRemembered.nextBillingDate, paymentDate: prevRemembered.paymentDate }
+        : { nextBillingDate: dueDateISO, paymentDate: c.paymentDate };
+      delete monthPaidPrevClient[c.id];
+    }
+    var prevClient = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate };
     var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
     if (idx >= 0) state.payments[idx] = updated;
     else state.payments.push(updated);
+    c.nextBillingDate = clientPatch.nextBillingDate;
+    c.paymentDate = clientPatch.paymentDate;
     render();
     persistPayment(updated)
-      .then(function () { toast(makePaid ? 'החודש סומן כשולם' : 'בוטל סימון התשלום'); })
+      .then(function () {
+        // The month's payment row is saved. Persist the client advance: reload
+        // first, patch the FRESH row, then save — never saveAll from old state.
+        return loadAll()
+          .then(function () {
+            var fresh = state.clients.find(function (x) { return x.id === c.id; });
+            if (!fresh) return; // client removed server-side; nothing to advance
+            fresh.nextBillingDate = clientPatch.nextBillingDate;
+            fresh.paymentDate = clientPatch.paymentDate;
+            return persist();
+          })
+          .then(function () {
+            render();
+            toast(makePaid ? 'החודש סומן כשולם' : 'בוטל סימון התשלום');
+          })
+          .catch(function (e2) {
+            // The payment row IS saved; only the client advance failed. Keep
+            // the optimistic values on-screen (they ride along on the next
+            // successful save) and say what happened.
+            render();
+            toast('התשלום נשמר אך עדכון תאריך הגבייה נכשל: ' + e2.message, true);
+          });
+      })
       .catch(function (e) {
+        // Payment save failed: nothing was written — roll back the payment row
+        // AND the client advance/revert (incl. the remembered pre-mark values).
         if (prev) state.payments[idx] = prev;
         else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        c.nextBillingDate = prevClient.nextBillingDate;
+        c.paymentDate = prevClient.paymentDate;
+        if (makePaid) delete monthPaidPrevClient[c.id];
+        else if (prevRemembered) monthPaidPrevClient[c.id] = prevRemembered;
         render();
         toast('שמירה נכשלה: ' + e.message, true);
       });
@@ -3579,12 +3721,16 @@
       var basePay = paymentForClientOn(c, currentMonthBaseDueDate(c));
       var psId = basePay.status === 'paid' ? 'paid' : basePay.status === 'partial' ? 'partial' : 'unpaid';
       var psLabel = psId === 'paid' ? 'שולם' : psId === 'partial' ? 'שולם חלקית' : 'לא שולם';
+      // The chip names the month it settles (MM/YYYY from the current month's
+      // base due date) so "שולם" can never be misread as some other month.
+      var chipMk = monthKey(currentMonthBaseDueDate(c));
+      var chipName = 'חבילה' + (/^\d{4}-\d{2}$/.test(chipMk) ? ' ' + chipMk.slice(5, 7) + '/' + chipMk.slice(0, 4) : '');
       if (state.role === 'editor') {
         paidChipHtml = psId === 'paid'
-          ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="בטל סימון תשלום לחודש הנוכחי">חבילה: ' + psLabel + ' ↺</button>'
-          : '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">חבילה: ' + psLabel + ' ✓</button>';
+          ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="בטל סימון תשלום לחודש הנוכחי">' + chipName + ': ' + psLabel + ' ↺</button>'
+          : '<button type="button" class="chip chip-' + psId + ' month-pay-btn" data-action="mark-month-paid" title="סמן את החודש הנוכחי כשולם">' + chipName + ': ' + psLabel + ' ✓</button>';
       } else {
-        paidChipHtml = '<span class="chip chip-' + psId + '">חבילה: ' + psLabel + '</span>';
+        paidChipHtml = '<span class="chip chip-' + psId + '">' + chipName + ': ' + psLabel + '</span>';
       }
       paidOnRow = (psId === 'paid' && basePay.paymentDate)
         ? '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' + displayDate(basePay.paymentDate) + '</span></div>'
@@ -4435,9 +4581,10 @@
 
   // Bug B: legacy clients saved before the nextBillingDate column have it blank,
   // so renewalInfo would fall back to startDate (banner counts from תחילת טיפול).
-  // Reconstruct it from the latest PAID base payment row (paymentDate else dueDate,
-  // + 30 days) on load, without overwriting a populated value — no manual re-save
-  // needed. Mirrors deriveNextBillingDate in public/charges-logic.js.
+  // Reconstruct it from the latest PAID base payment row on load — the next
+  // cycle after the DUE date it settled (anchored on the due date, never the
+  // paid date, so the billing day doesn't drift) — without overwriting a
+  // populated value. Mirrors deriveNextBillingDate in public/charges-logic.js.
   function deriveNextBillingDates() {
     if (!Array.isArray(state.clients) || !Array.isArray(state.payments)) return;
     state.clients.forEach(function (c) {
@@ -4446,10 +4593,10 @@
       state.payments.forEach(function (p) {
         if (!p || p.clientId !== c.id || p.status !== 'paid') return;
         if (paymentKindFromId(p.id).kind !== 'base') return;
-        var anchor = p.paymentDate || p.dueDate || '';
+        var anchor = p.dueDate || p.paymentDate || '';
         if (anchor && anchor > latest) latest = anchor;
       });
-      if (latest) c.nextBillingDate = addDays(latest, 30);
+      if (latest) c.nextBillingDate = nextCycleDueDateAfter(c, latest);
     });
   }
 
@@ -4807,10 +4954,11 @@
         sessionsUnit: c.sessionsUnit, packageChangeDate: c.packageChangeDate
       };
       c.pricePerSession = amount;
-      // Re-anchor from the paid date (same addDays(x,30) formula as edit/activate),
-      // so the renewal alert/גבייה הבאה advance off the date actually entered.
       c.paymentDate = paidDate;
-      c.nextBillingDate = addDays(paidDate, 30);
+      // Advance to the cycle AFTER the month being billed — anchored on the DUE
+      // date (renewalDate), never the paid date, so the billing day doesn't
+      // drift (paying the 04/09 cycle on 30/08 advances to 04/10, not 29/09).
+      c.nextBillingDate = nextCycleDueDateAfter(c, renewalDate);
       if (pkgChanged) {
         // Same fields the former שינוי חבילה flow wrote: new weekly frequency and
         // the packageChangeDate re-anchor (stamped to the payment date).
@@ -4911,7 +5059,12 @@
           submit.disabled = false;
           return;
         }
-        var nextBill = payDate ? addDays(payDate, 30) : (startDate ? addDays(startDate, 30) : '');
+        // Next collection = the cycle AFTER the intake month, on the client's
+        // billing day (else the startDate day-of-month, clamped) — anchored on
+        // the startDate cycle, never payDate+30, so the billing day never drifts.
+        var nextBill = startDate
+          ? nextCycleDueDateAfter({ billingDay: bdDay || '', startDate: startDate }, startDate)
+          : '';
         var client = {
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
@@ -5042,7 +5195,10 @@
       if (agPayStatus) lead.paymentStatus = agPayStatus;
       if (agPayDate) {
         lead.paymentDate = agPayDate;
-        lead.nextBillingDate = addDays(agPayDate, 30);
+        // The agreement payment opens the cycle anchored on its own date; the
+        // next collection is one cycle later (billing day / day-of-month kept,
+        // short-month clamp — one MONTH, not 30 days).
+        lead.nextBillingDate = nextCycleDueDateAfter(lead, agPayDate);
       }
       if (agreementAdvance) lead.stage = 'agreement';
       persist()
@@ -5077,7 +5233,10 @@
         toast('יש להזין תאריך תשלום', true);
         return;
       }
-      var nextBill = payDate ? addDays(payDate, 30) : addDays(startDate, 30);
+      // Next collection = the cycle AFTER the activation month, on the
+      // startDate day-of-month (clamped) — anchored on the startDate cycle,
+      // never payDate+30, so the billing day never drifts.
+      var nextBill = nextCycleDueDateAfter({ billingDay: '', startDate: startDate }, startDate);
 
       var client = {
         id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
@@ -5342,14 +5501,18 @@
           client.sessionsUnit = bdUnits;
         }
       }
-      // Recalculate next billing date from payment date (+30 days), as on activate
-      if (client.paymentDate) {
-        client.nextBillingDate = addDays(client.paymentDate, 30);
-      }
       // Bug A: a deliberately changed paid-date with status=paid must reach the
       // per-month base payment row (the single source the card chip + גבייה read)
       // via persistPayment — otherwise the chip keeps showing the old/today date.
       var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
+      // nextBillingDate is recomputed ONLY on that same deliberate change: an
+      // ordinary edit must never touch the stored renewal anchor (it used to
+      // unconditionally re-stamp paymentDate + 30 days, silently dragging the
+      // billing day around). The advance anchors on the month's DUE date —
+      // the next cycle after it — never on the paid date.
+      if (propagatePaid) {
+        client.nextBillingDate = nextCycleDueDateAfter(client, currentMonthBaseDueDate(client));
+      }
       // Optimistic base-payment propagation: apply to state.payments NOW so the
       // card chip reflects it immediately; snapshot for rollback on failure.
       var basePay = null;

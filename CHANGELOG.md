@@ -92,6 +92,44 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   source-scan guards incl. the frozen 34-column `CLIENTS_HEADERS`). Apps
   Script redeploys automatically via clasp CI on merge.
 
+### Changed
+- **Month-paid chip advances `nextBillingDate`; explicit month label; no false
+  stop banner on the 1st.** Stops the stale-`nextBillingDate` recurrence at its
+  source (the one-off repair above fixes the existing rows):
+  - `setCurrentMonthPaid(c, true)` now ALSO advances the client:
+    `nextBillingDate` → the next cycle due date AFTER the month being marked
+    (`nextCycleDueDateAfter` — anchored on the due date, never the paid date)
+    and `paymentDate` → today. Unmarking restores the pre-mark values
+    (remembered per client for the session; post-reload fallback is the
+    month's own due date). The client fields persist through the saveAll path
+    only AFTER a fresh `loadAll`, so a stale tab never clear-and-rewrites
+    Clients from old state; the payment row still goes through the single
+    `savePayment` path with optimistic update + rollback.
+  - The chip names the month it settles: `חבילה 09/2026: לא שולם ✓` /
+    `חבילה 09/2026: שולם ↺` (month from `currentMonthBaseDueDate`); tooltips
+    unchanged.
+  - `renewalInfo`: when the current month's row is absent/unpaid, today is
+    before the current-month due date, AND the previous month's base row is
+    paid → `due_soon` counting to the current-month due date — never the false
+    🛑 overdue a stale stored date used to produce on the 1st. Overdue stays
+    reserved for an explicit unpaid/partial `paymentStatus` or a due date that
+    already passed without a paid row.
+  - **One month, not 30 days.** Every `nextBillingDate` write now uses the
+    next-cycle rule (billing day, else the startDate day-of-month, clamped to
+    the month's end — new `nextCycleDueDate` / `nextCycleDueDateAfter` in
+    `public/charges-logic.js`, inline-mirrored in `public/app.js` and matching
+    Code.gs `_nextCycleDueDate`, keep-in-sync comments + a realm parity test):
+    renew-and-pay (billing-day-4 renewed on 30/08 → 04/10, not 29/09), direct
+    intake and lead activation (keep the day-of-month), the agreement payment,
+    and the legacy on-load derive (now anchored on the paid row's DUE date).
+    The edit modal no longer recomputes `nextBillingDate` unconditionally —
+    only a deliberately changed paid date with status paid re-anchors it, via
+    the same rule.
+  - Contracts untouched: `getTreatmentPlans`' `renewalDate` still reads the
+    stored value; Payments row semantics, `getDebtStatus`, and the Clients
+    headers are unchanged. New `test/month-paid-advances-billing.test.js`
+    (+ updated derive/renew tests) lock all of the above; full suite 726 green.
+
 ### Testing / CI
 - **Automated test CI + coverage for the priority modules.** Added
   `.github/workflows/test.yml` — runs `npm ci && npm test` (Node 22, the

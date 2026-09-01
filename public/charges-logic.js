@@ -145,8 +145,65 @@
     return addMonth(anchor);
   }
 
+  // 'yyyy-MM-dd' for (year, month 1-12, day), day clamped to the month's last
+  // day — the same clamp currentMonthBaseDueDate applies in public/app.js.
+  function clampedCycleIso(y, m, day) {
+    var last = new Date(y, m, 0).getDate();
+    var d = day > last ? last : day;
+    return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
+
+  // Next cycle due date ON OR AFTER fromIso: the client's billing day (numeric
+  // billingDay, else the startDate day-of-month; neither -> '') in fromIso's
+  // month, clamped to the month's last day; a candidate before fromIso rolls to
+  // the same day next month (clamped again). Mirrors _nextCycleDueDate in
+  // apps-script/Code.gs and nextCycleDueDate in public/app.js — keep all three
+  // in sync.
+  function nextCycleDueDate(client, fromIso) {
+    var bd = null;
+    var raw = client && client.billingDay;
+    if (raw !== '' && raw != null && isFinite(Number(raw)) && Number(raw) >= 1) {
+      bd = Math.floor(Number(raw));
+    }
+    if (!bd) {
+      var d = dayOfMonth(client && client.startDate);
+      if (d && d >= 1) bd = d;
+    }
+    if (!bd) return '';
+    var t = String(fromIso || '').slice(0, 10).split('-');
+    var y = parseInt(t[0], 10);
+    var m = parseInt(t[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return '';
+    var candidate = clampedCycleIso(y, m, bd);
+    if (candidate < fromIso) {
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+      candidate = clampedCycleIso(y, m, bd);
+    }
+    return candidate;
+  }
+
+  // The next cycle due date AFTER the cycle billed at cycleDueIso: the billing
+  // day in the month AFTER cycleDueIso's month, clamped. Anchors on the DUE
+  // date being paid, NEVER on the paid date, so the billing day stops drifting
+  // (paying the 04/09 cycle on 30/08 advances to 04/10, not 29/09). A client
+  // with no billing-day anchor falls back to due date + 1 calendar month
+  // (keeps its day-of-month, short-month clamp). Mirrors nextCycleDueDateAfter
+  // in public/app.js — keep both in sync.
+  function nextCycleDueDateAfter(client, cycleDueIso) {
+    var due = String(cycleDueIso || '').slice(0, 10);
+    var p = due.split('-');
+    if (p.length < 3) return '';
+    var y = parseInt(p[0], 10);
+    var m = parseInt(p[1], 10);
+    if (!isFinite(y) || !isFinite(m)) return '';
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+    return nextCycleDueDate(client, y + '-' + ('0' + m).slice(-2) + '-01') || addMonth(due);
+  }
+
   // Add N days to an ISO date string. Mirrors addDays in public/app.js — keep
-  // both in sync. Used for the nextBillingDate = anchor + 30 derivation.
+  // both in sync.
   function addDays(isoDate, days) {
     if (!isoDate) return '';
     var d = new Date(isoDate);
@@ -159,9 +216,10 @@
 
   // Reconstruct a client's next-billing date for legacy rows saved before the
   // nextBillingDate column existed (it comes back blank). Take the latest PAID
-  // base payment row and add 30 days to its paymentDate (else dueDate) — the same
-  // addDays(anchor, 30) formula used on activate/renew/edit. NEVER overwrites a
-  // populated nextBillingDate. Returns '' when nothing can be derived. Mirrors
+  // base payment row and advance to the next cycle after the DUE date it
+  // settled (nextCycleDueDateAfter — anchored on the due date, never the paid
+  // date, so the billing day doesn't drift). NEVER overwrites a populated
+  // nextBillingDate. Returns '' when nothing can be derived. Mirrors
   // deriveNextBillingDates in public/app.js — keep both in sync.
   function deriveNextBillingDate(client, payments) {
     if (!client) return '';
@@ -172,10 +230,10 @@
       var p = payments[i];
       if (!p || p.clientId !== client.id || p.status !== 'paid') continue;
       if (paymentKindFromId(p.id).kind !== 'base') continue;
-      var anchor = p.paymentDate || p.dueDate || '';
+      var anchor = p.dueDate || p.paymentDate || '';
       if (anchor && anchor > latest) latest = anchor;
     }
-    return latest ? addDays(latest, 30) : '';
+    return latest ? nextCycleDueDateAfter(client, latest) : '';
   }
 
   function dayOfMonth(iso) {
@@ -360,6 +418,8 @@
     compareCardUrgency: compareCardUrgency,
     addMonth: addMonth,
     addDays: addDays,
+    nextCycleDueDate: nextCycleDueDate,
+    nextCycleDueDateAfter: nextCycleDueDateAfter,
     deriveNextBillingDate: deriveNextBillingDate,
     nextRenewalDueDate: nextRenewalDueDate,
     dayOfMonth: dayOfMonth,

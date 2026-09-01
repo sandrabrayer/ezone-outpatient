@@ -21,6 +21,7 @@ const {
   nextRenewalDueDate,
   basePaymentPaidOn,
   addDays,
+  nextCycleDueDateAfter,
   deriveNextBillingDate,
   sessionFrequencyUnit
 } = require('../public/charges-logic');
@@ -292,16 +293,24 @@ test('sessionFrequencyUnit: all other treatment types are weekly (שבוע)', ()
 
 /* ===== Bug B: derive-on-load nextBillingDate for legacy clients ===== */
 
-test('deriveNextBillingDate = latest paid base payment paymentDate + 30 days', () => {
-  const client = { id: 'abc' }; // no nextBillingDate (legacy)
+test('deriveNextBillingDate = next cycle after the latest paid base row (due-date anchored)', () => {
+  const client = { id: 'abc' }; // no nextBillingDate (legacy), no billingDay/startDate
   const payments = [
-    { id: 'pay::abc::base::2026-04', clientId: 'abc', status: 'paid', paymentDate: '2026-04-10' },
-    { id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-22' },
-    { id: 'pay::abc::base::2026-05', clientId: 'abc', status: 'paid', paymentDate: '2026-05-15' }
+    { id: 'pay::abc::base::2026-04', clientId: 'abc', status: 'paid', dueDate: '2026-04-10', paymentDate: '2026-04-10' },
+    { id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', dueDate: '2026-06-22', paymentDate: '2026-06-25' },
+    { id: 'pay::abc::base::2026-05', clientId: 'abc', status: 'paid', dueDate: '2026-05-15', paymentDate: '2026-05-15' }
   ];
-  // Latest paid base is 2026-06-22 -> + 30 days = 2026-07-22 (same formula as
-  // the גבייה הבאה chip and the activate/renew path).
+  // Latest paid base is DUE 2026-06-22 -> one cycle later = 2026-07-22. The
+  // anchor is the due date, never the paid date (2026-06-25 would drift).
   assert.equal(deriveNextBillingDate(client, payments), '2026-07-22');
+});
+
+test('deriveNextBillingDate honors the billing day over the due-date day', () => {
+  // The stored billingDay is authoritative for the cycle: a drifted due date
+  // (the 22nd for a billing-day-4 client) still derives to the 4th.
+  const client = { id: 'abc', billingDay: 4 };
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', dueDate: '2026-06-22' }];
+  assert.equal(deriveNextBillingDate(client, payments), '2026-07-04');
 });
 
 test('deriveNextBillingDate never overwrites a populated nextBillingDate', () => {
@@ -320,16 +329,16 @@ test('deriveNextBillingDate ignores unpaid rows, extra charges, and other client
   assert.equal(deriveNextBillingDate(client, payments), '');
 });
 
-test('deriveNextBillingDate falls back to dueDate when a paid base row lacks paymentDate', () => {
+test('deriveNextBillingDate falls back to paymentDate when a paid base row lacks dueDate', () => {
   const client = { id: 'abc' };
-  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '', dueDate: '2026-06-01' }];
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-01', dueDate: '' }];
   assert.equal(deriveNextBillingDate(client, payments), '2026-07-01');
 });
 
-test('deriveNextBillingDate parity: derived value equals the chip formula addDays(anchor,30)', () => {
+test('deriveNextBillingDate parity: derived value equals nextCycleDueDateAfter(anchor)', () => {
   const client = { id: 'abc' };
-  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', paymentDate: '2026-06-22' }];
-  assert.equal(deriveNextBillingDate(client, payments), addDays('2026-06-22', 30));
+  const payments = [{ id: 'pay::abc::base::2026-06', clientId: 'abc', status: 'paid', dueDate: '2026-06-22' }];
+  assert.equal(deriveNextBillingDate(client, payments), nextCycleDueDateAfter(client, '2026-06-22'));
 });
 
 /* ===== Bug A: backdated paid-date round-trips (not coerced to today) ===== */
@@ -370,10 +379,13 @@ test('renew payment carries the modal paid-date + notes, keyed to the renewal mo
   assert.equal(pay.notes, 'מזומן');                 // free-text notes persist to the row
 });
 
-test('renew re-anchors nextBillingDate from the paid date (+30), backdate-sensitive', () => {
-  assert.equal(addDays('2026-06-28', 30), '2026-07-28');
-  // A backdated paid date yields a different anchor than a later date would.
-  assert.notEqual(addDays('2026-06-10', 30), addDays('2026-06-28', 30));
+test('renew re-anchors nextBillingDate on the DUE date being billed, not the paid date', () => {
+  // Renewing the 04/09 cycle on 30/08 advances to 04/10 — the billing day
+  // holds; the paid date no longer drags the anchor around (was +30 days).
+  const client = { id: 'abc', billingDay: 4 };
+  assert.equal(nextCycleDueDateAfter(client, '2026-09-04'), '2026-10-04');
+  // Backdating the PAID date changes nothing — only the billed cycle matters.
+  assert.equal(nextCycleDueDateAfter(client, '2026-09-04'), nextCycleDueDateAfter(client, '2026-09-04'));
 });
 
 test('chargeStatusFor for one_time charge: status comes from the ::once id, independent of todayISO month', () => {
