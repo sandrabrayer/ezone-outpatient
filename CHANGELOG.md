@@ -68,6 +68,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `CHANGELOG-treatment-plans-dates.md`.
 
 ### Fixed
+- **Paid/due everywhere follows the billing CYCLE, not the calendar month.**
+  After #94 the card chip still keyed "paid" to a calendar-month Payments row
+  (`paymentForClientOn(currentMonthBaseDueDate)`), while packages are cycles
+  (paid date → next billing date) — so every patient whose cycle straddles a
+  month boundary (e.g. paid 31/8, גבייה הבאה 30/09) showed `לא שולם` while the
+  banner correctly counted to 30/09. Single source of truth now: since #94
+  `nextBillingDate` advances exactly when a payment is recorded, so **paid-up ⇔
+  `nextBillingDate` non-blank and ≥ today** — new pure `packagePaidState(c,
+  todayIso) → { paid, until }` in `public/charges-logic.js`, mirrored in
+  `app.js` (keep-in-sync + parity test). On that rule:
+  - **Chip**: paid → `שולם עד 30/09 ✓` (green, unmark), unpaid → `לא שולם ✓`
+    (pink, mark); tooltips name the next collection / the advance.
+  - **Chip mark** writes the CYCLE row — `cyclePaymentDueDate`: the stored
+    `nextBillingDate` when past/today, else the current month's base due — the
+    SAME row id חידוש ותשלום writes (parity-tested), then advances per the #94
+    rule with `paymentDate = today`. **Unmark** reverts to the pre-mark values
+    (the remembered rollback now also carries the settled row's due date;
+    reload fallback = `prevCycleDueDateBefore`, the anchor un-advanced).
+  - **Edit-modal propagation** reuses the same helper — one implementation,
+    same cycle row, same advance.
+  - **גבייה tab**: a client is due on X iff their `nextBillingDate` is X (not
+    a billing-day calendar match); extras unchanged; the base row lookup then
+    resolves to the cycle row and the day's totals follow. A note above the
+    list says "לפי גבייה הבאה של כל מטופל". NOTE: the monthly summary (סיכום
+    חודשי) still counts by calendar-month Payments rows — unchanged here.
+  - **Card שולם ב** shows the payment date of the row covering the current
+    cycle (the cycle one month before the advanced anchor).
+  - **`renewalInfo`** keys "settled" on `packagePaidState` (same anchor the
+    banner counts to — chip and banner can no longer disagree); the #94 grace
+    window is kept. `getTreatmentPlans` / `getDebtStatus` contracts untouched.
+  New `test/package-chip-cycle.test.js` (22 tests: the rule, the עידו/מנשה
+  labels, chip↔renew↔edit row-id parity, mark/unmark round trip, the גבייה
+  cycle listing + totals, wiring guards) plus lockstep updates to the #94
+  suites; full suite 748 green.
 - **One-off repair of stale `nextBillingDate` (dry-run + apply).** Many active
   clients' monthly payments were recorded with the card chip (חבילה: לא שולם ✓ —
   `setCurrentMonthPaid`), which writes the month's Payments row but never

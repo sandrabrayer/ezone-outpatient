@@ -68,9 +68,12 @@ test('paymentKindFromId distinguishes extra vs base for the new shapes', () => {
 });
 
 test('clientsDueOn returns base + extras on a date that hits both', () => {
+  // Base due-ness keys on the stored nextBillingDate (the billing-cycle
+  // anchor), not on a billing-day calendar match.
   const clients = [{
     id: 'abc', name: 'Test', status: 'פעיל',
-    billingDay: 15, startDate: '2026-01-15', pricePerSession: 2000
+    billingDay: 15, startDate: '2026-01-15', pricePerSession: 2000,
+    nextBillingDate: '2026-05-15'
   }];
   const charges = [
     {
@@ -128,8 +131,8 @@ test('clientsDueOn skips monthly extras before their start month', () => {
 
 test('clientsDueOn skips inactive charges and ignores discharged clients', () => {
   const clients = [
-    { id: 'abc', status: 'פעיל',     billingDay: 5, pricePerSession: 1000 },
-    { id: 'xyz', status: 'סיים טיפול', billingDay: 5, pricePerSession: 1000 }
+    { id: 'abc', status: 'פעיל',     billingDay: 5, pricePerSession: 1000, nextBillingDate: '2026-05-05' },
+    { id: 'xyz', status: 'סיים טיפול', billingDay: 5, pricePerSession: 1000, nextBillingDate: '2026-05-05' }
   ];
   const charges = [
     {

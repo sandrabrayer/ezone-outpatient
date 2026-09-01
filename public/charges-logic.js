@@ -202,6 +202,21 @@
     return nextCycleDueDate(client, y + '-' + ('0' + m).slice(-2) + '-01') || addMonth(due);
   }
 
+  // Package paid-up state from the SINGLE source of truth. Packages are billing
+  // CYCLES (paid date -> next billing date), not calendar months, and since
+  // PR #94 every payment path (month-paid chip, חידוש ותשלום, intake,
+  // activation, agreement) advances nextBillingDate exactly when a payment is
+  // recorded. Therefore:
+  //   paid-up ⇔ nextBillingDate non-blank AND >= today   (until = that date)
+  //   unpaid  ⇔ blank or < today
+  // renewalInfo already counts to the same date, so chip and banner agree.
+  // Mirrors packagePaidState in public/app.js — keep both in sync.
+  function packagePaidState(client, todayIso) {
+    var until = String((client && client.nextBillingDate) || '').slice(0, 10);
+    var paid = !!until && until >= String(todayIso || '').slice(0, 10);
+    return { paid: paid, until: paid ? until : '' };
+  }
+
   // Add N days to an ISO date string. Mirrors addDays in public/app.js — keep
   // both in sync.
   function addDays(isoDate, days) {
@@ -308,15 +323,14 @@
     var out = [];
     (clients || []).forEach(function (c) {
       if (c.status === 'סיים טיפול') return;
-      var bd = c.billingDay ? Number(c.billingDay) : dayOfMonth(c.startDate);
-      if (bd) {
-        var effective = (last && bd > last) ? last : bd;
-        if (effective === d) {
-          out.push({
-            clientId: c.id, kind: 'base', dueDate: dateISO,
-            amount: Number(c.pricePerSession) || 0
-          });
-        }
+      // Base monthly: a client is due on X iff their גבייה הבאה is X — the
+      // stored nextBillingDate (the billing-cycle anchor), NOT a billing-day
+      // calendar match. Mirrors clientsDueOn in public/app.js — keep in sync.
+      if (String(c.nextBillingDate || '').slice(0, 10) === dateISO) {
+        out.push({
+          clientId: c.id, kind: 'base', dueDate: dateISO,
+          amount: Number(c.pricePerSession) || 0
+        });
       }
       (charges || []).forEach(function (charge) {
         if (charge.clientId !== c.id) return;
@@ -420,6 +434,7 @@
     addDays: addDays,
     nextCycleDueDate: nextCycleDueDate,
     nextCycleDueDateAfter: nextCycleDueDateAfter,
+    packagePaidState: packagePaidState,
     deriveNextBillingDate: deriveNextBillingDate,
     nextRenewalDueDate: nextRenewalDueDate,
     dayOfMonth: dayOfMonth,
