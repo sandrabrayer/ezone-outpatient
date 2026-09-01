@@ -67,6 +67,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   mirror test in `test/treatment-plans.test.js` is updated in lockstep. See
   `CHANGELOG-treatment-plans-dates.md`.
 
+### Fixed
+- **One-off repair of stale `nextBillingDate` (dry-run + apply).** Many active
+  clients' monthly payments were recorded with the card chip (חבילה: לא שולם ✓ —
+  `setCurrentMonthPaid`), which writes the month's Payments row but never
+  advances `Clients.nextBillingDate` (only חידוש ותשלום advances it), so on the
+  1st of the month `renewalInfo()` saw a past stored date plus no current-month
+  row and every such card turned red 🛑 עצור טיפול. New Code.gs repair: pure
+  `_nextCycleDueDate` (billing day = `billingDay` else `startDate` day-of-month,
+  clamped to the month's last day, rolled forward past today) +
+  `_planStaleNextBillingRepair` classify every active client with a stale
+  (non-blank, past) `nextBillingDate` into `fix` / `skippedOverdue` (an
+  explicit unpaid/partial base row for the previous month keeps its red
+  banner) / `skippedNoAnchor`. New INTERNAL POST action
+  `repairStaleNextBilling` (same trust level as `savePayment`; the Node proxy
+  forwards it verbatim): dry-run by default returns the plan and writes
+  NOTHING; `apply: '1'` writes `nextBillingDate` cell-by-cell via the
+  `_writeCreditsOwed` single-cell pattern under `LockService` — never
+  `_writeAll`, no header change, every write `Logger.log`ged. Editor helpers
+  `previewStaleNextBillingRepairNow()` / `applyStaleNextBillingRepairNow()`
+  for the one-off run. Locked by `test/stale-next-billing-repair.test.js`
+  (real-code extraction of the pure helpers, a vm sandbox asserting dry-run
+  performs zero writes and apply writes exactly the planned cells, and
+  source-scan guards incl. the frozen 34-column `CLIENTS_HEADERS`). Apps
+  Script redeploys automatically via clasp CI on merge.
+
 ### Testing / CI
 - **Automated test CI + coverage for the priority modules.** Added
   `.github/workflows/test.yml` — runs `npm ci && npm test` (Node 22, the
