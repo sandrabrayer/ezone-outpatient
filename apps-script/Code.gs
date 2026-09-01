@@ -1128,6 +1128,199 @@ function _setPaymentAmountOverride(payload) {
   }
 }
 
+/* ===== One-off stale nextBillingDate repair (2026-09-01) =====================
+ *
+ * Many active clients' monthly payments were recorded with the card chip
+ * (setCurrentMonthPaid in public/app.js), which writes the month's Payments row
+ * but never advances Clients.nextBillingDate — only חידוש ותשלום advances it.
+ * On the 1st of the month renewalInfo() sees no current-month row plus a past
+ * stored date, and every such card turns red 🛑 עצור טיפול. Nothing in the
+ * sheet is corrupted; the dates were simply never advanced.
+ *
+ * Planning is PURE (_planStaleNextBillingRepair over _readAll snapshots, dates
+ * already ISO strings so plain string comparison orders them). Writes are
+ * single-cell setValue of nextBillingDate only — the _writeCreditsOwed /
+ * _writePaymentAmountOverride pattern, NEVER _writeAll — under LockService.
+ * Dry-run by default; apply === '1' writes. Run from the editor via
+ * previewStaleNextBillingRepairNow / applyStaleNextBillingRepairNow. */
+
+/* 'yyyy-MM-dd' for (year, month 1-12, day), day clamped to the month's last
+ * day — the same clamp currentMonthBaseDueDate applies in public/app.js. */
+function _clampDayIso(y, m, day) {
+  var last = new Date(y, m, 0).getDate();
+  var d = day > last ? last : day;
+  return y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+}
+
+/* Pure: the client's next cycle due date ON OR AFTER todayIso ('yyyy-MM-dd').
+ * Billing day = numeric cl.billingDay, else day-of-month of cl.startDate;
+ * neither -> ''. Candidate = that day in todayIso's month, clamped to the
+ * month's last day; a candidate before todayIso rolls to the same day next
+ * month (clamped again). Mirrors the anchor precedence of currentMonthBaseDueDate
+ * / clientsDueOn in public/app.js — keep the billing-day rule in sync. */
+function _nextCycleDueDate(cl, todayIso) {
+  var bd = null;
+  var raw = cl && cl.billingDay;
+  if (raw !== '' && raw != null && isFinite(Number(raw)) && Number(raw) >= 1) {
+    bd = Math.floor(Number(raw));
+  }
+  if (!bd) {
+    var sd = String((cl && cl.startDate) || '').slice(0, 10).split('-');
+    if (sd.length === 3) {
+      var d = parseInt(sd[2], 10);
+      if (isFinite(d) && d >= 1) bd = d;
+    }
+  }
+  if (!bd) return '';
+  var t = String(todayIso || '').slice(0, 10).split('-');
+  var y = parseInt(t[0], 10);
+  var m = parseInt(t[1], 10);
+  if (!isFinite(y) || !isFinite(m)) return '';
+  var candidate = _clampDayIso(y, m, bd);
+  if (candidate < todayIso) {
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+    candidate = _clampDayIso(y, m, bd);
+  }
+  return candidate;
+}
+
+/* 'yyyy-MM' of the month before todayIso's month. */
+function _prevMonthKey(todayIso) {
+  var t = String(todayIso || '').slice(0, 10).split('-');
+  var y = parseInt(t[0], 10);
+  var m = parseInt(t[1], 10);
+  if (!isFinite(y) || !isFinite(m)) return '';
+  m -= 1;
+  if (m < 1) { m = 12; y -= 1; }
+  return y + '-' + ('0' + m).slice(-2);
+}
+
+/* An explicitly unpaid/partial payment status (English or Hebrew), i.e. a row
+ * that EXISTS and says the money did not fully arrive. */
+function _isUnpaidishStatus(v) {
+  var s = String(v == null ? '' : v).trim().toLowerCase();
+  return s === 'unpaid' || s === 'partial' || s === 'לא שולם' || s === 'שולם חלקית';
+}
+
+/* Pure: classify every active client whose stored nextBillingDate is stale
+ * (non-blank and < todayIso) into one of three buckets:
+ *   fix            — { id, name, from, to: _nextCycleDueDate(...) }
+ *   skippedOverdue — has an unpaid/partial BASE row due in the previous month
+ *                    (really is overdue — leave the red banner alone)
+ *   skippedNoAnchor— no billingDay and no startDate day to anchor a cycle on
+ * Clients that are discharged (סיים טיפול), deactivated (לא פעיל), blank, or
+ * already future-dated are untouched. Extra-charge rows (::chg-) never count
+ * as overdue here — only the base monthly package row does. */
+function _planStaleNextBillingRepair(clients, payments, todayIso) {
+  var prevMk = _prevMonthKey(todayIso);
+  var overdueByClient = {};
+  (payments || []).forEach(function (p) {
+    if (!p || !_isUnpaidishStatus(p.status)) return;
+    if (/::chg-/.test(String(p.id || ''))) return; // extra charge, not the base package
+    if (String(p.dueDate || '').slice(0, 7) !== prevMk) return;
+    var cid = String(p.clientId == null ? '' : p.clientId);
+    if (cid) overdueByClient[cid] = true;
+  });
+  var fix = [];
+  var skippedOverdue = [];
+  var skippedNoAnchor = [];
+  (clients || []).forEach(function (cl) {
+    if (!cl) return;
+    if (cl.status === 'סיים טיפול' || cl.status === DEACTIVATED_CLIENT_STATUS_HE) return;
+    var from = String(cl.nextBillingDate || '').slice(0, 10);
+    if (!from || from >= todayIso) return; // blank or not stale
+    var entry = { id: cl.id, name: cl.name || '', from: from };
+    if (overdueByClient[String(cl.id)]) { skippedOverdue.push(entry); return; }
+    var to = _nextCycleDueDate(cl, todayIso);
+    if (!to) { skippedNoAnchor.push(entry); return; }
+    if (to === from) return; // nothing to change
+    entry.to = to;
+    fix.push(entry);
+  });
+  return { fix: fix, skippedOverdue: skippedOverdue, skippedNoAnchor: skippedNoAnchor };
+}
+
+/* Persist one client's nextBillingDate without rewriting the whole Clients
+ * sheet. Locates the row by scanning the id column (the _writeCreditsOwed
+ * pattern). Fail-soft: no-hit (client deleted mid-flight) changes nothing. */
+function _writeNextBillingDate(clientsSh, clientId, isoDate) {
+  var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+  var nbdCol = CLIENTS_HEADERS.indexOf('nextBillingDate') + 1;
+  var lastRow = clientsSh.getLastRow();
+  if (lastRow < 2 || idCol < 1 || nbdCol < 1 || !clientId) return false;
+  var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var r = 0; r < ids.length; r++) {
+    if (String(ids[r][0]) === String(clientId)) {
+      clientsSh.getRange(r + 2, nbdCol).setValue(isoDate);
+      return true;
+    }
+  }
+  return false;
+}
+
+/* One-off repair. INTERNAL (same trust level as savePayment / mergeClients —
+ * posted same-origin through the Node proxy; no cross-app secret). Dry-run by
+ * default returns the plan and writes NOTHING; apply === '1' single-cell-writes
+ * nextBillingDate for each fix row under the script lock. todayIso is
+ * overridable for testing; defaults to today in the project timezone. */
+function _repairStaleNextBilling(apply, todayIso) {
+  var doApply = apply === '1' || apply === 1 || apply === true;
+  var t = String(todayIso || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    t = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+  }
+  var lock = null;
+  if (doApply) {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  }
+  try {
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var plan = _planStaleNextBillingRepair(
+      _readAll(clientsSh, CLIENTS_HEADERS),
+      _readAll(paymentsSh, PAYMENTS_HEADERS),
+      t
+    );
+    if (!doApply) {
+      return { ok: true, dryRun: true, today: t, applied: 0, plan: plan };
+    }
+    var applied = 0;
+    plan.fix.forEach(function (f) {
+      if (_writeNextBillingDate(clientsSh, f.id, f.to)) {
+        applied++;
+        Logger.log('repairStaleNextBilling: ' + f.id + ' (' + f.name + ') ' + f.from + ' -> ' + f.to);
+      } else {
+        Logger.log('repairStaleNextBilling: MISS ' + f.id + ' (' + f.name + ') — row not found, nothing written');
+      }
+    });
+    return { ok: true, dryRun: false, today: t, applied: applied, plan: plan };
+  } finally {
+    if (lock) { try { lock.releaseLock(); } catch (_) {} }
+  }
+}
+
+/* Editor helper: log the repair plan. Writes NOTHING. */
+function previewStaleNextBillingRepairNow() {
+  var res = _repairStaleNextBilling('0');
+  Logger.log('repairStaleNextBilling DRY-RUN (today=' + res.today + '): fix=' +
+    res.plan.fix.length + ' skippedOverdue=' + res.plan.skippedOverdue.length +
+    ' skippedNoAnchor=' + res.plan.skippedNoAnchor.length);
+  Logger.log(JSON.stringify(res.plan, null, 2));
+  return res;
+}
+
+/* Editor helper: APPLY the repair. Logs the plan before, each write (inside
+ * _repairStaleNextBilling), and the applied count after. */
+function applyStaleNextBillingRepairNow() {
+  var before = _repairStaleNextBilling('0');
+  Logger.log('BEFORE (plan, today=' + before.today + '): ' + JSON.stringify(before.plan, null, 2));
+  var res = _repairStaleNextBilling('1');
+  Logger.log('AFTER: applied=' + res.applied + ' of ' + res.plan.fix.length + ' planned');
+  return res;
+}
+
 /* ===== Client charges ===== */
 function _getCharges() {
   var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
@@ -3129,6 +3322,16 @@ function doPost(e) {
       // INTERNAL write (same trust level as savePayment) — the outpatient app posts
       // it same-origin through the Node proxy; no cross-app secret.
       return _json(_setPaymentAmountOverride(payload));
+    }
+    if (action === 'repairStaleNextBilling') {
+      // One-off stale nextBillingDate repair. INTERNAL (same trust level as
+      // savePayment — posted same-origin through the Node proxy; no cross-app
+      // secret). Dry-run unless apply === '1'; apply single-cell-writes
+      // nextBillingDate only, never _writeAll.
+      var rsApply = (payload && payload.apply != null)
+        ? payload.apply
+        : (e && e.parameter && e.parameter.apply);
+      return _json(_repairStaleNextBilling(rsApply, payload && payload.today));
     }
     if (action === 'saveCharge' || action === 'updateCharge') {
       return _json(_upsertCharge(payload.charge));
