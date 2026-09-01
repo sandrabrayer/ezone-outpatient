@@ -44,11 +44,18 @@ test('#1 renewMarkPaid handler routes שולם through setCurrentMonthPaid', () 
   assert.doesNotMatch(m[0], /setClinicalType|persist\(\)/);
 });
 
-test('#1 setCurrentMonthPaid persists via persistPayment → savePayment (not saveAll/clinical)', () => {
+test('#1 setCurrentMonthPaid persists via persistPayment → savePayment (not clinical)', () => {
   const fn = APP.match(/function setCurrentMonthPaid\([\s\S]*?\n  \}/);
   assert.ok(fn, 'setCurrentMonthPaid not found');
   assert.match(fn[0], /persistPayment\(updated\)/);
-  assert.doesNotMatch(fn[0], /setClinicalType|clinicalTreatmentType|\bpersist\(\)/);
+  assert.doesNotMatch(fn[0], /setClinicalType|clinicalTreatmentType/);
+  // The client-advance save (nextBillingDate/paymentDate) goes through the
+  // saveAll path, but ONLY after a fresh loadAll — a possibly-stale tab must
+  // never clear-and-rewrite Clients from old state.
+  const persistIdx = fn[0].indexOf('persist()');
+  const reloadIdx = fn[0].indexOf('loadAll()');
+  assert.ok(persistIdx !== -1 && reloadIdx !== -1 && reloadIdx < persistIdx,
+    'the client advance must reload (loadAll) before persist()');
   // persistPayment is the savePayment upsert path
   assert.match(APP, /async function persistPayment\(payment\)\s*\{\s*await apiPostAction\('savePayment'/);
 });
