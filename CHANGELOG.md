@@ -68,6 +68,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `CHANGELOG-treatment-plans-dates.md`.
 
 ### Fixed
+- **The package chip toggles paid ⇄ unpaid reliably again.** After the cycle
+  fix (#95) the chip's click was still gated on the underlying Payments ROW
+  status, while its visible state comes from the anchor (`packagePaidState`) —
+  whenever the two disagreed the click was a silent no-op, so the chip felt
+  stuck: a legacy paid row whose anchor never advanced couldn't be marked
+  paid; a paid-up patient whose paid row sits under a different month than
+  the computed previous cycle couldn't be unmarked. Three fixes in
+  `setCurrentMonthPaid`:
+  - The toggle is now gated on `packagePaidState` itself (the state the chip
+    renders), never on a row. When the row already says the new status it is
+    simply not rewritten — only the anchor moves, preserving the row's real
+    `paymentDate`/amount history (which the שולם ב line then shows).
+  - Marking paid with an anchor several cycles stale used to advance one
+    cycle into the PAST (chip stayed לא שולם after a successful click); the
+    mark now lands the anchor on the first cycle strictly AFTER today.
+  - Unmarking without this session's pre-mark memory used to revert the
+    anchor to the settled row's due date, which for an advance-paid row is
+    still ahead (chip stayed green); the revert now lands strictly behind
+    today (one more cycle back when needed), and the settled row is found via
+    the remembered mark → the latest paid base row → the computed previous
+    cycle.
+  Regression tests in `test/package-chip-cycle.test.js` /
+  `test/month-paid-advances-billing.test.js` (stale-anchor mark lands after
+  today; advance-paid unmark lands behind today; toggle gated on the package
+  state); full suite 750 green.
 - **Paid/due everywhere follows the billing CYCLE, not the calendar month.**
   After #94 the card chip still keyed "paid" to a calendar-month Payments row
   (`paymentForClientOn(currentMonthBaseDueDate)`), while packages are cycles

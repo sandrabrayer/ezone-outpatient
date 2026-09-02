@@ -35,6 +35,7 @@ const APP = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
 const {
   nextCycleDueDate,
   nextCycleDueDateAfter,
+  addDays,
   dayOfMonth,
   lastDayOfMonth,
   paymentId,
@@ -140,13 +141,28 @@ test('app.js: the edit modal no longer recomputes nextBillingDate unconditionall
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Mirror of setCurrentMonthPaid's client patch in public/app.js — keep in sync.
+// prevCycle mirrors prevCycleDueDateBefore: the billing day one month before
+// the anchor.
+function prevCycleBefore(c, anchorIso) {
+  const p = String(anchorIso || '').slice(0, 10).split('-');
+  if (p.length < 3) return '';
+  let y = parseInt(p[0], 10), m = parseInt(p[1], 10);
+  m -= 1; if (m < 1) { m = 12; y -= 1; }
+  return nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || '';
+}
 function monthPaidClientPatch(c, makePaid, dueDateISO, remembered, todayIso) {
   if (makePaid) {
-    return { nextBillingDate: nextCycleDueDateAfter(c, dueDateISO), paymentDate: todayIso };
+    let advanced = nextCycleDueDateAfter(c, dueDateISO);
+    // a multi-cycle-stale anchor must still land the mark strictly ahead
+    if (advanced && advanced <= todayIso) {
+      advanced = nextCycleDueDate(c, addDays(todayIso, 1)) || advanced;
+    }
+    return { nextBillingDate: advanced, paymentDate: todayIso };
   }
-  return remembered
-    ? { nextBillingDate: remembered.nextBillingDate, paymentDate: remembered.paymentDate }
-    : { nextBillingDate: dueDateISO, paymentDate: c.paymentDate };
+  if (remembered) return { nextBillingDate: remembered.nextBillingDate, paymentDate: remembered.paymentDate };
+  // the revert must land strictly behind today so the package reads unpaid
+  const revertTo = (dueDateISO && dueDateISO < todayIso) ? dueDateISO : prevCycleBefore(c, dueDateISO);
+  return { nextBillingDate: revertTo, paymentDate: c.paymentDate };
 }
 
 test('marking the month paid advances nextBillingDate one cycle and stamps paymentDate', () => {
@@ -156,6 +172,15 @@ test('marking the month paid advances nextBillingDate one cycle and stamps payme
   assert.equal(patch.paymentDate, '2026-09-01');     // stamped today
 });
 
+test('marking with a MULTI-cycle-stale anchor still lands the anchor after today', () => {
+  // Anchor stuck in July, today Sept 2: one cycle after July is August — still
+  // past — so the mark lands on the first cycle after today (Sept 10). Without
+  // this the chip stayed לא שולם after a successful click.
+  const c = { id: 'c1', billingDay: 10, nextBillingDate: '2026-07-10' };
+  const patch = monthPaidClientPatch(c, true, '2026-07-10', null, '2026-09-02');
+  assert.equal(patch.nextBillingDate, '2026-09-10');
+});
+
 test('unmarking restores the remembered pre-mark values', () => {
   const c = { id: 'c1', billingDay: 10, nextBillingDate: '2026-10-10', paymentDate: '2026-09-01' };
   const remembered = { nextBillingDate: '2026-07-10', paymentDate: '2026-07-08' };
@@ -163,22 +188,28 @@ test('unmarking restores the remembered pre-mark values', () => {
   assert.deepEqual(patch, remembered);
 });
 
-test('unmarking after a reload (nothing remembered) falls back to the month own due date', () => {
+test('unmarking after a reload (nothing remembered) lands the anchor strictly behind today', () => {
   const c = { id: 'c1', billingDay: 10, nextBillingDate: '2026-10-10', paymentDate: '2026-09-01' };
+  // The settled row's due date (2026-09-10) is still ahead of today, so the
+  // revert steps back one more cycle — otherwise the chip stayed green.
   const patch = monthPaidClientPatch(c, false, '2026-09-10', null, '2026-09-01');
-  assert.equal(patch.nextBillingDate, '2026-09-10'); // the unpaid month IS the next collection
+  assert.equal(patch.nextBillingDate, '2026-08-10');
   assert.equal(patch.paymentDate, '2026-09-01');     // kept
+  // A past-due settled row reverts to its own date (already behind today).
+  const patch2 = monthPaidClientPatch(c, false, '2026-08-10', null, '2026-09-01');
+  assert.equal(patch2.nextBillingDate, '2026-08-10');
 });
 
 test('app.js wiring: setCurrentMonthPaid advances, remembers, and reloads before persisting', () => {
   const fn = fnSource('setCurrentMonthPaid');
   // the advance mirrors monthPaidClientPatch above
   assert.match(fn, /nextCycleDueDateAfter\(c, dueDateISO\)/);
-  assert.match(fn, /paymentDate: today\(\)/);
+  // the mark stamps today, unless a legacy row already carries the real paid date
+  assert.match(fn, /paymentDate: \(!rowNeedsWrite && base\.paymentDate\) \|\| today\(\)/);
   // pre-mark values remembered per client; unmark falls back to the due date
   assert.match(APP, /var monthPaidPrevClient = \{\}/);
   assert.match(fn, /monthPaidPrevClient\[c\.id\] = \{ nextBillingDate: c\.nextBillingDate, paymentDate: c\.paymentDate, dueDateISO: dueDateISO \}/);
-  assert.match(fn, /\{ nextBillingDate: dueDateISO, paymentDate: c\.paymentDate \}/);
+  assert.match(fn, /\{ nextBillingDate: revertTo, paymentDate: c\.paymentDate \}/);
   // client save happens ONLY after a fresh reload (never saveAll from stale state)
   const reload = fn.indexOf('loadAll()');
   const save = fn.indexOf('persist()');

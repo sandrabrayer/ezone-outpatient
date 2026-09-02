@@ -2413,28 +2413,53 @@
   // first (loadAll) and the advance re-applied to the fresh row — a possibly
   // stale tab never clear-and-rewrites Clients from old state.
   var monthPaidPrevClient = {}; // clientId -> { nextBillingDate, paymentDate, dueDateISO } before the mark
+  // The due date of the client's LATEST paid base row. Used to find the row
+  // that covers the paid-up cycle when the pre-mark memory is gone (the renew
+  // modal may have billed a different month than the computed previous cycle).
+  function latestPaidBaseDueDate(c) {
+    var latest = '';
+    state.payments.forEach(function (p) {
+      if (!p || p.clientId !== c.id || p.status !== 'paid') return;
+      if (paymentKindFromId(p.id).kind !== 'base') return;
+      var d = fmtDate(p.dueDate);
+      if (d && d > latest) latest = d;
+    });
+    return latest;
+  }
   function setCurrentMonthPaid(c, makePaid) {
     if (state.role !== 'editor') return;
     var todayIso = today();
+    // The chip toggles the PACKAGE state (packagePaidState — the same anchor
+    // it renders from), so the toggle is gated on that state, never on a
+    // Payments row: a legacy paid row whose anchor never advanced, or a paid
+    // row filed under a different month, must not turn the click into a
+    // silent no-op.
+    var pkg = packagePaidState(c, todayIso);
+    if (pkg.paid === !!makePaid) return; // already in the requested state
     // The row settled/reverted is the CYCLE row — the same one חידוש ותשלום
     // writes — not the calendar-month row (packages are cycles; a cycle that
     // straddles a month boundary has no current-calendar-month row at all):
     //   mark   -> the due cycle (cyclePaymentDueDate: the stored
     //             nextBillingDate when past/today, else the month's base due)
     //   unmark -> the row the mark wrote: remembered from this session's mark,
-    //             else the cycle one month before the advanced anchor
+    //             else the latest paid base row, else the cycle one month
+    //             before the advanced anchor
     var prevRemembered = monthPaidPrevClient[c.id];
     var dueDateISO;
     if (makePaid) {
       dueDateISO = cyclePaymentDueDate(c, todayIso);
     } else {
       dueDateISO = (prevRemembered && prevRemembered.dueDateISO) ||
+        latestPaidBaseDueDate(c) ||
         prevCycleDueDateBefore(c, c.nextBillingDate) ||
         currentMonthBaseDueDate(c);
     }
     var base = paymentForClientOn(c, dueDateISO);
     var newStatus = makePaid ? 'paid' : 'unpaid';
-    if (base.status === newStatus) return;
+    // Write the row only when it actually changes; when it already says so
+    // (legacy paid row, already-reverted row) only the anchor moves — the
+    // row's own paymentDate/amount history is left untouched.
+    var rowNeedsWrite = base.status !== newStatus;
     var amount = base.amountDue || clientAmountDue(c) || 0;
     var updated = {
       id: base.id,
@@ -2454,22 +2479,39 @@
     var clientPatch;
     if (makePaid) {
       monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate, dueDateISO: dueDateISO };
-      clientPatch = { nextBillingDate: nextCycleDueDateAfter(c, dueDateISO), paymentDate: today() };
+      var advanced = nextCycleDueDateAfter(c, dueDateISO);
+      // An anchor several cycles stale advances one cycle into the PAST; the
+      // mark must land strictly ahead so the package reads paid-up (the first
+      // cycle after today).
+      if (advanced && advanced <= todayIso) {
+        advanced = nextCycleDueDate(c, addDays(todayIso, 1)) || advanced;
+      }
+      clientPatch = {
+        nextBillingDate: advanced,
+        paymentDate: (!rowNeedsWrite && base.paymentDate) || today()
+      };
     } else {
+      // The revert must land strictly BEHIND today so the package reads
+      // unpaid — an advance-paid row's own due date can still be ahead.
+      var revertTo = (dueDateISO && dueDateISO < todayIso)
+        ? dueDateISO
+        : prevCycleDueDateBefore(c, dueDateISO || c.nextBillingDate);
       clientPatch = prevRemembered
         ? { nextBillingDate: prevRemembered.nextBillingDate, paymentDate: prevRemembered.paymentDate }
-        : { nextBillingDate: dueDateISO, paymentDate: c.paymentDate };
+        : { nextBillingDate: revertTo, paymentDate: c.paymentDate };
       delete monthPaidPrevClient[c.id];
     }
     var prevClient = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate };
     var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
-    if (idx >= 0) state.payments[idx] = updated;
-    else state.payments.push(updated);
+    if (rowNeedsWrite) {
+      if (idx >= 0) state.payments[idx] = updated;
+      else state.payments.push(updated);
+    }
     c.nextBillingDate = clientPatch.nextBillingDate;
     c.paymentDate = clientPatch.paymentDate;
     render();
-    persistPayment(updated)
+    (rowNeedsWrite ? persistPayment(updated) : Promise.resolve())
       .then(function () {
         // The month's payment row is saved. Persist the client advance: reload
         // first, patch the FRESH row, then save — never saveAll from old state.
@@ -2496,8 +2538,10 @@
       .catch(function (e) {
         // Payment save failed: nothing was written — roll back the payment row
         // AND the client advance/revert (incl. the remembered pre-mark values).
-        if (prev) state.payments[idx] = prev;
-        else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        if (rowNeedsWrite) {
+          if (prev) state.payments[idx] = prev;
+          else state.payments = state.payments.filter(function (p) { return p.id !== updated.id; });
+        }
         c.nextBillingDate = prevClient.nextBillingDate;
         c.paymentDate = prevClient.paymentDate;
         if (makePaid) delete monthPaidPrevClient[c.id];

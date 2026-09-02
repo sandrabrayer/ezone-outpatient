@@ -211,11 +211,28 @@ test('unmark: prevCycleDueDateBefore finds the settled cycle when memory is gone
 test('app.js wiring: mark/unmark key on the cycle row and remember dueDateISO for the revert', () => {
   const fn = fnSource('setCurrentMonthPaid');
   assert.match(fn, /dueDateISO = cyclePaymentDueDate\(c, todayIso\)/);
-  assert.match(fn, /\(prevRemembered && prevRemembered\.dueDateISO\) \|\|\s*\n\s*prevCycleDueDateBefore\(c, c\.nextBillingDate\)/);
+  assert.match(fn, /\(prevRemembered && prevRemembered\.dueDateISO\) \|\|\s*\n\s*latestPaidBaseDueDate\(c\) \|\|\s*\n\s*prevCycleDueDateBefore\(c, c\.nextBillingDate\)/);
   assert.match(fn, /dueDateISO: dueDateISO \}/);
-  // the advance + revert values are unchanged from #94
+  // the advance rule is #94's, clamped to land strictly after today
   assert.match(fn, /nextCycleDueDateAfter\(c, dueDateISO\)/);
-  assert.match(fn, /\{ nextBillingDate: dueDateISO, paymentDate: c\.paymentDate \}/);
+  assert.match(fn, /if \(advanced && advanced <= todayIso\)/);
+  assert.match(fn, /nextCycleDueDate\(c, addDays\(todayIso, 1\)\)/);
+  // the revert lands strictly behind today
+  assert.match(fn, /\{ nextBillingDate: revertTo, paymentDate: c\.paymentDate \}/);
+});
+
+test('app.js wiring: the toggle is gated on packagePaidState, never on a Payments row', () => {
+  const fn = fnSource('setCurrentMonthPaid');
+  // THE STUCK-CHIP BUG: gating on the row made the click a silent no-op
+  // whenever the row and the anchor disagreed (legacy paid row + stale
+  // anchor, or a paid row filed under a different month).
+  assert.match(fn, /var pkg = packagePaidState\(c, todayIso\)/);
+  assert.match(fn, /if \(pkg\.paid === !!makePaid\) return/);
+  assert.doesNotMatch(fn, /if \(base\.status === newStatus\) return/);
+  // a row that already says the new status is not rewritten — only the anchor
+  // moves, so the row's history (paymentDate/amount) survives
+  assert.match(fn, /var rowNeedsWrite = base\.status !== newStatus/);
+  assert.match(fn, /rowNeedsWrite \? persistPayment\(updated\) : Promise\.resolve\(\)/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
