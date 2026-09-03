@@ -3740,3 +3740,1104 @@ function setupIntegrityTrigger() {
   ScriptApp.newTrigger('nightlyIntegrityJob').timeBased().everyDays(1).atHour(2).create();
   return { ok: true, installed: 'nightlyIntegrityJob @ 02:00' };
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Corrupted-rows cleanup (U+FFFD repair pipeline) — ported from the Dashboard
+ * app's shipped design (E-Zone-Dashboard PRs #105/#107/#108), reimplemented
+ * for THIS backend's architecture.
+ *
+ * Background: the Dashboard app's server.js had a UTF-8 chunk-split bug
+ * (2026-07-27 → 2026-08-31) that replaced split Hebrew characters with U+FFFD
+ * ('�'). Outpatient's own read path was never at risk, but corrupted rows
+ * arrived HERE through the Dashboard→Outpatient createLead handoff (corrupted
+ * lead name/note at arrival) and then spread on conversion/edit into Clients
+ * and every sheet that copies a name (Payments.clientName,
+ * SessionLog.patientName, stop flags/alerts, …).
+ *
+ * Pipeline (all five entry points are PUBLIC — run them from the Apps Script
+ * editor's Run dropdown — and deliberately NOT reachable through doGet/doPost;
+ * a guard test locks that):
+ *   1. harvestRevisionSnapshotsNow — exports a spread of this spreadsheet's
+ *      own Drive revisions across the corruption window and rebuilds each as
+ *      a Sheets file named EZONE-OUT-SNAPSHOT-AUTO-<yyyy-MM-dd> (the OUT
+ *      prefix keeps outpatient snapshots disjoint from the Dashboard app's
+ *      EZONE-SNAPSHOT-* files). Idempotent; per-revision failure isolation.
+ *   2. scanCorruptedRowsNow — DRY RUN, zero writes: scans every target
+ *      sheet/column for U+FFFD and logs one proposal per corrupted cell,
+ *      classified by the tier system below.
+ *   3. writeRepairPlanNow — writes the proposals into the hidden RepairPlan
+ *      sheet, everything approved=FALSE, for Sandra to review/edit/approve.
+ *   4. applyCorruptedRowRepairsNow — executes ONLY approved=TRUE rows, under
+ *      the script lock, re-verifying oldValue before every SINGLE-CELL write
+ *      (getRange(...).setValue — NEVER _writeAll, so a concurrent save can
+ *      never be clobbered). Every applied/skipped row is audit-logged.
+ *   5. deleteAutoSnapshotsNow — trashes EZONE-OUT-SNAPSHOT-AUTO-* only.
+ *
+ * Repair tiers (priority order; a machine must NEVER guess):
+ *   tier 0 — cross-reference: a Clients row's originating Leads row
+ *            (fromLead) with a clean name; or a clean row elsewhere sharing a
+ *            normalized phone (name columns only).
+ *   tier 1 — snapshot: relocate the row in a snapshot by its stable key
+ *            (id / sessionId / key), phone fallback for the Clients family;
+ *            2+ key hits → ambiguous, NO proposal. The snapshot value must
+ *            pass the compatibility guard (surviving non-U+FFFD segments
+ *            appear in order, each U+FFFD run stands for 1+ characters,
+ *            anchored at both ends). Snapshot columns are mapped by the
+ *            snapshot's OWN header row (schemas are append-only, so older
+ *            snapshots simply lack trailing columns).
+ *   tier 2 — closed value sets (enum columns only, never free text):
+ *            exactly ONE legal value compatible with the corrupted cell.
+ *   tier 3 — clean-name roster from every live target sheet + every
+ *            snapshot: exactly ONE compatible name (name columns only).
+ *            Bonus: twin-merge — two same-key rows (live sheet + its family
+ *            sheet, e.g. Clients / Clients-removed) corrupted in DIFFERENT
+ *            positions whose union reconstructs the full clean string.
+ *
+ * ⚠️ THERAPIST NAMES (TherapistRates.name, SessionLog.therapist,
+ * ExtraSessionRequests.therapist) must stay EXACTLY matched to the
+ * therapists app's roster — payout matching is fail-closed on the name.
+ * Proposals for those columns carry a loud 'THERAPIST-NAME — verify
+ * cross-app' suffix in the plan's source column: verify against the
+ * therapists app before approving. Client name columns used in cross-app
+ * phone/name matching carry a similar 'CLIENT-NAME' suffix. */
+
+var CORRUPTION_MARK = '�'; // '�'
+
+var REPAIR_PLAN_SHEET = 'RepairPlan';
+/* APPEND-ONLY like every header array in this file; the exact order is
+ * pinned by test/corrupted-rows-cleanup.test.js. */
+var REPAIR_PLAN_HEADERS = ['sheet', 'row', 'column', 'newValue', 'action', 'approved', 'oldValue', 'source'];
+
+/* Minimal hidden append-only audit log (this repo had no AuditLog pattern —
+ * introduced here, same design as the Dashboard app's). Rows are appended,
+ * never rewritten or deleted. */
+var AUDIT_LOG_SHEET = 'AuditLog';
+var AUDIT_LOG_HEADERS = ['timestamp', 'action', 'fn', 'rowKey', 'name', 'details'];
+
+/* Snapshot prefixes. EZONE-OUT-SNAPSHOT (not the Dashboard's EZONE-SNAPSHOT)
+ * so the two apps' snapshots can never cross: this app's discovery only sees
+ * OUT-prefixed files, and its cleanup only trashes OUT-AUTO-prefixed ones. */
+var SNAPSHOT_NAME_PREFIX = 'EZONE-OUT-SNAPSHOT';
+var AUTO_SNAPSHOT_PREFIX = SNAPSHOT_NAME_PREFIX + '-AUTO-'; // EZONE-OUT-SNAPSHOT-AUTO-
+
+var CORRUPTION_BUG_LIVE_DATE = '2026-07-27';   // Dashboard server.js chunk-split went live
+var CORRUPTION_WINDOW_END_DATE = '2026-09-01'; // day after the Dashboard fix deployed (2026-08-31)
+var XLSX_EXPORT_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/* Loud plan-source suffixes for cross-app-sensitive columns. */
+var THERAPIST_NAME_SUFFIX = ' — THERAPIST-NAME — verify cross-app';
+var CLIENT_NAME_SUFFIX = ' — CLIENT-NAME — used in cross-app phone/name matching, verify';
+
+/* MIRROR of public/app.js LOCATIONS (the סניף source of truth). The Apps
+ * Script runtime cannot import that module, so the list is duplicated here —
+ * test/corrupted-rows-cleanup.test.js asserts it deep-equals the frontend
+ * literal, exactly like the CLINICAL_TO_BILLING mirror. Keep in sync. */
+var CORRUPTION_LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
+
+/* Lead stages as STORED on the Leads sheet (public/app.js writes the Hebrew
+ * label via idToHe): the three kanban stages + the legacy alias + לא רלוונטי. */
+var CORRUPTION_LEAD_STAGES = ['פרטים אישיים', 'שיחת היכרות', 'תוכנית טיפול', 'הסכם נחתם', 'לא רלוונטי'];
+
+/* Client statuses as stored on Clients.status. */
+var CORRUPTION_CLIENT_STATUSES = ['פעיל', 'סיים טיפול', 'לא פעיל'];
+
+function _hasCorruption(v) {
+  return typeof v === 'string' ? v.indexOf(CORRUPTION_MARK) >= 0 :
+    String(v == null ? '' : v).indexOf(CORRUPTION_MARK) >= 0;
+}
+
+/* Phone key for cross-reference matching, per the ecosystem rule: normalize
+ * through _recoverPhone (strips separators, 972→0, restores a leading zero
+ * Sheets dropped) and accept ONLY a full /^0\d{9}$/ mobile-length match —
+ * anything else returns '' and never participates in matching. */
+function _corruptionPhoneKey(raw) {
+  var p = _recoverPhone(raw);
+  return /^0\d{9}$/.test(p) ? p : '';
+}
+
+/* The shared compatibility/wildcard rule for every tier: split the corrupted
+ * value on runs of U+FFFD and require the surviving segments to appear IN
+ * ORDER in the candidate, with each U+FFFD run standing for 1+ characters
+ * (a run always replaced at least one original character — a Hebrew char is
+ * 2 UTF-8 bytes, so a run may stand for FEWER chars than its length, never
+ * zero). Anchored: surviving leading/trailing text must lead/trail the
+ * candidate too. This is both tier 1's sanity guard and tiers 2–3's matcher. */
+function _corruptionWildcardRegex(corrupted) {
+  var parts = String(corrupted).split(/�+/);
+  var esc = parts.map(function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+  return new RegExp('^' + esc.join('[\\s\\S]+') + '$');
+}
+
+/* Exactly-one-match helper for the enum and roster tiers: returns
+ * {count, value} where value is set only when EXACTLY ONE candidate matches
+ * the corrupted value under the wildcard rule. 0 or 2+ → manual. */
+function _corruptionMatchOne(corrupted, candidates) {
+  var re = _corruptionWildcardRegex(corrupted);
+  var hit = '';
+  var count = 0;
+  for (var i = 0; i < candidates.length; i++) {
+    if (re.test(candidates[i])) {
+      count++;
+      if (count === 1) hit = candidates[i]; else break;
+    }
+  }
+  return { count: count, value: count === 1 ? hit : '' };
+}
+
+/* Tier 3 bonus — merge two same-length strings corrupted in DIFFERENT
+ * positions: where one has U+FFFD the other must be clean, and where both
+ * are clean they must agree. Returns the reconstructed string, or '' when
+ * the union cannot fully reconstruct. */
+function _corruptionTwinMerge(a, b) {
+  a = String(a);
+  b = String(b);
+  if (a.length === 0 || a.length !== b.length) return '';
+  var out = '';
+  for (var i = 0; i < a.length; i++) {
+    var ca = a.charAt(i);
+    var cb = b.charAt(i);
+    if (ca === CORRUPTION_MARK && cb === CORRUPTION_MARK) return '';
+    if (ca !== CORRUPTION_MARK && cb !== CORRUPTION_MARK && ca !== cb) return '';
+    out += (ca === CORRUPTION_MARK) ? cb : ca;
+  }
+  return out;
+}
+
+/* The sheets + columns where free-text / Hebrew-enum values live — the scan
+ * targets (Phase 1 enumeration, one entry per sheet holding Hebrew text).
+ * Date/number/English-key columns are deliberately absent: U+FFFD cannot
+ * appear in them unless the row is damaged beyond a text repair.
+ *   headers   — the sheet's positional header array (append-only)
+ *   keyCol    — the stable row key tier 1 relocates by ('' = no reliable
+ *               key: TherapistRates is keyed by the very column that may be
+ *               corrupted, so it repairs from enum/roster only)
+ *   family    — sibling sheets rows migrate between (Clients ↔
+ *               Clients-removed, Leads ↔ לידים שהוסרו): tier 1 searches the
+ *               row's own sheet first, then the family
+ *   leadIdCol — Clients-family column referencing the originating lead
+ *   textCols  — columns scanned for U+FFFD
+ *   phoneCols — columns whose digits feed the phone cross-reference
+ *   nameCol   — the sheet's person-name column (lead/phone/roster repairs
+ *               propose values only for THIS column)
+ *   enumCols  — {column: valueClass} closed-set columns tier 2 may repair;
+ *               free-text columns (note/notes/…) are deliberately absent
+ *   crossAppCols — {column: suffix} appended to the plan's source for
+ *               cross-app-sensitive columns (therapist / client names) */
+function _corruptionScanTargets() {
+  var clientText = ['name', 'serviceType', 'location', 'status', 'notes', 'source',
+    'payerName', 'sessionsPerWeek', 'paymentStatus', 'clinicalTreatmentType', 'assignedTo'];
+  var clientEnums = { serviceType: 'billingService', location: 'location', status: 'clientStatus',
+    paymentStatus: 'paymentStatus', clinicalTreatmentType: 'clinicalType', assignedTo: 'assignee' };
+  var clientPhones = ['phone', 'treatmentContactPhone', 'payerPhone'];
+  var clientCross = { name: CLIENT_NAME_SUFFIX };
+  var leadText = ['name', 'serviceType', 'location', 'note', 'stage',
+    'not_relevant_reason', 'not_relevant_note', 'assignedTo'];
+  var leadEnums = { serviceType: 'billingService', location: 'location',
+    stage: 'leadStage', assignedTo: 'assignee' };
+  var clientsFamily = ['Clients', 'Clients-removed'];
+  var leadsFamily = ['Leads', 'לידים שהוסרו'];
+  return [
+    { sheet: 'Clients',              headers: CLIENTS_HEADERS,         keyCol: 'id',        family: clientsFamily, leadIdCol: 'fromLead', textCols: clientText, phoneCols: clientPhones, nameCol: 'name',        enumCols: clientEnums, crossAppCols: clientCross },
+    { sheet: 'Clients-removed',      headers: CLIENTS_REMOVED_HEADERS, keyCol: 'id',        family: clientsFamily, leadIdCol: 'fromLead', textCols: clientText, phoneCols: clientPhones, nameCol: 'name',        enumCols: clientEnums, crossAppCols: clientCross },
+    { sheet: 'Leads',                headers: LEADS_HEADERS,           keyCol: 'id',        family: leadsFamily,   leadIdCol: '',         textCols: leadText,   phoneCols: ['phone'],    nameCol: 'name',        enumCols: leadEnums,   crossAppCols: {} },
+    { sheet: 'לידים שהוסרו',         headers: REMOVED_LEADS_HEADERS,   keyCol: 'id',        family: leadsFamily,   leadIdCol: '',         textCols: leadText,   phoneCols: ['phone'],    nameCol: 'name',        enumCols: leadEnums,   crossAppCols: {} },
+    { sheet: 'Payments',             headers: PAYMENTS_HEADERS,        keyCol: 'id',        family: [],            leadIdCol: '',         textCols: ['clientName', 'status', 'method', 'notes'], phoneCols: [], nameCol: 'clientName', enumCols: { status: 'paymentStatus' }, crossAppCols: {} },
+    { sheet: 'ClientCharges',        headers: CHARGES_HEADERS,         keyCol: 'id',        family: [],            leadIdCol: '',         textCols: ['description', 'notes'], phoneCols: [], nameCol: '',         enumCols: {},          crossAppCols: {} },
+    { sheet: 'SessionLog',           headers: SESSION_LOG_HEADERS,     keyCol: 'sessionId', family: [],            leadIdCol: '',         textCols: ['patientName', 'therapist', 'clinicalTreatmentType'], phoneCols: ['phone'], nameCol: 'patientName', enumCols: { clinicalTreatmentType: 'clinicalType', therapist: 'therapistName' }, crossAppCols: { therapist: THERAPIST_NAME_SUFFIX, patientName: CLIENT_NAME_SUFFIX } },
+    { sheet: THERAPIST_RATES_SHEET,  headers: THERAPIST_RATES_HEADERS, keyCol: '',          family: [],            leadIdCol: '',         textCols: ['name'],   phoneCols: [],           nameCol: 'name',        enumCols: { name: 'therapistName' }, crossAppCols: { name: THERAPIST_NAME_SUFFIX } },
+    { sheet: 'StopFlags',            headers: STOP_FLAGS_HEADERS,      keyCol: 'id',        family: [],            leadIdCol: '',         textCols: ['name', 'note', 'reportedBy', 'resolvedBy'], phoneCols: ['phone'], nameCol: 'name', enumCols: {}, crossAppCols: {} },
+    { sheet: STOP_ALERTS_SHEET,      headers: STOP_ALERTS_HEADERS,     keyCol: 'id',        family: [],            leadIdCol: '',         textCols: ['clientName', 'createdBy', 'note'], phoneCols: [], nameCol: 'clientName', enumCols: {}, crossAppCols: {} },
+    { sheet: 'ExtraSessionRequests', headers: EXTRA_SESSION_HEADERS,   keyCol: 'id',        family: [],            leadIdCol: '',         textCols: ['patientName', 'treatmentType', 'therapist', 'requestedBy', 'note'], phoneCols: ['phone'], nameCol: 'patientName', enumCols: { therapist: 'therapistName' }, crossAppCols: { therapist: THERAPIST_NAME_SUFFIX } },
+    { sheet: CONTINUATION_SHEET,     headers: CONTINUATION_HEADERS,    keyCol: 'key',       family: [],            leadIdCol: '',         textCols: ['name', 'house', 'note'], phoneCols: [], nameCol: 'name',   enumCols: {},          crossAppCols: {} },
+    { sheet: 'Settings',             headers: SETTINGS_HEADERS,        keyCol: 'key',       family: [],            leadIdCol: '',         textCols: ['value'],  phoneCols: [],           nameCol: '',            enumCols: {},          crossAppCols: {} }
+  ];
+}
+
+/* Read a target sheet's data rows WITH their 1-based sheet row numbers.
+ * getSheetByName only — the scanner must not even create a sheet. Fully-empty
+ * rows are skipped (mirrors _readAll) but row numbers stay true. Values are
+ * kept RAW (no date formatting, no phone recovery) so oldValue in the plan is
+ * exactly what the cell holds. Returns null when the sheet is absent. */
+function _corruptionReadRows(target) {
+  var sh = _ss().getSheetByName(target.sheet);
+  if (!sh) return null;
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sh.getRange(2, 1, lastRow - 1, target.headers.length).getValues();
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var hasContent = false;
+    for (var j = 0; j < row.length; j++) {
+      if (row[j] !== '' && row[j] !== null) { hasContent = true; break; }
+    }
+    if (!hasContent) continue;
+    var obj = {};
+    for (var c = 0; c < target.headers.length; c++) obj[target.headers[c]] = row[c];
+    rows.push({ rowNumber: i + 2, obj: obj });
+  }
+  return rows;
+}
+
+/* Locate snapshot spreadsheets: every Drive spreadsheet whose name starts
+ * with EZONE-OUT-SNAPSHOT, READ-ONLY (opened, never written). Priority order
+ * is OLDEST content first — a name ending in an encoded yyyy-MM-dd date (the
+ * harvested AUTO files) sorts by THAT date (all harvested files are CREATED
+ * at harvest time, so lastUpdated says nothing about content age); a
+ * snapshot without an encoded date (a manual copy) keeps lastUpdated as its
+ * key. Fail-soft everywhere: no Drive access / no snapshot just shrinks the
+ * list (tiers 2–3 run regardless). The live spreadsheet itself is excluded
+ * even if renamed to match the prefix. */
+function _corruptionSnapshots() {
+  var found = [];
+  var seen = {};
+  var activeId = '';
+  try { activeId = _ss().getId(); } catch (_) { /* fake env */ }
+  var collect = function (iter) {
+    while (iter && iter.hasNext()) {
+      var f = iter.next();
+      var name = String(f.getName());
+      if (name.indexOf(SNAPSHOT_NAME_PREFIX) !== 0) continue;
+      var id = String(f.getId());
+      if (seen[id] || id === activeId) continue;
+      seen[id] = true;
+      var updated = 0;
+      try { updated = f.getLastUpdated().getTime(); } catch (_) { /* keep 0 → highest priority */ }
+      var encoded = name.match(/(\d{4}-\d{2}-\d{2})$/);
+      var encodedMs = encoded ? Date.parse(encoded[1]) : NaN;
+      found.push({ id: id, name: name, sortKey: isNaN(encodedMs) ? updated : encodedMs });
+    }
+  };
+  try {
+    collect(DriveApp.searchFiles('title contains "' + SNAPSHOT_NAME_PREFIX + '"'));
+  } catch (e) {
+    try { collect(DriveApp.getFilesByName(SNAPSHOT_NAME_PREFIX)); } catch (_) { /* no Drive at all */ }
+  }
+  found.sort(function (a, b) { return a.sortKey - b.sortKey; });
+  var out = [];
+  found.forEach(function (f) {
+    try {
+      out.push({ name: f.name, ss: SpreadsheetApp.openById(f.id) });
+    } catch (e) {
+      Logger.log('snapshot "' + f.name + '" could not be opened as a spreadsheet — skipped (' + e + ')');
+    }
+  });
+  return out;
+}
+
+/* Read one snapshot sheet's data rows keyed by ITS OWN header row — the
+ * column-position tolerance: every schema here is append-only, so mapping by
+ * the snapshot's headers lines each logical column up with today's name, and
+ * a column the snapshot lacks simply reads as undefined. READ-ONLY. Returns
+ * null when the sheet is absent. */
+function _corruptionSnapshotRows(ss, sheetName) {
+  var sh = null;
+  try { sh = ss.getSheetByName(sheetName); } catch (_) { sh = null; }
+  if (!sh) return null;
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h); });
+  var values = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var hasContent = false;
+    for (var j = 0; j < row.length; j++) {
+      if (row[j] !== '' && row[j] !== null) { hasContent = true; break; }
+    }
+    if (!hasContent) continue;
+    var obj = {};
+    for (var h = 0; h < headers.length; h++) {
+      if (headers[h] !== '') obj[headers[h]] = row[h];
+    }
+    rows.push({ rowNumber: i + 2, obj: obj });
+  }
+  return rows;
+}
+
+/* Index one snapshot for matching: per target sheet, rows by stable key and
+ * (Clients family) by normalized phone; plus every clean person name for the
+ * roster tier. */
+function _corruptionSnapshotIndex(snap, targets) {
+  var idx = { name: snap.name, bySheet: {}, names: [], namesSeen: {} };
+  var addName = function (v) {
+    var s = String(v == null ? '' : v).trim();
+    if (s === '' || _hasCorruption(s) || idx.namesSeen[s]) return;
+    idx.namesSeen[s] = true;
+    idx.names.push(s);
+  };
+  targets.forEach(function (t) {
+    var rows = _corruptionSnapshotRows(snap.ss, t.sheet);
+    if (!rows) return;
+    var byKey = {};
+    var byPhone = {};
+    rows.forEach(function (r) {
+      if (t.nameCol) addName(r.obj[t.nameCol]);
+      if (t.keyCol) {
+        var key = String(r.obj[t.keyCol] == null ? '' : r.obj[t.keyCol]).trim();
+        if (key) {
+          if (!byKey[key]) byKey[key] = [];
+          byKey[key].push(r);
+        }
+      }
+      (t.phoneCols || []).forEach(function (pc) {
+        var pk = _corruptionPhoneKey(r.obj[pc]);
+        if (!pk) return;
+        if (!byPhone[pk]) byPhone[pk] = [];
+        byPhone[pk].push(r);
+      });
+    });
+    idx.bySheet[t.sheet] = { byKey: byKey, byPhone: byPhone };
+  });
+  return idx;
+}
+
+/* Find THE snapshot row for a live row: by the sheet's stable key first (own
+ * sheet, then the family sheets — a row may have moved, e.g. Clients →
+ * Clients-removed), then by normalized phone as the fallback (Clients family
+ * only — the ecosystem phone rule). 2+ candidates in whichever pool answered
+ * → ambiguous: {row:null, why} and NO proposal — a machine must not guess. */
+function _corruptionSnapshotMatchRow(idx, t, rowObj) {
+  if (!t.keyCol) return { row: null, why: '' };
+  var order = [t.sheet].concat((t.family || []).filter(function (nm) { return nm !== t.sheet; }));
+  var key = String(rowObj[t.keyCol] == null ? '' : rowObj[t.keyCol]).trim();
+  var i, pool;
+  if (key) {
+    for (i = 0; i < order.length; i++) {
+      pool = idx.bySheet[order[i]];
+      if (!pool || !pool.byKey[key]) continue;
+      if (pool.byKey[key].length === 1) return { row: pool.byKey[key][0], sheet: order[i], why: '' };
+      return { row: null, sheet: '', why: pool.byKey[key].length + ' rows in ' + order[i] +
+        ' share ' + t.keyCol + ' ' + key + ' — ambiguous, no proposal' };
+    }
+  }
+  // Phone fallback: exactly one snapshot row sharing any of the live row's
+  // normalized phones (only sheets that carry phone columns index byPhone).
+  var phones = [];
+  (t.phoneCols || []).forEach(function (pc) {
+    var pk = _corruptionPhoneKey(rowObj[pc]);
+    if (pk && phones.indexOf(pk) === -1) phones.push(pk);
+  });
+  if (!phones.length) return { row: null, sheet: '', why: '' };
+  for (i = 0; i < order.length; i++) {
+    pool = idx.bySheet[order[i]];
+    if (!pool) continue;
+    var hits = [];
+    var seenRow = {};
+    phones.forEach(function (pk) {
+      (pool.byPhone[pk] || []).forEach(function (r) {
+        if (!seenRow[r.rowNumber]) { seenRow[r.rowNumber] = true; hits.push(r); }
+      });
+    });
+    if (hits.length === 1) return { row: hits[0], sheet: order[i], why: '' };
+    if (hits.length > 1) {
+      return { row: null, sheet: '', why: hits.length + ' rows in ' + order[i] +
+        ' share the phone — ambiguous, no proposal' };
+    }
+  }
+  return { row: null, sheet: '', why: '' };
+}
+
+/* Tier 1 for one corrupted cell: walk the snapshots in priority order; the
+ * first matched row whose value in the SAME LOGICAL COLUMN is clean and
+ * passes the compatibility guard wins. A clean-but-incompatible value sets
+ * mismatch=true — the caller classifies 'snapshot mismatch — manual' and
+ * does NOT fall through to enum/roster (the value visibly changed after the
+ * snapshot; guessing from weaker sources would be worse, not better). */
+function _corruptionSnapshotProposal(snapIndexes, t, r, col) {
+  var res = { newValue: '', source: '', mismatch: false, notes: [] };
+  var corrupted = String(r.obj[col]);
+  for (var i = 0; i < snapIndexes.length; i++) {
+    var idx = snapIndexes[i];
+    var m = _corruptionSnapshotMatchRow(idx, t, r.obj);
+    if (!m.row) {
+      if (m.why) res.notes.push(idx.name + ': ' + m.why);
+      continue;
+    }
+    var v = m.row.obj[col];
+    if (v === undefined || v === null || v === '') continue; // snapshot lacks the column/value
+    var sv = String(v);
+    if (_hasCorruption(sv)) continue; // snapshot row corrupted too (post-bug revision)
+    if (_corruptionWildcardRegex(corrupted).test(sv)) {
+      res.newValue = sv;
+      res.source = idx.name + ' ' + m.sheet + ' row ' + m.row.rowNumber;
+      return res;
+    }
+    res.mismatch = true;
+    res.notes.push(idx.name + ': snapshot value "' + sv + '" is incompatible with the corrupted cell');
+  }
+  return res;
+}
+
+/* Tier 2 legal-value pools, keyed by the valueClass names used in
+ * _corruptionScanTargets' enumCols. Seeded from the in-code closed sets
+ * (billing/clinical maps, statuses, stages, locations, therapist rate maps)
+ * and extended with every clean value observed in the live enum columns
+ * themselves — that is where free-but-closed sets like assignedTo get their
+ * values. */
+function _corruptionEnumSets(bySheet, targets) {
+  var sets = { billingService: {}, clinicalType: {}, clientStatus: {}, paymentStatus: {},
+    leadStage: {}, location: {}, assignee: {}, therapistName: {} };
+  Object.keys(BILLING_PRICES).forEach(function (k) { sets.billingService[k] = true; });
+  sets.billingService[DAY_CENTER_BILLING] = true;
+  Object.keys(CLINICAL_TO_BILLING).forEach(function (k) { sets.clinicalType[k] = true; });
+  CORRUPTION_CLIENT_STATUSES.forEach(function (k) { sets.clientStatus[k] = true; });
+  Object.keys(DEBT_PAYMENT_STATUS_ALIASES).forEach(function (k) { sets.paymentStatus[k] = true; });
+  CORRUPTION_LEAD_STAGES.forEach(function (k) { sets.leadStage[k] = true; });
+  CORRUPTION_LOCATIONS.forEach(function (k) { sets.location[k] = true; });
+  Object.keys(THERAPIST_FLAT_RATES).forEach(function (k) { sets.therapistName[k] = true; });
+  Object.keys(PSYCHIATRIST_RATES).forEach(function (k) { sets.therapistName[k] = true; });
+  targets.forEach(function (t) {
+    var entry = bySheet[t.sheet];
+    if (!entry || !entry.rows) return;
+    Object.keys(t.enumCols || {}).forEach(function (col) {
+      var cls = t.enumCols[col];
+      if (!sets[cls]) sets[cls] = {};
+      entry.rows.forEach(function (r) {
+        var v = String(r.obj[col] == null ? '' : r.obj[col]).trim();
+        if (v !== '' && !_hasCorruption(v)) sets[cls][v] = true;
+      });
+    });
+  });
+  var out = {};
+  Object.keys(sets).forEach(function (cls) { out[cls] = Object.keys(sets[cls]); });
+  return out;
+}
+
+/* Tier 3 roster: every clean person name from every live target sheet's
+ * nameCol plus every snapshot's names. */
+function _corruptionRoster(bySheet, targets, snapIndexes) {
+  var seen = {};
+  var names = [];
+  var add = function (v) {
+    var s = String(v == null ? '' : v).trim();
+    if (s === '' || _hasCorruption(s) || seen[s]) return;
+    seen[s] = true;
+    names.push(s);
+  };
+  targets.forEach(function (t) {
+    var entry = bySheet[t.sheet];
+    if (!entry || !entry.rows || !t.nameCol) return;
+    entry.rows.forEach(function (r) { add(r.obj[t.nameCol]); });
+  });
+  snapIndexes.forEach(function (idx) { idx.names.forEach(add); });
+  return names;
+}
+
+/* The shared scan engine behind scanCorruptedRowsNow / writeRepairPlanNow.
+ * READ-ONLY (snapshots included — opened and read, never written). Returns:
+ *   cells    — [{sheet,row,column,value,proposal,source,newValue,note}] one
+ *              per corrupted cell; proposal ∈ 'repair from lead' | 'repair
+ *              from phone match' | 'repair from snapshot' | 'repair from
+ *              enum' | 'repair from roster' | 'repair from twin-merge' |
+ *              'snapshot mismatch — manual' | 'no source — manual'
+ *   snapshots— snapshot names in priority order ([] when none — tiers 2–3
+ *              still ran)
+ *   summary  — counts, incl. per-proposal breakdown */
+function _corruptionScan() {
+  var targets = _corruptionScanTargets();
+  var bySheet = {};
+  targets.forEach(function (t) { bySheet[t.sheet] = { target: t, rows: _corruptionReadRows(t) }; });
+
+  // Cross-reference sources (tier 0).
+  // (a) Leads-family rows by lead id — clean name + phone; first clean hit wins.
+  // (b) normalized phone → clean name, from EVERY live target row.
+  var leadById = {};
+  var phoneToName = {};
+  targets.forEach(function (t) {
+    var entry = bySheet[t.sheet];
+    if (!entry || !entry.rows) return;
+    var isLeadsFamily = (t.sheet === 'Leads' || t.sheet === 'לידים שהוסרו');
+    entry.rows.forEach(function (r) {
+      var nm = t.nameCol ? String(r.obj[t.nameCol] == null ? '' : r.obj[t.nameCol]) : '';
+      var cleanName = nm !== '' && !_hasCorruption(nm);
+      if (isLeadsFamily) {
+        var id = String(r.obj.id == null ? '' : r.obj.id).trim();
+        if (id && !leadById[id]) leadById[id] = { name: nm, cleanName: cleanName, phone: r.obj.phone };
+      }
+      if (cleanName) {
+        (t.phoneCols || []).forEach(function (pc) {
+          var key = _corruptionPhoneKey(r.obj[pc]);
+          if (key && !phoneToName[key]) phoneToName[key] = nm;
+        });
+      }
+    });
+  });
+
+  // (c) same-key rows across a sheet family (Clients ↔ Clients-removed,
+  // Leads ↔ removed leads) — the twin pool for the twin-merge bonus.
+  var familyByKey = {};
+  targets.forEach(function (t) {
+    if (!t.keyCol || !t.family || !t.family.length) return;
+    var famName = t.family.join('|');
+    if (!familyByKey[famName]) familyByKey[famName] = {};
+    var entry = bySheet[t.sheet];
+    if (!entry || !entry.rows) return;
+    entry.rows.forEach(function (r) {
+      var key = String(r.obj[t.keyCol] == null ? '' : r.obj[t.keyCol]).trim();
+      if (!key) return;
+      if (!familyByKey[famName][key]) familyByKey[famName][key] = [];
+      familyByKey[famName][key].push({ sheet: t.sheet, row: r });
+    });
+  });
+
+  // Tier 1–3 sources, computed once for the whole scan. All READ-ONLY.
+  var snapshots = _corruptionSnapshots();
+  var snapIndexes = snapshots.map(function (s) { return _corruptionSnapshotIndex(s, targets); });
+  var enumSets = _corruptionEnumSets(bySheet, targets);
+  var roster = _corruptionRoster(bySheet, targets, snapIndexes);
+  var addNote = function (finding, note) {
+    finding.note = finding.note ? finding.note + '; ' + note : note;
+  };
+
+  var cells = [];
+  targets.forEach(function (t) {
+    var entry = bySheet[t.sheet];
+    if (!entry.rows) return; // sheet absent — nothing to scan
+    var famName = (t.family && t.family.length) ? t.family.join('|') : '';
+    entry.rows.forEach(function (r) {
+      t.textCols.forEach(function (col) {
+        var v = r.obj[col];
+        if (!_hasCorruption(v)) return;
+        var finding = { sheet: t.sheet, row: r.rowNumber, column: col,
+          value: String(v), proposal: 'no source — manual', source: '', newValue: '', note: '' };
+        var manual = function () { return finding.proposal === 'no source — manual'; };
+
+        // Tier 0a — the originating Leads-family row (Clients family only),
+        // name column only. (A corrupted lead can never propose itself: its
+        // own name fails the clean check.)
+        var leadId = t.leadIdCol ? String(r.obj[t.leadIdCol] == null ? '' : r.obj[t.leadIdCol]).trim() : '';
+        if (manual() && col === t.nameCol && leadId &&
+            leadById[leadId] && leadById[leadId].cleanName) {
+          finding.proposal = 'repair from lead';
+          finding.source = 'lead ' + leadId;
+          finding.newValue = leadById[leadId].name;
+        }
+        // Tier 0b — a clean row elsewhere sharing this row's phone — name only.
+        if (manual() && col === t.nameCol) {
+          var phones = [];
+          (t.phoneCols || []).forEach(function (pc) {
+            var key = _corruptionPhoneKey(r.obj[pc]);
+            if (key && phones.indexOf(key) === -1) phones.push(key);
+          });
+          if (phones.length === 0 && leadId && leadById[leadId]) {
+            var lk = _corruptionPhoneKey(leadById[leadId].phone);
+            if (lk) phones.push(lk);
+          }
+          for (var p = 0; p < phones.length; p++) {
+            var candidate = phoneToName[phones[p]];
+            if (candidate && !_hasCorruption(candidate) && candidate !== String(v)) {
+              finding.proposal = 'repair from phone match';
+              finding.source = 'phone ' + phones[p];
+              finding.newValue = candidate;
+              break;
+            }
+          }
+        }
+        // Tier 1 — snapshot (all text columns, notes included).
+        if (manual() && snapIndexes.length > 0 && t.keyCol) {
+          var sp = _corruptionSnapshotProposal(snapIndexes, t, r, col);
+          if (sp.notes.length > 0) addNote(finding, sp.notes.join('; '));
+          if (sp.newValue) {
+            finding.proposal = 'repair from snapshot';
+            finding.source = sp.source;
+            finding.newValue = sp.newValue;
+          } else if (sp.mismatch) {
+            // A clean snapshot value exists but fails the compatibility
+            // guard: the live value was edited after the snapshot. Manual —
+            // and the weaker tiers must not have a go either.
+            finding.proposal = 'snapshot mismatch — manual';
+          }
+        }
+        // Tier 2 — closed value sets (enum columns only, never free text).
+        if (manual() && t.enumCols && t.enumCols[col] && enumSets[t.enumCols[col]]) {
+          var em = _corruptionMatchOne(String(v), enumSets[t.enumCols[col]]);
+          if (em.count === 1) {
+            finding.proposal = 'repair from enum';
+            finding.source = t.enumCols[col] + ' value set';
+            finding.newValue = em.value;
+          } else if (em.count > 1) {
+            addNote(finding, em.count + ' legal ' + t.enumCols[col] + ' values match — manual');
+          }
+        }
+        // Tier 3 — name roster (name columns only, never free text).
+        if (manual() && col === t.nameCol) {
+          var rm = _corruptionMatchOne(String(v), roster);
+          if (rm.count === 1) {
+            finding.proposal = 'repair from roster';
+            finding.source = 'name roster (' + roster.length + ' names)';
+            finding.newValue = rm.value;
+          } else if (rm.count > 1) {
+            addNote(finding, rm.count + ' roster names match — manual');
+          }
+        }
+        // Tier 3 bonus — twin-merge: another row for the SAME key (own sheet
+        // or its family sheet) corrupted in DIFFERENT positions whose union
+        // reconstructs the full clean string.
+        if (manual() && famName && t.keyCol) {
+          var key = String(r.obj[t.keyCol] == null ? '' : r.obj[t.keyCol]).trim();
+          var group = key ? (familyByKey[famName][key] || []) : [];
+          for (var g = 0; g < group.length; g++) {
+            var tw = group[g];
+            if (tw.sheet === t.sheet && tw.row.rowNumber === r.rowNumber) continue;
+            var tv = tw.row.obj[col];
+            if (tv === undefined || tv === null || !_hasCorruption(tv)) continue;
+            var merged = _corruptionTwinMerge(String(v), String(tv));
+            if (merged !== '') {
+              finding.proposal = 'repair from twin-merge';
+              finding.source = tw.sheet + ' row ' + tw.row.rowNumber + ' (same ' + t.keyCol + ')';
+              finding.newValue = merged;
+              break;
+            }
+          }
+        }
+        // Cross-app-sensitive columns: make the risk impossible to miss in
+        // the plan review, whatever tier proposed the value.
+        if (t.crossAppCols && t.crossAppCols[col]) {
+          finding.source = (finding.source || finding.proposal) + t.crossAppCols[col];
+        }
+        cells.push(finding);
+      });
+    });
+  });
+
+  var byProposal = {};
+  cells.forEach(function (c) { byProposal[c.proposal] = (byProposal[c.proposal] || 0) + 1; });
+
+  return {
+    cells: cells,
+    snapshots: snapshots.map(function (s) { return s.name; }),
+    summary: { corruptedCells: cells.length, byProposal: byProposal }
+  };
+}
+
+/* One Logger line describing snapshot availability — shared by both public
+ * scan/plan entry points so the log always states whether tier 1 ran. */
+function _logSnapshotStatus(res) {
+  if (res.snapshots.length === 0) {
+    Logger.log('NO SNAPSHOT FOUND — no spreadsheet named "' + SNAPSHOT_NAME_PREFIX +
+      '*" is visible in Drive, so tier 1 (snapshot repair) was skipped; the enum and roster tiers still ran. ' +
+      'Run harvestRevisionSnapshotsNow first (or File → Version history → pick a pre-' +
+      CORRUPTION_BUG_LIVE_DATE + ' version → Make a copy named ' + SNAPSHOT_NAME_PREFIX + '), then re-run.');
+  } else {
+    Logger.log('Snapshot(s) used for tier 1, in priority order (oldest content first): ' +
+      res.snapshots.join(', ') + '. Snapshots are read-only — never written.');
+  }
+}
+
+/* DRY RUN — run from the Apps Script editor (Run dropdown). READ-ONLY
+ * (getSheetByName only; cannot even create a sheet): scans every target
+ * sheet/column for U+FFFD and Logger.logs each hit with its PROPOSED action
+ * and source. NOTHING is written; use writeRepairPlanNow to turn these
+ * proposals into the reviewable RepairPlan sheet. */
+function scanCorruptedRowsNow() {
+  var res = _corruptionScan();
+  _logSnapshotStatus(res);
+  res.cells.forEach(function (c) {
+    Logger.log('CORRUPTED ' + c.sheet + ' row ' + c.row + ' [' + c.column + '] "' + c.value + '" → ' +
+      c.proposal + (c.newValue ? ' ("' + c.newValue + '" from ' + c.source + ')' : '') +
+      (c.note ? ' [' + c.note + ']' : ''));
+  });
+  Logger.log('scanCorruptedRowsNow: ' + res.summary.corruptedCells + ' corrupted cell(s). By tier: ' +
+    JSON.stringify(res.summary.byProposal) + '. NO WRITES performed.');
+  return res;
+}
+
+/* Ensure the hidden RepairPlan sheet exists with text-formatted value
+ * columns (so 'FALSE', dates-as-text and leading zeros survive as typed). */
+function _repairPlanSheet() {
+  var sh = _ensureSheet(REPAIR_PLAN_SHEET, REPAIR_PLAN_HEADERS);
+  try { if (!sh.isSheetHidden()) sh.hideSheet(); } catch (_) { /* no-op */ }
+  var maxRows = sh.getMaxRows();
+  if (maxRows > 1) {
+    ['newValue', 'approved', 'oldValue'].forEach(function (colName) {
+      var c = REPAIR_PLAN_HEADERS.indexOf(colName) + 1;
+      try { sh.getRange(2, c, maxRows - 1, 1).setNumberFormat('@'); } catch (_) { /* no-op */ }
+    });
+  }
+  return sh;
+}
+
+/* Populate the hidden RepairPlan sheet from the scan, every row with
+ * approved=FALSE — Sandra reviews, edits newValue where the scan found no
+ * source, and flips approved to TRUE per row she wants executed. FULL
+ * REWRITE on each run (write-then-trim), so re-running RESETS approvals —
+ * run it once, review, apply. Writes ONLY to RepairPlan. */
+function writeRepairPlanNow() {
+  var res = _corruptionScan();
+  _logSnapshotStatus(res);
+  var sh = _repairPlanSheet();
+  var planRows = res.cells.map(function (c) {
+    var obj = { sheet: c.sheet, row: c.row, column: c.column, newValue: c.newValue,
+      action: 'repair', approved: 'FALSE', oldValue: c.value,
+      source: c.proposal + (c.source ? ' — ' + c.source : '') + (c.note ? ' [' + c.note + ']' : '') };
+    return REPAIR_PLAN_HEADERS.map(function (h) { return obj[h] == null ? '' : obj[h]; });
+  });
+  var lastRow = sh.getLastRow();
+  if (planRows.length > 0) {
+    sh.getRange(2, 1, planRows.length, REPAIR_PLAN_HEADERS.length).setValues(planRows);
+  }
+  if (lastRow > planRows.length + 1) {
+    sh.getRange(planRows.length + 2, 1, lastRow - planRows.length - 1, REPAIR_PLAN_HEADERS.length).clearContent();
+  }
+  Logger.log('writeRepairPlanNow: wrote ' + planRows.length + ' plan row(s), ALL approved=FALSE. ' +
+    'Unhide + review the RepairPlan sheet, fill any blank newValue, flip approved to TRUE per row, ' +
+    'then run applyCorruptedRowRepairsNow. Rows whose source carries a THERAPIST-NAME suffix must be ' +
+    'verified byte-exact against the therapists app roster before approving.');
+  return planRows.length;
+}
+
+/* Append one event row to the hidden AuditLog sheet. FAIL-SOFT by hard
+ * contract (locked by test): audit logging must NEVER break or fail the main
+ * operation — every failure is swallowed. `details` may be an object (JSON-
+ * stringified) or a ready string. */
+function logAudit_(action, fn, rowKey, name, details) {
+  try {
+    var sh = _ensureSheet(AUDIT_LOG_SHEET, AUDIT_LOG_HEADERS);
+    try { if (!sh.isSheetHidden()) sh.hideSheet(); } catch (_) { /* no-op */ }
+    var row = [
+      new Date().toISOString(),
+      String(action == null ? '' : action),
+      String(fn == null ? '' : fn),
+      String(rowKey == null ? '' : rowKey),
+      String(name == null ? '' : name),
+      typeof details === 'string' ? details : JSON.stringify(details || {})
+    ];
+    sh.getRange(sh.getLastRow() + 1, 1, 1, AUDIT_LOG_HEADERS.length).setValues([row]);
+  } catch (err) {
+    try { Logger.log('audit log skipped: ' + err); } catch (_) { /* no-op */ }
+  }
+}
+
+/* Execute ONLY the approved=TRUE rows of RepairPlan, under the script lock.
+ * Per row: re-verify the target cell still holds EXACTLY oldValue AND that
+ * it is still corrupted; then write newValue to that SINGLE cell
+ * (getRange(row, col).setValue — never _writeAll, never a bulk setValues, so
+ * concurrent saves are never clobbered). Any mismatch (drift), unknown
+ * sheet/column, or blank/corrupted newValue → SKIP + log, touch nothing.
+ * Every applied repair is audit-logged (fail-soft). */
+function applyCorruptedRowRepairsNow() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log('applyCorruptedRowRepairsNow: could not acquire the script lock — try again.');
+    return { ok: false, error: 'busy', applied: 0, skipped: 0 };
+  }
+  try {
+    var ss = _ss();
+    var planSh = ss.getSheetByName(REPAIR_PLAN_SHEET);
+    if (!planSh) {
+      Logger.log('applyCorruptedRowRepairsNow: no RepairPlan sheet — run writeRepairPlanNow first.');
+      return { ok: true, applied: 0, skipped: 0 };
+    }
+    var lastRow = planSh.getLastRow();
+    if (lastRow < 2) {
+      Logger.log('applyCorruptedRowRepairsNow: RepairPlan is empty.');
+      return { ok: true, applied: 0, skipped: 0 };
+    }
+    var values = planSh.getRange(2, 1, lastRow - 1, REPAIR_PLAN_HEADERS.length).getValues();
+    var plan = values.map(function (row) {
+      var obj = {};
+      for (var j = 0; j < REPAIR_PLAN_HEADERS.length; j++) obj[REPAIR_PLAN_HEADERS[j]] = row[j];
+      return obj;
+    }).filter(function (p) {
+      // approved=FALSE (and anything that isn't literally TRUE) is skipped.
+      return String(p.approved).toUpperCase() === 'TRUE';
+    });
+
+    var targetsBySheet = {};
+    _corruptionScanTargets().forEach(function (t) { targetsBySheet[t.sheet] = t; });
+
+    var applied = 0, skipped = 0;
+    var skip = function (p, why) {
+      skipped++;
+      Logger.log('SKIP ' + p.action + ' ' + p.sheet + ' row ' + p.row + ' [' + p.column + ']: ' + why);
+    };
+
+    plan.forEach(function (p) {
+      if (String(p.action) !== 'repair') return skip(p, 'unknown action "' + p.action + '"');
+      var target = targetsBySheet[String(p.sheet)];
+      if (!target) return skip(p, 'unknown sheet');
+      var colIdx = target.headers.indexOf(String(p.column));
+      if (colIdx < 0) return skip(p, 'unknown column');
+      var rowNum = Number(p.row);
+      if (!isFinite(rowNum) || rowNum < 2) return skip(p, 'bad row number');
+      var newValue = String(p.newValue == null ? '' : p.newValue);
+      if (newValue === '' || _hasCorruption(newValue)) {
+        return skip(p, 'newValue blank or corrupted — fill it in before approving');
+      }
+      var sh = ss.getSheetByName(target.sheet);
+      if (!sh) return skip(p, 'sheet missing');
+      var cell = sh.getRange(rowNum, colIdx + 1, 1, 1);
+      var current = String(cell.getValue());
+      // Drift guard: the cell must still hold exactly the corrupted value the
+      // plan recorded. Any drift (row moved, already repaired, edited since)
+      // skips — the plan row number is a hint, never an authority.
+      if (current !== String(p.oldValue) || !_hasCorruption(current)) {
+        return skip(p, 'cell no longer holds the expected corrupted value (row drift or already repaired)');
+      }
+      cell.setValue(newValue); // SINGLE-CELL write — never _writeAll
+      applied++;
+      logAudit_('corruption_repair', 'applyCorruptedRowRepairsNow', target.sheet + '!' + rowNum, newValue,
+        { sheet: target.sheet, row: rowNum, column: String(p.column), oldValue: current, newValue: newValue });
+    });
+
+    Logger.log('applyCorruptedRowRepairsNow: ' + applied + ' repair(s) applied, ' + skipped +
+      ' skipped. Approved rows only; see the hidden AuditLog sheet for the trail.');
+    return { ok: true, applied: applied, skipped: skipped };
+  } finally {
+    try { lock.releaseLock(); } catch (_) { /* no-op */ }
+  }
+}
+
+/* ---- Automated revision harvesting (feeds tier 1 with many snapshots) ----
+ *
+ * A single pre-bug snapshot covers only rows created before 2026-07-27, but
+ * corruption arrived throughout 2026-07-27 → 2026-08-31 — each row's LAST
+ * CLEAN value lives in a different revision. harvestRevisionSnapshotsNow
+ * lists THIS spreadsheet's Drive revisions, picks a spread across the
+ * corruption window, exports each as xlsx, and rebuilds each as a real
+ * Google Sheet named EZONE-OUT-SNAPSHOT-AUTO-<yyyy-MM-dd> — exactly what
+ * _corruptionSnapshots' prefix discovery consumes (ordered by the encoded
+ * date). deleteAutoSnapshotsNow cleans them up afterwards, never touching a
+ * manual EZONE-OUT-SNAPSHOT copy. */
+
+/* Normalize Drive revision metadata across API shapes (v3: revisions[] with
+ * modifiedTime; v2: items[] with modifiedDate) into {id, modified(ms),
+ * exportLinks}, ascending by modified. Undatable entries are dropped. */
+function _normalizeRevisions(rawList) {
+  var out = [];
+  (rawList || []).forEach(function (r) {
+    if (!r) return;
+    var modified = Date.parse(r.modifiedTime || r.modifiedDate || '');
+    var id = String(r.id == null ? '' : r.id);
+    if (!id || isNaN(modified)) return;
+    out.push({ id: id, modified: modified, exportLinks: r.exportLinks || null });
+  });
+  out.sort(function (a, b) { return a.modified - b.modified; });
+  return out;
+}
+
+/* List ALL revisions of a file. Advanced Drive service first (v2/v3 shapes
+ * both handled, fields:* so exportLinks come along); UrlFetchApp against the
+ * Drive v3 REST API with the script's own OAuth token as the fallback. */
+function _listSpreadsheetRevisions(fileId) {
+  var raw = [];
+  var pageToken = null;
+  try {
+    if (typeof Drive !== 'undefined' && Drive.Revisions && Drive.Revisions.list) {
+      do {
+        var args = { fields: '*', pageSize: 200 };
+        if (pageToken) args.pageToken = pageToken;
+        var resp = Drive.Revisions.list(fileId, args);
+        raw = raw.concat(resp.revisions || resp.items || []);
+        pageToken = resp.nextPageToken || null;
+      } while (pageToken);
+      return _normalizeRevisions(raw);
+    }
+    Logger.log('Drive advanced service not enabled — falling back to the REST API');
+  } catch (e) {
+    Logger.log('advanced Drive revision listing failed (' + e + ') — falling back to the REST API');
+  }
+  raw = [];
+  pageToken = null;
+  do {
+    var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId) +
+      '/revisions?fields=*&pageSize=200';
+    if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
+    var restResp = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    if (restResp.getResponseCode() !== 200) {
+      throw new Error('revision list failed: HTTP ' + restResp.getResponseCode());
+    }
+    var body = JSON.parse(restResp.getContentText());
+    raw = raw.concat(body.revisions || []);
+    pageToken = body.nextPageToken || null;
+  } while (pageToken);
+  return _normalizeRevisions(raw);
+}
+
+/* Pick which revisions to harvest. PURE (no services) so it is directly
+ * testable. Selection: the newest revision strictly BEFORE the bug went
+ * live (the clean baseline), plus the latest revision inside each ~6-day
+ * bucket across the corruption window, plus the newest pre-fix revision —
+ * deduped by revision id and then by calendar day (latest per day wins,
+ * since the harvested file name encodes only the date), capped at `cap` by
+ * evenly thinning the middle while always keeping the first and last.
+ * Revisions may be sparse (Google consolidates old ones): empty buckets are
+ * simply skipped — take what exists. Returns [{id, modified, exportLinks,
+ * dateLabel}] ascending; dateLabel is the UTC yyyy-MM-dd used in the name. */
+function _selectHarvestRevisions(revisions, opts) {
+  opts = opts || {};
+  var bugLive = Date.parse((opts.bugLive || CORRUPTION_BUG_LIVE_DATE) + 'T00:00:00Z');
+  var windowEnd = Date.parse((opts.windowEnd || CORRUPTION_WINDOW_END_DATE) + 'T00:00:00Z');
+  var stepMs = (opts.stepDays || 6) * 24 * 60 * 60 * 1000;
+  var cap = opts.cap || 10;
+
+  var sorted = (revisions || []).slice().sort(function (a, b) { return a.modified - b.modified; });
+  var pickedIds = {};
+  var picked = [];
+  var add = function (rev) {
+    if (!rev || pickedIds[rev.id]) return;
+    pickedIds[rev.id] = true;
+    picked.push(rev);
+  };
+
+  var baseline = null;
+  sorted.forEach(function (r) { if (r.modified < bugLive) baseline = r; });
+  add(baseline);
+  for (var start = bugLive; start < windowEnd; start += stepMs) {
+    var end = Math.min(start + stepMs, windowEnd);
+    var inBucket = null;
+    sorted.forEach(function (r) { if (r.modified >= start && r.modified < end) inBucket = r; });
+    add(inBucket);
+  }
+  var preFix = null;
+  sorted.forEach(function (r) { if (r.modified < windowEnd) preFix = r; });
+  add(preFix);
+
+  picked.sort(function (a, b) { return a.modified - b.modified; });
+  // One file per calendar day (the name encodes only the date): latest wins.
+  var byLabel = {};
+  var labels = [];
+  picked.forEach(function (r) {
+    var label = new Date(r.modified).toISOString().slice(0, 10);
+    if (!byLabel[label]) labels.push(label);
+    byLabel[label] = { id: r.id, modified: r.modified, exportLinks: r.exportLinks, dateLabel: label };
+  });
+  var out = labels.map(function (l) { return byLabel[l]; });
+
+  if (out.length > cap) {
+    var kept = [out[0]];
+    var middle = out.slice(1, out.length - 1);
+    var slots = cap - 2;
+    for (var i = 0; i < slots; i++) {
+      kept.push(middle[Math.round(i * (middle.length - 1) / Math.max(slots - 1, 1))]);
+    }
+    kept.push(out[out.length - 1]);
+    var seenOut = {};
+    out = kept.filter(function (r) {
+      if (seenOut[r.id]) return false;
+      seenOut[r.id] = true;
+      return true;
+    });
+  }
+  return out;
+}
+
+/* Export one revision as an xlsx blob via its exportLinks, fetched with the
+ * script's own OAuth token. When the listed revision came without
+ * exportLinks, the single revision is re-fetched with fields:* first. */
+function _exportRevisionXlsxBlob(fileId, rev) {
+  var url = rev.exportLinks && rev.exportLinks[XLSX_EXPORT_MIME];
+  if (!url) {
+    var meta = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' +
+      encodeURIComponent(fileId) + '/revisions/' + encodeURIComponent(rev.id) + '?fields=*', {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    if (meta.getResponseCode() === 200) {
+      var body = JSON.parse(meta.getContentText());
+      url = body.exportLinks && body.exportLinks[XLSX_EXPORT_MIME];
+    }
+  }
+  if (!url) throw new Error('no xlsx exportLink for revision ' + rev.id);
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('xlsx export of revision ' + rev.id + ' failed: HTTP ' + resp.getResponseCode());
+  }
+  return resp.getBlob();
+}
+
+/* Rebuild an xlsx blob as a real Google Sheet named `name` via the Drive
+ * advanced service — v3 Files.create converts when the target mimeType is
+ * the Google Sheets type; v2 Files.insert uses convert:true. */
+function _createSpreadsheetFromXlsx(blob, name) {
+  if (typeof Drive === 'undefined' || !Drive.Files) {
+    throw new Error('Drive advanced service unavailable — enable it in appsscript.json');
+  }
+  if (Drive.Files.create) {
+    return Drive.Files.create({ name: name, mimeType: 'application/vnd.google-apps.spreadsheet' }, blob);
+  }
+  if (Drive.Files.insert) {
+    return Drive.Files.insert({ title: name, mimeType: 'application/vnd.google-apps.spreadsheet' }, blob, { convert: true });
+  }
+  throw new Error('Drive advanced service exposes neither Files.create (v3) nor Files.insert (v2)');
+}
+
+/* Harvest revision snapshots of THIS spreadsheet for the tier-1 repair.
+ * PUBLIC (Run dropdown), never dispatchable via doGet/doPost. Idempotent: a
+ * date whose EZONE-OUT-SNAPSHOT-AUTO-<date> file already exists is skipped,
+ * so re-running only fills gaps. Per-revision try/catch: one failed export
+ * neither kills the harvest nor blocks the rest. Read-only toward the live
+ * spreadsheet; creates only the AUTO-named snapshot files. */
+function harvestRevisionSnapshotsNow() {
+  var fileId = _ss().getId();
+  var revisions = _listSpreadsheetRevisions(fileId);
+  Logger.log('harvestRevisionSnapshotsNow: ' + revisions.length + ' revision(s) found for this spreadsheet.');
+  var selected = _selectHarvestRevisions(revisions);
+  Logger.log('Selected ' + selected.length + ' revision(s): ' +
+    selected.map(function (r) { return r.dateLabel + ' (rev ' + r.id + ')'; }).join(', '));
+
+  var harvested = 0, skipped = 0, failed = 0;
+  selected.forEach(function (rev) {
+    var name = AUTO_SNAPSHOT_PREFIX + rev.dateLabel;
+    try {
+      if (DriveApp.getFilesByName(name).hasNext()) {
+        skipped++;
+        Logger.log('SKIP ' + name + ' — already harvested.');
+        return;
+      }
+      var blob = _exportRevisionXlsxBlob(fileId, rev);
+      _createSpreadsheetFromXlsx(blob, name);
+      harvested++;
+      Logger.log('HARVESTED ' + name + ' from revision ' + rev.id + '.');
+    } catch (e) {
+      failed++;
+      Logger.log('FAILED ' + name + ' (revision ' + rev.id + '): ' + e);
+    }
+  });
+  var summary = { found: revisions.length, selected: selected.length,
+    harvested: harvested, skipped: skipped, failed: failed };
+  Logger.log('harvestRevisionSnapshotsNow: ' + revisions.length + ' revision(s) found, ' +
+    selected.length + ' selected, ' + harvested + ' harvested, ' + skipped +
+    ' skipped (already present), ' + failed + ' failed. Next: run scanCorruptedRowsNow / ' +
+    'writeRepairPlanNow — the ' + AUTO_SNAPSHOT_PREFIX + '* files feed tier 1 automatically.');
+  return summary;
+}
+
+/* Trash every harvested EZONE-OUT-SNAPSHOT-AUTO-* file — cleanup for after
+ * the repair is done. PUBLIC (Run dropdown), never dispatchable via
+ * doGet/doPost. A manually created EZONE-OUT-SNAPSHOT copy (no -AUTO-) is
+ * NEVER touched: only names starting with the full AUTO prefix qualify.
+ * Trash, not delete — recoverable from the Drive trash for 30 days. */
+function deleteAutoSnapshotsNow() {
+  var trashed = 0;
+  var iter = null;
+  try {
+    iter = DriveApp.searchFiles('title contains "' + AUTO_SNAPSHOT_PREFIX + '"');
+  } catch (e) {
+    Logger.log('deleteAutoSnapshotsNow: Drive search failed (' + e + ') — nothing trashed.');
+    return { trashed: 0 };
+  }
+  while (iter.hasNext()) {
+    var f = iter.next();
+    var name = String(f.getName());
+    if (name.indexOf(AUTO_SNAPSHOT_PREFIX) !== 0) continue; // never a manual snapshot
+    try {
+      f.setTrashed(true);
+      trashed++;
+      Logger.log('TRASHED ' + name + '.');
+    } catch (e2) {
+      Logger.log('FAILED to trash ' + name + ': ' + e2);
+    }
+  }
+  Logger.log('deleteAutoSnapshotsNow: ' + trashed + ' auto-snapshot(s) trashed. ' +
+    'A manual ' + SNAPSHOT_NAME_PREFIX + ' copy is never touched.');
+  return { trashed: trashed };
+}
