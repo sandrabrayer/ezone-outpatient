@@ -9,9 +9,12 @@
  * each test FILE in its own process, so this file deliberately leaves
  * SHEETS_URL / DASHBOARD_SHEETS_URL / OCCUPANCY_SECRET / APP_PIN unset and
  * asserts the fail-closed behaviour:
- *   - /api/sheets            -> 500 (SHEETS_URL not configured)
- *   - /api/continuation-roster -> 500 (roster proxy not configured)
+ *   - /api/sheets            -> 401 (SESSION_SECRET unset => session gate closed;
+ *                                    the gate runs BEFORE the SHEETS_URL check)
+ *   - /api/continuation-roster -> 401 (same session gate)
  *   - /api/verify-pin        -> 401 (APP_PIN unset => checkPin fails closed)
+ * The SHEETS_URL / roster-config 500s sit BEHIND the gate, so they are only
+ * reachable with a valid session (see test/session-who-when.test.js).
  *
  * global.fetch is stubbed to THROW so that any accidental upstream call (which
  * would be a fail-open regression) turns into a loud test failure rather than a
@@ -30,6 +33,7 @@ delete process.env.SHEETS_URL;
 delete process.env.DASHBOARD_SHEETS_URL;
 delete process.env.OCCUPANCY_SECRET;
 delete process.env.APP_PIN;
+delete process.env.SESSION_SECRET;
 
 let fetchCalled = false;
 global.fetch = async () => {
@@ -76,23 +80,23 @@ async function waitForListen() {
   throw new Error('server did not start listening');
 }
 
-test('GET /api/sheets fails closed (500) when SHEETS_URL is unset', async () => {
+test('GET /api/sheets fails closed (401) when SESSION_SECRET is unset — the session gate runs first', async () => {
   await waitForListen();
   fetchCalled = false;
   const res = await request('GET', '/api/sheets?action=getWinbackSource');
-  assert.equal(res.status, 500);
+  assert.equal(res.status, 401);
   assert.equal(res.json.ok, false);
-  assert.match(res.json.error, /SHEETS_URL/);
+  assert.equal(res.json.error, 'session_not_configured');
   assert.equal(fetchCalled, false, 'must not reach upstream when unconfigured');
 });
 
-test('GET /api/continuation-roster fails closed (500) when the roster proxy is unset', async () => {
+test('GET /api/continuation-roster fails closed (401) when SESSION_SECRET is unset', async () => {
   await waitForListen();
   fetchCalled = false;
   const res = await request('GET', '/api/continuation-roster');
-  assert.equal(res.status, 500);
+  assert.equal(res.status, 401);
   assert.equal(res.json.ok, false);
-  assert.match(res.json.error, /DASHBOARD_SHEETS_URL and OCCUPANCY_SECRET/);
+  assert.equal(res.json.error, 'session_not_configured');
   assert.equal(fetchCalled, false, 'must not reach upstream when unconfigured');
 });
 

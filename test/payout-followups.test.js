@@ -32,7 +32,7 @@ test('source: credit balance uses _writeCreditsOwed, not a whole-sheet rewrite',
   const m = SRC.match(/function _recordSessionOutcome\(payload\)[\s\S]*?\n}\n/);
   assert.ok(m, '_recordSessionOutcome not found');
   const fn = m[0];
-  assert.match(fn, /_writeCreditsOwed\(clientsSh, clientId, balance\)/);
+  assert.match(fn, /_writeCreditsOwed\(clientsSh, clientId, balance, _requestUser\(payload\)\)/);
   assert.doesNotMatch(fn, /_writeAll\(clientsSh/, 'must not rewrite the whole Clients sheet per session');
 });
 

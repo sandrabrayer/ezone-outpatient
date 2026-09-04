@@ -21,8 +21,19 @@ var LEADS_HEADERS = [
   // the very END so every earlier column keeps its position (_readAll/_writeAll
   // map positionally; _ensureSheet does not migrate). Follows the lead onto the
   // client on conversion. Old rows read back blank.
-  'assignedTo'
+  'assignedTo',
+  // APPEND-ONLY who/when stamps (session-who-when PR, port of Dashboard PR
+  // #113). SERVER-OWNED: _saveAll stamps a lead whose non-meta columns
+  // changed (or a new lead) with the server clock + the proxy-injected
+  // session user, and carries the existing sheet stamps for an unchanged
+  // echo — payload stamps are never trusted. Text-forced so the ISO stamp is
+  // never Date-coerced. Old rows read back blank until first edited.
+  'updatedAt', 'updatedBy'
 ];
+
+/* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
+ * _leadDiffCols ignores them so an echoed stale stamp never reads as an edit. */
+var LEADS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy'];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,
  * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
@@ -100,8 +111,32 @@ var CLIENTS_HEADERS = [
   //     _writePaymentAmountOverride (mirrors _writeCreditsOwed); preserved by id on
   //     _saveAll so a stale full-sheet save can't clobber a newer override. Old rows
   //     read back blank -> {}.
-  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides'
+  'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides',
+  //   updatedAt / updatedBy (who/when stamping — session-who-when PR, port of
+  //     Dashboard PR #113): APPEND-ONLY, physically unwritten on the live sheet so
+  //     they land at the very END (positions 35-36) with no migration. SERVER-OWNED:
+  //     updatedAt = ISO server time of the last write that CHANGED a non-meta
+  //     column of this row; updatedBy = the session user the Railway proxy injects
+  //     from the SIGNED cookie ('' for cross-app callers and legacy cookies).
+  //     _saveAll stamps changed/new rows and carries the sheet's stamps for an
+  //     unchanged echo (payload stamps are NEVER trusted); every single-cell
+  //     Clients writer stamps its row via _stampClientRow. Text-forced (like the
+  //     phone columns) so the ISO stamp is never Date-coerced. Old rows read back
+  //     blank until first edited. PR 2 uses updatedAt for stale-save refusal.
+  'updatedAt', 'updatedBy'
 ];
+
+/* Meta columns of the Clients sheet — identity, who/when audit, and the two
+ * SERVER-MANAGED cell-level columns (creditsOwed / paymentAmountOverrides are
+ * preserved by id on every save, so a payload echo of them is never an edit).
+ * _clientDiffCols ignores all five: two rows differing only in these are the
+ * same client content-wise, and an echoed stale stamp never re-stamps. */
+var CLIENTS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides'];
+
+/* Columns whose cells hold who/when stamps. Forced to plain-text ('@') on
+ * ensure/write (same mechanism as PHONE_COLUMNS) so Sheets never coerces the
+ * ISO timestamp into a Date and hands back a shifted/reformatted value. */
+var STAMP_COLUMNS = { updatedAt: true, updatedBy: true };
 
 /* Tombstone sheet ("Clients-removed") for rows removed from Clients — the
  * recovery net for the stale-tab clobber incident (2026-08-26): _saveAll is a
@@ -144,7 +179,12 @@ var CLIENTS_REMOVED_HEADERS = [
   'phone',
   'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
   'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides',
-  'removedAt', 'removedVia', 'restoredAt'
+  'removedAt', 'removedVia', 'restoredAt',
+  // APPEND-ONLY mirror of the Clients who/when stamps — at the very END (after
+  // restoredAt) per this sheet's own positional rule. A tombstone carries the
+  // row's last-edit stamps; an explicit ✕ delete overwrites them with now +
+  // the deleting user so the recovery copy answers "who deleted this, when".
+  'updatedAt', 'updatedBy'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -186,7 +226,11 @@ var REMOVED_LEADS_HEADERS = [
   // APPEND-ONLY (משוייך ל / assigned-to): mirror of the LEADS_HEADERS column so a
   // removed lead preserves its assignee. Appended at the very END (after the
   // removedAt/originSheet bookkeeping columns) per the positional append-only rule.
-  'assignedTo'
+  'assignedTo',
+  // APPEND-ONLY mirror of the Leads who/when stamps (at the very END). A
+  // removed lead carries now + the removing user, so the tombstone answers
+  // "who removed this, when" alongside removedAt.
+  'updatedAt', 'updatedBy'
 ];
 
 /* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
@@ -273,16 +317,131 @@ function _recoverPhone(raw) {
   return s;
 }
 
-/* Force '@' (plain text) format on any phone columns in this sheet, below the
- * header row, so future writes preserve leading zeros. */
+/* Columns that must be stored as plain text: phones (leading zeros) and the
+ * who/when stamps (ISO timestamps that Sheets would otherwise Date-coerce). */
+function _isTextForcedColumn(name) {
+  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name]);
+}
+
+/* Force '@' (plain text) format on any phone / stamp columns in this sheet,
+ * below the header row, so future writes preserve leading zeros and ISO
+ * timestamps verbatim. */
 function _formatPhoneColumns(sh, headers) {
   var maxRows = sh.getMaxRows();
   if (maxRows < 2) return;
   for (var i = 0; i < headers.length; i++) {
-    if (PHONE_COLUMNS[headers[i]]) {
+    if (_isTextForcedColumn(headers[i])) {
       sh.getRange(2, i + 1, maxRows - 1, 1).setNumberFormat('@');
     }
   }
+}
+
+/* ===== Who/when stamping helpers (session-who-when PR) =====================
+ *
+ * updatedAt / updatedBy are SERVER-OWNED on Clients and Leads. The Railway
+ * proxy sets `user` on every /api/sheets POST body FROM THE SIGNED SESSION
+ * COOKIE, overwriting anything the browser sent — so the value that reaches
+ * doPost is never client-controlled. Cross-app receivers (therapists /
+ * dashboard → /exec directly) pass '' explicitly: they stamp WHEN, not who. */
+
+/* The authenticated user name for who/when stamping (updatedBy). Defensive
+ * normalization on top of the proxy's: trimmed, capped at 40 chars, angle
+ * brackets + control chars stripped. Blank for legacy cookies (allowed). */
+function _requestUser(payload) {
+  return String(payload && payload.user != null ? payload.user : '')
+    .replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 40);
+}
+
+/* Stamp a row object in place: updatedAt = ISO server time, updatedBy = user
+ * (may be blank). Returns the row for chaining. */
+function _stampRow(row, user) {
+  if (!row || typeof row !== 'object') return row;
+  row.updatedAt = new Date().toISOString();
+  row.updatedBy = String(user == null ? '' : user);
+  return row;
+}
+
+/* Column names (from `headers`) where two row objects differ, ignoring the
+ * `meta` columns (identity / audit / server-managed cells). Plain String
+ * comparison: _readAll already hands back ISO date strings and recovered
+ * phones, and a payload number vs. a sheet number stringify identically, so a
+ * pure echo of an unchanged row diffs to []. An empty result means "no
+ * content change" — the row keeps its existing stamps. */
+function _rowDiffCols(headers, meta, a, b) {
+  var diff = [];
+  var skip = {};
+  for (var m = 0; m < meta.length; m++) skip[meta[m]] = true;
+  for (var c = 0; c < headers.length; c++) {
+    var h = headers[c];
+    if (skip[h]) continue;
+    var av = String(a && a[h] != null ? a[h] : '');
+    var bv = String(b && b[h] != null ? b[h] : '');
+    if (av !== bv) diff.push(h);
+  }
+  return diff;
+}
+
+/* Clients: differing non-meta columns (ignores id, updatedAt, updatedBy,
+ * creditsOwed, paymentAmountOverrides). */
+function _clientDiffCols(a, b) {
+  return _rowDiffCols(CLIENTS_HEADERS, CLIENTS_META_COLUMNS, a, b);
+}
+
+/* Leads: differing non-meta columns (ignores id, updatedAt, updatedBy). */
+function _leadDiffCols(a, b) {
+  return _rowDiffCols(LEADS_HEADERS, LEADS_META_COLUMNS, a, b);
+}
+
+/* Reconcile the who/when stamps of an incoming row against the on-sheet row
+ * it replaces: a real content change (or a brand-new row, existing == null)
+ * is stamped now + user; an unchanged echo carries the SHEET's stamps —
+ * payload stamps are never trusted either way. Returns the changed-column
+ * list ([] for an unchanged echo; ['*'] for a new row). */
+function _reconcileStamps(diffFn, incoming, existing, user) {
+  if (!existing) {
+    _stampRow(incoming, user);
+    return ['*'];
+  }
+  var changed = diffFn(incoming, existing);
+  if (changed.length) {
+    _stampRow(incoming, user);
+  } else {
+    incoming.updatedAt = existing.updatedAt == null ? '' : existing.updatedAt;
+    incoming.updatedBy = existing.updatedBy == null ? '' : existing.updatedBy;
+  }
+  return changed;
+}
+
+/* Single-cell stamp for the cell-level Clients writers: locate the client row
+ * by scanning the id column (the _writeCreditsOwed pattern) and write
+ * updatedAt/updatedBy into that row only — never _writeAll. Fail-soft: no hit
+ * changes nothing and returns false. Columns are header-lookup-derived so a
+ * future append can never shift the write. */
+function _stampClientRow(clientsSh, clientId, user) {
+  var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+  var atCol = CLIENTS_HEADERS.indexOf('updatedAt') + 1;
+  var byCol = CLIENTS_HEADERS.indexOf('updatedBy') + 1;
+  var lastRow = clientsSh.getLastRow();
+  if (lastRow < 2 || idCol < 1 || atCol < 1 || byCol < 1 || !clientId) return false;
+  var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var r = 0; r < ids.length; r++) {
+    if (String(ids[r][0]) === String(clientId)) {
+      _stampClientRowAt(clientsSh, r + 2, user);
+      return true;
+    }
+  }
+  return false;
+}
+
+/* Stamp a Clients sheet row by its 1-based sheet row number (for writers that
+ * already located the row). Two single-cell setValue writes. */
+function _stampClientRowAt(clientsSh, rowNum, user) {
+  var atCol = CLIENTS_HEADERS.indexOf('updatedAt') + 1;
+  var byCol = CLIENTS_HEADERS.indexOf('updatedBy') + 1;
+  if (atCol < 1 || byCol < 1 || rowNum < 2) return false;
+  clientsSh.getRange(rowNum, atCol).setValue(new Date().toISOString());
+  clientsSh.getRange(rowNum, byCol).setValue(String(user == null ? '' : user));
+  return true;
 }
 
 function _ss() {
@@ -349,10 +508,11 @@ function _writeAll(sh, headers, rows) {
       return v;
     });
   });
-  // Force phone columns to plain text BEFORE writing so leading zeros survive
-  // (Sheets would otherwise coerce a numeric-looking phone to a number).
+  // Force phone + stamp columns to plain text BEFORE writing so leading zeros
+  // and ISO timestamps survive (Sheets would otherwise coerce a numeric-looking
+  // phone to a number and an ISO string to a Date).
   for (var c = 0; c < headers.length; c++) {
-    if (PHONE_COLUMNS[headers[c]]) {
+    if (_isTextForcedColumn(headers[c])) {
       sh.getRange(2, c + 1, values.length, 1).setNumberFormat('@');
     }
   }
@@ -689,7 +849,9 @@ function _therapistPay(therapistName, treatmentType) {
 // Persist one client's creditsOwed without rewriting the whole Clients sheet.
 // Locates the row by scanning the id column (like the SessionLog upsert).
 // Fail-soft: no-hit (client deleted mid-flight) changes nothing.
-function _writeCreditsOwed(clientsSh, clientId, balance) {
+// Stamps the row's updatedAt/updatedBy (who/when) alongside the balance —
+// `user` is '' for the cross-app recordSessionOutcome receiver.
+function _writeCreditsOwed(clientsSh, clientId, balance, user) {
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var creditCol = CLIENTS_HEADERS.indexOf('creditsOwed') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -698,6 +860,7 @@ function _writeCreditsOwed(clientsSh, clientId, balance) {
   for (var r = 0; r < ids.length; r++) {
     if (String(ids[r][0]) === String(clientId)) {
       clientsSh.getRange(r + 2, creditCol).setValue(balance);
+      _stampClientRowAt(clientsSh, r + 2, user);
       return true;
     }
   }
@@ -722,7 +885,7 @@ function _parseAmountOverrides(v) {
  * _writeCreditsOwed / the SessionLog upsert), reads+merges that single JSON cell,
  * and writes it back. amount === null/'' deletes the key (revert to computed).
  * Fail-soft: no-hit (client deleted mid-flight) changes nothing and returns false. */
-function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount) {
+function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount, user) {
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var ovCol = CLIENTS_HEADERS.indexOf('paymentAmountOverrides') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -738,6 +901,7 @@ function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount) {
         map[paymentId] = Number(amount);
       }
       cell.setValue(Object.keys(map).length ? JSON.stringify(map) : '');
+      _stampClientRowAt(clientsSh, r + 2, user); // who/when
       return true;
     }
   }
@@ -849,7 +1013,7 @@ function _bumpDataVersion() {
  * historical stale-tab clobber signature) when not given.
  * appendRow per row (the לידים שהוסרו pattern); MUST be called under the
  * caller's script lock — this helper takes none of its own. */
-function _appendClientTombstones(rows, explicitSet, viaFallback) {
+function _appendClientTombstones(rows, explicitSet, viaFallback, deletedBy) {
   if (!rows || !rows.length) return 0;
   var fallback = viaFallback || 'saveAll-diff';
   var sh = _ensureSheet('Clients-removed', CLIENTS_REMOVED_HEADERS);
@@ -858,10 +1022,17 @@ function _appendClientTombstones(rows, explicitSet, viaFallback) {
     var row = rows[i] || {};
     var id = row.id != null ? String(row.id) : '';
     var via = (explicitSet && explicitSet[id]) ? 'explicit-delete' : fallback;
+    // who/when: an explicit ✕ delete overwrites the snapshot's stamps with
+    // now + the deleting user (deletedBy, may be blank) so the tombstone
+    // answers "who deleted this and when"; preserve-log snapshots keep the
+    // row's OWN last-edit stamps untouched.
+    var explicit = via === 'explicit-delete';
     sh.appendRow(CLIENTS_REMOVED_HEADERS.map(function (h) {
       if (h === 'removedAt') return now;
       if (h === 'removedVia') return via;
       if (h === 'restoredAt') return '';
+      if (explicit && h === 'updatedAt') return now;
+      if (explicit && h === 'updatedBy') return String(deletedBy == null ? '' : deletedBy);
       var v = row[h];
       return (v === undefined || v === null) ? '' : v;
     }));
@@ -884,6 +1055,9 @@ function _saveAll(payload) {
     var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var leads = (payload && payload.leads) || [];
     var clients = (payload && payload.clients) || [];
+    // who/when: the session user the Railway proxy injected from the SIGNED
+    // cookie ('' for legacy cookies / the GET fallback). Never client-supplied.
+    var user = _requestUser(payload);
     // creditsOwed is SERVER-MANAGED (mutated only by recordSessionOutcome). A
     // dashboard save carries the balance the client tab last loaded, which may be
     // stale — so NEVER trust the payload value: preserve the on-sheet balance by id
@@ -894,14 +1068,17 @@ function _saveAll(payload) {
     // let a brand-new client (no existing row) seed from its payload value.
     var existingCredits = {};
     var existingOverrides = {};
+    var existingById = {};
     var existing = _readAll(clientsSh, CLIENTS_HEADERS);
     for (var e = 0; e < existing.length; e++) {
       var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
       if (eid) {
         existingCredits[eid] = _toCredits(existing[e].creditsOwed);
         existingOverrides[eid] = existing[e].paymentAmountOverrides == null ? '' : existing[e].paymentAmountOverrides;
+        existingById[eid] = existing[e];
       }
     }
+    var stampedClients = 0;
     for (var i = 0; i < clients.length; i++) {
       _deriveClientServiceType(clients[i]);
       var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
@@ -911,6 +1088,25 @@ function _saveAll(payload) {
       clients[i].paymentAmountOverrides = _hasOwn(existingOverrides, cid)
         ? existingOverrides[cid]
         : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
+      // who/when (SERVER-OWNED stamps): compare the row about to be written
+      // against its on-sheet row on the non-meta columns. Changed or new ->
+      // stamp now + user; an unchanged echo carries the SHEET's stamps.
+      // Payload stamps are never trusted in either case.
+      var existingRow = cid && _hasOwn(existingById, cid) ? existingById[cid] : null;
+      if (_reconcileStamps(_clientDiffCols, clients[i], existingRow, user).length) stampedClients++;
+    }
+    // Leads: same who/when reconciliation by id (Leads rows already carry ids).
+    var existingLeadsById = {};
+    var existingLeads = _readAll(leadsSh, LEADS_HEADERS);
+    for (var el = 0; el < existingLeads.length; el++) {
+      var lid = (existingLeads[el] && existingLeads[el].id != null) ? String(existingLeads[el].id) : '';
+      if (lid) existingLeadsById[lid] = existingLeads[el];
+    }
+    var stampedLeads = 0;
+    for (var li = 0; li < leads.length; li++) {
+      var lidIn = (leads[li] && leads[li].id != null) ? String(leads[li].id) : '';
+      var existingLead = lidIn && _hasOwn(existingLeadsById, lidIn) ? existingLeadsById[lidIn] : null;
+      if (_reconcileStamps(_leadDiffCols, leads[li], existingLead, user).length) stampedLeads++;
     }
     // Staleness signal (stale-save prevention): the frontend echoes back the
     // dataVersion it loaded; an echo older than current means another device
@@ -951,7 +1147,7 @@ function _saveAll(payload) {
         else preservedRows.push(existing[d]);
       }
     }
-    var tombstoned = _appendClientTombstones(explicitDropRows, explicitSet);
+    var tombstoned = _appendClientTombstones(explicitDropRows, explicitSet, null, user);
     // Preserved-log dedupe: a tab that stays stale re-sends the same short
     // list on every save. Skip the log row when the NEWEST tombstone for the
     // id is already an open (restoredAt blank) 'saveAll-diff-preserved' —
@@ -972,7 +1168,8 @@ function _saveAll(payload) {
       tombstoned += _appendClientTombstones(preservedToLog, null, 'saveAll-diff-preserved');
       // Merge: keep the preserved rows in the rewrite, current on-sheet
       // values untouched — the payload never knew them, so the payload
-      // cannot rewrite them.
+      // cannot rewrite them (their who/when stamps ride along unchanged:
+      // a preserved row is never re-stamped).
       for (var p = 0; p < preservedRows.length; p++) clients.push(preservedRows[p]);
     }
     _writeAll(leadsSh, LEADS_HEADERS, leads);
@@ -985,7 +1182,10 @@ function _saveAll(payload) {
       tombstoned: tombstoned,
       preserved: preservedRows.length,
       staleSave: staleSave,
-      dataVersion: newVersion
+      dataVersion: newVersion,
+      // who/when: rows whose stamps were rewritten by this save (changed or
+      // new). Additive — old clients ignore it.
+      stamped: { clients: stampedClients, leads: stampedLeads }
     };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
@@ -1049,6 +1249,9 @@ function _restoreRemovedClient(payload) {
     for (var h = 0; h < CLIENTS_REMOVED_HEADERS.length; h++) {
       tomb[CLIENTS_REMOVED_HEADERS[h]] = vals[rowIdx][h];
     }
+    // who/when: a restore is a Clients write by the restoring user — stamp the
+    // row that comes back (tombstone stamps describe the removal, not this).
+    _stampRow(tomb, _requestUser(payload));
     clientsSh.appendRow(CLIENTS_HEADERS.map(function (hh) {
       var v = tomb[hh];
       return (v === undefined || v === null) ? '' : v;
@@ -1121,7 +1324,7 @@ function _setPaymentAmountOverride(payload) {
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
     var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
-    var ok = _writePaymentAmountOverride(sh, clientId, paymentId, amount);
+    var ok = _writePaymentAmountOverride(sh, clientId, paymentId, amount, _requestUser(payload));
     return ok ? { ok: true } : { ok: false, error: 'client_not_found' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
@@ -1244,7 +1447,7 @@ function _planStaleNextBillingRepair(clients, payments, todayIso) {
 /* Persist one client's nextBillingDate without rewriting the whole Clients
  * sheet. Locates the row by scanning the id column (the _writeCreditsOwed
  * pattern). Fail-soft: no-hit (client deleted mid-flight) changes nothing. */
-function _writeNextBillingDate(clientsSh, clientId, isoDate) {
+function _writeNextBillingDate(clientsSh, clientId, isoDate, user) {
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var nbdCol = CLIENTS_HEADERS.indexOf('nextBillingDate') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -1253,6 +1456,7 @@ function _writeNextBillingDate(clientsSh, clientId, isoDate) {
   for (var r = 0; r < ids.length; r++) {
     if (String(ids[r][0]) === String(clientId)) {
       clientsSh.getRange(r + 2, nbdCol).setValue(isoDate);
+      _stampClientRowAt(clientsSh, r + 2, user); // who/when
       return true;
     }
   }
@@ -1264,7 +1468,7 @@ function _writeNextBillingDate(clientsSh, clientId, isoDate) {
  * default returns the plan and writes NOTHING; apply === '1' single-cell-writes
  * nextBillingDate for each fix row under the script lock. todayIso is
  * overridable for testing; defaults to today in the project timezone. */
-function _repairStaleNextBilling(apply, todayIso) {
+function _repairStaleNextBilling(apply, todayIso, user) {
   var doApply = apply === '1' || apply === 1 || apply === true;
   var t = String(todayIso || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
@@ -1288,7 +1492,7 @@ function _repairStaleNextBilling(apply, todayIso) {
     }
     var applied = 0;
     plan.fix.forEach(function (f) {
-      if (_writeNextBillingDate(clientsSh, f.id, f.to)) {
+      if (_writeNextBillingDate(clientsSh, f.id, f.to, user)) {
         applied++;
         Logger.log('repairStaleNextBilling: ' + f.id + ' (' + f.name + ') ' + f.from + ' -> ' + f.to);
       } else {
@@ -1469,7 +1673,7 @@ function _removePayment(paymentId) {
   }
 }
 
-function _removeLead(lead) {
+function _removeLead(lead, user) {
   if (!lead || typeof lead !== 'object') return { ok: false, error: 'missing_lead' };
   if (!lead.id) return { ok: false, error: 'missing_id' };
 
@@ -1502,6 +1706,9 @@ function _removeLead(lead) {
     }
     rowObj.removedAt = new Date().toISOString();
     rowObj.originSheet = 'Leads';
+    // who/when: the tombstone records the REMOVER (now + session user), not
+    // the row's last-edit stamps — the recovery copy answers "who removed it".
+    _stampRow(rowObj, user);
 
     var removedSheet = _ensureSheet('לידים שהוסרו', REMOVED_LEADS_HEADERS);
     var newRow = REMOVED_LEADS_HEADERS.map(function(h) {
@@ -1993,6 +2200,7 @@ function _setClinicalType(payload) {
     var client = hits[0];
     client.clinicalTreatmentType = clinical;
     _deriveClientServiceType(client); // overwrites serviceType via _clinicalToBilling
+    _stampRow(client, ''); // who/when — cross-app receiver: WHEN only, no user
 
     _writeAll(sh, CLIENTS_HEADERS, clients);
     return { ok: true, matched: 1 };
@@ -2251,7 +2459,9 @@ function _recordSessionOutcome(payload) {
       //    whole-sheet _writeAll here was the save-path hotspot)
       if (balance !== origCredits) {
         matchedClient.creditsOwed = balance;
-        _writeCreditsOwed(clientsSh, clientId, balance);
+        // who/when: '' for the cross-app receiver; the internal
+        // correctSessionOutcome path carries the proxy-injected user.
+        _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
       }
       rowObj.creditsOwed = balance;
     } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
@@ -2482,6 +2692,7 @@ function _deactivateClient(payload) {
           _recoverPhone(rows[i][payerIdx]) !== phone) continue;
       if (String(rows[i][statusIdx]) === DEACTIVATED_CLIENT_STATUS_HE) continue; // already
       sh.getRange(i + 2, statusIdx + 1).setValue(DEACTIVATED_CLIENT_STATUS_HE);
+      _stampClientRowAt(sh, i + 2, ''); // who/when — cross-app receiver: WHEN only
       deactivated++;
     }
     return { ok: true, deactivated: deactivated };
@@ -2892,6 +3103,7 @@ function _createLead(payload) {
       not_relevant_reason: '',
       not_relevant_note: ''
     };
+    _stampRow(lead, ''); // who/when — cross-app (dashboard) receiver: WHEN only
     sh.appendRow(LEADS_HEADERS.map(function (h) {
       return lead[h] == null ? '' : lead[h];
     }));
@@ -2977,7 +3189,9 @@ function _mergeClients(payload) {
       }
     }
 
-    // 3. Remove dup client rows and write everything back.
+    // 3. Remove dup client rows and write everything back. The survivor is the
+    //    row this merge edited — stamp it (who/when); untouched rows keep theirs.
+    _stampRow(survivor, _requestUser(payload));
     var keptClients = clients.filter(function (c) { return !dupSet[String(c.id)]; });
     _writeAll(clientsSh, CLIENTS_HEADERS, keptClients);
     if (repPay) _writeAll(paymentsSh, PAYMENTS_HEADERS, payments);
@@ -3151,7 +3365,10 @@ function doPost(e) {
         explicitRemovedIds: Array.isArray(payload.explicitRemovedIds) ? payload.explicitRemovedIds : [],
         // the dataVersion the tab loaded, echoed back — _saveAll validates
         // (fail-open on absent/non-numeric).
-        dataVersion: payload.dataVersion
+        dataVersion: payload.dataVersion,
+        // who/when: the session user the Railway proxy injected from the
+        // SIGNED cookie (never client-controlled — the proxy overwrites it).
+        user: _requestUser(payload)
       }));
     }
     if (action === 'getData')     return _json(_getData());
@@ -3238,7 +3455,9 @@ function doPost(e) {
       if (!_sessionOutcomeAuthOk(soParams)) {
         return _json({ ok: false, error: 'unauthorized' });
       }
-      return _json(_recordSessionOutcome(payload));
+      // Cross-app receiver (therapists → /exec directly, no proxy): stamps
+      // WHEN only — a caller-supplied `user` is never taken as updatedBy.
+      return _json(_recordSessionOutcome(Object.assign({}, payload, { user: '' })));
     }
     if (action === 'correctSessionOutcome') {
       // Internal dashboard correction / add-missing-session path — מורן fixes an
@@ -3331,7 +3550,7 @@ function doPost(e) {
       var rsApply = (payload && payload.apply != null)
         ? payload.apply
         : (e && e.parameter && e.parameter.apply);
-      return _json(_repairStaleNextBilling(rsApply, payload && payload.today));
+      return _json(_repairStaleNextBilling(rsApply, payload && payload.today, _requestUser(payload)));
     }
     if (action === 'saveCharge' || action === 'updateCharge') {
       return _json(_upsertCharge(payload.charge));
@@ -3350,7 +3569,7 @@ function doPost(e) {
     if (action === 'removePaymentsForClient') {
       return _json(_removePaymentsForClient(payload.clientId));
     }
-    if (action === 'removeLead') return _json(_removeLead(payload.lead));
+    if (action === 'removeLead') return _json(_removeLead(payload.lead, _requestUser(payload)));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
@@ -4577,6 +4796,9 @@ function applyCorruptedRowRepairsNow() {
         return skip(p, 'cell no longer holds the expected corrupted value (row drift or already repaired)');
       }
       cell.setValue(newValue); // SINGLE-CELL write — never _writeAll
+      // who/when: a Clients cell repair is a row write — stamp WHEN (no
+      // session user: this runs from the editor, not through the proxy).
+      if (target.sheet === 'Clients') _stampClientRowAt(sh, rowNum, '');
       applied++;
       logAudit_('corruption_repair', 'applyCorruptedRowRepairsNow', target.sheet + '!' + rowNum, newValue,
         { sheet: target.sheet, row: rowNum, column: String(p.column), oldValue: current, newValue: newValue });

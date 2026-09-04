@@ -425,14 +425,33 @@
   }
 
   // --- API ---------------------------------------------------------------
+  // Auth is a server-signed HttpOnly session cookie minted by POST
+  // /api/verify-pin (7 days). Every data route requires it; there is no
+  // client-trusted "logged in" flag. If the cookie is missing or expired the
+  // server answers 401 and the ONE handler below sends the user back to the
+  // PIN screen — on load, and whenever a session expires mid-use.
+  function handleUnauthorized() {
+    try { sessionStorage.removeItem('ez_role'); } catch (_) {}
+    state.role = 'viewer';
+    showPin();
+  }
+  // fetch() wrapper for the app's own API routes: a 401 flips to the PIN
+  // screen and throws, so no caller ever tries to parse an unauthorized
+  // response as data. /api/verify-pin does NOT use it (there a 401 simply
+  // means "wrong PIN").
+  async function apiFetch(url, opts) {
+    var r = await fetch(url, opts);
+    if (r.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
+    return r;
+  }
   async function apiLoad() {
-    var r = await fetch('/api/sheets', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets', { cache: 'no-store' });
     var data = await r.json();
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiSave(payload) {
-    var r = await fetch('/api/sheets', {
+    var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -456,14 +475,14 @@
 
   async function apiLoadSettings() {
     try {
-      var r = await fetch('/api/sheets?action=getSettings', { cache: 'no-store' });
+      var r = await apiFetch('/api/sheets?action=getSettings', { cache: 'no-store' });
       var data = await r.json();
       if (!r.ok || data.ok === false) return {};
       return data.settings || {};
     } catch (_) { return {}; }
   }
   async function apiSaveSettings(settings) {
-    var r = await fetch('/api/sheets', {
+    var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'saveSettings', settings: settings })
@@ -496,7 +515,12 @@
       nextBillingDate: fmtDate(row.nextBillingDate),
       house_of_origin: row.house_of_origin || '',
       // משוייך ל (assigned-to): staff member the lead is assigned to.
-      assignedTo: row.assignedTo || ''
+      assignedTo: row.assignedTo || '',
+      // who/when stamps (SERVER-OWNED, read-only here): carried so the tab
+      // knows the version it loaded — PR 2 echoes updatedAt for stale-save
+      // refusal. The server ignores client-sent stamps on save.
+      updatedAt: row.updatedAt || '',
+      updatedBy: row.updatedBy || ''
     };
   }
   function normalizeClientFromSheet(row) {
@@ -542,7 +566,12 @@
       // map layered over the computed amount on גבייה open-balance rows. Parsed from
       // the JSON cell; blank/garbage -> {}. Read via effectivePaymentAmount(); the
       // package price / charge source rows are never touched.
-      paymentAmountOverrides: parseAmountOverrides(row.paymentAmountOverrides)
+      paymentAmountOverrides: parseAmountOverrides(row.paymentAmountOverrides),
+      // who/when stamps (SERVER-OWNED, read-only here): carried so the tab
+      // knows the version it loaded — PR 2 echoes updatedAt for stale-save
+      // refusal. The server ignores client-sent stamps on save.
+      updatedAt: row.updatedAt || '',
+      updatedBy: row.updatedBy || ''
     };
   }
 
@@ -582,7 +611,12 @@
       not_relevant_note: l.not_relevant_note || '',
       house_of_origin: l.house_of_origin || '',
       // משוייך ל (assigned-to): preserve the lead's assignee on save.
-      assignedTo: l.assignedTo || ''
+      assignedTo: l.assignedTo || '',
+      // who/when echo (the stamps this tab loaded). The server NEVER trusts
+      // them — it stamps changed rows itself and carries the sheet's stamps
+      // for unchanged ones; PR 2 compares the echoed updatedAt for conflicts.
+      updatedAt: l.updatedAt || '',
+      updatedBy: l.updatedBy || ''
     };
   }
   function clientForSheet(c) {
@@ -630,7 +664,12 @@
       paymentAmountOverrides: (function () {
         var m = c.paymentAmountOverrides;
         return (m && typeof m === 'object' && Object.keys(m).length) ? JSON.stringify(m) : '';
-      })()
+      })(),
+      // who/when echo (the stamps this tab loaded). The server NEVER trusts
+      // them — it stamps changed rows itself and carries the sheet's stamps
+      // for unchanged ones; PR 2 compares the echoed updatedAt for conflicts.
+      updatedAt: c.updatedAt || '',
+      updatedBy: c.updatedBy || ''
     };
   }
 
@@ -662,31 +701,31 @@
 
   // --- Payments API / serialization -------------------------------------
   async function apiGetPayments() {
-    var r = await fetch('/api/sheets?action=getPayments', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getPayments', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiGetCharges() {
-    var r = await fetch('/api/sheets?action=getCharges', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getCharges', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiGetStopFlags() {
-    var r = await fetch('/api/sheets?action=getStopFlags', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getStopFlags', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiGetExtraRequests() {
-    var r = await fetch('/api/sheets?action=getExtraSessionRequests', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getExtraSessionRequests', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiApproveExtra(id, approvedBy) {
-    var r = await fetch('/api/sheets', {
+    var r = await apiFetch('/api/sheets', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'approveExtraSession', id: id, approvedBy: approvedBy })
     });
@@ -695,7 +734,7 @@
     return data;
   }
   async function apiGetSessionLog() {
-    var r = await fetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getSessionLog', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -704,7 +743,7 @@
   // type only — no secret, no notes/reasons). Used to know the sent-state across
   // sessions, not just the current optimistic one.
   async function apiGetMyStopAlerts() {
-    var r = await fetch('/api/sheets?action=getMyStopAlerts', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getMyStopAlerts', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -712,14 +751,14 @@
   // Un-restored Clients-removed tombstones (the _saveAll row-loss guard's
   // audit sheet). INTERNAL read, same trust level as the main load.
   async function apiGetRemovedClients() {
-    var r = await fetch('/api/sheets?action=getRemovedClients', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getRemovedClients', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiPostAction(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
-    var r = await fetch('/api/sheets', {
+    var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -3108,13 +3147,13 @@
   var continuationVM = {};
 
   async function apiGetContinuationRoster() {
-    var r = await fetch('/api/continuation-roster', { cache: 'no-store' });
+    var r = await apiFetch('/api/continuation-roster', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
   async function apiGetContinuation() {
-    var r = await fetch('/api/sheets?action=getContinuation', { cache: 'no-store' });
+    var r = await apiFetch('/api/sheets?action=getContinuation', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -4789,7 +4828,9 @@
       state.loaded = true;
       render();
     } catch (e) {
-      toast('שגיאה בטעינת הנתונים: ' + e.message, true);
+      // A 401 already flipped to the PIN screen (apiFetch) — no error toast
+      // on top of it; every other failure is surfaced as before.
+      if (!(e && e.message === 'unauthorized')) toast('שגיאה בטעינת הנתונים: ' + e.message, true);
       throw e;
     }
   }
@@ -4813,6 +4854,9 @@
           try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
           state.role = 'editor';
           enterApp();
+          // The data routes are session-gated: the load fired at init was
+          // refused (401) until this PIN minted the cookie, so load now.
+          if (!state.loaded) loadAll().catch(function () {});
         } else if (err) {
           err.hidden = false;
         }
@@ -4830,8 +4874,15 @@
       try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {}
       state.role = 'viewer';
       enterApp();
+      // Viewer mode rides the same session cookie (the data routes are
+      // gated): with a live cookie on this device the data loads; without
+      // one the 401 handler returns to the PIN screen.
+      if (!state.loaded) loadAll().catch(function () {});
     });
     on('#logoutBtn', 'click', function () {
+      // Expire the server session cookie too (fire-and-forget) so a shared
+      // device does not keep a live 7-day session after יציאה.
+      try { fetch('/api/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
       try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';
       showPin();

@@ -57,14 +57,16 @@ const CLIENTS_H = headers('CLIENTS_HEADERS');
 
 test('assignedTo is last on the leads arrays; on CLIENTS it trails the payment tail', () => {
   // Leads sheets were untouched by the volta+dashboard unification.
-  assert.equal(LEADS_H[LEADS_H.length - 1], 'assignedTo');
-  assert.equal(REMOVED_H[REMOVED_H.length - 1], 'assignedTo');
+  // The who/when stamps (session-who-when PR) were appended AFTER assignedTo,
+  // so it is now third-from-last on both leads arrays.
+  assert.deepEqual(LEADS_H.slice(-3), ['assignedTo', 'updatedAt', 'updatedBy']);
+  assert.deepEqual(REMOVED_H.slice(-3), ['assignedTo', 'updatedAt', 'updatedBy']);
   // assignedTo is a volta-only column (physically unwritten on the live sheet) that
   // appended after the payment tail. The later paymentAmountOverrides column appended
   // after it, so assignedTo now sits second-from-last on CLIENTS.
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 1], 'paymentAmountOverrides');
-  assert.deepEqual(CLIENTS_H.slice(-4),
-    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides']);
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 3], 'paymentAmountOverrides');
+  assert.deepEqual(CLIENTS_H.slice(-6),
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy']);
 });
 
 test('lead assignedTo round-trips positionally without misaligning earlier columns', () => {

@@ -53,22 +53,27 @@ const FROZEN_CLIENTS_HEADERS = [
   'clinicalTreatmentType', 'packageChangeDate', 'assignedTo',
   // APPEND-ONLY: manual collection-amount overrides (סכום גבייה). Physically
   // unwritten on the live sheet -> lands at the very END (position 34), no migration.
-  'paymentAmountOverrides'
+  'paymentAmountOverrides',
+  // APPEND-ONLY: who/when stamps (session-who-when PR). Physically unwritten on
+  // the live sheet -> positions 35-36, no migration. Server-owned; see
+  // test/session-who-when.test.js for the stamping contract.
+  'updatedAt', 'updatedBy'
 ];
 
 test('CLIENTS_HEADERS equals the frozen physical order', () => {
   const H = namedArray('CLIENTS_HEADERS');
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
-  assert.equal(H.length, 34, 'Clients has 34 columns');
+  assert.equal(H.length, 36, 'Clients has 36 columns');
 });
 
-test('paymentAmountOverrides is APPEND-ONLY: the trailing column, everything before it unchanged', () => {
+test('updatedAt/updatedBy are APPEND-ONLY: the trailing two columns, everything before them unchanged', () => {
   const H = namedArray('CLIENTS_HEADERS');
-  assert.equal(H[H.length - 1], 'paymentAmountOverrides', 'the new column is last');
+  assert.deepEqual(H.slice(-2), ['updatedAt', 'updatedBy'], 'the who/when stamps are last');
+  assert.equal(H[H.length - 3], 'paymentAmountOverrides', 'the previous tail column is directly before them');
   // every earlier column keeps the frozen pre-append order
-  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -1);
-  assert.deepEqual(H.slice(0, -1), PRE_APPEND);
-  assert.equal(PRE_APPEND.length, 33, 'exactly one column was appended (33 -> 34)');
+  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -2);
+  assert.deepEqual(H.slice(0, -2), PRE_APPEND);
+  assert.equal(PRE_APPEND.length, 34, 'exactly two columns were appended (34 -> 36)');
 });
 
 test('phone (join key) stays at physical column 26 (index 25)', () => {

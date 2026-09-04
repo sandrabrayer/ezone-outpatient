@@ -121,7 +121,13 @@ test('blank-id rows cannot be diffed and are never tombstoned', () => {
 test('CLIENTS_REMOVED_HEADERS = every CLIENTS_HEADERS column + removedAt/removedVia/restoredAt, as its OWN literal', () => {
   const clients = namedArray('CLIENTS_HEADERS');
   const removed = namedArray('CLIENTS_REMOVED_HEADERS');
-  assert.deepEqual(removed, clients.concat(['removedAt', 'removedVia', 'restoredAt']));
+  // The who/when stamps are appended at the very END of BOTH literals: on the
+  // tombstone they trail the removedAt/removedVia/restoredAt bookkeeping columns
+  // (this sheet's own append-only rule), so the mirror is "every Clients column
+  // except the stamps, then the bookkeeping, then the stamps".
+  const STAMPS = ['updatedAt', 'updatedBy'];
+  assert.deepEqual(clients.slice(-2), STAMPS);
+  assert.deepEqual(removed, clients.slice(0, -2).concat(['removedAt', 'removedVia', 'restoredAt']).concat(STAMPS));
   // Decoupling guard: the tombstone array must be a full literal, never
   // derived from CLIENTS_HEADERS at runtime (a concat would let a future
   // Clients append shift the meta columns under existing tombstone rows).
