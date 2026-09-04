@@ -98,6 +98,26 @@ button, input, select, textarea {
 }
 .pin-error { color: var(--red); margin-bottom: 10px; font-size: 13px; }
 .pin-card .btn { width: 100%; margin-top: 8px; }
+/* Name picker (after the PIN): one full-width button per allow-listed name */
+.user-buttons { display: flex; flex-direction: column; gap: 4px; }
+.user-buttons .btn { font-size: 18px; padding: 14px; }
+
+/* "מחובר/ת כ: <name> · החלף" in the topbar; החלף is a bare link-style button */
+.session-user { font-size: 13px; color: var(--muted); white-space: nowrap; margin-inline-end: 6px; }
+.session-user b { color: var(--text); font-weight: 600; }
+.link-btn {
+  background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+  color: var(--green-2); font: inherit; text-decoration: underline;
+}
+.link-btn:hover { filter: brightness(1.1); }
+
+/* Stale-save conflict refusal banner (below the topbar, above the views) */
+.conflict-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+  background: #2a1515; border: 1px solid #6b2a2a; color: #ff9b9b; font-size: 14px;
+}
+.conflict-banner .link-btn { color: #ff9b9b; text-decoration: none; font-size: 16px; }
 
 /* layout */
 .app { display: flex; flex-direction: column; min-height: 100vh; }

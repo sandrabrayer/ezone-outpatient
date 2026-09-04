@@ -412,6 +412,45 @@ function _reconcileStamps(diffFn, incoming, existing, user) {
   return changed;
 }
 
+/* Stale-save CONFLICT REFUSAL (Outpatient PR 2 — port of Dashboard PR #114).
+ * Decides whether an incoming row must be refused because another person
+ * saved a real change to the same row after this tab loaded it:
+ *   sheetStamp = existing.updatedAt  (what the sheet holds now)
+ *   seenStamp  = incoming.updatedAt  (the stamp the tab loaded and echoes;
+ *                the client round-trips it untouched)
+ * REFUSE iff BOTH stamps are non-empty AND they differ AND the incoming row
+ * actually changes a non-meta column (diffFn non-empty). Returns the changed
+ * column list in that case, null otherwise. Everything else keeps today's
+ * last-writer-wins: an empty seenStamp (a tab loaded before stamping
+ * existed, or a payload that never carried it), an empty sheetStamp (a row
+ * never stamped yet), an equal stamp (fresh tab), a pure echo (nothing to
+ * refuse — the stamps are carried as before), or a new row (no existing). */
+function _staleConflictCols(diffFn, incoming, existing) {
+  if (!existing || !incoming) return null;
+  var sheetStamp = String(existing.updatedAt == null ? '' : existing.updatedAt).trim();
+  var seenStamp = String(incoming.updatedAt == null ? '' : incoming.updatedAt).trim();
+  if (!sheetStamp || !seenStamp || seenStamp === sheetStamp) return null;
+  var changed = diffFn(incoming, existing);
+  return changed.length ? changed : null;
+}
+
+/* One `conflicts[]` entry for a refused row + the audit line. There is no
+ * audit sheet for saves (tombstones only cover deletes), so the execution
+ * log is the audit trail — the '[conflict]' prefix makes it greppable. */
+function _conflictEntry(kind, incoming, existing, changed, user) {
+  var entry = {
+    id: String(existing.id == null ? '' : existing.id),
+    name: String(existing.name == null ? '' : existing.name),
+    sheetUpdatedAt: String(existing.updatedAt == null ? '' : existing.updatedAt),
+    sheetUpdatedBy: String(existing.updatedBy == null ? '' : existing.updatedBy),
+    changed: changed
+  };
+  Logger.log('[conflict] saveAll refused %s id=%s name=%s changed=%s sheetUpdatedAt=%s sheetUpdatedBy=%s seenUpdatedAt=%s attemptedBy=%s',
+    kind, entry.id, entry.name, changed.join(','), entry.sheetUpdatedAt, entry.sheetUpdatedBy,
+    String(incoming.updatedAt == null ? '' : incoming.updatedAt), String(user == null ? '' : user));
+  return entry;
+}
+
 /* Single-cell stamp for the cell-level Clients writers: locate the client row
  * by scanning the id column (the _writeCreditsOwed pattern) and write
  * updatedAt/updatedBy into that row only — never _writeAll. Fail-soft: no hit
@@ -1079,6 +1118,14 @@ function _saveAll(payload) {
       }
     }
     var stampedClients = 0;
+    // Stale-save conflict refusal (PR 2): rows another person changed after
+    // this tab loaded them are refused ONE BY ONE — the sheet row is written
+    // back unchanged in the incoming row's place and the refusal is reported
+    // in the additive `conflicts` response field (absent when none). The rest
+    // of the save proceeds. Still under the script lock, still clear-and-
+    // rewrite; the creditsOwed / paymentAmountOverrides preserve-by-id blocks
+    // above/below are untouched.
+    var conflicts = [];
     for (var i = 0; i < clients.length; i++) {
       _deriveClientServiceType(clients[i]);
       var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
@@ -1088,11 +1135,17 @@ function _saveAll(payload) {
       clients[i].paymentAmountOverrides = _hasOwn(existingOverrides, cid)
         ? existingOverrides[cid]
         : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
+      var existingRow = cid && _hasOwn(existingById, cid) ? existingById[cid] : null;
+      var conflictCols = _staleConflictCols(_clientDiffCols, clients[i], existingRow);
+      if (conflictCols) {
+        conflicts.push(_conflictEntry('client', clients[i], existingRow, conflictCols, user));
+        clients[i] = existingRow; // the sheet's row, byte-for-byte, stamps included
+        continue;
+      }
       // who/when (SERVER-OWNED stamps): compare the row about to be written
       // against its on-sheet row on the non-meta columns. Changed or new ->
       // stamp now + user; an unchanged echo carries the SHEET's stamps.
       // Payload stamps are never trusted in either case.
-      var existingRow = cid && _hasOwn(existingById, cid) ? existingById[cid] : null;
       if (_reconcileStamps(_clientDiffCols, clients[i], existingRow, user).length) stampedClients++;
     }
     // Leads: same who/when reconciliation by id (Leads rows already carry ids).
@@ -1106,6 +1159,13 @@ function _saveAll(payload) {
     for (var li = 0; li < leads.length; li++) {
       var lidIn = (leads[li] && leads[li].id != null) ? String(leads[li].id) : '';
       var existingLead = lidIn && _hasOwn(existingLeadsById, lidIn) ? existingLeadsById[lidIn] : null;
+      // Same conflict rule as Clients (by id, _leadDiffCols).
+      var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
+      if (leadConflictCols) {
+        conflicts.push(_conflictEntry('lead', leads[li], existingLead, leadConflictCols, user));
+        leads[li] = existingLead;
+        continue;
+      }
       if (_reconcileStamps(_leadDiffCols, leads[li], existingLead, user).length) stampedLeads++;
     }
     // Staleness signal (stale-save prevention): the frontend echoes back the
@@ -1175,7 +1235,7 @@ function _saveAll(payload) {
     _writeAll(leadsSh, LEADS_HEADERS, leads);
     _writeAll(clientsSh, CLIENTS_HEADERS, clients);
     var newVersion = _bumpDataVersion();
-    return {
+    var result = {
       ok: true,
       savedLeads: leads.length,
       savedClients: clients.length,
@@ -1187,6 +1247,11 @@ function _saveAll(payload) {
       // new). Additive — old clients ignore it.
       stamped: { clients: stampedClients, leads: stampedLeads }
     };
+    // Additive: the rows this save was REFUSED for (stale-save conflict
+    // refusal), each { id, name, sheetUpdatedAt, sheetUpdatedBy, changed }.
+    // Absent — not an empty array — when nothing was refused.
+    if (conflicts.length) result.conflicts = conflicts;
+    return result;
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }

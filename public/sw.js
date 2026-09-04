@@ -16,8 +16,12 @@
  * - v3 (2026-07-08): letter recoloured to a fiercer green (#2dd47a -> #00c853),
  *   white ground and glyph geometry unchanged. CACHE bumped to evict the
  *   previously-cached icon bytes.
+ * - v4 (2026-09-04): name picker + conflict refusal — new conflicts.js
+ *   module, new index.html markup (picker screen, header name, conflict
+ *   banner) and CSS. CACHE bumped so an installed app cannot serve the old
+ *   shell with the new app.js.
  */
-var CACHE = 'ezone-outpatient-v3';
+var CACHE = 'ezone-outpatient-v4';
 var SHELL = [
   './',
   './index.html',

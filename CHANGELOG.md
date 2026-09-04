@@ -6,6 +6,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Name picker + stale-save conflict refusal (Outpatient PR 2).** Port of
+  E-Zone-Dashboard PR #114 on top of PR 1. After a correct PIN the client
+  reads `GET /api/me`; an empty `user` opens a one-screen RTL name picker
+  (one button per `lib/users.js` name via the new session-gated
+  `GET /api/users`, no free text) that re-posts `/api/verify-pin` with
+  `{ pin, user }` — the PIN lives in a closure for that single call, the
+  cookie is re-issued with the name inside and the same 7-day TTL. The
+  header shows `מחובר/ת כ: <name> · החלף` (החלף = logout → PIN → picker); a
+  remembered editor session without a name is sent through PIN → picker once
+  on next load. `Code.gs _saveAll`: for each id-matched client/lead, when the
+  sheet's `updatedAt` and the tab's echoed `updatedAt` are both non-empty and
+  differ AND a non-meta column changed (`_clientDiffCols` / `_leadDiffCols`),
+  the row is REFUSED — the sheet row is written back unchanged in its place
+  and reported in the additive `conflicts` response field (absent when none),
+  with a `[conflict]` execution-log line. Empty echo (pre-stamping tab),
+  empty sheet stamp, equal stamp, pure echo and new rows keep today's
+  behaviour; still under the lock, preserve-by-id blocks untouched. Client:
+  `public/conflicts.js` `conflictsMessage(res)` builds the banner
+  `השינוי ל־<names> לא נשמר — <updatedBy> עדכן/ה קודם. הנתונים רועננו.`
+  (blank editor → `מישהו/י`), shown in a dismissible banner, then `loadAll()`;
+  never retried. `sw.js` cache `ezone-outpatient-v3` → `v4`. Tests: new
+  `test/name-picker-conflicts.test.js` (29, incl. two Playwright e2e cases);
+  suite 819 → 848. See `CHANGELOG-name-picker-conflicts.md`.
 - **Signed session cookie + who/when stamping (Outpatient PR 1).** Port of
   E-Zone-Dashboard PRs #113/#114. `POST /api/verify-pin` now mints a signed
   HttpOnly `ezone_session` cookie (HMAC over `SESSION_SECRET`, 7 days,
