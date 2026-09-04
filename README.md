@@ -18,6 +18,15 @@ through an Apps Script Web App.
    falling back to `treatmentContactPhone`, leading-zero recovered), and the
    edit modal edits it via the **טלפון מטופל** field.
 
+## User guide (Hebrew)
+
+The end-user guide for the office team lives in
+[`docs/USER-GUIDE.he.md`](docs/USER-GUIDE.he.md) (Hebrew, rendered RTL on
+GitHub). It covers login, daily operations, the working rules that prevent
+edit conflicts, common problems and who to contact. It contains no
+credentials by design — `test/user-guide.test.js` fails if anything
+secret-looking is added to it.
+
 ## Access
 
 - PIN screen on load. The PIN is configured server-side via the `APP_PIN`
