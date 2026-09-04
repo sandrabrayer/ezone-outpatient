@@ -465,8 +465,11 @@ test('D: _saveAll via doPost — changed row stamped now+user, unchanged row kee
     action: 'saveAll',
     user: 'שירן', // what the Railway proxy injects from the cookie
     clients: [
-      // c1: real change (notes) + forged stamps + stale server-managed cells
-      { id: 'c1', name: 'דנה כהן', phone: '0501234567', status: 'פעיל', notes: 'EDITED', creditsOwed: 99, paymentAmountOverrides: '', updatedAt: 'forged', updatedBy: 'HACKER' },
+      // c1: real change (notes) + a forged updatedBy + stale server-managed
+      // cells. updatedAt is the TRUE echo of the sheet stamp: a mismatching
+      // echo on a changed row is now a stale-save CONFLICT (refused, PR 2 —
+      // test/name-picker-conflicts.test.js), not a "forged stamp" to ignore.
+      { id: 'c1', name: 'דנה כהן', phone: '0501234567', status: 'פעיל', notes: 'EDITED', creditsOwed: 99, paymentAmountOverrides: '', updatedAt: OLD_AT, updatedBy: 'HACKER' },
       // c2: pure echo of the sheet row (forged stamps only)
       { id: 'c2', name: 'יוסי לוי', phone: '0502223333', status: 'פעיל', notes: 'b', creditsOwed: 0, updatedAt: 'forged', updatedBy: 'HACKER' },
       // c3: echo of a never-stamped row
@@ -762,8 +765,10 @@ test('G: every /api data call in app.js goes through apiFetch (401 -> PIN screen
   // one reusable handler: 401 -> forget the role, show the PIN screen, throw
   assert.match(APP, /async function apiFetch\(url, opts\) \{\s*var r = await fetch\(url, opts\);\s*if \(r\.status === 401\) \{ handleUnauthorized\(\); throw new Error\('unauthorized'\); \}/);
   assert.match(APP, /function handleUnauthorized\(\) \{[\s\S]*?sessionStorage\.removeItem\('ez_role'\)[\s\S]*?showPin\(\);/);
-  // the PIN form itself is unchanged (sends only the PIN; the name picker is PR 2)
-  assert.match(APP, /body: JSON\.stringify\(\{ pin: pin \}\)/);
+  // the PIN form sends only the PIN; the name picker (PR 2) re-posts {pin, user}
+  // through the SAME helper — the body never carries anything else
+  assert.match(APP, /var body = user \? \{ pin: pin, user: user \} : \{ pin: pin \};/);
+  assert.match(APP, /body: JSON\.stringify\(body\)/);
   // logout also expires the server cookie
   assert.match(APP, /fetch\('\/api\/logout', \{ method: 'POST' \}\)/);
   // the load fired at init is refused until the PIN mints the cookie, so a

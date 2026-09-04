@@ -409,7 +409,9 @@ app.post('/api/verify-pin', (req, res) => {
     // attach — accepted ONLY from the fixed SESSION_USERS list (the leads
     // assignedTo names); anything else falls back to the legacy user-less
     // token. It rides INSIDE the signed token so it cannot be changed
-    // without breaking the HMAC. (The login form sends it from PR 2 on.)
+    // without breaking the HMAC. The name picker re-posts {pin, user} right
+    // after a user-less login: the cookie is simply re-issued with the same
+    // 7-day TTL (SESSION_MAX_AGE) — never extended, never a second cookie.
     const user = validateSessionUser(req.body && req.body.user);
     const token = createSessionToken(SESSION_SECRET, undefined, undefined, user);
     res.set('Set-Cookie', buildSessionCookie(token, requestIsHttps(req)));
@@ -423,9 +425,19 @@ app.post('/api/verify-pin', (req, res) => {
 /* GET /api/me — the display name embedded in this session's signed cookie
  * (who/when stamping). Session-gated like every data route; a legacy
  * user-less cookie answers { user: '' } and everything keeps working. The
- * frontend reads this in PR 2 (name picker) — no UI uses it yet. */
+ * frontend reads it after the PIN (empty -> name picker) and at load (header
+ * "מחובר/ת כ: <name>"). */
 app.get('/api/me', requireSession, (req, res) => {
   res.status(200).json({ ok: true, user: sessionUserFromRequest(req) });
+});
+
+/* GET /api/users — the fixed list of names the login name picker offers
+ * (lib/users.js SESSION_USERS, the same list /api/verify-pin accepts a
+ * `user` from), so the client never carries a duplicate that could drift.
+ * Session-gated: the picker only appears after a correct PIN minted the
+ * cookie, and the names are staff, not public. Read-only, no input. */
+app.get('/api/users', requireSession, (req, res) => {
+  res.status(200).json({ ok: true, users: SESSION_USERS.slice() });
 });
 
 /* POST /api/logout — expire the session cookie immediately. Open route:

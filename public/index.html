@@ -25,6 +25,18 @@
     </div>
   </div>
 
+  <!-- Name picker (after the PIN): one tappable button per allow-listed name,
+       filled from GET /api/users by app.js. No free text — the server accepts a
+       session user ONLY from lib/users.js. -->
+  <div id="userScreen" class="pin-screen" hidden>
+    <div class="pin-card">
+      <div class="brand">E-ZONE Outpatient</div>
+      <div class="pin-sub">מי מתחבר/ת?</div>
+      <div id="userButtons" class="user-buttons"></div>
+      <div id="userError" class="pin-error" hidden>שגיאה — נסו שוב</div>
+    </div>
+  </div>
+
   <div id="app" class="app" hidden>
     <header class="topbar">
       <div class="logo"><img class="logo-mark" src="icon-v1-192.png?v=__BUILD__" alt="" width="30" height="30" />טיפולי חוץ</div>
@@ -39,6 +51,7 @@
         <button class="tab" data-view="continuation">מסלול המשך</button>
       </nav>
       <div class="topbar-right">
+        <span id="sessionUser" class="session-user" hidden>מחובר/ת כ: <b id="sessionUserName"></b> · <button type="button" id="switchUserBtn" class="link-btn">החלף</button></span>
         <button id="settingsBtn" class="btn btn-ghost edit-only" title="הגדרות">⚙️</button>
         <button id="refreshBtn" class="btn btn-ghost" title="רענון">↻</button>
         <button id="logoutBtn" class="btn btn-ghost">יציאה</button>
@@ -46,6 +59,13 @@
     </header>
 
     <main class="main">
+      <!-- Conflict refusal banner: a save that another person beat to the sheet
+           was refused row-by-row; app.js fills the text (conflictsMessage) and
+           reloads. Hidden until then. -->
+      <div id="conflictBanner" class="conflict-banner" role="alert" hidden>
+        <span id="conflictBannerText"></span>
+        <button type="button" id="conflictBannerClose" class="link-btn" aria-label="סגור">✕</button>
+      </div>
       <!-- Dashboard -->
       <section id="view-dashboard" class="view active">
         <div class="kpis">
@@ -801,6 +821,7 @@
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="payout-export.js?v=__BUILD__" defer></script>
+  <script src="conflicts.js?v=__BUILD__" defer></script>
   <script>
     // PWA: register the service worker so the app is installable to the home
     // screen and opens standalone. Network-first, so data stays fresh.

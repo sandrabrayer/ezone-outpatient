@@ -141,6 +141,7 @@
   // --- state -------------------------------------------------------------
   var state = {
     role: 'viewer',
+    user: '',       // the name inside this device's session cookie (GET /api/me); '' = user-less (legacy) session
     view: 'dashboard',
     leads: [],
     clients: [],
@@ -433,6 +434,7 @@
   function handleUnauthorized() {
     try { sessionStorage.removeItem('ez_role'); } catch (_) {}
     state.role = 'viewer';
+    state.user = '';
     showPin();
   }
   // fetch() wrapper for the app's own API routes: a 401 flips to the PIN
@@ -462,15 +464,37 @@
     return data;
   }
 
-  async function apiVerifyPin(pin) {
+  // `user` (optional) is the name the picker chose: the server re-issues the
+  // cookie with that name inside the signed token (same 7-day TTL), accepting
+  // it ONLY from its own allow-list. Without it the body is exactly {pin}.
+  async function apiVerifyPin(pin, user) {
+    var body = user ? { pin: pin, user: user } : { pin: pin };
     var r = await fetch('/api/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: pin })
+      body: JSON.stringify(body)
     });
     var data = {};
     try { data = await r.json(); } catch (_) {}
     return r.ok && data.ok === true;
+  }
+  // The name inside this session's cookie ('' for a user-less session).
+  // Session-gated: a 401 flips to the PIN screen like every data call.
+  async function apiMe() {
+    var r = await apiFetch('/api/me', { cache: 'no-store' });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return typeof data.user === 'string' ? data.user : '';
+  }
+  // The allow-listed names the picker offers (lib/users.js, via the server —
+  // the client keeps no copy that could drift).
+  async function apiUsers() {
+    var r = await apiFetch('/api/users', { cache: 'no-store' });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return Array.isArray(data.users) ? data.users.filter(function (u) { return typeof u === 'string' && u; }) : [];
   }
 
   async function apiLoadSettings() {
@@ -517,8 +541,9 @@
       // משוייך ל (assigned-to): staff member the lead is assigned to.
       assignedTo: row.assignedTo || '',
       // who/when stamps (SERVER-OWNED, read-only here): carried so the tab
-      // knows the version it loaded — PR 2 echoes updatedAt for stale-save
-      // refusal. The server ignores client-sent stamps on save.
+      // knows the version it loaded — the echoed updatedAt is what the
+      // server compares for stale-save conflict refusal. Client-sent stamps
+      // are never written as-is.
       updatedAt: row.updatedAt || '',
       updatedBy: row.updatedBy || ''
     };
@@ -568,8 +593,9 @@
       // package price / charge source rows are never touched.
       paymentAmountOverrides: parseAmountOverrides(row.paymentAmountOverrides),
       // who/when stamps (SERVER-OWNED, read-only here): carried so the tab
-      // knows the version it loaded — PR 2 echoes updatedAt for stale-save
-      // refusal. The server ignores client-sent stamps on save.
+      // knows the version it loaded — the echoed updatedAt is what the
+      // server compares for stale-save conflict refusal. Client-sent stamps
+      // are never written as-is.
       updatedAt: row.updatedAt || '',
       updatedBy: row.updatedBy || ''
     };
@@ -612,9 +638,10 @@
       house_of_origin: l.house_of_origin || '',
       // משוייך ל (assigned-to): preserve the lead's assignee on save.
       assignedTo: l.assignedTo || '',
-      // who/when echo (the stamps this tab loaded). The server NEVER trusts
-      // them — it stamps changed rows itself and carries the sheet's stamps
-      // for unchanged ones; PR 2 compares the echoed updatedAt for conflicts.
+      // who/when echo (the stamps this tab loaded). The server NEVER writes
+      // them as-is — it stamps changed rows itself and carries the sheet's
+      // stamps for unchanged ones — but it COMPARES the echoed updatedAt with
+      // the sheet's: a changed row whose echo is stale is refused (conflict).
       updatedAt: l.updatedAt || '',
       updatedBy: l.updatedBy || ''
     };
@@ -665,9 +692,10 @@
         var m = c.paymentAmountOverrides;
         return (m && typeof m === 'object' && Object.keys(m).length) ? JSON.stringify(m) : '';
       })(),
-      // who/when echo (the stamps this tab loaded). The server NEVER trusts
-      // them — it stamps changed rows itself and carries the sheet's stamps
-      // for unchanged ones; PR 2 compares the echoed updatedAt for conflicts.
+      // who/when echo (the stamps this tab loaded). The server NEVER writes
+      // them as-is — it stamps changed rows itself and carries the sheet's
+      // stamps for unchanged ones — but it COMPARES the echoed updatedAt with
+      // the sheet's: a changed row whose echo is stale is refused (conflict).
       updatedAt: c.updatedAt || '',
       updatedBy: c.updatedBy || ''
     };
@@ -693,10 +721,41 @@
     if (state.dataVersion != null) payload.dataVersion = state.dataVersion;
     var data = await apiSave(payload);
     if (data && data.dataVersion != null) state.dataVersion = Number(data.dataVersion);
+    // Conflict refusal (PR 2): the server REFUSED the rows another person
+    // edited after this tab loaded them (the sheet row was kept, the rest of
+    // the save went through) and lists them in `conflicts`. Show the banner
+    // and reload so the tab shows the sheet's version. NEVER retried — the
+    // person re-applies their change on top of the fresh data if still needed.
+    var conflictMsg = conflictsMessage(data);
+    if (conflictMsg) {
+      showConflictBanner(conflictMsg);
+      loadAll().catch(function (e) { console.warn('[ezone] conflict reload failed:', e.message); });
+      return;
+    }
+    hideConflictBanner();
     if (data && data.staleSave) {
       toast('הנתונים עודכנו ממכשיר אחר — רענני לראות את המצב המלא');
       loadAll().catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
     }
+  }
+  // Pure wording helper (public/conflicts.js, unit-tested): '' when the
+  // response carries no conflicts. Defensive if the module failed to load.
+  function conflictsMessage(res) {
+    var mod = (typeof self !== 'undefined' && self.EzoneConflicts) || null;
+    if (mod && typeof mod.conflictsMessage === 'function') return mod.conflictsMessage(res);
+    var list = res && Array.isArray(res.conflicts) ? res.conflicts : [];
+    return list.length ? 'השינוי לא נשמר — מישהו/י עדכן/ה קודם. הנתונים רועננו.' : '';
+  }
+  function showConflictBanner(msg) {
+    var box = $('#conflictBanner');
+    var txt = $('#conflictBannerText');
+    if (!box || !txt) { toast(msg, true); return; }
+    txt.textContent = msg; // plain text only — never innerHTML
+    box.hidden = false;
+  }
+  function hideConflictBanner() {
+    var box = $('#conflictBanner');
+    if (box) box.hidden = true;
   }
 
   // --- Payments API / serialization -------------------------------------
@@ -4702,6 +4761,8 @@
     document.body.classList.toggle('viewer', state.role !== 'editor');
   }
   function showPin() {
+    var picker = $('#userScreen');
+    if (picker) picker.hidden = true;
     $('#pinScreen').hidden = false;
     $('#app').hidden = true;
     $('#pinInput').value = '';
@@ -4709,11 +4770,90 @@
   }
   function enterApp() {
     var pin = $('#pinScreen');
+    var picker = $('#userScreen');
     var app = $('#app');
     if (pin) pin.hidden = true;
+    if (picker) picker.hidden = true;
     if (app) app.hidden = false;
     applyRole();
+    renderSessionUser();
     setView('dashboard');
+  }
+  // Header: "מחובר/ת כ: <name> · החלף" — only when the session carries a name.
+  // The name is written with textContent (it is allow-listed server-side, but
+  // never interpolated into HTML regardless).
+  function renderSessionUser() {
+    var box = $('#sessionUser');
+    var nameEl = $('#sessionUserName');
+    if (!box || !nameEl) return;
+    if (state.user) { nameEl.textContent = state.user; box.hidden = false; }
+    else { nameEl.textContent = ''; box.hidden = true; }
+  }
+  // After a correct PIN: read the cookie's name; empty -> the picker (the
+  // PIN is handed to it in a closure for ONE re-issue call, never stored).
+  // Any name -> straight into the app.
+  function finishLogin(pin) {
+    return apiMe().then(function (user) {
+      if (user) { state.user = user; enterEditor(); return; }
+      showUserPicker(pin);
+    });
+  }
+  function enterEditor() {
+    try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
+    state.role = 'editor';
+    enterApp();
+    // The data routes are session-gated: the load fired at init was
+    // refused (401) until this PIN minted the cookie, so load now.
+    if (!state.loaded) loadAll().catch(function () {});
+  }
+  // Name picker: one tappable button per allow-listed name (GET /api/users),
+  // no free text. Picking re-posts {pin, user} to /api/verify-pin so the
+  // cookie is re-issued with the name inside the signed token. `pin` lives
+  // only in this closure and is dropped after the single call.
+  function showUserPicker(pin) {
+    var screen = $('#userScreen');
+    var box = $('#userButtons');
+    var err = $('#userError');
+    if (!screen || !box) { enterEditor(); return; }
+    $('#pinScreen').hidden = true;
+    $('#app').hidden = true;
+    screen.hidden = false;
+    if (err) err.hidden = true;
+    box.textContent = '';
+    apiUsers().then(function (users) {
+      if (!users.length) { enterEditor(); return; } // nothing to pick — user-less session, as before
+      users.forEach(function (name) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-primary user-btn';
+        b.textContent = name;
+        b.addEventListener('click', function () {
+          if (pin == null) return; // already used
+          var chosen = pin;
+          pin = null;
+          if (err) err.hidden = true;
+          $$('#userButtons .user-btn').forEach(function (x) { x.disabled = true; });
+          apiVerifyPin(chosen, name).then(function (ok) {
+            chosen = null;
+            if (!ok) throw new Error('verify-pin refused');
+            return apiMe();
+          }).then(function (user) {
+            state.user = user;
+            enterEditor();
+          }).catch(function () {
+            // Re-issue failed (network / PIN changed meanwhile): back to the
+            // PIN screen — the PIN is gone from memory, so it must be retyped.
+            if (err) err.hidden = false;
+            setTimeout(showPin, 900);
+          });
+        });
+        box.appendChild(b);
+      });
+    }).catch(function (e) {
+      // 401 already flipped to the PIN screen; any other failure must not
+      // lock anyone out — continue user-less (today's behaviour).
+      if (!(e && e.message === 'unauthorized')) enterEditor();
+    });
   }
 
   // --- init
@@ -4851,15 +4991,11 @@
       if (btn) btn.disabled = true;
       apiVerifyPin(v).then(function (ok) {
         if (ok) {
-          try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {}
-          state.role = 'editor';
-          enterApp();
-          // The data routes are session-gated: the load fired at init was
-          // refused (401) until this PIN minted the cookie, so load now.
-          if (!state.loaded) loadAll().catch(function () {});
-        } else if (err) {
-          err.hidden = false;
+          // Cookie minted. Name picker next unless the session already
+          // carries a name (finishLogin); the PIN goes with it in a closure.
+          return finishLogin(v).catch(function () { enterEditor(); });
         }
+        if (err) err.hidden = false;
       }).catch(function () {
         if (err) err.hidden = false;
       }).finally(function () {
@@ -4879,14 +5015,20 @@
       // one the 401 handler returns to the PIN screen.
       if (!state.loaded) loadAll().catch(function () {});
     });
-    on('#logoutBtn', 'click', function () {
+    function logout() {
       // Expire the server session cookie too (fire-and-forget) so a shared
       // device does not keep a live 7-day session after יציאה.
       try { fetch('/api/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
       try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';
+      state.user = '';
+      renderSessionUser();
       showPin();
-    });
+    }
+    on('#logoutBtn', 'click', logout);
+    // החלף (switch user) = logout -> PIN -> name picker.
+    on('#switchUserBtn', 'click', logout);
+    on('#conflictBannerClose', 'click', hideConflictBanner);
 
     $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
     on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
@@ -5745,9 +5887,27 @@
     try { wireEvents(); } catch (e) { console.error('[ezone] wireEvents failed', e); }
     var saved = null;
     try { saved = sessionStorage.getItem('ez_role'); } catch (_) {}
-    if (saved === 'editor' || saved === 'viewer') { state.role = saved; enterApp(); }
-    else { showPin(); }
-    loadAll().catch(function () {});
+    if (saved === 'editor' || saved === 'viewer') {
+      state.role = saved;
+      enterApp();
+      // Read the session's name first (a 401 here flips to the PIN screen
+      // and the load is skipped). An EDITOR session minted before the name
+      // picker existed has no name: send it through PIN -> picker once, so
+      // its saves stamp updatedBy from now on. Viewers never pick.
+      apiMe().then(function (user) {
+        state.user = user;
+        renderSessionUser();
+        if (state.role === 'editor' && !user) { showPin(); return; }
+        loadAll().catch(function () {});
+      }).catch(function (e) {
+        // The name is a stamping nicety, never a gate: any failure other
+        // than a 401 (which already showed the PIN screen) loads user-less.
+        if (!(e && e.message === 'unauthorized')) loadAll().catch(function () {});
+      });
+    } else {
+      showPin();
+      loadAll().catch(function () {});
+    }
   }
 
   function bootWhenReady() {

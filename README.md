@@ -114,12 +114,23 @@ request and every push to `main`.
   is one of `lib/users.js` `SESSION_USERS`), `401` on mismatch, `429` after 10
   attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset
 - `GET /api/me` → `{ ok, user }` — the name in this session's cookie (`''`
-  for a user-less cookie). Session-gated.
+  for a user-less cookie). Session-gated. The client reads it after the PIN:
+  an empty `user` opens the **name picker** (one button per name, no free
+  text), which re-posts `/api/verify-pin` with `{ pin, user }` so the cookie
+  is re-issued with the name inside (same 7-day TTL). The header then shows
+  `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
+- `GET /api/users` → `{ ok, users }` — the picker's list (`lib/users.js`
+  `SESSION_USERS`, the only names `/api/verify-pin` accepts). Session-gated.
 - `POST /api/logout` → expires the cookie. Open.
 - `GET /api/sheets` → `{ ok, leads, clients, dataVersion }`. Session-gated.
 - `POST /api/sheets` with `{ leads, clients }` → saves everything.
   Session-gated; the proxy **always** sets `body.user` from the cookie before
-  forwarding, so `updatedBy` can never be client-supplied.
+  forwarding, so `updatedBy` can never be client-supplied. **Conflict
+  refusal:** a row whose echoed `updatedAt` differs from the sheet's (someone
+  saved it after this tab loaded it) AND whose content changed is refused —
+  the sheet row is kept and listed in the additive response field
+  `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
+  (absent when none). The client shows a banner and reloads; it never retries.
 - `GET /api/continuation-roster` — session-gated.
 - Every route above except `/api/verify-pin` and `/api/logout` answers
   `401 { ok:false, error:'unauthorized' }` without a valid cookie (or
