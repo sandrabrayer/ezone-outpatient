@@ -149,9 +149,9 @@ test('parse tolerates blank / malformed JSON -> {}', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 4) Source guards — the real wiring must match the mirror (Code.gs)
 // ─────────────────────────────────────────────────────────────────────────────
-test('CLIENTS_HEADERS appends paymentAmountOverrides as the trailing column', () => {
+test('CLIENTS_HEADERS appends paymentAmountOverrides after the volta-only columns (who/when stamps trail it)', () => {
   const H = gsHeaders('CLIENTS_HEADERS');
-  assert.equal(H[H.length - 1], 'paymentAmountOverrides');
+  assert.deepEqual(H.slice(-3), ['paymentAmountOverrides', 'updatedAt', 'updatedBy']);
 });
 test('_writePaymentAmountOverride derives columns via CLIENTS_HEADERS.indexOf (never a literal)', () => {
   const m = GS.match(/function _writePaymentAmountOverride[\s\S]*?\n}/);

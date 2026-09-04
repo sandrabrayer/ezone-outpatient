@@ -21,6 +21,12 @@ const SECRET = 'debt-sekret-456';
 
 process.env.PORT = String(TEST_PORT);
 process.env.SHEETS_URL = SHEETS_URL;
+// The /api/sheets proxy is session-gated (session-who-when PR): mint a valid
+// cookie with a dummy secret so the forwarding assertions reach the route.
+const SESSION_SECRET = 'test-session-secret-0123456789abcdef';
+process.env.SESSION_SECRET = SESSION_SECRET;
+const { createSessionToken } = require('../lib/session');
+const COOKIE = 'ezone_session=' + createSessionToken(SESSION_SECRET);
 
 let capturedUrl = null;
 global.fetch = async (url) => {
@@ -42,7 +48,7 @@ test.after(() => { if (server) server.close(); });
 function httpGet(path) {
   return new Promise((resolve, reject) => {
     const req = http.get(
-      { host: '127.0.0.1', port: TEST_PORT, path },
+      { host: '127.0.0.1', port: TEST_PORT, path, headers: path === '/healthz' ? {} : { Cookie: COOKIE } },
       (res) => {
         let body = '';
         res.on('data', (c) => { body += c; });

@@ -21,10 +21,19 @@ through an Apps Script Web App.
 ## Access
 
 - PIN screen on load. The PIN is configured server-side via the `APP_PIN`
-  env var and verified by `POST /api/verify-pin`; a correct PIN grants full
-  edit access.
-- "המשך כצופה בלבד" hides all edit controls (read-only).
-- Choice is stored in `sessionStorage` for the session only.
+  env var and verified by `POST /api/verify-pin`; a correct PIN mints a
+  signed HttpOnly session cookie (`ezone_session`, 7 days, HMAC over
+  `SESSION_SECRET`) that every data route requires — a missing/expired
+  cookie answers 401 and the app returns to the PIN screen. A correct PIN
+  grants full edit access. יציאה expires the cookie (`POST /api/logout`).
+- "המשך כצופה בלבד" hides all edit controls (read-only). It rides the same
+  cookie: the data loads only if this device already has a live session.
+- The editor/viewer choice is stored in `sessionStorage` for the session
+  only; the credential is the cookie, never a browser flag.
+- Who/when: every Clients / Leads write stamps `updatedAt` (server time) and
+  `updatedBy` (the `user` embedded in the signed cookie — only a name from
+  `lib/users.js`; blank until the name picker ships in PR 2). See
+  `CHANGELOG-session-who-when.md`.
 
 ## Stack
 
@@ -77,8 +86,10 @@ note. No real secrets appear in any test — dummy values only.
 Coverage highlights: billing rules (`billing-status`, `charges`, `debt-status`),
 renewal/credit alerts (`vered-alerts`), the shared-secret `getWinbackSource`
 endpoint auth + projection (`winback-source`, caller mocked), and HTTP-level
-route/auth behaviour including the `/api/verify-pin` gate and fail-closed
-config (`server-routes`, `server-fail-closed`).
+route/auth behaviour including the `/api/verify-pin` gate, the session cookie
++ who/when stamping contract (`session-who-when`, run over the real `Code.gs`
+in a vm sandbox) and fail-closed config (`server-routes`, `server-fail-closed`,
+`session-fail-closed`).
 
 CI (`.github/workflows/test.yml`) runs `npm ci && npm test` on every pull
 request and every push to `main`.
@@ -86,18 +97,33 @@ request and every push to `main`.
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
-- Set the environment variables `SHEETS_URL` and `APP_PIN` on the Railway
-  service. `APP_PIN` is the edit-mode PIN, checked server-side — if unset,
-  `/api/verify-pin` rejects every attempt.
+- Set the environment variables `SHEETS_URL`, `APP_PIN` and `SESSION_SECRET`
+  on the Railway service. `APP_PIN` is the edit-mode PIN, checked server-side
+  — if unset, `/api/verify-pin` rejects every attempt. `SESSION_SECRET` is
+  the HMAC key for the session cookie (any long random string, e.g.
+  `openssl rand -hex 32`) — if unset the server is **fail-closed**: a correct
+  PIN answers 500 and every data route 401 until it is configured. Railway
+  variables apply only to deployments started after saving.
 - The app listens on `process.env.PORT`.
 - Deploy as a single service — one URL only.
 
 ## API (frontend → backend, relative only)
 
-- `GET /api/sheets` → `{ ok, leads, clients }`
-- `POST /api/sheets` with `{ leads, clients }` → saves everything
-- `POST /api/verify-pin` with `{ pin }` → `{ ok: true }` on match, `401` on
-  mismatch, `429` after 10 attempts in 15 minutes from the same IP
+- `POST /api/verify-pin` with `{ pin, user? }` → `{ ok: true }` + the
+  `ezone_session` cookie on match (`user` is stored in the cookie only if it
+  is one of `lib/users.js` `SESSION_USERS`), `401` on mismatch, `429` after 10
+  attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset
+- `GET /api/me` → `{ ok, user }` — the name in this session's cookie (`''`
+  for a user-less cookie). Session-gated.
+- `POST /api/logout` → expires the cookie. Open.
+- `GET /api/sheets` → `{ ok, leads, clients, dataVersion }`. Session-gated.
+- `POST /api/sheets` with `{ leads, clients }` → saves everything.
+  Session-gated; the proxy **always** sets `body.user` from the cookie before
+  forwarding, so `updatedBy` can never be client-supplied.
+- `GET /api/continuation-roster` — session-gated.
+- Every route above except `/api/verify-pin` and `/api/logout` answers
+  `401 { ok:false, error:'unauthorized' }` without a valid cookie (or
+  `session_not_configured` when `SESSION_SECRET` is unset).
 
 ### Cross-app read endpoints (shared-secret, read-only)
 
@@ -202,7 +228,7 @@ request and every push to `main`.
   delete-propagation sender. See `CHANGELOG-deactivate-client.md`. **Requires an
   Apps Script redeploy.**
 
-### Debug endpoints
+### Debug endpoints (session-gated)
 
 - `GET /api/debug/env` – confirms `SHEETS_URL` is configured (no secret leak).
 - `GET /api/debug/routes` – lists mounted routes.

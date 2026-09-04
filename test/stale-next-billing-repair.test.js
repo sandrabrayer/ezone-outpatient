@@ -369,12 +369,24 @@ test('vm: apply writes EXACTLY the planned nextBillingDate cells and nothing els
   assert.equal(res.dryRun, false);
   assert.equal(res.applied, 2);
   const valueWrites = writes.filter((w) => w.kind !== 'setNumberFormat');
-  // Exactly two single-cell setValue calls, on the Clients sheet, in the
-  // nextBillingDate column, on the c1/c2 rows (sheet rows 2 and 3).
-  assert.deepEqual(valueWrites, [
+  // Single-cell setValue calls only, on the Clients sheet: the nextBillingDate
+  // cell on the c1/c2 rows (sheet rows 2 and 3), each followed by that row's
+  // who/when stamp (updatedAt = ISO now, updatedBy = '' — no session user on
+  // the repair path). Nothing else is written.
+  const AT_COL = CLIENTS_HEADERS.indexOf('updatedAt') + 1;
+  const BY_COL = CLIENTS_HEADERS.indexOf('updatedBy') + 1;
+  assert.deepEqual(valueWrites.filter((w) => w.col === NBD_COL), [
     { sheet: 'Clients', row: 2, col: NBD_COL, value: '2026-09-10', kind: 'setValue' },
     { sheet: 'Clients', row: 3, col: NBD_COL, value: '2026-09-04', kind: 'setValue' },
   ]);
+  const stampWrites = valueWrites.filter((w) => w.col === AT_COL || w.col === BY_COL);
+  assert.deepEqual(stampWrites.map((w) => [w.sheet, w.row, w.col, w.kind]), [
+    ['Clients', 2, AT_COL, 'setValue'], ['Clients', 2, BY_COL, 'setValue'],
+    ['Clients', 3, AT_COL, 'setValue'], ['Clients', 3, BY_COL, 'setValue'],
+  ]);
+  stampWrites.filter((w) => w.col === AT_COL).forEach((w) => assert.match(String(w.value), /^\d{4}-\d{2}-\d{2}T/));
+  stampWrites.filter((w) => w.col === BY_COL).forEach((w) => assert.equal(w.value, ''));
+  assert.equal(valueWrites.length, 6, 'nbd + 2 stamps per repaired row, nothing else');
   // And the cells actually hold the new dates; every other row is untouched.
   assert.equal(sheets.Clients._data[1][NBD_COL - 1], '2026-09-10');
   assert.equal(sheets.Clients._data[2][NBD_COL - 1], '2026-09-04');
@@ -437,9 +449,9 @@ test('editor helpers exist: preview logs the plan; apply logs before/after', () 
   assert.ok(/Logger\.log/.test(preview) && /Logger\.log/.test(apply));
 });
 
-test('CLIENTS_HEADERS untouched: 34 append-only columns ending at paymentAmountOverrides', () => {
+test('CLIENTS_HEADERS: 36 append-only columns — paymentAmountOverrides then the who/when stamps', () => {
   assert.equal(CLIENTS_HEADERS[0], 'id');
-  assert.equal(CLIENTS_HEADERS[CLIENTS_HEADERS.length - 1], 'paymentAmountOverrides');
-  assert.equal(CLIENTS_HEADERS.length, 34);
+  assert.deepEqual(CLIENTS_HEADERS.slice(-3), ['paymentAmountOverrides', 'updatedAt', 'updatedBy']);
+  assert.equal(CLIENTS_HEADERS.length, 36);
   assert.ok(CLIENTS_HEADERS.includes('nextBillingDate'));
 });

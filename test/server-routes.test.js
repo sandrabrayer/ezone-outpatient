@@ -26,6 +26,8 @@ const DUMMY_SHEETS_URL = 'https://script.example.com/macros/s/AKfycbDUMMY/exec';
 process.env.PORT = String(TEST_PORT);
 process.env.APP_PIN = DUMMY_PIN;
 process.env.SHEETS_URL = DUMMY_SHEETS_URL;
+// Session cookies are minted by /api/verify-pin — the gated routes below log in first.
+process.env.SESSION_SECRET = 'test-session-secret-0123456789abcdef';
 
 // Stub fetch so the app can never reach a live backend from these tests.
 global.fetch = async () => ({
@@ -38,15 +40,15 @@ let server;
 test.before(() => { server = app.start(TEST_PORT); });
 test.after(() => { if (server) server.close(); });
 
-function request(method, path, bodyObj) {
+function request(method, path, bodyObj, extraHeaders) {
   const body = bodyObj == null ? null : JSON.stringify(bodyObj);
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         host: '127.0.0.1', port: TEST_PORT, path, method,
-        headers: body
+        headers: Object.assign(body
           ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-          : {}
+          : {}, extraHeaders || {})
       },
       (res) => {
         let data = '';
@@ -54,7 +56,7 @@ function request(method, path, bodyObj) {
         res.on('end', () => {
           let json = null;
           try { json = JSON.parse(data); } catch (_) { /* non-JSON body */ }
-          resolve({ status: res.statusCode, body: data, json });
+          resolve({ status: res.statusCode, body: data, json, headers: res.headers });
         });
       }
     );
@@ -62,6 +64,14 @@ function request(method, path, bodyObj) {
     if (body) req.write(body);
     req.end();
   });
+}
+
+// Log in with the dummy PIN and return the Cookie header the gated routes need.
+async function loginCookie() {
+  const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN });
+  assert.equal(res.status, 200);
+  const setCookie = (res.headers['set-cookie'] || [])[0] || '';
+  return setCookie.split(';')[0];
 }
 
 async function waitForListen() {
@@ -79,9 +89,10 @@ test('GET /healthz responds 200 { ok: true }', async () => {
   assert.deepEqual(res.json, { ok: true });
 });
 
-test('GET /api/debug/env reports config flags without leaking values', async () => {
+test('GET /api/debug/env reports config flags without leaking values (session-gated)', async () => {
   await waitForListen();
-  const res = await request('GET', '/api/debug/env');
+  assert.equal((await request('GET', '/api/debug/env')).status, 401, 'no cookie -> 401');
+  const res = await request('GET', '/api/debug/env', null, { Cookie: await loginCookie() });
   assert.equal(res.status, 200);
   assert.equal(res.json.ok, true);
   assert.equal(res.json.sheetsUrlConfigured, true);

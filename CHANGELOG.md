@@ -6,6 +6,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Signed session cookie + who/when stamping (Outpatient PR 1).** Port of
+  E-Zone-Dashboard PRs #113/#114. `POST /api/verify-pin` now mints a signed
+  HttpOnly `ezone_session` cookie (HMAC over `SESSION_SECRET`, 7 days,
+  SameSite=Lax, Secure behind HTTPS; legacy `expiry.sig` and user-bearing
+  `expiry.userB64.sig` tokens) and accepts an optional `user` **only** from
+  `lib/users.js` (`ורד` / `שירן` / `יעל` — the `assignedTo` names). Every
+  browser-only data route (`/api/sheets` GET+POST, `/api/continuation-roster`,
+  new `GET /api/me`, `/api/debug/*`) requires the cookie (401 otherwise);
+  `POST /api/sheets` always overwrites `body.user` from the cookie; new
+  `POST /api/logout` expires it (the יציאה button calls it). **Fail-closed:**
+  no `SESSION_SECRET` → verify-pin 500 + a clear log line, data routes 401.
+  No Railway route serves another app (therapists / dashboard call the Apps
+  Script `/exec` directly — verified), so nothing cross-app changed. Schema:
+  `updatedAt`, `updatedBy` appended at the END of `CLIENTS_HEADERS` (36
+  cols), `LEADS_HEADERS` and both tombstone literals, text-forced.
+  `Code.gs` stamps are SERVER-OWNED: `_saveAll` diffs each client/lead
+  against its on-sheet row by id (`_clientDiffCols` / `_leadDiffCols`
+  ignore id + stamps + the two server-managed cells) — changed or new →
+  stamp now + user, unchanged → carry the sheet's stamps, payload stamps
+  never trusted, preserved rows untouched, explicit deletes stamp the
+  deleter on the tombstone; every single-cell Clients writer stamps its row
+  (blank user for cross-app receivers). Client: one `apiFetch` 401 handler
+  → PIN screen; data loads after the PIN. **Railway: set `SESSION_SECRET`
+  BEFORE merging** (variables apply only to deployments started after
+  saving). Tests: +32 (`session-who-when`, `session-fail-closed`), 17 pins
+  updated; suite 819 green. See `CHANGELOG-session-who-when.md` (incl. the
+  PR 2 plan: name picker + `updatedAt` conflict refusal).
 - **`getTreatmentPlans`: project `renewalDate` (date only).** The cross-app
   projection now includes each client's package-end/renewal date so the E-Zone
   Therapists app can prompt a "renew next week" conversation. SAME value Vered's

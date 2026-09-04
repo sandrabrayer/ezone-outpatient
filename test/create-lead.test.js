@@ -71,7 +71,10 @@ const LEADS_HEADERS = [
   'house_of_origin', 'not_relevant_reason', 'not_relevant_note',
   // assignedTo (משוייך ל) is appended on the volta line and kept in the union;
   // the mirror must track Code.gs's LEADS_HEADERS.
-  'assignedTo'
+  'assignedTo',
+  // who/when stamps (session-who-when PR): appended last; _createLead stamps
+  // updatedAt (WHEN) with a blank updatedBy — it is a cross-app receiver.
+  'updatedAt', 'updatedBy'
 ];
 
 function createLead(sheet, expectedSecret, payload, today) {

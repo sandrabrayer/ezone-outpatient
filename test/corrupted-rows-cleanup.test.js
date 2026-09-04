@@ -580,12 +580,21 @@ test('vm apply: approved=TRUE rows only; oldValue re-verified; single-cell write
   assert.equal(res.ok, true);
   assert.equal(res.applied, 2);
   assert.equal(res.skipped, 3);
-  // exactly two single-cell setValue writes on Clients, at the planned cells
+  // exactly two single-cell setValue writes on Clients at the planned cells,
+  // each followed by that row's who/when stamp (updatedAt/updatedBy — two more
+  // single-cell writes; updatedBy blank: the repair runs from the editor).
+  const AT = CLIENTS_HEADERS.indexOf('updatedAt') + 1;
+  const BY = CLIENTS_HEADERS.indexOf('updatedBy') + 1;
   const clientWrites = writes.filter((w) => w.sheet === 'Clients');
-  assert.deepEqual(clientWrites, [
+  assert.deepEqual(clientWrites.filter((w) => w.col !== AT && w.col !== BY), [
     { sheet: 'Clients', row: 3, col: NAME + 1, value: 'רות לוי', kind: 'setValue' },
     { sheet: 'Clients', row: 5, col: NOTES + 1, value: 'שורה אחרת', kind: 'setValue' },
   ]);
+  assert.deepEqual(clientWrites.filter((w) => w.col === AT || w.col === BY).map((w) => [w.row, w.col, w.kind, w.col === BY ? w.value : /^\d{4}-\d{2}-\d{2}T/.test(String(w.value))]), [
+    [3, AT, 'setValue', true], [3, BY, 'setValue', ''],
+    [5, AT, 'setValue', true], [5, BY, 'setValue', ''],
+  ]);
+  assert.equal(clientWrites.length, 6);
   // unapproved and drifted rows are untouched
   assert.equal(sheets.Clients._data[1][NAME], 'דנה �הן');
   assert.equal(sheets.Clients._data[3][NOTES], 'הערה �שנה');
@@ -743,9 +752,9 @@ test('CORRUPTION_LOCATIONS mirrors public/app.js LOCATIONS exactly', () => {
   assert.deepEqual(codeGs, frontend);
 });
 
-test('CLIENTS_HEADERS untouched: 34 append-only columns ending at paymentAmountOverrides', () => {
-  assert.equal(CLIENTS_HEADERS.length, 34);
-  assert.equal(CLIENTS_HEADERS[CLIENTS_HEADERS.length - 1], 'paymentAmountOverrides');
+test('CLIENTS_HEADERS: 36 append-only columns — paymentAmountOverrides then the who/when stamps', () => {
+  assert.equal(CLIENTS_HEADERS.length, 36);
+  assert.deepEqual(CLIENTS_HEADERS.slice(-3), ['paymentAmountOverrides', 'updatedAt', 'updatedBy']);
 });
 
 test('scan targets: every configured column exists in its sheet\'s header array', () => {

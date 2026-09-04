@@ -340,11 +340,11 @@ test('Script Property keys are pinned', () => {
   assert.ok(GS.includes("var INTEGRITY_BACKUP_NAME      = 'EZONE-Backups';"));
 });
 
-test('CLIENTS_HEADERS untouched: still ends at paymentAmountOverrides', () => {
+test('CLIENTS_HEADERS: append-only tail — paymentAmountOverrides then the who/when stamps', () => {
   const headers = gsHeaders('CLIENTS_HEADERS');
   assert.equal(headers[0], 'id');
-  assert.equal(headers[headers.length - 1], 'paymentAmountOverrides');
-  assert.equal(headers.length, 34);
+  assert.deepEqual(headers.slice(-3), ['paymentAmountOverrides', 'updatedAt', 'updatedBy']);
+  assert.equal(headers.length, 36);
 });
 
 test('project timezone is Asia/Jerusalem (atHour(2) + snapshot date rolls depend on it)', () => {
