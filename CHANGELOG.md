@@ -6,6 +6,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **End-user guide (Hebrew, RTL).** New `docs/USER-GUIDE.he.md` — the
+  first user-facing document in the repo: login (the bot never hands out
+  passwords), daily operations (leads/outpatients incl. `לא רלוונטי` with a
+  reason, renewals, treatment plans, editing a card), therapist payouts
+  (present but not in use yet), working rules that prevent conflicts
+  (refresh before editing, one editor per patient at a time, verify after
+  save), common problems (duplicates — never delete on your own; a
+  "disappeared" record — check other statuses then report, never re-enter;
+  unsaved changes) and who to contact. Wrapped in `<div dir="rtl" lang="he">`
+  so GitHub renders it right-to-left. README links to it. No runtime change.
+  Guard test `test/user-guide.test.js` (12) pins the sections, the RTL
+  wrapper, the absence of anything secret-looking, and that the UI wording the
+  guide relies on still exists in `public/index.html`; suite 848 → 860. See
+  `CHANGELOG-user-guide.md`.
 - **Name picker + stale-save conflict refusal (Outpatient PR 2).** Port of
   E-Zone-Dashboard PR #114 on top of PR 1. After a correct PIN the client
   reads `GET /api/me`; an empty `user` opens a one-screen RTL name picker
