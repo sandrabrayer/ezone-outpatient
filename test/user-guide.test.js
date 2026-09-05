@@ -7,8 +7,8 @@
  * so these lock its structure (sections, RTL wrapper), its safety rules
  * (never hand out passwords, never delete duplicates yourself), that it
  * never carries anything that looks like a credential, and that the UI
- * wording it relies on still exists in public/index.html so the text cannot
- * silently drift from the app. Pure file-content checks — no server, no
+ * wording / session TTL it relies on still exist in public/index.html and
+ * lib/session.js so the text cannot silently drift from the app. Pure file-content checks — no server, no
  * network.
  */
 
@@ -22,6 +22,7 @@ const GUIDE_PATH = path.join(ROOT, 'docs', 'USER-GUIDE.he.md');
 const guide = fs.readFileSync(GUIDE_PATH, 'utf8');
 const indexHtml = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+const { DEFAULT_TTL_SECONDS } = require('../lib/session');
 
 const lines = guide.split('\n');
 const h2s = lines.filter((l) => l.startsWith('## ')).map((l) => l.slice(3).trim());
@@ -76,6 +77,17 @@ test('5. login section: the bot never hands out passwords; password requests go 
   const s = section('כניסה');
   assert.ok(s.includes('הבוט לא מוסר סיסמאות'), 'states the bot does not give passwords');
   assert.ok(s.includes('סנדרה'), 'names a person to ask for a password');
+});
+
+test('5b. login section describes the real session behaviour (no "remember device" checkbox)', () => {
+  const s = section('כניסה');
+  // The app has no such checkbox — a correct PIN keeps the device logged in for
+  // the cookie TTL and the name picker remembers the name per device.
+  assert.ok(!s.includes('זכור מכשיר זה'), 'no reference to a non-existent "remember this device" checkbox');
+  const days = DEFAULT_TTL_SECONDS / 86400;
+  assert.ok(Number.isInteger(days), 'session TTL is a whole number of days');
+  assert.ok(s.includes(`${days} ימים`), `states the device stays logged in for ${days} days (lib/session.js TTL)`);
+  assert.ok(s.includes('בוחרים את השם'), 'mentions picking your name once');
 });
 
 test('6. therapist-payout section says the feature is not in use yet', () => {

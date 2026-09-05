@@ -16,9 +16,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   "disappeared" record — check other statuses then report, never re-enter;
   unsaved changes) and who to contact. Wrapped in `<div dir="rtl" lang="he">`
   so GitHub renders it right-to-left. README links to it. No runtime change.
-  Guard test `test/user-guide.test.js` (12) pins the sections, the RTL
-  wrapper, the absence of anything secret-looking, and that the UI wording the
-  guide relies on still exists in `public/index.html`; suite 848 → 860. See
+  Login bullet describes the real behaviour (device stays logged in for 7
+  days, name picked once from the list — no "remember device" checkbox).
+  Guard test `test/user-guide.test.js` (13) pins the sections, the RTL
+  wrapper, the absence of anything secret-looking, the "7 ימים" to
+  `lib/session.js` `DEFAULT_TTL_SECONDS`, and that the UI wording the guide
+  relies on still exists in `public/index.html`; suite 848 → 861. See
   `CHANGELOG-user-guide.md`.
 - **Name picker + stale-save conflict refusal (Outpatient PR 2).** Port of
   E-Zone-Dashboard PR #114 on top of PR 1. After a correct PIN the client
