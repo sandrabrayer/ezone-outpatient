@@ -6,6 +6,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Hardened `@claude` GitHub Actions workflow.** New
+  `.github/workflows/claude.yml`, copied **byte-for-byte** from
+  `ezone-helpdesk` (blob `ec00836`) with no adaptation, so all six E-ZONE
+  copies stay diffable against one original. It runs
+  `anthropics/claude-code-action@v1` when `@claude` is mentioned on an issue
+  or PR, and only for the repo owner: the job's `if:` gates on
+  `github.actor == 'sandrabrayer'`, `&&`-ed *in front of* the four mention
+  checks (`issue_comment`, `pull_request_review_comment`,
+  `pull_request_review`, `issues`), so no other account can start a run —
+  E-ZONE staff reach the helpdesk through its own intake, never through
+  GitHub. A non-owner `@claude` mention produces **no run at all**; that is
+  the intended outcome, not a bug to be "fixed" by loosening the `if:`.
+  Permissions are declared once at workflow level and are exactly
+  `contents: write`, `pull-requests: write`, `issues: write`,
+  `id-token: write`, `actions: read` — nothing beyond. Cost is capped with
+  `claude_args: '--max-turns 15'`. The credential appears only as
+  `${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`; nothing is hard-coded and no
+  other secret is named. **Setup required after merge:** that secret is not
+  yet set here (Actions secrets hold only `APP_PIN`, `CLASPRC_JSON`,
+  `DEPLOYMENT_ID`), so until it is added the workflow is inert — add it under
+  Settings → Secrets and variables → Actions with the value from
+  `claude setup-token`. The deploy branch
+  `claude/youthful-volta-laarnk` is also the GitHub default branch, so agent
+  PRs target what Railway serves. Workflow file only — no application code,
+  no `Code.gs` (no clasp redeploy), no frontend asset (no SW bump), no new
+  dependencies, no new env vars. Contract and rationale:
+  `docs/github-actions.md` in `ezone-helpdesk`.
 - **End-user guide (Hebrew, RTL).** New `docs/USER-GUIDE.he.md` — the
   first user-facing document in the repo: login (the bot never hands out
   passwords), daily operations (leads/outpatients incl. `לא רלוונטי` with a
