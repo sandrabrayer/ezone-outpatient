@@ -6,6 +6,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Working indicator (spinner) across the app.** Nothing said "I heard
+  you": an Apps Script save is a 1-3 s round-trip, so a click looked like
+  nothing happening and people clicked again — which has produced duplicate
+  rows before. Coverage is structural rather than per-call-site: `apiFetch`
+  is now the SINGLE network funnel (verify-pin and logout moved on to it with
+  an `allow401` flag) and drives a header indicator for every server call by
+  construction, and `withBusy(target, kind, fn)` / `busyAttach(el, kind)` are
+  the single action wrappers that add the clicked button’s spinner, its
+  Hebrew label and the double-click block. New `public/busy.js` (UMD, pure,
+  injectable timers) holds the timing rules: show only after **150 ms**, once
+  shown hold **300 ms**, after **20 s** add "זה לוקח יותר מהרגיל…";
+  reference-counted so overlapping actions share one spinner. It cannot get
+  stuck — every path ends in a `finally`, `end()`/`release()` are idempotent,
+  and if `busy.js` fails to load the app still works without a spinner.
+  Labels in one place: שומר… / מחפש… / שולח… / טוען… / מייצא…. 19
+  button-level actions, all 8 search boxes (spinner at the field’s inline
+  end, RTL-correct), and every `apiFetch` call in the header. Optimistic
+  saves and delegated list actions are header-only by design (they close or
+  re-render the button before the save returns). Accessibility:
+  `role="status"` carrying the Hebrew label, `aria-busy` on the region, and a
+  **pulsing dot instead of a rotation** under `prefers-reduced-motion`. Pure
+  CSS in the existing `--green` accent, no new library, `Code.gs` untouched.
+  `sw.js` cache `v5` -> `v6`. Tests: new `test/busy-indicator.test.js` (51,
+  including 11 that run the real busy layer sliced out of `app.js` in a vm);
+  suite 872 -> 929. See `CHANGELOG-busy-indicator.md`.
 - **ירדן added as an outpatient user.** `lib/users.js` `SESSION_USERS`
   `[ורד, שירן, יעל]` -> `[ורד, שירן, יעל, ירדן]` (appended, existing order
   kept) and the matching `<option>ירדן</option>` on the single
