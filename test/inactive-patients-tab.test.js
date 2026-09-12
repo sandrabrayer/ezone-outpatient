@@ -97,7 +97,7 @@ test('index.html: nav tab + view section exist and wire by the standard data-vie
 
 test('app.js: render() dispatches the inactive view and the search input is wired', () => {
   assert.match(APP, /state\.view === 'inactive'\) renderInactive\(\)/);
-  assert.match(APP, /state\.inactiveSearch = e\.target\.value; renderInactive\(\)/);
+  assert.match(APP, /wireSearchBox\('#inactiveSearch', function \(e\) \{ state\.inactiveSearch = e\.target\.value; return renderInactive\(\); \}\);/);
   assert.match(APP, /inactiveSearch: ''/, 'per-tab search state must be initialized');
 });
 

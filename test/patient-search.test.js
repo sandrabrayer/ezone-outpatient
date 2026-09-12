@@ -112,7 +112,9 @@ test('index.html: the locator panel + input live on the dashboard, and the modul
 
 test('app.js: the locator is wired — per-dashboard search state, input listener, render call', () => {
   assert.match(APP, /dashSearch: ''/);
-  assert.match(APP, /state\.dashSearch = e\.target\.value; renderDashPatientSearch\(\)/);
+  // Wired through the shared wireSearchBox helper since the working-indicator
+  // PR, so the field can spin while the tombstone fetch is out.
+  assert.match(APP, /wireSearchBox\('#dashPatientSearch', function \(e\) \{ state\.dashSearch = e\.target\.value; return renderDashPatientSearch\(\); \}\);/);
   const dash = APP.match(/function renderDashboard\(\) \{[\s\S]*?\n  \}/);
   assert.ok(dash, 'renderDashboard not found');
   assert.match(dash[0], /renderDashPatientSearch\(\);/, 'the dashboard render must include the locator');

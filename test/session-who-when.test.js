@@ -758,19 +758,25 @@ test('F: Apps Script cross-app receivers keep their own secret gates and need no
 
 test('G: every /api data call in app.js goes through apiFetch (401 -> PIN screen); /api/verify-pin does not', () => {
   const raw = APP.match(/await fetch\('\/api\/[^']*'/g) || [];
-  assert.deepEqual(raw, ["await fetch('/api/verify-pin'"], 'only the PIN call may use raw fetch');
+  assert.deepEqual(raw, [], 'no /api call may bypass apiFetch any more');
+  // Since the working-indicator PR there is NO raw /api fetch at all: even
+  // verify-pin and logout go through the funnel, with allow401 so a 401 there
+  // still means "wrong PIN" / "already logged out" rather than a bounce.
+  assert.match(APP, /apiFetch\('\/api\/verify-pin',[\s\S]{0,200}?allow401: true/);
+  assert.match(APP, /apiFetch\('\/api\/logout',[\s\S]{0,120}?allow401: true/);
   const wrapped = (APP.match(/await apiFetch\('\/api\/[^']*'/g) || []);
   assert.ok(wrapped.length >= 15, 'all data calls wrapped, got ' + wrapped.length);
   assert.ok(wrapped.some((s) => s.includes('/api/continuation-roster')));
   // one reusable handler: 401 -> forget the role, show the PIN screen, throw
-  assert.match(APP, /async function apiFetch\(url, opts\) \{\s*var r = await fetch\(url, opts\);\s*if \(r\.status === 401\) \{ handleUnauthorized\(\); throw new Error\('unauthorized'\); \}/);
+  assert.match(APP, /async function apiFetch\(url, opts, cfg\) \{/);
+  assert.match(APP, /if \(r.status === 401 && !cfg.allow401\) \{ handleUnauthorized\(\); throw new Error\('unauthorized'\); \}/);
   assert.match(APP, /function handleUnauthorized\(\) \{[\s\S]*?sessionStorage\.removeItem\('ez_role'\)[\s\S]*?showPin\(\);/);
   // the PIN form sends only the PIN; the name picker (PR 2) re-posts {pin, user}
   // through the SAME helper — the body never carries anything else
   assert.match(APP, /var body = user \? \{ pin: pin, user: user \} : \{ pin: pin \};/);
   assert.match(APP, /body: JSON\.stringify\(body\)/);
   // logout also expires the server cookie
-  assert.match(APP, /fetch\('\/api\/logout', \{ method: 'POST' \}\)/);
+  assert.match(APP, /apiFetch\('\/api\/logout', \{ method: 'POST' \}/);
   // the load fired at init is refused until the PIN mints the cookie, so a
   // successful PIN (and the viewer button) loads the data if nothing loaded yet
   assert.match(APP, /state\.role = 'editor';\s*enterApp\(\);[\s\S]{0,300}?if \(!state\.loaded\) loadAll\(\)\.catch/);
