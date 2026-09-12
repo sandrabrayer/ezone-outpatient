@@ -20,8 +20,11 @@
  *   module, new index.html markup (picker screen, header name, conflict
  *   banner) and CSS. CACHE bumped so an installed app cannot serve the old
  *   shell with the new app.js.
+ * - v5 (2026-09-12): ירדן added to the login name picker / assignedTo list
+ *   (lib/users.js + index.html). CACHE bumped so an installed app cannot keep
+ *   serving the old index.html whose משוייך ל dropdown lacks her.
  */
-var CACHE = 'ezone-outpatient-v4';
+var CACHE = 'ezone-outpatient-v5';
 var SHELL = [
   './',
   './index.html',

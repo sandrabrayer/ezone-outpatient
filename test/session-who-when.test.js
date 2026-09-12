@@ -165,7 +165,7 @@ test('B: SESSION_USERS equals the index.html assignedTo options (nothing invente
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
   assert.deepEqual(SESSION_USERS, options);
-  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל']);
+  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל', 'ירדן']);
 });
 
 test('B: verify-pin sets an HttpOnly SameSite=Lax 7-day cookie; Secure only behind HTTPS', async () => {
