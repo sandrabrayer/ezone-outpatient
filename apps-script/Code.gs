@@ -17,8 +17,9 @@ var LEADS_HEADERS = [
   'not_relevant_reason',
   'not_relevant_note',
   // APPEND-ONLY (משוייך ל / assigned-to): staff member the lead is assigned to
-  // (ורד / שירן / יעל). Other staff besides Vered now enter leads. Appended at
-  // the very END so every earlier column keeps its position (_readAll/_writeAll
+  // (the lib/users.js SESSION_USERS names: ורד / שירן / יעל / ירדן). Other
+  // staff besides Vered now enter leads. Appended at the very END so every
+  // earlier column keeps its position (_readAll/_writeAll
   // map positionally; _ensureSheet does not migrate). Follows the lead onto the
   // client on conversion. Old rows read back blank.
   'assignedTo',
