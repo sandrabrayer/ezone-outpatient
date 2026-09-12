@@ -1,0 +1,15 @@
+# Line endings: LF everywhere, in the repo AND in the working tree.
+#
+# Git for Windows ships core.autocrlf=true in its SYSTEM config, so every
+# fresh clone on Sandra's Windows PCs checked every text file out with CRLF.
+# The committed blobs were already LF, so nothing was wrong in the repo — but
+# the many tests that read a source file and match it with \n-anchored regexes
+# failed locally while passing in CI on Ubuntu: 39 failures out of 877, across
+# 18 files, all of them false. `eol=lf` overrides core.autocrlf for this repo,
+# so a checkout on either PC matches what CI sees.
+#
+# text=auto still lets git detect binary content, so the generated PWA icons
+# (public/icon-v1-*.png) are left byte-for-byte alone — and so is
+# test/session-who-when.test.js, which carries NUL bytes in a control-character
+# fixture and is therefore auto-detected as binary too.
+* text=auto eol=lf
