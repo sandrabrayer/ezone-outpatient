@@ -51,6 +51,15 @@
         <button class="tab" data-view="continuation">מסלול המשך</button>
       </nav>
       <div class="topbar-right">
+        <!-- Global working indicator: shown whenever ANY call to the server is
+             in flight, including the ones with no button behind them. role=status
+             announces the Hebrew label (visually hidden — the spinner carries the
+             meaning on screen); the 20 s notice becomes visible text. -->
+        <span id="globalBusy" class="busy-global" role="status" hidden>
+          <span class="busy-spinner" aria-hidden="true"></span>
+          <span id="globalBusyLabel" class="sr-only"></span>
+          <span id="globalBusySlow" class="busy-slow" hidden>זה לוקח יותר מהרגיל…</span>
+        </span>
         <span id="sessionUser" class="session-user" hidden>מחובר/ת כ: <b id="sessionUserName"></b> · <button type="button" id="switchUserBtn" class="link-btn">החלף</button></span>
         <button id="settingsBtn" class="btn btn-ghost edit-only" title="הגדרות">⚙️</button>
         <button id="refreshBtn" class="btn btn-ghost" title="רענון">↻</button>
@@ -80,7 +89,10 @@
              dropped-row incident). -->
         <div class="panel">
           <div class="panel-title">🔎 איתור מטופל</div>
-          <input id="dashPatientSearch" class="search" placeholder="חיפוש מטופל בכל הלשוניות — כולל מטופלים שנמחקו…" />
+          <span class="search-wrap">
+            <input id="dashPatientSearch" class="search" placeholder="חיפוש מטופל בכל הלשוניות — כולל מטופלים שנמחקו…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <div id="dashPatientResults" class="billing-breakdown"></div>
         </div>
 
@@ -127,7 +139,10 @@
       <!-- Leads -->
       <section id="view-leads" class="view">
         <div class="toolbar">
-          <input id="leadsSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="leadsSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <button id="addLeadBtn" class="btn btn-primary edit-only">+ ליד חדש</button>
         </div>
         <div id="kanban" class="kanban"></div>
@@ -137,7 +152,10 @@
       <section id="view-clients" class="view">
         <div id="duplicateClientsReport" class="dupreport" hidden></div>
         <div class="toolbar">
-          <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <button id="addClientBtn" class="btn btn-primary edit-only">+ הוסף מטופל ישירות</button>
           <div id="clientTabs" class="client-tabs"></div>
         </div>
@@ -147,7 +165,10 @@
       <!-- Billing -->
       <section id="view-billing" class="view">
         <div class="toolbar">
-          <input id="billingSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="billingSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <label class="billing-date-label">תאריך
             <input id="billingDate" type="date" />
           </label>
@@ -180,7 +201,10 @@
       <!-- Retention -->
       <section id="view-retention" class="view">
         <div class="toolbar">
-          <input id="retentionSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="retentionSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">שימור לידים — לא רלוונטים</h2>
         </div>
         <div id="retentionList"></div>
@@ -192,7 +216,10 @@
            therapists app via the deactivateClient receiver). Both restorable. -->
       <section id="view-inactive" class="view">
         <div class="toolbar">
-          <input id="inactiveSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="inactiveSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
         </div>
         <div id="inactiveList"></div>
@@ -201,7 +228,10 @@
       <!-- Therapist payouts -->
       <section id="view-payouts" class="view">
         <div class="toolbar">
-          <input id="payoutSearch" class="search" placeholder="חיפוש לפי שם מטפל…" />
+          <span class="search-wrap">
+            <input id="payoutSearch" class="search" placeholder="חיפוש לפי שם מטפל…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <label class="billing-date-label">חודש
             <input id="payoutMonth" type="month" />
           </label>
@@ -223,7 +253,10 @@
       <!-- Continuation track (מסלול המשך) -->
       <section id="view-continuation" class="view">
         <div class="toolbar">
-          <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <span class="search-wrap">
+            <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
+            <span class="busy-spinner search-spinner" aria-hidden="true" hidden></span>
+          </span>
           <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
         </div>
         <div id="continuationList" class="continuation-list"></div>
@@ -823,6 +856,7 @@
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="payout-export.js?v=__BUILD__" defer></script>
   <script src="conflicts.js?v=__BUILD__" defer></script>
+  <script src="busy.js?v=__BUILD__" defer></script>
   <script>
     // PWA: register the service worker so the app is installable to the home
     // screen and opens standalone. Network-first, so data stays fresh.

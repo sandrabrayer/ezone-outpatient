@@ -23,8 +23,12 @@
  * - v5 (2026-09-12): ירדן added to the login name picker / assignedTo list
  *   (lib/users.js + index.html). CACHE bumped so an installed app cannot keep
  *   serving the old index.html whose משוייך ל dropdown lacks her.
+ * - v6 (2026-09-12): working indicator — new busy.js module, the spinner
+ *   markup/CSS in index.html + style.css, and app.js routed through the
+ *   withBusy/busyAttach helpers. CACHE bumped so an installed app cannot
+ *   serve the old shell against the new app.js.
  */
-var CACHE = 'ezone-outpatient-v5';
+var CACHE = 'ezone-outpatient-v6';
 var SHELL = [
   './',
   './index.html',

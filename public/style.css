@@ -967,3 +967,96 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ===== Working indicator (spinner) — appended ==============================
+ * One visual language for "the app is doing something": a ring that spins in
+ * the app's existing accent (--green), used in three places — the header
+ * (any server call, button or not), inside a clicked button next to its
+ * Hebrew label, and at the end of a search field.
+ *
+ * Pure CSS, no library. Everything here is logical-property based
+ * (inset-inline-*, margin-inline-*), so it lays out correctly in this RTL app
+ * without a single direction-specific rule.
+ *
+ * MOTION: the rotation is the default, but prefers-reduced-motion replaces it
+ * with a gentle opacity pulse on a filled dot — the same information, no
+ * spinning. See the media query at the end of this block.
+ */
+.busy-spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--green) 28%, transparent);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: busy-spin 0.7s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Screen-reader-only text: the Hebrew label inside role="status". On screen
+ * the spinner carries the meaning, so the label is not shown twice. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
+
+/* --- header: the global indicator ---------------------------------------- */
+.busy-global {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-inline-end: 4px;
+}
+/* The 20 s "this is taking longer than usual" notice. Muted, so it reads as
+ * reassurance rather than an error (errors are --red, in the toast). */
+.busy-slow {
+  color: var(--muted); font-size: 12px; white-space: nowrap;
+}
+@media (max-width: 600px) {
+  /* Keep the crowded phone header to the spinner alone; the notice would
+     push the tabs off-screen. It stays in the DOM for screen readers. */
+  .busy-slow { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+
+/* --- a button that is working -------------------------------------------- */
+/* The label is swapped for "spinner + שומר…" while busy. The button keeps its
+ * own width behaviour; the gap matches .busy-global so the two read alike. */
+button.is-busy {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+button.is-busy .busy-spinner {
+  /* On a filled primary button the accent ring would vanish into the
+     background, so borrow the button's own text colour. */
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+/* A disabled button is dimmed app-wide; while it is BUSY that dimming reads as
+ * "broken", so keep it legible and show the working cursor instead. */
+button.is-busy[disabled] { opacity: 1; cursor: progress; }
+
+/* --- a search field that is working --------------------------------------- */
+.search-wrap { position: relative; display: block; }
+/* The toolbar lays searches out in a flex row; the wrapper has to inherit the
+   input's growth so the field keeps its old width. */
+.toolbar .search-wrap { flex: 1 1 auto; min-width: 0; }
+.search-wrap .search { width: 100%; }
+.search-spinner {
+  position: absolute;
+  /* inline-end = the LEFT edge in RTL, i.e. the far end of the field from
+     where Hebrew text starts. No dir-specific rule needed. */
+  inset-inline-end: 10px;
+  top: 50%;
+  margin-top: -7px;             /* half the 14px box — vertical centring */
+  pointer-events: none;         /* never eat a click meant for the input */
+}
+
+/* --- reduced motion: a pulsing dot, never a rotation ---------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border: 0;
+    background: var(--green);
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  button.is-busy .busy-spinner { background: currentColor; }
+  @keyframes busy-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+}
