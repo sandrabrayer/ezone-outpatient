@@ -300,6 +300,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
     (+ updated derive/renew tests) lock all of the above; full suite 726 green.
 
 ### Testing / CI
+- **LF line endings in the working tree too (`.gitattributes`).** Git for
+  Windows ships `core.autocrlf=true` in its SYSTEM config, so every fresh
+  clone on Windows checked each text file out with CRLF. The committed blobs
+  were always LF — nothing was wrong in the repo — but the many tests that
+  read a source file and match it with `\n`-anchored regexes then failed
+  locally while passing in CI on Ubuntu: **39 false failures out of 877,
+  across 18 test files**, reproduced on a fresh clone before the fix and gone
+  after it. New `.gitattributes` with `* text=auto eol=lf` — `eol=lf` is the
+  half that matters, overriding `core.autocrlf` for this repo so a Windows
+  checkout matches what CI sees. **No content churn:** all 200 tracked blobs
+  were already LF (196 text + 4 binary), so the commit adds files and
+  renormalises nothing. `text=auto` still auto-detects binary, leaving the
+  three PWA icons and `test/session-who-when.test.js` (NUL bytes in a
+  control-character fixture) byte-for-byte alone. Same fix as
+  `ezone-helpdesk` PR #30. New `test/line-endings.test.js` (6) guards both
+  directions: the rule still exists and still says `eol=lf`, no tracked blob
+  or working-tree text file carries CRLF, binaries stay auto-detected, and
+  the `\n`-anchored source reads that used to break still hold.
+  Suite 877 → 883.
 - **Automated test CI + coverage for the priority modules.** Added
   `.github/workflows/test.yml` — runs `npm ci && npm test` (Node 22, the
   built-in `node --test` runner) on **every pull request and every push to

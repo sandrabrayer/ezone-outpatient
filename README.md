@@ -103,6 +103,18 @@ in a vm sandbox) and fail-closed config (`server-routes`, `server-fail-closed`,
 CI (`.github/workflows/test.yml`) runs `npm ci && npm test` on every pull
 request and every push to `main`.
 
+**Line endings.** `.gitattributes` pins `* text=auto eol=lf`, so the working
+tree is LF on every OS. This matters because many tests read a source file
+and match it with \n-anchored regexes: Git for Windows ships
+`core.autocrlf=true` in its **system** config, and before this rule a fresh
+Windows clone checked everything out as CRLF and produced **39 false test
+failures** that CI on Ubuntu never saw. The committed blobs were always LF —
+only the checkout was wrong. If you have an **older clone** made before this
+rule landed, it still holds CRLF files until it re-checks-out: from a
+**clean** tree run `git rm --cached -r . && git reset --hard` once.
+`test/line-endings.test.js` fails loudly with that same instruction if a
+checkout ever drifts back.
+
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
