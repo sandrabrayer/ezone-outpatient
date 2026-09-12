@@ -115,6 +115,44 @@ rule landed, it still holds CRLF files until it re-checks-out: from a
 `test/line-endings.test.js` fails loudly with that same instruction if a
 checkout ever drifts back.
 
+## Working indicator (spinner)
+
+Whenever the app is searching, saving, sending, loading or exporting, a
+spinner shows until the action finishes. Coverage is structural, so a new
+action cannot silently miss it:
+
+- **`apiFetch` is the single network funnel.** Every call to the server goes
+  through it (including `/api/verify-pin` and `/api/logout`, with an
+  `allow401` flag where a 401 is not an expired session), and it drives the
+  header indicator in a `finally`. A test asserts the only bare `fetch(` in
+  `app.js` is the one *inside* `apiFetch`.
+- **`withBusy(target, kind, fn)`** wraps an action: it disables the clicked
+  button immediately (blocking the double-click that has created duplicate
+  rows before), swaps its label for a spinner + Hebrew label, and restores
+  everything in a `finally`. **`busyAttach(el, kind)`** is the lower-level
+  sibling for modal forms that already own their disable/re-enable.
+
+The timing rules live in `public/busy.js` (UMD, pure, injectable timers, so
+they are unit-tested without waiting): show only after **150 ms**, once shown
+hold at least **300 ms**, and after **20 s** add `זה לוקח יותר מהרגיל…`.
+Overlapping actions are reference-counted behind one spinner. Labels live in
+one place — `שומר…` / `מחפש…` / `שולח…` / `טוען…` / `מייצא…`, falling back to
+`טוען…` for an unknown kind.
+
+**It cannot get stuck:** every path ends in a `finally`, `end()`/`release()`
+are idempotent, the count never goes below zero, and if `busy.js` fails to
+load the app still runs — just without a spinner.
+
+Accessibility: `role="status"` carries the Hebrew label as screen-reader-only
+text (the spinner is `aria-hidden`), `aria-busy` marks the region in flux,
+and `prefers-reduced-motion: reduce` swaps the rotation for a pulsing dot.
+Pure CSS in the existing `--green` accent; RTL comes from logical properties
+(`inset-inline-end`), with no direction-specific rules.
+
+**Adding an action?** Wrap it in `withBusy` if it has a button. If it only
+calls the server, it is already covered by the funnel. See
+`CHANGELOG-busy-indicator.md` for the full per-action list.
+
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).

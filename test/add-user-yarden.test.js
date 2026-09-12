@@ -480,12 +480,14 @@ test('E: the existing three still log in and still stamp — no regression from 
 
 /* ================= F. service worker ================= */
 
-test('F: sw.js cache bumped v4 -> v5 (index.html changed) and the bump is documented', () => {
-  assert.match(SW, /var CACHE = 'ezone-outpatient-v5';/);
-  assert.doesNotMatch(SW, /var CACHE = 'ezone-outpatient-v4';/, 'only one live CACHE version');
-  assert.match(SW, /v5 \(2026-09-12\)/, 'the bump is documented in the header comment');
+test('F: this PR\'s v4 -> v5 bump stays documented; the live cache never regresses below it', () => {
+  // The v5 bump this PR shipped stays recorded in the header history. The
+  // CURRENT version is deliberately NOT pinned here — later PRs bump it
+  // monotonically and own that assertion (busy-indicator pins v6).
+  assert.match(SW, /v5 \(2026-09-12\)/, 'the v5 bump stays documented in the header comment');
   // monotonic: every version mentioned in the header is <= the live one
   const live = Number((SW.match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]);
+  assert.ok(live >= 5, 'the live cache never goes below the v5 shipped here, got v' + live);
   const mentioned = Array.from(SW.matchAll(/^ \* - v(\d+) \(/gm)).map((m) => Number(m[1]));
   assert.ok(mentioned.length >= 4, 'the header keeps the bump history');
   mentioned.forEach((v) => assert.ok(v <= live, 'v' + v + ' documented above the live v' + live));

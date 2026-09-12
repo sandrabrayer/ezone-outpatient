@@ -425,6 +425,231 @@
     return a.index - b.index;
   }
 
+  // --- Working indicator (spinner) ---------------------------------------
+  // ONE helper, withBusy(), fronts every action that can take time, and ONE
+  // network funnel, apiFetch(), fronts every call to the server — so an action
+  // cannot be missed by accident:
+  //   * apiFetch drives the GLOBAL (header) indicator for 100% of server
+  //     calls BY CONSTRUCTION, including the ones with no button behind them
+  //     (the lazy tombstone fetch behind patient search, the post-action
+  //     reloads). Adding a new endpoint cannot forget the spinner.
+  //   * withBusy adds the clicked button's own spinner + Hebrew label, and
+  //     blocks the double-click that used to create duplicate rows.
+  // The TIMING rules (150 ms before showing, 300 ms minimum once shown, the
+  // 20 s "slow" notice) live in public/busy.js and are unit-tested there.
+  var BusyMod = (typeof self !== 'undefined' && self.EzoneBusy) || null;
+  var BUSY_FALLBACK_LABEL = 'טוען…';
+  var BUSY_FALLBACK_SLOW = 'זה לוקח יותר מהרגיל…';
+
+  function busyLabelFor(kind) { return BusyMod ? BusyMod.labelFor(kind) : BUSY_FALLBACK_LABEL; }
+  function busySlowText() { return BusyMod ? BusyMod.SLOW_TEXT : BUSY_FALLBACK_SLOW; }
+
+  // If busy.js failed to load, every action must still WORK — it just runs
+  // without a spinner. Never let the indicator break the app.
+  function makeBusyTracker(handlers) {
+    if (BusyMod) return BusyMod.createTracker(handlers);
+    return {
+      begin: function () { return function () {}; },
+      reset: function () {},
+      isVisible: function () { return false; },
+      isSlow: function () { return false; },
+      activeCount: function () { return 0; }
+    };
+  }
+
+  // ---- the global indicator in the header --------------------------------
+  function setGlobalBusy(on) {
+    var box = $('#globalBusy');
+    if (box) box.hidden = !on;
+    // aria-busy marks the REGION whose content is in flux.
+    var app = $('#app');
+    if (app) {
+      if (on) app.setAttribute('aria-busy', 'true');
+      else app.removeAttribute('aria-busy');
+    }
+  }
+  function setGlobalSlow(on) {
+    var el = $('#globalBusySlow');
+    if (el) el.hidden = !on;
+  }
+  var globalBusyTracker = makeBusyTracker({
+    onShow: function () { setGlobalBusy(true); },
+    onHide: function () { setGlobalBusy(false); setGlobalSlow(false); },
+    onSlow: function (isSlow) { setGlobalSlow(isSlow); }
+  });
+  // The header carries role="status", so its label is what a screen reader
+  // announces. Set it from the FIRST action of a batch; overlapping actions
+  // share one spinner and keep that label.
+  function beginGlobalBusy(kind) {
+    if (globalBusyTracker.activeCount() === 0) {
+      var el = $('#globalBusyLabel');
+      if (el) el.textContent = busyLabelFor(kind);
+    }
+    return globalBusyTracker.begin();
+  }
+
+  // ---- per-target painting (a button, or a search field's wrapper) -------
+  function paintBusy(el, kind) {
+    if (!el) return;
+    el.setAttribute('aria-busy', 'true');
+    el.classList.add('is-busy');
+    if (el.tagName === 'BUTTON') {
+      // Remember the real label so it comes back verbatim. textContent only —
+      // these labels are plain Hebrew words, never markup.
+      if (el.dataset.busyPrevLabel === undefined) el.dataset.busyPrevLabel = el.textContent;
+      el.textContent = '';
+      var sp = document.createElement('span');
+      sp.className = 'busy-spinner';
+      sp.setAttribute('aria-hidden', 'true');   // the label carries the meaning
+      var tx = document.createElement('span');
+      tx.className = 'busy-btn-label';
+      tx.textContent = busyLabelFor(kind);
+      el.appendChild(sp);
+      el.appendChild(tx);
+    } else {
+      // A search field's wrapper: reveal the spinner already in the markup so
+      // the input itself is never rebuilt (that would lose focus + caret).
+      var s = $('.busy-spinner', el);
+      if (s) s.hidden = false;
+    }
+  }
+  function unpaintBusy(el) {
+    if (!el) return;
+    el.classList.remove('is-busy');
+    el.removeAttribute('aria-busy');
+    if (el.tagName === 'BUTTON') {
+      if (el.dataset.busyPrevLabel !== undefined) {
+        el.textContent = el.dataset.busyPrevLabel;
+        delete el.dataset.busyPrevLabel;
+      }
+    } else {
+      var s = $('.busy-spinner', el);
+      if (s) s.hidden = true;
+    }
+  }
+  // The disable/restore half of the guard lives in busy.js (createControlGuard)
+  // so it can be unit-tested without a DOM; this only adds the repainting.
+  // Idempotent: it is reached both from the tracker's onHide and from
+  // withBusy's finally (whichever comes second is a no-op), so a target can
+  // never stay disabled.
+  function releaseBusyTarget(el) {
+    if (!el || !el.__ezBusyActive) return;
+    unpaintBusy(el);
+    if (el.__ezBusyRelease) { el.__ezBusyRelease(); el.__ezBusyRelease = null; }
+    else { el.__ezBusyActive = false; if ('disabled' in el) el.disabled = !!el.__ezBusyPrevDisabled; }
+  }
+  // Claim a control, or null if it is already working (swallow the click).
+  function claimBusyControl(el) {
+    if (!BusyMod) {
+      if (el.__ezBusyActive) return null;
+      el.__ezBusyActive = true;
+      el.__ezBusyPrevDisabled = !!el.disabled;
+      el.disabled = true;
+      return function () { el.__ezBusyActive = false; el.disabled = !!el.__ezBusyPrevDisabled; };
+    }
+    var release = BusyMod.createControlGuard(el).begin();
+    if (release) el.__ezBusyRelease = release;
+    return release;
+  }
+  function busyTrackerFor(el, kind) {
+    if (!el.__ezBusyTracker) {
+      el.__ezBusyTracker = makeBusyTracker({
+        onShow: function () { paintBusy(el, el.__ezBusyKind); },
+        // A control stays disabled until the spinner actually goes away, so
+        // the visual state and the clickable state never disagree. A plain
+        // region (a search field's wrapper) has nothing to re-enable.
+        onHide: function () {
+          if ('disabled' in el) releaseBusyTarget(el);
+          else unpaintBusy(el);
+        },
+        onSlow: function () {} // the 20 s notice is shown once, in the header
+      });
+    }
+    el.__ezBusyKind = kind;
+    return el.__ezBusyTracker;
+  }
+
+  /**
+   * busyAttach(el, kind) — the lower-level sibling of withBusy, for the modal
+   * form handlers whose control flow ALREADY owns the disable/re-enable
+   * (they re-enable on each validation early-return, before any async work
+   * starts). It disables and starts the indicator now; the returned release()
+   * re-enables and stops it.
+   *
+   * release() is idempotent, so a handler can call it on every exit path —
+   * validation bail-out, success, error — and the indicator can never be left
+   * running. Both helpers share one tracker per element, so they cannot
+   * disagree about what is showing.
+   */
+  function busyAttach(el, kind) {
+    if (!el) return function () {};
+    var endTarget = busyTrackerFor(el, kind).begin();
+    var endGlobal = beginGlobalBusy(kind);
+    if (!el.__ezBusyActive) {
+      // These handlers reach here having ALREADY set disabled = true
+      // themselves, so claim through the same guard but restore to enabled —
+      // each one guards its entry with `if (submit.disabled) return;`.
+      el.disabled = false;
+      claimBusyControl(el);
+    }
+    var released = false;
+    return function release() {
+      if (released) return;
+      released = true;
+      endGlobal();
+      endTarget();
+      var tr = el.__ezBusyTracker;
+      if (!tr || !tr.isVisible()) releaseBusyTarget(el);
+    };
+  }
+
+  /**
+   * withBusy(target, kind, fn) — the one wrapper every timed action uses.
+   *
+   *   target : the clicked button, or a search field's wrapper, or null for a
+   *            background action (then only the header indicator moves).
+   *   kind   : save | search | send | load | export — picks the Hebrew label.
+   *   fn     : () => Promise | any
+   *
+   * Returns a promise that settles like fn's. The target is disabled
+   * IMMEDIATELY (not after 150 ms), because blocking the second click is a
+   * correctness guarantee, not a visual nicety — double submits have created
+   * duplicate rows here before. A call made while the same target is still
+   * busy does nothing at all and resolves to undefined.
+   *
+   * Everything is undone in a finally, so success, a thrown error and a
+   * rejected promise all end the same way: no stuck spinner, ever.
+   */
+  function withBusy(target, kind, fn) {
+    // A CONTROL (button / input) is disabled while it works, so a second
+    // activation must be swallowed. A plain REGION (a search field's wrapper)
+    // must not be: every keystroke of search-as-you-type is a fresh action,
+    // and the tracker simply reference-counts them behind one spinner.
+    var isControl = !!(target && ('disabled' in target));
+    // Claiming happens IMMEDIATELY (not after 150 ms): blocking the second
+    // click is the duplicate-row guard, not a visual nicety. A null claim
+    // means the control is already working — do nothing at all.
+    if (isControl && claimBusyControl(target) === null) return Promise.resolve(undefined);
+    var endTarget = function () {};
+    if (target) {
+      endTarget = busyTrackerFor(target, kind).begin();
+    }
+    var endGlobal = beginGlobalBusy(kind);
+    var p;
+    try { p = Promise.resolve(fn()); }
+    catch (err) { p = Promise.reject(err); }
+    return p.finally(function () {
+      endGlobal();
+      endTarget();
+      // If the spinner never appeared (the action beat the 150 ms delay) the
+      // tracker's onHide never runs, so release the control here instead.
+      if (isControl) {
+        var tr = target.__ezBusyTracker;
+        if (!tr || !tr.isVisible()) releaseBusyTarget(target);
+      }
+    });
+  }
+
   // --- API ---------------------------------------------------------------
   // Auth is a server-signed HttpOnly session cookie minted by POST
   // /api/verify-pin (7 days). Every data route requires it; there is no
@@ -439,12 +664,28 @@
   }
   // fetch() wrapper for the app's own API routes: a 401 flips to the PIN
   // screen and throws, so no caller ever tries to parse an unauthorized
-  // response as data. /api/verify-pin does NOT use it (there a 401 simply
-  // means "wrong PIN").
-  async function apiFetch(url, opts) {
-    var r = await fetch(url, opts);
-    if (r.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
-    return r;
+  // response as data.
+  //
+  // This is ALSO the single network funnel for the working indicator: every
+  // call to the server passes through here, so the header spinner covers all
+  // of them by construction — including the ones no button started. A new
+  // endpoint cannot forget it. Per-call options:
+  //   kind     — which Hebrew label the header shows ('load' by default).
+  //   allow401 — /api/verify-pin only, where a 401 means "wrong PIN" rather
+  //              than "session expired", so it must NOT bounce to the PIN
+  //              screen; the caller reads the status itself.
+  async function apiFetch(url, opts, cfg) {
+    cfg = cfg || {};
+    var endBusy = beginGlobalBusy(cfg.kind || 'load');
+    try {
+      var r = await fetch(url, opts);
+      if (r.status === 401 && !cfg.allow401) { handleUnauthorized(); throw new Error('unauthorized'); }
+      return r;
+    } finally {
+      // Always — a network error, a 401 bounce and a clean response all land
+      // here, so the header indicator can never be left spinning.
+      endBusy();
+    }
   }
   async function apiLoad() {
     var r = await apiFetch('/api/sheets', { cache: 'no-store' });
@@ -469,11 +710,14 @@
   // it ONLY from its own allow-list. Without it the body is exactly {pin}.
   async function apiVerifyPin(pin, user) {
     var body = user ? { pin: pin, user: user } : { pin: pin };
-    var r = await fetch('/api/verify-pin', {
+    // Through the same funnel as every other call (so the login shows the
+    // indicator too), but allow401: here a 401 is "wrong PIN", not an expired
+    // session, and must not bounce back to the PIN screen behind our back.
+    var r = await apiFetch('/api/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    });
+    }, { kind: 'send', allow401: true });
     var data = {};
     try { data = await r.json(); } catch (_) {}
     return r.ok && data.ok === true;
@@ -1251,12 +1495,13 @@
 
   function renderDashPatientSearch() {
     var box = $('#dashPatientResults');
-    if (!box) return;
+    if (!box) return Promise.resolve();
     var q = state.dashSearch.trim();
-    if (!q) { box.innerHTML = ''; return; }
+    if (!q) { box.innerHTML = ''; return Promise.resolve(); }
     // Deleted patients must be findable here too → lazily pull the tombstones
-    // on the first search and re-render when they land.
-    ensureRemovedClients(function () { if (state.view === 'dashboard') renderDashPatientSearch(); });
+    // on the first search and re-render when they land. The promise is handed
+    // back (below) so the search field can spin while that fetch is out.
+    var pending = ensureRemovedClients(function () { if (state.view === 'dashboard') renderDashPatientSearch(); });
     var rows = PatientSearch.searchPatients(q, {
       clients: state.clients,
       removedClients: Array.isArray(state.removedClients) ? state.removedClients : [],
@@ -1265,9 +1510,10 @@
     box.innerHTML = '';
     if (!rows.length) {
       box.innerHTML = '<div class="bd-line muted">לא נמצא מטופל בשם הזה — בשום לשונית</div>';
-      return;
+      return pending;
     }
     rows.forEach(function (rw) { box.appendChild(dashSearchRow(rw)); });
+    return pending;
   }
 
   // Credit alert: active patients who owe a make-up session (creditsOwed > 0),
@@ -1739,6 +1985,7 @@
     var req = pendingMerge;
     var btn = $('#mergeClientsConfirm');
     if (btn) btn.disabled = true;
+    var releaseBusy = busyAttach(btn, 'save');
     apiPostAction('mergeClients', { survivorId: req.survivorId, dupIds: req.dupIds })
       .then(function (res) {
         closeMergeClientsModal();
@@ -1749,7 +1996,7 @@
         });
       })
       .catch(function (err) { toast('שגיאה במיזוג: ' + err.message, true); })
-      .finally(function () { if (btn) btn.disabled = false; });
+      .finally(function () { releaseBusy(); });
   }
 
   function bankDetailsLine() {
@@ -2463,11 +2710,12 @@
       rm.title = 'מחיקת רשומת גבייה של מטופל שנמחק';
       rm.onclick = function () {
         if (!confirm('להסיר את רשומת הגבייה של ' + (nameDisplay || 'מטופל שנמחק') + '?')) return;
-        rm.disabled = true;
+        var releaseBusy = busyAttach(rm, 'save');
         state.payments = state.payments.filter(function (p) { return p.id !== payment.id; });
         removePayment(payment.id)
           .then(function () { toast('הוסר'); renderBilling(); })
-          .catch(function (e) { toast('שגיאה: ' + e.message, true); rm.disabled = false; });
+          .catch(function (e) { toast('שגיאה: ' + e.message, true); })
+          .finally(function () { releaseBusy(); });
       };
       row.appendChild(rm);
     }
@@ -2816,10 +3064,14 @@
   // needs them; onDone re-renders the calling view once they arrive.
   // state.removedClients: null = not fetched, 'loading' = in flight,
   // array = loaded (empty on failure so the calling view still renders).
+  // Returns a promise so a caller can show its spinner for exactly as long as
+  // the fetch runs (the dashboard search does). Already-loaded / already
+  // in-flight resolve immediately — the spinner belongs to the fetch, not to
+  // the re-render that follows it.
   function ensureRemovedClients(onDone) {
-    if (state.removedClients !== null) return;
+    if (state.removedClients !== null) return Promise.resolve();
     state.removedClients = 'loading';
-    apiGetRemovedClients()
+    return apiGetRemovedClients()
       .then(function (d) { state.removedClients = d.removed || []; })
       .catch(function (e) {
         console.warn('[ezone] getRemovedClients failed:', e.message);
@@ -3610,7 +3862,7 @@
     if (!therapist) return;
     var month = state.payoutMonth || currentMonthStr();
     if (!window.confirm('לסמן את ' + therapist + ' לחודש ' + month + ' כהועבר לחשבת שכר?\nהסשנים יוסרו מהתצוגה ולא יופיעו שוב.')) return;
-    if (btn) btn.disabled = true;
+    var releaseBusy = busyAttach(btn, 'send');
     apiPostAction('markForwarded', { therapist: therapist, month: month })
       .then(function (r) {
         toast('הועבר: ' + (r.forwarded || 0) + ' סשנים');
@@ -3618,8 +3870,8 @@
       })
       .catch(function (err) {
         toast('שגיאה: ' + err.message, true);
-        if (btn) btn.disabled = false;
-      });
+      })
+      .finally(function () { releaseBusy(); });
   }
 
   // Build a UTF-8-BOM CSV (so Excel renders Hebrew correctly) and download it.
@@ -3673,6 +3925,7 @@
     if (freq) payload.freqPerWeek = toNum(freq);
 
     if (submit) submit.disabled = true;
+    var releaseBusy = busyAttach(submit, 'save');
     apiPostAction('correctSessionOutcome', payload)
       .then(function () {
         toast(existingId ? 'הסשן תוקן' : 'הסשן נוסף');
@@ -3680,7 +3933,7 @@
         reloadSessionLog();
       })
       .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-      .finally(function () { if (submit) submit.disabled = false; });
+      .finally(function () { releaseBusy(); });
   }
 
   // ---- Leads kanban
@@ -4617,7 +4870,7 @@
     if (!client) { toast('מטופל לא נמצא', true); return; }
     var submit = $('#editAmountSubmit');
     var revertBtn = $('#editAmountRevert');
-    if (submit) submit.disabled = true;
+    var releaseBusy = busyAttach(submit, 'save');
     if (revertBtn) revertBtn.disabled = true;
     if (!client.paymentAmountOverrides || typeof client.paymentAmountOverrides !== 'object') {
       client.paymentAmountOverrides = {};
@@ -4639,8 +4892,8 @@
         toast('שגיאה: ' + err.message, true);
       })
       .finally(function () {
-        if (submit) submit.disabled = false;
-        if (revertBtn) revertBtn.disabled = false;
+        releaseBusy();                                  // submit + its spinner
+        if (revertBtn) revertBtn.disabled = false;      // the sibling has no spinner
       });
   }
 
@@ -4988,18 +5241,19 @@
       var btn = $('#pinSubmit');
       var err = $('#pinError');
       if (err) err.hidden = true;
-      if (btn) btn.disabled = true;
-      apiVerifyPin(v).then(function (ok) {
-        if (ok) {
-          // Cookie minted. Name picker next unless the session already
-          // carries a name (finishLogin); the PIN goes with it in a closure.
-          return finishLogin(v).catch(function () { enterEditor(); });
-        }
-        if (err) err.hidden = false;
-      }).catch(function () {
-        if (err) err.hidden = false;
-      }).finally(function () {
-        if (btn) btn.disabled = false;
+      // withBusy owns the disable/re-enable and the שולח… label; a second
+      // click while the PIN is in flight is ignored.
+      withBusy(btn, 'send', function () {
+        return apiVerifyPin(v).then(function (ok) {
+          if (ok) {
+            // Cookie minted. Name picker next unless the session already
+            // carries a name (finishLogin); the PIN goes with it in a closure.
+            return finishLogin(v).catch(function () { enterEditor(); });
+          }
+          if (err) err.hidden = false;
+        }).catch(function () {
+          if (err) err.hidden = false;
+        });
       });
     });
     on('#pinInput', 'keydown', function (e) {
@@ -5018,7 +5272,11 @@
     function logout() {
       // Expire the server session cookie too (fire-and-forget) so a shared
       // device does not keep a live 7-day session after יציאה.
-      try { fetch('/api/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
+      // Through the funnel like everything else. allow401: logging out of an
+      // already-dead session is a success, not a reason to bounce.
+      try {
+        apiFetch('/api/logout', { method: 'POST' }, { kind: 'send', allow401: true }).catch(function () {});
+      } catch (_) {}
       try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';
       state.user = '';
@@ -5031,7 +5289,11 @@
     on('#conflictBannerClose', 'click', hideConflictBanner);
 
     $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
-    on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
+    on('#refreshBtn', 'click', function (e) {
+      withBusy(e.currentTarget, 'load', function () {
+        return loadAll().then(function () { toast('רועננו'); });
+      }).catch(function () {});
+    });
     on('#settingsBtn', 'click', function () { openSettingsModal(); });
     var renewalsBox = $('#renewalsAlerts');
     if (renewalsBox) renewalsBox.addEventListener('click', handleRenewalActionClick);
@@ -5043,14 +5305,28 @@
     if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
     var mergeConfirmBtn = $('#mergeClientsConfirm');
     if (mergeConfirmBtn) mergeConfirmBtn.addEventListener('click', performMergeClients);
-    on('#dashPatientSearch', 'input', function (e) { state.dashSearch = e.target.value; renderDashPatientSearch(); });
-    on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
+    // Search-as-you-type goes through the SAME helper as every button, with
+    // the field's wrapper as the busy region: the spinner lands at the end of
+    // the field (inline-end = left in RTL). Local filtering finishes far
+    // inside the 150 ms delay and so shows nothing at all — which is the
+    // point; only a search that really waits (the dashboard one pulls the
+    // deleted-patient tombstones on first use) ever spins.
+    function wireSearchBox(sel, apply) {
+      on(sel, 'input', function (e) {
+        var wrap = e.target.parentNode;
+        var region = (wrap && wrap.classList && wrap.classList.contains('search-wrap')) ? wrap : null;
+        withBusy(region, 'search', function () { return apply(e); })
+          .catch(function (err) { console.warn('[ezone] search failed:', err && err.message); });
+      });
+    }
+    wireSearchBox('#dashPatientSearch', function (e) { state.dashSearch = e.target.value; return renderDashPatientSearch(); });
+    wireSearchBox('#leadsSearch', function (e) { state.leadSearch = e.target.value; return renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
-    on('#clientsSearch', 'input', function (e) { state.clientSearch = e.target.value; renderClients(); });
-    on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
-    on('#inactiveSearch', 'input', function (e) { state.inactiveSearch = e.target.value; renderInactive(); });
-    on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
-    on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
+    wireSearchBox('#clientsSearch', function (e) { state.clientSearch = e.target.value; return renderClients(); });
+    wireSearchBox('#retentionSearch', function (e) { state.retentionSearch = e.target.value; return renderRetention(); });
+    wireSearchBox('#inactiveSearch', function (e) { state.inactiveSearch = e.target.value; return renderInactive(); });
+    wireSearchBox('#billingSearch', function (e) { state.billingSearch = e.target.value; return renderBilling(); });
+    wireSearchBox('#continuationSearch', function (e) { state.continuationSearch = e.target.value; return renderContinuation(); });
     var continuationListEl = $('#continuationList');
     if (continuationListEl) continuationListEl.addEventListener('click', handleContinuationListClick);
     on('#continuationToOutpatientConfirm', 'click', function () {
@@ -5073,9 +5349,14 @@
       state.payoutMonth = e.target.value || currentMonthStr();
       renderPayouts();
     });
-    on('#payoutSearch', 'input', function (e) { state.payoutSearch = e.target.value; renderPayouts(); });
+    wireSearchBox('#payoutSearch', function (e) { state.payoutSearch = e.target.value; return renderPayouts(); });
     on('#payoutList', 'click', handlePayoutListClick);
-    on('#payoutExportBtn', 'click', exportPayoutCsv);
+    // Export builds the CSV in the browser (no server call), so it normally
+    // finishes well inside the 150 ms delay and shows nothing — but a very
+    // large month still gets the מייצא… label instead of a frozen button.
+    on('#payoutExportBtn', 'click', function (e) {
+      withBusy(e.currentTarget, 'export', function () { return exportPayoutCsv(); });
+    });
     on('#payoutAddSessionBtn', 'click', function () { openSessionModal(null); });
     var clinicalSel = $('#sessionClinicalType');
     if (clinicalSel) clinicalSel.addEventListener('change', updateSessionFreqVisibility);
@@ -5135,6 +5416,7 @@
       charge.billingDay = charge.billingType === 'monthly' && billingDay ? toNum(billingDay) : '';
       charge.notes = notes;
       render();
+      var releaseBusy = busyAttach(submit, 'save');
       persistCharge(charge)
         .then(function () { toast('החיוב עודכן'); closeEditChargeModal(); })
         .catch(function (err) {
@@ -5142,7 +5424,7 @@
           render();
           toast('שגיאה: ' + err.message, true);
         })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
 
     var editAmountForm = $('#editAmountForm');
@@ -5211,6 +5493,7 @@
         state.payments.push(paidRow);
       }
       render();
+      var releaseBusy = busyAttach(submit, 'save');
       persistCharge(charge)
         .then(function () {
           if (paidRow) return persistPayment(paidRow).catch(function () {
@@ -5224,7 +5507,7 @@
           render();
           toast('שגיאה: ' + err.message, true);
         })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
 
     var renewForm = $('#renewForm');
@@ -5275,6 +5558,7 @@
         c.sessionsUnit = pkg.units;
         c.packageChangeDate = paidDate;
       }
+      var releaseBusy = busyAttach(submit, 'save');
       persist()
         .then(function () {
           // Single paid-date path: same builder as the edit-modal propagation.
@@ -5304,7 +5588,7 @@
           toast('שגיאה: ' + err.message, true);
           render();
         })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
 
     // "שולם" quick action inside the חידוש ותשלום modal: mark the CURRENT month
@@ -5454,19 +5738,21 @@
       function runAddFlow() {
         submit.disabled = true;
         addLeadFromForm(form);
+        var releaseBusy = busyAttach(submit, 'save');
         persist()
           .then(function () { toast('נשמר'); closeLeadModal(); render(); })
           .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-          .finally(function () { submit.disabled = false; });
+          .finally(function () { releaseBusy(); });
       }
       if (editingLeadId) {
         var lead = state.leads.find(function (l) { return l.id === editingLeadId; });
         if (!lead) { submit.disabled = false; return; }
         updateLeadFromForm(lead, form);
+        var releaseBusy = busyAttach(submit, 'save');
         persist()
           .then(function () { toast('נשמר'); closeLeadModal(); render(); })
           .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-          .finally(function () { submit.disabled = false; });
+          .finally(function () { releaseBusy(); });
       } else {
         var newPhoneNorm = normalizePhone((form.phone && form.phone.value) || '');
         var existing = newPhoneNorm ? state.leads.find(function (l) {
@@ -5510,10 +5796,11 @@
         lead.nextBillingDate = nextCycleDueDateAfter(lead, agPayDate);
       }
       if (agreementAdvance) lead.stage = 'agreement';
+      var releaseBusy = busyAttach(submit, 'save');
       persist()
         .then(function () { toast('נשמר'); closeAgreementModal(); render(); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
 
     // Activate form — now includes payment fields
@@ -5636,6 +5923,7 @@
       var dischargedId = client.id;
       client.status = 'סיים טיפול';
       client.exitDate = fd.get('exitDate') || today();
+      var releaseBusy = busyAttach(submit, 'save');
       persist()
         .then(function () {
           // Vered confirmed the discharge → resolve any pending stop-flags for
@@ -5644,7 +5932,7 @@
         })
         .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
 
     var nrrForm = $('#notRelevantReasonForm');
@@ -5660,6 +5948,8 @@
       lead.stage = 'not_relevant';
       lead.not_relevant_reason = reason;
       lead.not_relevant_note = note;
+      // This modal's submit button carries no id — take it from the form.
+      var releaseBusy = busyAttach($('button[type="submit"]', e.target), 'save');
       persist()
         .then(function () { toast('סומן כלא רלוונטי'); closeNotRelevantReasonModal(); render(); })
         .catch(function (err) {
@@ -5668,7 +5958,8 @@
           lead.not_relevant_reason = prev.not_relevant_reason;
           lead.not_relevant_note = prev.not_relevant_note;
           toast('שגיאה: ' + err.message, true);
-        });
+        })
+        .finally(function () { releaseBusy(); });
     });
 
     // Stop-alert reason select: enable save only when a valid reason is chosen;
@@ -5718,6 +6009,8 @@
       if (!lead) { closeRemoveLeadModal(); return; }
       var prevLeads = state.leads.slice();
       state.leads = state.leads.filter(function (l) { return l.id !== lead.id; });
+      // The "כן, הסר" button carries no id — take it from the form.
+      var releaseBusy = busyAttach($('button[type="submit"]', e.target), 'save');
       persistRemoveLead(lead)
         .then(function () {
           toast('הליד הוסר', true);
@@ -5728,7 +6021,8 @@
           state.leads = prevLeads;
           toast('שגיאה: ' + err.message, true);
           render();
-        });
+        })
+        .finally(function () { releaseBusy(); });
     });
 
     var dupForm = $('#duplicateLeadForm');
@@ -5872,6 +6166,7 @@
         bankAccount: (fd.get('bankAccount') || '').trim(),
         bankHolder: (fd.get('bankHolder') || '').trim()
       };
+      var releaseBusy = busyAttach(submit, 'save');
       apiSaveSettings(next)
         .then(function () {
           state.settings = next;
@@ -5879,7 +6174,7 @@
           closeSettingsModal();
         })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
-        .finally(function () { submit.disabled = false; });
+        .finally(function () { releaseBusy(); });
     });
   }
 

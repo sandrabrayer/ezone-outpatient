@@ -581,7 +581,7 @@ test('D: the header renders "מחובר/ת כ: <name> · החלף" via textConte
   assert.doesNotMatch(src, /\.innerHTML\s*=/);
   assert.match(fnSource('enterApp'), /renderSessionUser\(\);/);
   // החלף and יציאה share one logout: expire the cookie, forget role + name, PIN screen
-  assert.match(APP, /function logout\(\) \{[\s\S]*?fetch\('\/api\/logout', \{ method: 'POST' \}\)[\s\S]*?state\.user = '';[\s\S]*?showPin\(\);\s*\}/);
+  assert.match(APP, /function logout\(\) \{[\s\S]*?apiFetch\('\/api\/logout', \{ method: 'POST' \}[\s\S]*?state\.user = '';[\s\S]*?showPin\(\);\s*\}/);
   assert.match(APP, /on\('#logoutBtn', 'click', logout\);/);
   assert.match(APP, /on\('#switchUserBtn', 'click', logout\);/);
   assert.match(fnSource('handleUnauthorized'), /state\.user = '';/);
