@@ -6,6 +6,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **ירדן added as an outpatient user.** `lib/users.js` `SESSION_USERS`
+  `[ורד, שירן, יעל]` -> `[ורד, שירן, יעל, ירדן]` (appended, existing order
+  kept) and the matching `<option>ירדן</option>` on the single
+  `<select name="assignedTo">` in `index.html`, which a test pins equal to
+  the list. That one list drives all three places a name appears: the login
+  **name picker** (`GET /api/users`), the `user` that `POST /api/verify-pin`
+  will embed in the session cookie, and the leads **משוייך ל** dropdown.
+  **Same permissions as everyone else, no new role** — the list is an
+  allow-list of names, not a role table; editor/viewer is decided by which
+  PIN button was used, never by which name was picked. `server.js`,
+  `app.js` and `_saveAll` needed no change (all read the list). Verified
+  against the real code: a save by ירדן stamps `updatedBy = ירדן` on a
+  changed client, a changed lead and a new row, and the stale-save conflict
+  refusal works for her in both directions (her stale save is refused with
+  a `[conflict]` line naming her; a row she stamped refuses someone else’s
+  stale save as `sheetUpdatedBy: ירדן`). `Code.gs` comment-only touch (the
+  `assignedTo` note listed the three old names). `sw.js` cache
+  `ezone-outpatient-v4` -> `v5`. Tests: new `test/add-user-yarden.test.js`
+  (17); suite 855 -> 872. See `CHANGELOG-add-user-yarden.md`.
 - **Hardened `@claude` GitHub Actions workflow.** New
   `.github/workflows/claude.yml`, copied **byte-for-byte** from
   `ezone-helpdesk` (blob `ec00836`) with no adaptation, so all six E-ZONE

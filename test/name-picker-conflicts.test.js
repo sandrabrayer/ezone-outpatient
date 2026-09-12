@@ -23,7 +23,7 @@
  *      the header renders the name via textContent; החלף = logout -> PIN ->
  *      picker; a save with conflicts shows the banner + reloads, never
  *      retries; a remembered user-less editor session gets the picker once.
- *   E. public/sw.js — cache bumped v3 -> v4.
+ *   E. public/sw.js — cache bumped v3 -> v4 (monotonic; never regresses).
  *
  * The Code.gs tests run the REAL shipped file in a vm sandbox with in-memory
  * sheets (the session-who-when harness). No live backend, dummy fixtures only.
@@ -165,7 +165,7 @@ test('A: GET /api/users serves SESSION_USERS (the picker list) and is session-ga
   const ok = await request('GET', '/api/users', null, { Cookie: cookieOf(login) });
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.json, { ok: true, users: SESSION_USERS });
-  assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל'], 'the three names, nothing invented');
+  assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל', 'ירדן'], 'the four names, nothing invented');
   // gated in the router (the F test in session-who-when pins the open set)
   const route = server._router.stack.find((m) => m.route && m.route.path === '/api/users');
   assert.ok(route, '/api/users mounted');
@@ -624,10 +624,15 @@ test('D: no other UI change — the PIN card, its buttons and the topbar tabs ar
 
 /* ================= E. service worker ================= */
 
-test('E: sw.js cache bumped v3 -> v4 so installed apps drop the old shell', () => {
-  assert.match(SW, /var CACHE = 'ezone-outpatient-v4';/);
-  assert.doesNotMatch(SW, /ezone-outpatient-v3'/);
-  assert.match(SW, /v4 \(2026-09-04\)/, 'the bump is documented in the header comment');
+test('E: this PR\'s v3 -> v4 bump stays documented; the live cache never regresses below it', () => {
+  // The v4 bump this PR shipped stays recorded in the header history, and a v3
+  // shell can never be served again. The CURRENT version is deliberately NOT
+  // pinned here — later PRs bump it monotonically and own that assertion
+  // (add-user-yarden pins v5). This test only guards against a regression.
+  assert.match(SW, /v4 \(2026-09-04\)/, 'the v4 bump stays documented in the header comment');
+  assert.doesNotMatch(SW, /var CACHE = 'ezone-outpatient-v3';/);
+  const live = Number((SW.match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]);
+  assert.ok(live >= 4, 'the live cache never goes below the v4 shipped here, got v' + live);
 });
 
 /* ================= F. Playwright e2e — drives the real app; skips when no browser ================= */
@@ -706,7 +711,7 @@ function startStub() {
   });
 }
 
-test('F: e2e — PIN -> name picker (three buttons, no input) -> pick -> header "מחובר/ת כ: <name> · החלף"; החלף -> logout -> PIN; a refused save shows the banner + reloads', skipOpt, async (t) => {
+test('F: e2e — PIN -> name picker (one button per SESSION_USERS name, no input) -> pick -> header "מחובר/ת כ: <name> · החלף"; החלף -> logout -> PIN; a refused save shows the banner + reloads', skipOpt, async (t) => {
   const { srv, port, seen } = await startStub();
   let browser;
   try { browser = await chromium.launch(); } catch (_) { srv.close(); return t.skip('no browser binary'); }

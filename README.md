@@ -130,6 +130,15 @@ request and every push to `main`.
   `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
 - `GET /api/users` → `{ ok, users }` — the picker's list (`lib/users.js`
   `SESSION_USERS`, the only names `/api/verify-pin` accepts). Session-gated.
+  **The users are ורד, שירן, יעל, ירדן** — one flat allow-list of names,
+  **not** a role table: every name on it has exactly the same permissions,
+  and editor vs. viewer is decided by which PIN button was used, never by
+  which name was picked. The same list is pinned by test to the leads
+  **משוייך ל** (`assignedTo`) `<select>` in `public/index.html`, so the
+  login names and the assignment dropdown can never drift. **To add or
+  rename a user, edit `lib/users.js` and `public/index.html` together** —
+  there is no Script Property, sheet tab or env var to touch, and no other
+  copy of the list anywhere (the client fetches it from this endpoint).
 - `POST /api/logout` → expires the cookie. Open.
 - `GET /api/sheets` → `{ ok, leads, clients, dataVersion }`. Session-gated.
 - `POST /api/sheets` with `{ leads, clients }` → saves everything.
