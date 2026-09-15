@@ -967,3 +967,83 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ===== Credits / refunds ledger (appended — do not reorder earlier rules) =====
+ * Money only: what the clinic owes BACK to a patient for days they paid for and
+ * did not use. Unrelated to the per-session credit balance the therapists app
+ * keeps. RTL throughout, on the existing token palette — no new hues. */
+.credits-modal {
+  width: min(760px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.credit-policy-note {
+  color: var(--muted); font-size: 12px; line-height: 1.6;
+  margin: 0 0 12px; padding: 8px 10px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+}
+.credit-warning {
+  color: var(--amber); font-size: 12px; line-height: 1.5; margin: 0 0 8px;
+}
+.credit-line {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 12px; background: var(--bg-elev);
+}
+.credit-line-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.credit-line-title { font-weight: 700; color: var(--green-2); font-size: 14px; }
+.credit-line-month {
+  color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.credit-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 20px;
+  background: var(--panel-2); color: var(--text-soft); font-weight: 600;
+}
+.credit-badge-ok { background: var(--green-deep); color: #fff; }
+.credit-calc { font-size: 13px; color: var(--text-soft); margin-bottom: 4px; }
+.credit-trail {
+  font-size: 11.5px; color: var(--muted); line-height: 1.6; margin-bottom: 10px;
+}
+.credit-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;
+}
+.credit-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-soft); }
+.credit-field > span { color: var(--muted); font-size: 12px; }
+.credit-field input, .credit-field select {
+  padding: 8px 10px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 14px;
+}
+.credit-field input:focus, .credit-field select:focus {
+  outline: none; border-color: var(--green); box-shadow: 0 0 0 2px rgba(41, 212, 136, 0.25);
+}
+.credit-payout-preview { color: var(--green-2); font-variant-numeric: tabular-nums; padding-top: 6px; }
+.credit-line-error { color: var(--red); font-size: 12px; margin: 8px 0 0; }
+
+/* Pending-payout view on the גבייה tab — grouped by the 15th they pay out on. */
+.credit-payout-list { display: block; }
+.credit-payout-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; margin-top: 10px;
+  background: var(--panel-2); border-radius: 8px;
+  font-weight: 700; color: var(--green-2); font-variant-numeric: tabular-nums;
+}
+.credit-payout-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--border);
+}
+.credit-payout-name { font-weight: 600; color: var(--text); font-size: 14px; }
+.credit-payout-meta { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.credit-payout-actions {
+  display: flex; align-items: center; gap: 8px; margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+@media (pointer: coarse) {
+  /* Same ≥40px touch-target rule used across the mobile/PWA pass. */
+  .credit-payout-actions .btn { min-height: 40px; padding: 8px 14px; }
+}
+@media (max-width: 600px) {
+  .credit-grid { grid-template-columns: 1fr; }
+  .credit-payout-row { flex-direction: column; align-items: stretch; }
+  .credit-payout-actions { margin-inline-start: 0; justify-content: space-between; }
+}

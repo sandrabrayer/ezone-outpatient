@@ -13,7 +13,10 @@ through an Apps Script Web App.
    `לא רלוונטי` button per card. Moving to `מטופל פעיל` opens the activation
    modal (service type, location, sessions/week, price/session, start date).
 3. **Clients (מטופלים)** – tabbed by service type; status `פעיל / הפסקה זמנית /
-   סיים טיפול`. `סיים טיפול` captures exit date and grays out the card. `✕`
+   סיים טיפול`. `סיים טיפול` captures exit date, grays out the card and — once
+   the discharge has saved — opens the **credits / refunds** modal for the money
+   owed back (see below; a failed or cancelled credit never undoes the
+   discharge). `✕`
    deletes permanently. Each card shows the patient phone (the `phone` column,
    falling back to `treatmentContactPhone`, leading-zero recovered), and the
    edit modal edits it via the **טלפון מטופל** field.
@@ -68,6 +71,12 @@ sessionsPerWeek, pricePerSession, startDate, created`
 
 **Clients**: `id, name, serviceType, location, sessionsPerWeek,
 pricePerSession, startDate, status, exitDate, fromLead`
+
+**Credits** (refunds owed to patients — money only, append-only column
+contract): `id, clientId, clientName, creditType, allocationMonth,
+calculatedAmount, amount, overrideReason, reason, approvedBy, decidedDate,
+payoutDate, status, paidDate, method, notes, basis, createdAt, createdBy,
+updatedAt, updatedBy`
 
 ## Local development
 
@@ -162,6 +171,10 @@ checkout ever drifts back.
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
 - `GET /api/continuation-roster` — session-gated.
+- The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
+  (write) are Apps Script actions the client reaches through the two
+  session-gated `/api/sheets` calls above. On `saveCredit` the proxy's
+  `body.user` overwrite is what stamps `createdBy`/`updatedBy`.
 - Every route above except `/api/verify-pin` and `/api/logout` answers
   `401 { ok:false, error:'unauthorized' }` without a valid cookie (or
   `session_not_configured` when `SESSION_SECRET` is unset).
@@ -351,6 +364,30 @@ checkout ever drifts back.
   (`forwardedToPayroll = 'YYYY-MM'`, the append-only `SessionLog` column) so those
   sessions never reappear; per-therapist independent. See
   `CHANGELOG-payout-correct-export-forward.md`.
+- The **credits / refunds ledger** (`Credits` sheet, ported from
+  E-Zone-Dashboard PR #124) records what the clinic owes **back** to a patient
+  when treatment ends. It is **money only** — no session or cancellation logic
+  — and is **unrelated to `Clients.creditsOwed`**, the per-*session* balance
+  `_recordSessionOutcome` keeps: that column counts **sessions**, this sheet
+  counts **₪**, and `_upsertCredit` never touches it. `public/credits-ledger.js`
+  (`CreditsLedger.suggestCredits(client, exitDate, payments)`) is pure: per
+  Payments row, window = `[dueDate, dueDate + 1 month − 1 day]`, `unusedDays` =
+  days in it strictly after the exit (never a day an earlier window already
+  credited), `rate` = **that row's** `amountPaid ÷ 30` (fixed constant, never
+  the month length), `raw` = rate × days **capped at that row's `amountPaid`**.
+  A window starting on/before the exit is `days_unused`; one starting after it
+  is `prepaid_return`, returned **in full at `amountPaid`**. **Policy: pro-rata
+  at any tenure** — the Dashboard's 14-day cutoff and last-7-days rule are
+  residential bed rules and are **deliberately not ported**. A **zero is still a
+  row**: "no refund owed" is a recorded decision. Credits pay out on the **15th**
+  (`payoutDate` derived server-side from `decidedDate`); marking one paid is an
+  **explicit** action needing `paidDate` + `method`. `calculatedAmount` and
+  `amount` both persist, with `overrideReason` required when they differ. It
+  opens after `סיום טיפול` saves, is reachable again from **מטופלים לא פעילים**,
+  and the pending payouts show on **גבייה** grouped by payout date. Actions
+  `getCredits` / `saveCredit` are **internal** — session-cookie-gated through
+  `/api/sheets`, with `createdBy`/`updatedBy` from the signed cookie; `server.js`
+  is unchanged. See `CHANGELOG-credits-ledger.md`.
 - `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
   type as recorded by the therapists app. On save, `_saveAll` derives
   `serviceType` from it via an inline mirror of `treatment-map.js`

@@ -23,8 +23,13 @@
  * - v5 (2026-09-12): ירדן added to the login name picker / assignedTo list
  *   (lib/users.js + index.html). CACHE bumped so an installed app cannot keep
  *   serving the old index.html whose משוייך ל dropdown lacks her.
+ * - v6 (2026-09-15): credits / refunds ledger — new credits-ledger.js module,
+ *   new index.html markup (credits modal, mark-paid modal, the
+ *   "זיכויים ממתינים לתשלום" section on גבייה) and CSS. CACHE bumped so an
+ *   installed app cannot serve the old shell, whose index.html never loads
+ *   credits-ledger.js, alongside the new app.js that needs it.
  */
-var CACHE = 'ezone-outpatient-v5';
+var CACHE = 'ezone-outpatient-v6';
 var SHELL = [
   './',
   './index.html',

@@ -152,6 +152,8 @@
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
     retained: [],   // lead-retention list (not_relevant + finished)
     removedClients: null, // un-restored Clients-removed tombstones; null = not yet fetched, 'loading' = in flight
+    credits: null,        // credits/refunds ledger rows; null = not yet fetched, 'loading' = in flight
+    creditsError: '',     // last ledger load failure (the ledger fails SOFT — everything else still loads)
     dataVersion: null, // Clients data version from getData, echoed back on saveAll (staleness signal); null = server didn't send one (fail-open: save never flagged stale)
     leadSearch: '',
     dashSearch: '',   // cross-tab patient locator on the dashboard (איתור מטופל)
@@ -806,6 +808,35 @@
     var data = await r.json().catch(function () { return {}; });
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
+  }
+  // Credits / refunds ledger. INTERNAL read, same trust level as the main
+  // load — it reaches Apps Script only through the session-cookie-gated
+  // /api/sheets proxy, never as a public endpoint.
+  async function apiGetCredits() {
+    var r = await apiFetch('/api/sheets?action=getCredits', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  // Create or edit ONE credit row. A backend refusal is never swallowed: the
+  // Apps Script answers {ok:false} with HTTP 200, so the parsed body is
+  // attached to the thrown error (err.data) and a 200 WITHOUT the echoed
+  // credit is treated as a failure too — otherwise a refused write would look
+  // like a save.
+  async function apiSaveCredit(credit) {
+    var r = await apiFetch('/api/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'saveCredit', credit: credit })
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || data.ok === false || !data.credit) {
+      var err = new Error(data.error || ('HTTP ' + r.status));
+      err.data = data;
+      throw err;
+    }
+    return data.credit;
   }
   // Un-restored Clients-removed tombstones (the _saveAll row-loss guard's
   // audit sheet). INTERNAL read, same trust level as the main load.
@@ -2308,6 +2339,7 @@
     renderBillingDueList(due, selected);
     renderBillingOpenList(selected);
     renderBillingMonthlySummary(selected);
+    renderCreditsPayouts();
   }
 
   function renderBillingDueList(dueItems, selectedISO) {
@@ -2816,6 +2848,444 @@
   // needs them; onDone re-renders the calling view once they arrive.
   // state.removedClients: null = not fetched, 'loading' = in flight,
   // array = loaded (empty on failure so the calling view still renders).
+  /* ===== Credits / refunds ledger ==========================================
+   *
+   * MONEY ONLY (ported from E-Zone-Dashboard PR #124). A client finishes
+   * treatment; the money they paid for days they did not use is owed back.
+   * The pure calculation lives in public/credits-ledger.js; this is the UI and
+   * the write path.
+   *
+   * NOT session logic: nothing here reads SessionLog, counts sessions or
+   * touches Clients.creditsOwed (the per-SESSION balance the therapists-app
+   * receiver keeps — a different concept that shares only the word "credit").
+   * Session-level and cancellation logic stay in the therapists app.
+   *
+   * FAIL-SOFT: the ledger is lazily fetched and a load failure never blocks
+   * anything else — the sections render empty with a note.
+   */
+  var CL = (typeof CreditsLedger !== 'undefined') ? CreditsLedger : null;
+  var creditsModalCtx = null;   // { client, exitDate, lines: [...] }
+  var markPaidCreditId = null;
+
+  var creditsLoadPromise = null;
+  /* Resolve once the ledger is in state.credits. A failure resolves too (with
+   * state.creditsError set): the ledger is FAIL-SOFT — it must never leave a
+   * caller hanging or block the rest of the app. */
+  function loadCredits() {
+    if (Array.isArray(state.credits)) return Promise.resolve();
+    if (creditsLoadPromise) return creditsLoadPromise;
+    state.credits = 'loading';
+    creditsLoadPromise = apiGetCredits()
+      .then(function (d) { state.credits = d.credits || []; state.creditsError = ''; })
+      .catch(function (e) {
+        console.warn('[ezone] getCredits failed:', e.message);
+        state.credits = [];
+        state.creditsError = e.message || 'load_failed';
+      })
+      .then(function () { creditsLoadPromise = null; });
+    return creditsLoadPromise;
+  }
+  /* Fire-and-forget lazy load FOR RENDERERS. `onLoaded` runs only when this
+   * call actually starts a fetch, so a renderer that calls it on every pass
+   * re-renders once when the data lands and never loops. */
+  function ensureCredits(onLoaded) {
+    if (Array.isArray(state.credits) || creditsLoadPromise) return;
+    loadCredits().then(function () { if (onLoaded) onLoaded(); });
+  }
+  function creditRows() {
+    return Array.isArray(state.credits) ? state.credits : [];
+  }
+  function creditCountForClient(clientId) {
+    if (!CL) return 0;
+    return CL.creditsForClient(creditRows(), clientId).length;
+  }
+  function reloadCredits() {
+    state.credits = null;
+    creditsLoadPromise = null;
+    return loadCredits();
+  }
+
+  /* Open the credits modal for one client. `exitDateOverride` is passed by the
+   * discharge hook (the date just saved); otherwise the client's stored
+   * exitDate is used. No exit date -> nothing to compute, so we say so rather
+   * than guessing one. */
+  function openCreditsForClient(client, exitDateOverride) {
+    if (state.role !== 'editor') return;
+    if (!CL) { toast('מודול הזיכויים לא נטען', true); return; }
+    var exitDate = fmtDate(exitDateOverride || (client && client.exitDate) || '');
+    if (!exitDate) { toast('אין תאריך סיום טיפול — לא ניתן לחשב זיכוי', true); return; }
+    loadCredits().then(function () {
+      var existing = CL.creditsForClient(creditRows(), client.id);
+      var suggestions = CL.suggestCredits(client, exitDate, state.payments || []);
+      var lines = CL.buildCreditLines(existing, suggestions, today());
+      lines.forEach(function (ln) {
+        if (!ln.clientId) ln.clientId = client.id;
+        if (!ln.clientName) ln.clientName = client.name || '';
+      });
+      creditsModalCtx = { client: client, exitDate: exitDate, lines: lines };
+      $('#creditsClientName').textContent = client.name || '';
+      $('#creditsExitDate').textContent = displayDate(exitDate);
+      var warn = $('#creditsLoadWarning');
+      if (warn) {
+        warn.hidden = !state.creditsError;
+        warn.textContent = state.creditsError
+          ? 'טעינת פנקס הזיכויים נכשלה (' + state.creditsError + ') — ייתכן שזיכויים קיימים אינם מוצגים.'
+          : '';
+      }
+      renderCreditLines();
+      $('#creditsModal').hidden = false;
+    });
+  }
+  function closeCreditsModal() {
+    var m = $('#creditsModal');
+    if (m) m.hidden = true;
+    creditsModalCtx = null;
+  }
+
+  function creditTypeLabel(t) {
+    return (CL && CL.CREDIT_TYPE_LABELS[t]) || t || '';
+  }
+
+  /* Build one editable line. Every field writes straight back into the line
+   * object, so validation and the save loop read the live values. */
+  function renderCreditLines() {
+    var host = $('#creditsLines');
+    if (!host || !creditsModalCtx) return;
+    host.innerHTML = '';
+    if (!creditsModalCtx.lines.length) {
+      host.innerHTML = '<p style="color:#888;margin:8px 0;">אין שורות זיכוי להצגה.</p>';
+      return;
+    }
+    creditsModalCtx.lines.forEach(function (line, idx) {
+      var box = document.createElement('div');
+      box.className = 'credit-line';
+      var savedBadge = line.savedNow
+        ? '<span class="credit-badge credit-badge-ok">נשמר</span>'
+        : (line.isNew ? '<span class="credit-badge">חדש</span>' : '');
+      box.innerHTML =
+        '<div class="credit-line-head">' +
+          '<span class="credit-line-title">' + escapeHtml(creditTypeLabel(line.creditType)) + '</span>' +
+          '<span class="credit-line-month">' + escapeHtml(line.allocationMonth) + '</span>' +
+          savedBadge +
+        '</div>' +
+        '<div class="credit-calc">סכום מחושב: <strong>' + money(line.calculatedAmount) + '</strong></div>' +
+        '<div class="credit-trail">' + escapeHtml(line.reason || '') + '</div>';
+
+      var grid = document.createElement('div');
+      grid.className = 'credit-grid';
+
+      function field(labelText, node) {
+        var l = document.createElement('label');
+        l.className = 'credit-field';
+        var span = document.createElement('span');
+        span.textContent = labelText;
+        l.appendChild(span);
+        l.appendChild(node);
+        grid.appendChild(l);
+        return l;
+      }
+      function input(type, value, onInput, attrs) {
+        var el = document.createElement('input');
+        el.type = type;
+        el.value = value == null ? '' : value;
+        if (attrs) Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+        el.addEventListener('input', onInput);
+        el.addEventListener('change', onInput);
+        return el;
+      }
+
+      var amountEl = input('number', line.amount, function () {
+        line.amount = this.value === '' ? '' : Number(this.value);
+        syncOverrideVisibility();
+      }, { min: '0', step: '1' });
+      field('סכום לזיכוי (₪)', amountEl);
+
+      var overrideEl = input('text', line.overrideReason, function () {
+        line.overrideReason = this.value;
+      }, { maxlength: '300', placeholder: 'חובה כששונה מהסכום המחושב' });
+      var overrideField = field('נימוק לשינוי הסכום', overrideEl);
+
+      var approvedEl = input('text', line.approvedBy, function () {
+        line.approvedBy = this.value;
+      }, { maxlength: '40' });
+      field('אושר על ידי', approvedEl);
+
+      var decidedEl = input('date', line.decidedDate, function () {
+        line.decidedDate = this.value;
+        line.payoutDate = CL.payoutDateFor(this.value);
+        payoutEl.textContent = line.payoutDate ? displayDate(line.payoutDate) : '—';
+      });
+      field('תאריך החלטה', decidedEl);
+
+      var payoutWrap = document.createElement('div');
+      payoutWrap.className = 'credit-field';
+      var payoutLabel = document.createElement('span');
+      payoutLabel.textContent = 'תאריך תשלום (ה־15)';
+      var payoutEl = document.createElement('strong');
+      payoutEl.className = 'credit-payout-preview';
+      payoutEl.textContent = line.payoutDate ? displayDate(line.payoutDate) : '—';
+      payoutWrap.appendChild(payoutLabel);
+      payoutWrap.appendChild(payoutEl);
+      grid.appendChild(payoutWrap);
+
+      var statusEl = document.createElement('select');
+      CL.CREDIT_STATUSES.forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s;
+        o.textContent = CL.CREDIT_STATUS_LABELS[s] || s;
+        if ((line.status || 'pending') === s) o.selected = true;
+        statusEl.appendChild(o);
+      });
+      statusEl.addEventListener('change', function () {
+        line.status = this.value;
+        syncPaidVisibility();
+      });
+      field('סטטוס', statusEl);
+
+      var paidDateEl = input('date', line.paidDate, function () { line.paidDate = this.value; });
+      var paidDateField = field('תאריך תשלום בפועל', paidDateEl);
+      var methodEl = input('text', line.method, function () { line.method = this.value; }, { maxlength: '40' });
+      var methodField = field('אמצעי תשלום', methodEl);
+
+      var notesEl = input('text', line.notes, function () { line.notes = this.value; }, { maxlength: '500' });
+      field('הערות', notesEl);
+
+      function syncOverrideVisibility() {
+        var differs = CL.roundMoney(Number(line.amount) || 0) !== CL.roundMoney(line.calculatedAmount);
+        overrideField.hidden = !differs;
+        overrideEl.required = differs;
+      }
+      function syncPaidVisibility() {
+        var isPaid = line.status === 'paid';
+        paidDateField.hidden = !isPaid;
+        methodField.hidden = !isPaid;
+      }
+      syncOverrideVisibility();
+      syncPaidVisibility();
+
+      box.appendChild(grid);
+      var errEl = document.createElement('p');
+      errEl.className = 'credit-line-error';
+      errEl.hidden = true;
+      box.appendChild(errEl);
+      line._errEl = errEl;
+      line._idx = idx;
+      host.appendChild(box);
+    });
+  }
+
+  /* Save every line, one at a time, stopping on the FIRST failure with the
+   * modal open. Lines already written are marked so a retry edits them
+   * instead of creating a duplicate. */
+  function submitCredits() {
+    if (!creditsModalCtx || !CL) return;
+    var btn = $('#creditsSubmit');
+    if (btn && btn.disabled) return;
+    var lines = creditsModalCtx.lines;
+
+    // Validate everything BEFORE the first write — a half-saved run is worse
+    // than a refused one.
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i]._errEl) { lines[i]._errEl.hidden = true; lines[i]._errEl.textContent = ''; }
+      var msg = CL.validateCreditLine(lines[i]);
+      if (msg) {
+        if (lines[i]._errEl) { lines[i]._errEl.textContent = msg; lines[i]._errEl.hidden = false; }
+        toast(msg, true);
+        return;
+      }
+    }
+
+    if (btn) btn.disabled = true;
+    var pending = lines.filter(function (l) { return !l.savedNow; });
+    var chain = Promise.resolve();
+    var failed = null;
+    pending.forEach(function (line) {
+      chain = chain.then(function () {
+        if (failed) return;
+        return apiSaveCredit({
+          id: line.id || '',
+          clientId: line.clientId,
+          clientName: line.clientName,
+          creditType: line.creditType,
+          allocationMonth: line.allocationMonth,
+          calculatedAmount: line.calculatedAmount,
+          amount: line.amount,
+          overrideReason: line.overrideReason,
+          reason: line.reason,
+          approvedBy: line.approvedBy,
+          decidedDate: line.decidedDate,
+          status: line.status || 'pending',
+          paidDate: line.paidDate,
+          method: line.method,
+          notes: line.notes,
+          basis: line.basis,
+          updatedAt: line.updatedAt || ''    // stale-save echo; '' on a create
+        }).then(function (saved) {
+          line.id = saved.id;
+          line.updatedAt = saved.updatedAt;
+          line.payoutDate = saved.payoutDate;
+          line.savedNow = true;
+          line.isNew = false;
+        }).catch(function (err) {
+          failed = { line: line, err: err };
+        });
+      });
+    });
+
+    chain.then(function () {
+      if (btn) btn.disabled = false;
+      if (!failed) {
+        return reloadCredits().then(function () {
+          toast('הזיכויים נשמרו');
+          closeCreditsModal();
+          render();
+        });
+      }
+      var err = failed.err;
+      var data = err.data || {};
+      if (data.error === 'conflict' && data.conflicts && data.conflicts[0]) {
+        var who = data.conflicts[0].sheetUpdatedBy || 'משתמש אחר';
+        toast('הזיכוי נערך בינתיים על ידי ' + who + ' — הטופס נטען מחדש', true);
+        return reloadCredits().then(function () {
+          openCreditsForClient(creditsModalCtx.client, creditsModalCtx.exitDate);
+        });
+      }
+      if (failed.line._errEl) {
+        failed.line._errEl.textContent = 'שמירה נכשלה: ' + err.message;
+        failed.line._errEl.hidden = false;
+      }
+      toast('שמירת זיכוי נכשלה: ' + err.message, true);
+      renderCreditLines();
+    });
+  }
+
+  /* Marking paid is an EXPLICIT action: method + date, through the same
+   * validated edit path. Nothing flips to paid when payoutDate passes. */
+  function showMarkCreditPaidModal(credit) {
+    if (state.role !== 'editor') return;
+    markPaidCreditId = credit.id;
+    $('#markCreditPaidName').textContent = credit.clientName || '';
+    $('#markCreditPaidAmount').textContent = money(credit.amount);
+    $('#markCreditPaidForm').paidDate.value = today();
+    $('#markCreditPaidForm').method.value = '';
+    $('#markCreditPaidModal').hidden = false;
+  }
+  function closeMarkCreditPaidModal() {
+    var m = $('#markCreditPaidModal');
+    if (m) m.hidden = true;
+    markPaidCreditId = null;
+  }
+  function submitMarkCreditPaid() {
+    if (!markPaidCreditId || !CL) return;
+    var form = $('#markCreditPaidForm');
+    var btn = $('#markCreditPaidSubmit');
+    var paidDate = (form.paidDate.value || '').trim();
+    var method = (form.method.value || '').trim();
+    if (!paidDate || !method) { toast('יש למלא תאריך תשלום ואמצעי תשלום', true); return; }
+    var existing = creditRows().map(CL.normalizeCredit).find(function (c) { return c.id === markPaidCreditId; });
+    if (!existing) { toast('הזיכוי לא נמצא — רענן את הדף', true); return; }
+    if (btn) btn.disabled = true;
+    apiSaveCredit({
+      id: existing.id,
+      status: 'paid',
+      paidDate: paidDate,
+      method: method,
+      updatedAt: existing.updatedAt   // stale-save echo
+    }).then(function () {
+      return reloadCredits();
+    }).then(function () {
+      toast('הזיכוי סומן כשולם');
+      closeMarkCreditPaidModal();
+      render();
+    }).catch(function (err) {
+      var data = err.data || {};
+      if (data.error === 'conflict' && data.conflicts && data.conflicts[0]) {
+        var who = data.conflicts[0].sheetUpdatedBy || 'משתמש אחר';
+        toast('הזיכוי נערך בינתיים על ידי ' + who + ' — רענן ונסה שוב', true);
+        return reloadCredits().then(function () { render(); });
+      }
+      toast('סימון כשולם נכשל: ' + err.message, true);
+    }).then(function () {
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  /* Pending credits grouped by payoutDate (the גבייה tab): what goes out on
+   * each 15th, with a per-date total and a grand total, so the outgoing amount
+   * is visible BEFORE the payout date. */
+  function renderCreditsPayouts() {
+    var host = $('#creditsPayoutList');
+    var totalEl = $('#creditsPayoutTotal');
+    if (!host) return;
+    ensureCredits(function () { if (state.view === 'billing') renderCreditsPayouts(); });
+    if (!CL || state.credits === 'loading') {
+      host.innerHTML = '<p style="color:#888;padding:12px;">טוען…</p>';
+      if (totalEl) totalEl.textContent = money(0);
+      return;
+    }
+    var grouped = CL.pendingCreditsByPayout(creditRows());
+    if (totalEl) totalEl.textContent = money(grouped.total);
+    host.innerHTML = '';
+    if (state.creditsError) {
+      var warn = document.createElement('p');
+      warn.style.cssText = 'color:#e0b74a;padding:8px 12px;margin:0;';
+      warn.textContent = 'טעינת פנקס הזיכויים נכשלה (' + state.creditsError + ').';
+      host.appendChild(warn);
+    }
+    if (!grouped.groups.length) {
+      var empty = document.createElement('p');
+      empty.style.cssText = 'color:#888;padding:12px;margin:0;';
+      empty.textContent = 'אין זיכויים ממתינים לתשלום';
+      host.appendChild(empty);
+      return;
+    }
+    grouped.groups.forEach(function (g) {
+      var head = document.createElement('div');
+      head.className = 'credit-payout-head';
+      head.innerHTML =
+        '<span>' + (g.payoutDate ? displayDate(g.payoutDate) : 'ללא תאריך תשלום') + '</span>' +
+        '<strong>' + money(g.total) + '</strong>';
+      host.appendChild(head);
+      g.credits.forEach(function (c) {
+        var row = document.createElement('div');
+        row.className = 'credit-payout-row';
+        var info = document.createElement('div');
+        info.innerHTML =
+          '<div class="credit-payout-name">' + escapeHtml(c.clientName || c.clientId) + '</div>' +
+          '<div class="credit-payout-meta">' + escapeHtml(creditTypeLabel(c.creditType)) +
+          ' · ' + escapeHtml(c.allocationMonth) +
+          (c.overrideReason ? ' · שינוי סכום: ' + escapeHtml(c.overrideReason) : '') +
+          '</div>';
+        row.appendChild(info);
+        var right = document.createElement('div');
+        right.className = 'credit-payout-actions';
+        var amt = document.createElement('strong');
+        amt.textContent = money(c.amount);
+        right.appendChild(amt);
+        if (state.role === 'editor') {
+          var payBtn = document.createElement('button');
+          payBtn.type = 'button';
+          payBtn.className = 'btn btn-ghost edit-only';
+          payBtn.textContent = 'סמן כשולם';
+          payBtn.onclick = function () { showMarkCreditPaidModal(c); };
+          right.appendChild(payBtn);
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'btn btn-ghost edit-only';
+          editBtn.textContent = 'ערוך';
+          editBtn.onclick = function () {
+            var cl = state.clients.find(function (x) { return String(x.id) === c.clientId; });
+            if (!cl) { toast('המטופל לא נמצא ברשימה', true); return; }
+            openCreditsForClient(cl);
+          };
+          right.appendChild(editBtn);
+        }
+        row.appendChild(right);
+        host.appendChild(row);
+      });
+    });
+  }
+
   function ensureRemovedClients(onDone) {
     if (state.removedClients !== null) return;
     state.removedClients = 'loading';
@@ -2871,6 +3341,9 @@
     // Deleted patients: un-restored Clients-removed tombstones (the _saveAll
     // row-loss guard). Lazily fetched on first render of this tab.
     ensureRemovedClients(function () { if (state.view === 'inactive') renderInactive(); });
+    // Credit counts on the discharged cards. Lazily fetched, fail-soft: a
+    // failed ledger load just shows (0) — the tab itself never breaks.
+    ensureCredits(function () { if (state.view === 'inactive') renderInactive(); });
     var removedRows = Array.isArray(state.removedClients)
       ? state.removedClients.filter(function (t) {
           return !iq || String(t.name || '').toLowerCase().indexOf(iq) !== -1;
@@ -2882,7 +3355,7 @@
       return;
     }
 
-    function inactiveSection(title, patients, badgeHtml, extraRowsFor) {
+    function inactiveSection(title, patients, badgeHtml, extraRowsFor, withCredits) {
       if (!patients.length) return;
       var h = document.createElement('div');
       h.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
@@ -2910,6 +3383,14 @@
           restorePatientBtn.textContent = 'שחזר לטיפול';
           restorePatientBtn.onclick = function () { openRestoreClientModal(c); };
           card.appendChild(restorePatientBtn);
+          if (withCredits) {
+            var creditsBtn = document.createElement('button');
+            creditsBtn.className = 'btn btn-ghost';
+            creditsBtn.style.cssText = 'margin-top:10px;margin-inline-start:8px;';
+            creditsBtn.textContent = 'זיכויים (' + creditCountForClient(c.id) + ')';
+            creditsBtn.onclick = function () { openCreditsForClient(c); };
+            card.appendChild(creditsBtn);
+          }
         }
         list.appendChild(card);
       });
@@ -2917,7 +3398,11 @@
 
     inactiveSection('סיימו טיפול', finished,
       '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#d4edda;color:#155724;font-weight:600;">סיים טיפול</span>',
-      function (c) { return retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : ''); });
+      function (c) { return retRow('סיום טיפול', c.exitDate ? displayDate(c.exitDate) : ''); },
+      // Recovery / edit path: reopen the credits modal for an already-discharged
+      // patient. Existing rows come back editable, missing suggestions are
+      // proposed, and NOTHING touches the discharge record itself.
+      true);
 
     inactiveSection('לא פעילים', deactivated,
       '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא פעיל</span>',
@@ -5084,8 +5569,18 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal();
       });
+    });
+
+    // Credits ledger (money only) — save the modal's lines, and the explicit
+    // mark-paid action from the pending-payout view.
+    var creditsSubmitBtn = $('#creditsSubmit');
+    if (creditsSubmitBtn) creditsSubmitBtn.addEventListener('click', submitCredits);
+    var markPaidForm = $('#markCreditPaidForm');
+    if (markPaidForm) markPaidForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      submitMarkCreditPaid();
     });
 
     var acTypeSel = $('#addChargeForm select[name="billingType"]');
@@ -5642,7 +6137,17 @@
           // this client. Best-effort; the discharge itself already succeeded.
           return resolveStopFlagsForClient(dischargedId);
         })
-        .then(function () { toast('סיום נשמר'); closeExitModal(); render(); })
+        .then(function () {
+          toast('סיום נשמר');
+          closeExitModal();
+          render();
+          // Credits are offered ONLY after BOTH discharge writes succeeded
+          // (the Clients save and the stop-flag resolution above). A failed or
+          // cancelled credit NEVER rolls the discharge back — the patient is
+          // discharged either way, and the ledger is reachable again from the
+          // מטופלים לא פעילים tab.
+          openCreditsForClient(client, client.exitDate);
+        })
         .catch(function (err) { toast('שגיאה: ' + err.message, true); })
         .finally(function () { submit.disabled = false; });
     });

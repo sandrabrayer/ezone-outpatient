@@ -480,8 +480,12 @@ test('E: the existing three still log in and still stamp — no regression from 
 
 /* ================= F. service worker ================= */
 
-test('F: sw.js cache bumped v4 -> v5 (index.html changed) and the bump is documented', () => {
-  assert.match(SW, /var CACHE = 'ezone-outpatient-v5';/);
+test('F: sw.js cache bumped past v4 (index.html changed) and the bump is documented', () => {
+  // This PR's own bump was v4 -> v5. Later PRs that touch index.html bump it
+  // again by the same house rule, so assert the FLOOR and the documentation of
+  // this bump, not an exact version that would freeze sw.js forever.
+  const liveVersion = Number((SW.match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]);
+  assert.ok(liveVersion >= 5, 'CACHE must be at least v5; found v' + liveVersion);
   assert.doesNotMatch(SW, /var CACHE = 'ezone-outpatient-v4';/, 'only one live CACHE version');
   assert.match(SW, /v5 \(2026-09-12\)/, 'the bump is documented in the header comment');
   // monotonic: every version mentioned in the header is <= the live one

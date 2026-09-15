@@ -175,6 +175,17 @@
           <div class="panel-subtitle">לפי מטופל</div>
           <div id="billMonthByClient" class="billing-breakdown"></div>
         </div>
+        <!-- Credits / refunds owed OUT to patients, grouped by the 15th they
+             pay out on. Money only — unrelated to the per-session credit
+             balance the therapists app keeps. -->
+        <div class="panel">
+          <div class="panel-title">
+            זיכויים ממתינים לתשלום
+            <span class="panel-sub">סה״כ <strong id="creditsPayoutTotal">₪0</strong></span>
+          </div>
+          <div class="billing-list-note">זיכויים משולמים ב־15 בחודש, לעולם לא במועד סיום הטיפול</div>
+          <div id="creditsPayoutList" class="credit-payout-list"></div>
+        </div>
       </section>
 
       <!-- Retention -->
@@ -504,6 +515,47 @@
       </div>
     </div>
 
+    <!-- Credits / refunds ledger (money only). Opens after a discharge saves,
+         and from the מטופלים לא פעילים tab for an already-discharged patient.
+         One line per credit decision; a ZERO is still a recorded decision. -->
+    <div id="creditsModal" class="modal" hidden>
+      <div class="modal-card credits-modal">
+        <div class="modal-title">זיכויים והחזרים</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="creditsClientName"></span> — סיום טיפול <span id="creditsExitDate"></span>
+        </div>
+        <p id="creditsLoadWarning" class="credit-warning" hidden></p>
+        <p class="credit-policy-note">
+          זיכוי יחסי על ימים שלא נוצלו, בכל אורך טיפול. תשלום שחלון הכיסוי שלו מתחיל אחרי סיום
+          הטיפול מוחזר במלואו. הזיכוי משולם ב־15 בחודש.
+        </p>
+        <div id="creditsLines"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-close>סגור</button>
+          <button type="button" class="btn btn-primary" id="creditsSubmit">שמור זיכויים</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Marking a credit paid is an EXPLICIT action: date + method, never
+         automatic when the payout date passes. -->
+    <div id="markCreditPaidModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">סימון זיכוי כשולם</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="markCreditPaidName"></span> — <span id="markCreditPaidAmount"></span>
+        </div>
+        <form id="markCreditPaidForm" class="form-grid">
+          <label>תאריך תשלום<input name="paidDate" type="date" required /></label>
+          <label>אמצעי תשלום<input name="method" type="text" maxlength="40" required /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="markCreditPaidSubmit">סמן כשולם</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Stop-treatment alert (עצירת טיפול) — a PAUSE signal to Yarden, distinct
          from סיים טיפול (final discharge). Requires a reason before sending. -->
     <div id="stopAlertModal" class="modal" hidden>
@@ -822,6 +874,7 @@
   <script src="therapist-pay.js?v=__BUILD__" defer></script>
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="payout-export.js?v=__BUILD__" defer></script>
+  <script src="credits-ledger.js?v=__BUILD__" defer></script>
   <script src="conflicts.js?v=__BUILD__" defer></script>
   <script>
     // PWA: register the service worker so the app is installable to the home
