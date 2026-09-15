@@ -9,10 +9,23 @@
  * row's `date` — the SESSION (treatment) date — NOT `recordedAt` (the write
  * timestamp).
  *
- * PAY RULE (mirrors the pay side): only outcomes that PAY are summed —
- *   `happened` and `patient_no_show` (the therapist showed up, so a no-show still
- *   pays). `therapist_cancelled` is EXCLUDED from the total, but its count is
- *   surfaced (pay 0) for trust/visibility.
+ * PAY RULE (mirrors the pay side). A row pays only if BOTH its outcome and its
+ * `payStatus` allow it — the outcome alone is no longer enough:
+ *   `happened`            -> pays (the gate never applies to it).
+ *   `patient_no_show`     -> now an APPROVAL GATE rather than automatic pay. A
+ *                            'pending_decision' row pays 0 and is NOT summed; a
+ *                            'declined' row pays 0 forever; an 'approved' row
+ *                            pays the ordinary rate.
+ *   `therapist_cancelled` -> EXCLUDED from the total, count surfaced (pay 0).
+ *
+ * The check WITHHOLDS on an explicit pending/declined rather than requiring an
+ * explicit 'approved' — see paysFor() for why a blank payStatus must keep
+ * paying (group no-shows, and every row written before the column existed).
+ *
+ * PENDING ROWS ARE SHOWN, NOT HIDDEN. They appear in the per-session breakdown
+ * with pay 0 and `pending: true`, and are counted in `pendingCount`, so מורן can
+ * see that a session exists and why it is not in the total. They are excluded
+ * from every money figure, and `_markForwarded` refuses to send them to payroll.
  *
  * Pre-VAT totals come straight from each row's stored `therapistPay` (already
  * pre-VAT, and already 0 for therapist_cancelled / group). The +VAT (gross) total
@@ -39,13 +52,79 @@
 })(typeof self !== 'undefined' ? self : this, function (TherapistPay) {
   'use strict';
 
-  // Outcomes that pay (therapist showed up). therapist_cancelled is excluded.
+  // Outcomes that CAN pay (the therapist showed up). Necessary, no longer
+  // sufficient: patient_no_show also needs an approved payStatus — see paysFor.
+  // therapist_cancelled is excluded outright.
   var PAID_OUTCOMES = { happened: true, patient_no_show: true };
   var EXCLUDED_OUTCOME = 'therapist_cancelled';
+
+  // Outcomes whose pay a person must approve before it counts.
+  var GATED_OUTCOMES = { patient_no_show: true };
+  var PAY_STATUS_PENDING  = 'pending_decision';
+  var PAY_STATUS_APPROVED = 'approved';
+  var PAY_STATUS_DECLINED = 'declined';
+
+  /* Is this row still waiting on a person? Only a gated outcome can be. */
+  function isPending(row) {
+    row = row || {};
+    return GATED_OUTCOMES[str(row.outcome)] === true &&
+           str(row.payStatus) === PAY_STATUS_PENDING;
+  }
+  /* Was this row's pay decided and refused? */
+  function isDeclined(row) {
+    row = row || {};
+    return GATED_OUTCOMES[str(row.outcome)] === true &&
+           str(row.payStatus) === PAY_STATUS_DECLINED;
+  }
+  /* Does this row contribute its therapistPay to the payout total?
+   *
+   * The rule is WITHHOLDING, not allow-listing: a paying outcome pays unless
+   * its payStatus explicitly withholds it ('pending_decision' or 'declined').
+   * That direction is deliberate, and the alternative ("pays only on an
+   * explicit 'approved'") would be wrong here, because a BLANK payStatus has
+   * three legitimate meanings and none of them is "unpaid":
+   *
+   *   1. `happened` / `therapist_cancelled` — the gate never applied.
+   *   2. A GROUP no-show — group pay is a decided 0 that no approval could
+   *      change, so it is never queued and never carries a status.
+   *   3. A no-show row written BEFORE this column existed. Every historical
+   *      row reads '' with its real, already-paid rate still in therapistPay.
+   *
+   * Requiring 'approved' would silently drop case 3 out of the payout totals —
+   * retroactively rewriting past months' pay for rows nobody decided about,
+   * which is exactly the kind of unannounced money change this gate exists to
+   * prevent. Withholding keeps history intact: only rows this feature actually
+   * wrote as pending or declined are held back, and those already carry
+   * therapistPay 0, so the money total agrees with the count either way.
+   * PAY_STATUS_APPROVED is still meaningful — it is what a decided row carries,
+   * and what the UI reads to show who approved it. */
+  function paysFor(row) {
+    row = row || {};
+    var outcome = str(row.outcome);
+    if (PAID_OUTCOMES[outcome] !== true) return false;
+    return !isPending(row) && !isDeclined(row);
+  }
 
   function str(v) { return String(v == null ? '' : v).trim(); }
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
   function round2(n) { return Math.round(n * 100) / 100; }
+
+  /* What a PENDING row would pay if approved. A pending row stores
+   * therapistPay 0, so the figure has to be looked up from the rate table —
+   * the client-side mirror of the same table the server approval uses. It is
+   * EXPOSURE, never money owed: it is reported separately and is never folded
+   * into preVatTotal. Fail-soft: an unknown therapist or a rate lookup that
+   * throws contributes 0 rather than breaking the whole view. */
+  function rateIfApproved(row) {
+    row = row || {};
+    if (num(row.rateIfApproved) > 0) return num(row.rateIfApproved);  // server-supplied, if present
+    if (!TherapistPay || typeof TherapistPay.therapistPay !== 'function') return 0;
+    try {
+      return num(TherapistPay.therapistPay(str(row.therapist), str(row.clinicalTreatmentType)));
+    } catch (_) {
+      return 0;
+    }
+  }
 
   // +VAT (gross) via the canonical helper; defensive 0.18 fallback if the pay
   // module isn't present (e.g. a stripped browser bundle).
@@ -88,18 +167,23 @@
       if (!byTherapist[name]) {
         byTherapist[name] = {
           therapist: name, paidCount: 0, sessionCount: 0,
-          excludedCancelledCount: 0, preVatTotal: 0, sessions: [], months: []
+          excludedCancelledCount: 0, pendingCount: 0, declinedCount: 0,
+          pendingRate: 0, preVatTotal: 0, sessions: [], months: []
         };
         order.push(name);
       }
       var t = byTherapist[name];
       var outcome = str(row.outcome);
-      var isPaid = PAID_OUTCOMES[outcome] === true;
+      var pending = isPending(row);
+      var declined = isDeclined(row);
+      var isPaid = paysFor(row);
       var pay = num(row.therapistPay);
       var rowMonth = monthOf(row.date);
 
       t.sessionCount++;
       if (isPaid) { t.paidCount++; t.preVatTotal += pay; }
+      else if (pending) { t.pendingCount++; t.pendingRate += rateIfApproved(row); }
+      else if (declined) { t.declinedCount++; }
       else if (outcome === EXCLUDED_OUTCOME) { t.excludedCancelledCount++; }
       if (rowMonth && t.months.indexOf(rowMonth) === -1) t.months.push(rowMonth);
 
@@ -112,14 +196,29 @@
         type: str(row.clinicalTreatmentType),
         outcome: outcome,
         pay: isPaid ? pay : 0,          // non-paying outcomes show 0 for visibility
-        paid: isPaid
+        paid: isPaid,
+        // What approving this pending row would pay (0 for any other row).
+        // Exposure only — never part of any total.
+        rateIfApproved: pending ? rateIfApproved(row) : 0,
+        // Pay-decision surface. A pending row is SHOWN (never hidden) with pay 0
+        // so מורן can see the session exists and why it is not in the total.
+        payStatus: str(row.payStatus),
+        pending: pending,
+        declined: declined,
+        approvedBy: str(row.approvedBy),
+        declineReason: str(row.declineReason),
+        decidedAt: str(row.decidedAt)
       });
     }
 
     order.sort(function (a, b) { return a.localeCompare(b, 'he'); });
     var result = {
       therapists: [],
-      totals: { paidCount: 0, excludedCancelledCount: 0, preVatTotal: 0, vatTotal: 0 }
+      totals: {
+        paidCount: 0, excludedCancelledCount: 0,
+        pendingCount: 0, declinedCount: 0, pendingRate: 0,
+        preVatTotal: 0, vatTotal: 0
+      }
     };
     for (var k = 0; k < order.length; k++) {
       var th = byTherapist[order[k]];
@@ -129,11 +228,18 @@
       th.months.sort();
       th.preVatTotal = round2(th.preVatTotal);
       th.vatTotal = round2(withVat(th.preVatTotal));
+      th.pendingRate = round2(th.pendingRate);
       result.therapists.push(th);
       result.totals.paidCount += th.paidCount;
       result.totals.excludedCancelledCount += th.excludedCancelledCount;
+      result.totals.pendingCount += th.pendingCount;
+      result.totals.declinedCount += th.declinedCount;
+      result.totals.pendingRate += th.pendingRate;
       result.totals.preVatTotal += th.preVatTotal;
     }
+    // pendingRate is NOT money owed — it is what the pending rows WOULD add if
+    // every one were approved. It is never folded into preVatTotal/vatTotal.
+    result.totals.pendingRate = round2(result.totals.pendingRate);
     result.totals.preVatTotal = round2(result.totals.preVatTotal);
     result.totals.vatTotal = round2(withVat(result.totals.preVatTotal));
     return result;
@@ -144,10 +250,13 @@
    *   month,                              // the resolved 'YYYY-MM'
    *   therapists: [{
    *     therapist, paidCount, sessionCount, excludedCancelledCount,
-   *     preVatTotal, vatTotal, months,
-   *     sessions: [{ sessionId, date, month, phone, patient, type, outcome, pay, paid }]
+   *     pendingCount, declinedCount, pendingRate, preVatTotal, vatTotal, months,
+   *     sessions: [{ sessionId, date, month, phone, patient, type, outcome, pay,
+   *                  paid, payStatus, pending, declined, approvedBy,
+   *                  declineReason, decidedAt }]
    *   }],
-   *   totals: { paidCount, excludedCancelledCount, preVatTotal, vatTotal },
+   *   totals: { paidCount, excludedCancelledCount, pendingCount, declinedCount,
+   *             pendingRate, preVatTotal, vatTotal },
    *   differences: { therapists: [ …same shape… ], totals: {…} }  // הפרשים
    * }
    *
@@ -213,6 +322,13 @@
   return {
     PAID_OUTCOMES: PAID_OUTCOMES,
     EXCLUDED_OUTCOME: EXCLUDED_OUTCOME,
+    GATED_OUTCOMES: GATED_OUTCOMES,
+    PAY_STATUS_PENDING: PAY_STATUS_PENDING,
+    PAY_STATUS_APPROVED: PAY_STATUS_APPROVED,
+    PAY_STATUS_DECLINED: PAY_STATUS_DECLINED,
+    isPending: isPending,
+    isDeclined: isDeclined,
+    paysFor: paysFor,
     monthOf: monthOf,
     isForwarded: isForwarded,
     monthlyPayoutSummary: monthlyPayoutSummary

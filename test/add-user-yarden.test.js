@@ -111,10 +111,13 @@ const login = (user) => request('POST', '/api/verify-pin', user === undefined ? 
 
 /* ================= A. the list ================= */
 
-test('A: ירדן is on the allow-list, APPENDED last — the existing three keep their exact order', () => {
+test('A: ירדן is on the allow-list, APPENDED after the existing three, which keep their exact order', () => {
   assert.ok(SESSION_USERS.includes(YARDEN), 'ירדן must be a session user');
-  assert.deepEqual(SESSION_USERS, LEGACY_THREE.concat([YARDEN]));
-  assert.equal(SESSION_USERS.length, 4);
+  // Stated as a PREFIX: the list is append-only, and later work appends after
+  // ירדן (סנדרה, for the therapist-pay approval gate). Pinning the whole array
+  // froze it against every future name while testing nothing extra — what this
+  // contract is really about is that the existing names never move.
+  assert.deepEqual(SESSION_USERS.slice(0, 4), LEGACY_THREE.concat([YARDEN]));
   assert.deepEqual(SESSION_USERS.slice(0, 3), LEGACY_THREE, 'no existing user moved, renamed or dropped');
   assert.equal(new Set(SESSION_USERS).size, SESSION_USERS.length, 'no duplicate names');
   SESSION_USERS.forEach((u) => assert.equal(typeof u, 'string', 'a flat list of names — never {name, role} objects'));
@@ -130,12 +133,19 @@ test('A: the list is still the ONLY source — lib/users.js exports nothing but 
   assert.equal((code.match(/const\s+\w+\s*=/g) || []).length, 1, 'still exactly one declaration — the names array');
 });
 
-test('A: SESSION_USERS still equals the index.html assignedTo options exactly (nothing invented, nothing missed)', () => {
+test('A: every assignedTo option is an allow-listed name (nothing invented), ירדן included', () => {
   const m = INDEX.match(/<select name="assignedTo"[^>]*>([\s\S]*?)<\/select>/);
   assert.ok(m, 'assignedTo select missing');
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
-  assert.deepEqual(options, SESSION_USERS, 'the dropdown and the allow-list must never drift');
+  // CONTAINMENT, not equality. Every assignee must be a name the server would
+  // accept — that is the safety property. The reverse no longer holds: סנדרה
+  // logs in to decide therapist pay (lib/approvers.js) but takes no leads, so
+  // she is an allow-listed user who is deliberately NOT in this dropdown.
+  options.forEach((o) => assert.ok(SESSION_USERS.includes(o),
+    'assignedTo offers "' + o + '", which /api/verify-pin would refuse'));
+  assert.ok(options.includes(YARDEN), 'ירדן must be assignable');
+  assert.deepEqual(options, LEGACY_THREE.concat([YARDEN]), 'the assignable set is unchanged by later logins');
   assert.equal((INDEX.match(/name="assignedTo"/g) || []).length, 1, 'still exactly one assignedTo select to keep in sync');
 });
 
@@ -152,12 +162,15 @@ test('A: the picker keeps NO client-side copy — app.js still fills it from GET
 
 /* ================= B. server parity ================= */
 
-test('B: /api/users lists all four names, ירדן included, in list order', async () => {
+test('B: /api/users serves the allow-list in order, ירדן included', async () => {
   await waitForListen();
   const cookie = cookieOf(await login());
   const res = await request('GET', '/api/users', null, { Cookie: cookie });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.json, { ok: true, users: LEGACY_THREE.concat([YARDEN]) });
+  assert.deepEqual(res.json, { ok: true, users: SESSION_USERS },
+    'the picker is served straight from the allow-list, never a second copy');
+  assert.deepEqual(res.json.users.slice(0, 4), LEGACY_THREE.concat([YARDEN]),
+    'the existing four keep their order');
   assert.ok(res.json.users.includes(YARDEN), 'the picker will render a ירדן button');
 });
 
@@ -480,8 +493,12 @@ test('E: the existing three still log in and still stamp — no regression from 
 
 /* ================= F. service worker ================= */
 
-test('F: sw.js cache bumped v4 -> v5 (index.html changed) and the bump is documented', () => {
-  assert.match(SW, /var CACHE = 'ezone-outpatient-v5';/);
+test('F: sw.js cache bumped past v4 (index.html changed) and the bump is documented', () => {
+  // This PR's own bump was v4 -> v5. Later PRs that touch index.html bump it
+  // again by the same house rule, so assert the FLOOR and the documentation of
+  // this bump, not an exact version that would freeze sw.js forever.
+  const liveVersion = Number((SW.match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]);
+  assert.ok(liveVersion >= 5, 'CACHE must be at least v5; found v' + liveVersion);
   assert.doesNotMatch(SW, /var CACHE = 'ezone-outpatient-v4';/, 'only one live CACHE version');
   assert.match(SW, /v5 \(2026-09-12\)/, 'the bump is documented in the header comment');
   // monotonic: every version mentioned in the header is <= the live one

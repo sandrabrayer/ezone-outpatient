@@ -967,3 +967,37 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ===== Patient-no-show pay approval gate (appended — do not reorder earlier) =====
+ * A no-show no longer pays the therapist automatically: a person decides. The
+ * backlog count rides on the תשלומי מטפלים tab so it is visible from every tab,
+ * and pending rows stay VISIBLE in the payout view (worth ₪0, never summed). */
+
+/* Persistent backlog badge on the tab button. */
+.tab-badge {
+  display: inline-block; min-width: 18px; margin-inline-start: 6px;
+  padding: 1px 6px; border-radius: 20px;
+  background: var(--amber); color: #3a2c00;
+  font-size: 11px; font-weight: 700; line-height: 16px; text-align: center;
+  font-variant-numeric: tabular-nums; vertical-align: middle;
+}
+/* On the active tab the amber-on-dark would fight the active state; invert it. */
+.tab.active .tab-badge { background: #3a2c00; color: var(--amber); }
+
+/* Pay state in the payout view's per-session table. */
+.pay-pending-chip, .pay-declined-chip {
+  display: inline-block; padding: 1px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pay-pending-chip { background: var(--amber); color: #3a2c00; }
+.pay-declined-chip { background: var(--red); color: #4a0000; }
+
+@media (pointer: coarse) {
+  /* Same ≥40px touch-target rule used across the mobile/PWA pass. */
+  #payDecisionAlerts .btn { min-height: 40px; padding: 8px 14px; }
+}
+@media (max-width: 600px) {
+  #payDecisionAlerts .renewal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  #payDecisionAlerts .renewal-actions .btn { flex: 1 1 auto; }
+}

@@ -2332,8 +2332,79 @@ var SESSION_LOG_HEADERS = [
   // view). Once stamped the row is SETTLED and is filtered out of the payout view;
   // a session logged late for an already-stamped month surfaces as a הפרש.
   // Set ONLY by _markForwarded; preserved (never cleared) across outcome upserts.
-  'forwardedToPayroll'
+  'forwardedToPayroll',
+  // APPEND-ONLY (patient-no-show pay approval gate). A patient_no_show used to
+  // pay the therapist AUTOMATICALLY; it is now a decision a PERSON makes.
+  // See CHANGELOG-no-show-pay-approval.md.
+  //
+  // payStatus: '' = NO decision applies — happened, therapist_cancelled, and
+  // a GROUP no-show (group pay is a decided 0 whatever anyone approves, so
+  // gating it would only ask for an approval of ₪0). 'pending_decision' = a
+  // non-group patient_no_show awaiting a person; therapistPay is 0 and the row
+  // is EXCLUDED from the payout totals and from forwarding. 'approved' =
+  // a person approved it; therapistPay is the ordinary rate. 'declined' = a
+  // person declined; therapistPay stays 0 and declineReason is REQUIRED.
+  //
+  // NOTHING auto-resolves: there is no timeout that pays and none that
+  // declines. A pending row stays pending until a person decides.
+  'payStatus',
+  // The person's verb as recorded at decision time ('approve' | 'decline' |
+  // ''). Redundant with payStatus by design: payStatus is the MECHANICAL state
+  // everything else keys off, `decision` is the audit record of what was
+  // chosen. Both are cleared together when a re-mark voids the decision.
+  'decision',
+  // The approver's name, taken from the SIGNED SESSION COOKIE (_requestUser) —
+  // never a request body — and refused unless it is in PAY_APPROVERS.
+  'approvedBy',
+  // Required on a decline, '' otherwise. A decline with no reason is refused.
+  'declineReason',
+  // ISO timestamp of the decision; '' while pending or N/A.
+  'decidedAt'
 ];
+
+/* Names allowed to decide a therapist-pay question. MIRROR of
+ * lib/approvers.js PAY_APPROVERS — Apps Script cannot require() lib/, so the
+ * list is duplicated here and test/no-show-pay-approval.test.js parses BOTH
+ * and asserts they are deep-equal, exactly as the therapist pay/billing tables
+ * are guarded. Keep in sync.
+ *
+ * ורד is the approver; סנדרה is her backup for absences. Both are also in
+ * SESSION_USERS — the name is read from the signed cookie, so a name that
+ * cannot log in can never reach this list at runtime. */
+var PAY_APPROVERS = ['ורד', 'סנדרה'];
+
+/* A sheet cell -> a finite number, else 0. Used to carry a frozen pay amount
+ * across an upsert without a blank or a stray string becoming NaN in the sheet. */
+function _toNumberOrZero(v) {
+  if (v === '' || v === null || v === undefined) return 0;
+  var n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
+function _isPayApprover(name) {
+  var n = String(name == null ? '' : name).trim();
+  if (!n) return false;                       // fail-closed: no name, no decision
+  for (var i = 0; i < PAY_APPROVERS.length; i++) {
+    if (PAY_APPROVERS[i] === n) return true;
+  }
+  return false;
+}
+
+/* The pay states a SessionLog row can carry. '' is a valid, meaningful value
+ * (no decision applies); it is not "unset". */
+var PAY_STATUS_PENDING  = 'pending_decision';
+var PAY_STATUS_APPROVED = 'approved';
+var PAY_STATUS_DECLINED = 'declined';
+
+/* Does the approval gate apply to this row? ONLY a non-group patient_no_show.
+ *
+ * Group (קבוצה) is excluded on purpose: _computeSessionPay returns a decided 0
+ * for group before it ever looks up a rate, so an approval could not change the
+ * amount by a single shekel — queueing it would ask a person to approve ₪0.
+ * happened and therapist_cancelled are untouched by the gate entirely. */
+function _payGateApplies(outcome, billingType) {
+  return outcome === 'patient_no_show' && billingType !== GROUP_BILLING;
+}
 
 var SESSION_STATUS_BY_OUTCOME = {
   happened:            'consumed',
@@ -2389,12 +2460,19 @@ function _recordSessionOutcome(payload) {
   if (payload && payload.freqPerWeek != null && payload.freqPerWeek !== '') freq = payload.freqPerWeek;
   else if (payload && payload.frequencyPerWeek != null && payload.frequencyPerWeek !== '') freq = payload.frequencyPerWeek;
 
-  var therapistPay, clientSessionValue;
+  // The rate this session WOULD pay. For a gated (non-group patient_no_show)
+  // row we still compute it here even though we write 0, for two reasons: an
+  // unknown therapist must still REJECT at write time exactly as it does today
+  // (discovering it only at approval time would be worse), and the queue needs
+  // a figure to show the approver. The value actually written is decided below.
+  var payGated = _payGateApplies(outcome, billingType);
+  var rateIfPaid, clientSessionValue;
   try {
-    therapistPay = _computeSessionPay(outcome, therapist, clinical, billingType);
+    rateIfPaid = _computeSessionPay(outcome, therapist, clinical, billingType);
   } catch (err) {
     return { ok: false, reason: 'unknown_therapist' };
   }
+  var therapistPay = payGated ? 0 : rateIfPaid;
   try {
     clientSessionValue = _computeSessionValue(billingType, freq);
   } catch (err) {
@@ -2452,7 +2530,14 @@ function _recordSessionOutcome(payload) {
       creditStatus:       '',
       // Preserved below from the existing row on an upsert — a re-sent / corrected
       // outcome must NOT lose an already-forwarded stamp (only _markForwarded sets it).
-      forwardedToPayroll: ''
+      forwardedToPayroll: '',
+      // Pay-decision fields. Defaults below are the VOID state; the upsert block
+      // re-applies a still-valid decision or opens a fresh pending one.
+      payStatus:          payGated ? PAY_STATUS_PENDING : '',
+      decision:           '',
+      approvedBy:         '',
+      declineReason:      '',
+      decidedAt:          ''
     };
 
     var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
@@ -2472,8 +2557,51 @@ function _recordSessionOutcome(payload) {
     }
     // Preserve an already-forwarded stamp across the upsert: a correction re-runs
     // pay/credit but must not silently un-forward a session payroll already received.
-    if (oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '') {
+    var wasForwarded = !!(oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '');
+    if (wasForwarded) {
       rowObj.forwardedToPayroll = String(oldRow.forwardedToPayroll).trim();
+    }
+
+    // ---- Pay decision across a re-mark -------------------------------------
+    // Rules, in order:
+    //
+    // 1. FORWARDED ROWS ARE FROZEN. Once a session's month has gone to חשבת
+    //    שכר, that money is out the door — a later correction must not rewrite
+    //    what was paid. The pay amount AND the whole pay decision are carried
+    //    from the existing row untouched, for EVERY outcome. (The payout view
+    //    already excludes forwarded rows, so the frozen figure stands as the
+    //    record of what payroll actually received; a genuine correction belongs
+    //    in the next cycle as a הפרש, not as a silent rewrite of a settled row.)
+    //    Credit effects are NOT frozen — they are a separate ledger and the
+    //    reversal below stays correct.
+    //
+    // 2. OUTCOME MOVED AWAY FROM A GATED NO-SHOW -> the decision is VOID. The
+    //    person decided about a no-show; that is no longer what happened, so
+    //    pending or decided, it is cleared and the ordinary rule for the new
+    //    outcome applies (rowObj already holds the void defaults).
+    //
+    // 3. STILL A GATED NO-SHOW -> the existing decision CARRIES. The same fact
+    //    is being re-reported, so a decision already made is not re-asked:
+    //    approved pays the RECOMPUTED rate (a TherapistRates change is picked
+    //    up), declined stays 0, pending stays pending.
+    if (wasForwarded) {
+      rowObj.therapistPay   = _toNumberOrZero(oldRow.therapistPay);
+      rowObj.payStatus      = String(oldRow.payStatus || '');
+      rowObj.decision       = String(oldRow.decision || '');
+      rowObj.approvedBy     = String(oldRow.approvedBy || '');
+      rowObj.declineReason  = String(oldRow.declineReason || '');
+      rowObj.decidedAt      = String(oldRow.decidedAt || '');
+    } else if (payGated && oldRow && String(oldRow.outcome) === 'patient_no_show') {
+      var carried = String(oldRow.payStatus || '');
+      if (carried === PAY_STATUS_APPROVED || carried === PAY_STATUS_DECLINED) {
+        rowObj.payStatus     = carried;
+        rowObj.decision      = String(oldRow.decision || '');
+        rowObj.approvedBy    = String(oldRow.approvedBy || '');
+        rowObj.declineReason = String(oldRow.declineReason || '');
+        rowObj.decidedAt     = String(oldRow.decidedAt || '');
+        rowObj.therapistPay  = (carried === PAY_STATUS_APPROVED) ? rateIfPaid : 0;
+      }
+      // anything else (pending, or a blank from a pre-gate row) -> stays pending
     }
 
     if (matchedClient) {
@@ -2558,10 +2686,15 @@ function _recordSessionOutcome(payload) {
     var result = {
       ok: true,
       sessionId: sessionId,
-      therapistPay: therapistPay,
+      // Read from rowObj, not the local: the pay-decision block above may have
+      // frozen it (forwarded row) or restored a carried approval.
+      therapistPay: rowObj.therapistPay,
       clientSessionValue: clientSessionValue,
       sessionStatus: sessionStatus,
-      creditStatus: rowObj.creditStatus
+      creditStatus: rowObj.creditStatus,
+      // '' when no decision applies; 'pending_decision' means the therapist is
+      // NOT paid for this row until a person approves it.
+      payStatus: rowObj.payStatus
     };
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
@@ -2569,6 +2702,157 @@ function _recordSessionOutcome(payload) {
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+/* ===== Patient-no-show pay decision =========================================
+ *
+ * A non-group patient_no_show is logged with therapistPay 0 and payStatus
+ * 'pending_decision'. This is the ONLY thing that resolves it — there is no
+ * timeout that pays and none that declines. A pending row stays pending until
+ * a person decides.
+ *
+ * INTERNAL write (same trust level as savePayment / correctSessionOutcome):
+ * the browser posts it same-origin through the session-cookie-gated Node
+ * proxy, so there is no cross-app secret. The approver's name is the `user`
+ * the PROXY injects from the SIGNED session cookie (_requestUser) — never a
+ * request body — and the decision is REFUSED unless that name is in
+ * PAY_APPROVERS (ורד, or סנדרה as backup). Fail-closed: a blank name (a legacy
+ * user-less cookie) is refused, so an unattributable pay decision cannot exist.
+ *
+ *   payload: { sessionId, decision: 'approve' | 'decline', declineReason? }
+ *
+ * approve -> therapistPay = _therapistPay(therapist, clinicalType) — the exact
+ *            rate _computeSessionPay would have produced before the gate
+ *            existed, recomputed now so a TherapistRates change is picked up.
+ * decline -> therapistPay stays 0; declineReason is REQUIRED.
+ *
+ * Refusals (write nothing): missing/unknown sessionId, a decision verb that is
+ * neither approve nor decline, a non-approver or blank cookie name, a row that
+ * is not pending, a decline with no reason, and an already-forwarded row
+ * (payroll has that month — its pay is frozen).
+ */
+function _decideSessionPay(payload) {
+  var sessionId = String((payload && payload.sessionId) || '').trim();
+  if (!sessionId) return { ok: false, reason: 'missing_session_id' };
+
+  var decision = String((payload && payload.decision) || '').trim();
+  if (decision !== 'approve' && decision !== 'decline') {
+    return { ok: false, reason: 'invalid_decision' };
+  }
+
+  var approver = _requestUser(payload);
+  if (!_isPayApprover(approver)) return { ok: false, reason: 'not_authorized' };
+
+  // Sanitized like every other free-text field that reaches a cell.
+  var declineReason = String((payload && payload.declineReason) || '')
+    .replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 300);
+  if (decision === 'decline' && !declineReason) {
+    return { ok: false, reason: 'decline_reason_required' };
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, reason: 'not_found' };
+
+    var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
+    var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+    var rowNum = 0;
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === sessionId) { rowNum = i + 2; break; }
+    }
+    if (!rowNum) return { ok: false, reason: 'not_found' };
+
+    var values = sh.getRange(rowNum, 1, 1, SESSION_LOG_HEADERS.length).getValues()[0];
+    var row = {};
+    for (var c = 0; c < SESSION_LOG_HEADERS.length; c++) row[SESSION_LOG_HEADERS[c]] = values[c];
+
+    // Already settled with payroll -> its pay is frozen, decision or not.
+    if (String(row.forwardedToPayroll || '').trim() !== '') {
+      return { ok: false, reason: 'already_forwarded', forwardedToPayroll: String(row.forwardedToPayroll).trim() };
+    }
+    // Only a row actually waiting on a person can be decided. This also makes
+    // the action idempotent-safe: a double-click cannot re-decide.
+    if (String(row.payStatus || '') !== PAY_STATUS_PENDING) {
+      return { ok: false, reason: 'not_pending', payStatus: String(row.payStatus || '') };
+    }
+
+    var pay = 0;
+    if (decision === 'approve') {
+      try {
+        // The SAME rate lookup the ungated path uses — not a stored figure.
+        pay = _computeSessionPay(String(row.outcome || ''), String(row.therapist || ''),
+          String(row.clinicalTreatmentType || ''), String(row.billingType || ''));
+      } catch (err) {
+        return { ok: false, reason: 'unknown_therapist' };
+      }
+    }
+
+    var nowIso = new Date().toISOString();
+    row.therapistPay  = pay;
+    row.payStatus     = decision === 'approve' ? PAY_STATUS_APPROVED : PAY_STATUS_DECLINED;
+    row.decision      = decision;
+    row.approvedBy    = approver;
+    row.declineReason = decision === 'decline' ? declineReason : '';
+    row.decidedAt     = nowIso;
+
+    // Single-row write (the payStatus/pay columns only exist on this row).
+    var rowArr = SESSION_LOG_HEADERS.map(function (h) {
+      var v = row[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    sh.getRange(rowNum, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
+
+    logAudit_('session_pay_' + decision + 'd', '_decideSessionPay', sessionId,
+      String(row.patientName || ''), {
+        therapist: String(row.therapist || ''), date: String(row.date || ''),
+        therapistPay: pay, payStatus: row.payStatus, approvedBy: approver,
+        declineReason: row.declineReason
+      });
+
+    return {
+      ok: true, sessionId: sessionId, payStatus: row.payStatus,
+      therapistPay: pay, approvedBy: approver, decidedAt: nowIso
+    };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Minimal INTERNAL read (same trust level as getMyStopAlerts): the rows waiting
+ * on a pay decision, for the dashboard queue + its count badge. Only what the
+ * queue renders — never the whole SessionLog. Sorted oldest-first so the
+ * longest-waiting decision is at the top of the backlog. */
+function _getPendingSessionPay() {
+  var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+  var rows = _readAll(sh, SESSION_LOG_HEADERS);
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r.payStatus || '') !== PAY_STATUS_PENDING) continue;
+    if (String(r.forwardedToPayroll || '').trim() !== '') continue;  // cannot be decided anyway
+    var rate = 0;
+    try {
+      rate = _computeSessionPay(String(r.outcome || ''), String(r.therapist || ''),
+        String(r.clinicalTreatmentType || ''), String(r.billingType || ''));
+    } catch (err) { rate = 0; }   // fail-soft: the queue still lists the row
+    out.push({
+      sessionId: String(r.sessionId || ''),
+      patientName: String(r.patientName || ''),
+      phone: _recoverPhone(r.phone),
+      therapist: String(r.therapist || ''),
+      clinicalTreatmentType: String(r.clinicalTreatmentType || ''),
+      date: String(r.date || ''),
+      recordedAt: String(r.recordedAt || ''),
+      rateIfApproved: rate            // what approving would pay, for the queue
+    });
+  }
+  out.sort(function (a, b) {
+    return String(a.recordedAt).localeCompare(String(b.recordedAt));
+  });
+  return { ok: true, pending: out };
 }
 
 /* Tolerant 'YYYY-MM' extraction for the payout forwarding match — MUST mirror
@@ -2618,16 +2902,27 @@ function _markForwarded(payload) {
     var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
     var rows = _readAll(sh, SESSION_LOG_HEADERS);
     var forwarded = 0;
+    var skippedPending = 0;
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (String(row.therapist || '').trim() !== therapist) continue;
       if (_payoutMonthOf(row.date) !== month) continue;
       if (String(row.forwardedToPayroll || '').trim() !== '') continue; // already settled
+      // A row still waiting on a pay decision must NEVER reach payroll. It is
+      // not in the payout total either, so forwarding it would settle a session
+      // nobody decided about and freeze it at 0 forever. Left unstamped, it
+      // stays in the queue and surfaces as a הפרש once decided.
+      if (String(row.payStatus || '') === PAY_STATUS_PENDING) { skippedPending++; continue; }
       row.forwardedToPayroll = month;
       forwarded++;
     }
     if (forwarded) _writeAll(sh, SESSION_LOG_HEADERS, rows);
-    return { ok: true, therapist: therapist, month: month, forwarded: forwarded };
+    return {
+      ok: true, therapist: therapist, month: month, forwarded: forwarded,
+      // Additive: how many rows were held back awaiting a decision, so the UI
+      // can say so rather than silently forwarding fewer sessions than shown.
+      skippedPending: skippedPending
+    };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -3393,6 +3688,9 @@ function doGet(e) {
       return _json(_getMyStopAlerts());
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    // INTERNAL minimal read (same trust level as getMyStopAlerts): the rows
+    // waiting on a patient-no-show pay decision, for the dashboard queue + badge.
+    if (action === 'getPendingSessionPay') return _json(_getPendingSessionPay());
     if (action === 'getContinuation') return _json(_getContinuation());
     // INTERNAL dashboard read (same trust level as getData): un-restored
     // Clients-removed tombstones, for the admin restore surface.
@@ -3536,6 +3834,14 @@ function doPost(e) {
       // place. forwardedToPayroll is preserved across the upsert.
       return _json(_recordSessionOutcome(payload));
     }
+    if (action === 'decideSessionPay') {
+      // INTERNAL write (same trust level as savePayment / correctSessionOutcome)
+      // — posted same-origin through the session-cookie-gated Node proxy, no
+      // cross-app secret. The approver is the `user` the PROXY injected from the
+      // SIGNED cookie; a caller-supplied name is never trusted, and a name not in
+      // PAY_APPROVERS is refused.
+      return _json(_decideSessionPay(payload));
+    }
     if (action === 'markForwarded') {
       return _json(_markForwarded(payload));
     }
@@ -3579,6 +3885,9 @@ function doPost(e) {
       return _json(_getMyStopAlerts());
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    // INTERNAL minimal read (same trust level as getMyStopAlerts): the rows
+    // waiting on a patient-no-show pay decision, for the dashboard queue + badge.
+    if (action === 'getPendingSessionPay') return _json(_getPendingSessionPay());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
     if (action === 'resolveStopFlag') {

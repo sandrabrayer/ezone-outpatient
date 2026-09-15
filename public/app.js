@@ -150,6 +150,7 @@
     stopFlags: [],  // stop-treatment flags from the therapists app (await confirmation)
     myStopAlerts: [], // this app's own stop/resume alert rows (id/clientId/status/type), seeded cross-session from getMyStopAlerts and updated optimistically — drives the sent/standing chip on overdue rows
     extraRequests: [], // over-package extra-session requests from the therapists app (await Vered approval)
+    payDecisions: [],  // patient_no_show rows awaiting a PAY decision (await Vered/Sandra); drives the dashboard queue + the payouts tab badge
     retained: [],   // lead-retention list (not_relevant + finished)
     removedClients: null, // un-restored Clients-removed tombstones; null = not yet fetched, 'loading' = in flight
     dataVersion: null, // Clients data version from getData, echoed back on saveAll (staleness signal); null = server didn't send one (fail-open: save never flagged stale)
@@ -809,6 +810,34 @@
   }
   // Un-restored Clients-removed tombstones (the _saveAll row-loss guard's
   // audit sheet). INTERNAL read, same trust level as the main load.
+  // Minimal INTERNAL read: the patient_no_show rows awaiting a pay decision.
+  // Only what the queue renders — never the whole SessionLog.
+  async function apiGetPendingSessionPay() {
+    var r = await apiFetch('/api/sheets?action=getPendingSessionPay', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  // Decide one pending row. The approver's NAME is NOT sent: the proxy injects
+  // it from the signed session cookie and the server refuses any name that is
+  // not a pay approver, so the browser cannot nominate an approver.
+  async function apiDecideSessionPay(sessionId, decision, declineReason) {
+    var body = { action: 'decideSessionPay', sessionId: sessionId, decision: decision };
+    if (decision === 'decline') body.declineReason = declineReason || '';
+    var r = await apiFetch('/api/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || data.ok === false) {
+      var err = new Error(data.reason || data.error || ('HTTP ' + r.status));
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
   async function apiGetRemovedClients() {
     var r = await apiFetch('/api/sheets?action=getRemovedClients', { cache: 'no-store' });
     var data = await r.json().catch(function () { return {}; });
@@ -1116,6 +1145,9 @@
   }
 
   function render() {
+    // The pay-decision backlog count is PERSISTENT: rendered on every pass from
+    // every view, so it is visible whichever tab is open.
+    renderPayTabBadge();
     if (state.view === 'dashboard') renderDashboard();
     else if (state.view === 'leads') renderLeads();
     else if (state.view === 'clients') renderClients();
@@ -1171,6 +1203,7 @@
     renderRenewalAlerts(activeOnly);
     renderStopFlags();
     renderExtraRequests();
+    renderPayDecisions();
     renderDashPatientSearch();
   }
 
@@ -1429,6 +1462,161 @@
   // Safe label for a treatment type on Vered's side (outpatient has no Hebrew
   // relabel map for therapists' types; show the raw value, just escaped).
   function displayServiceTypeSafe(v) { return String(v == null ? '' : v); }
+
+  /* ===== Therapist-pay decisions (patient_no_show approval gate) ============
+   *
+   * A patient_no_show no longer pays the therapist automatically: the row is
+   * logged with therapistPay 0 and payStatus 'pending_decision', and stays
+   * that way until ורד (or סנדרה as backup) decides. NOTHING auto-resolves —
+   * there is no timeout that pays and none that declines.
+   *
+   * The queue lives on the dashboard beside the two approval queues ורד
+   * already works, and the COUNT rides as a badge on the תשלומי מטפלים tab so
+   * a growing backlog is visible from every tab, not only this one.
+   */
+  function pendingPayDecisions() {
+    return Array.isArray(state.payDecisions) ? state.payDecisions : [];
+  }
+
+  /* The persistent backlog count. Rendered on every render() pass, from every
+   * view, so it is never stale and never hidden behind a tab. */
+  function renderPayTabBadge() {
+    var badge = $('#payTabBadge');
+    if (!badge) return;
+    var n = pendingPayDecisions().length;
+    badge.textContent = String(n);
+    badge.hidden = n === 0;
+    badge.title = n ? (n + ' מפגשים ממתינים להחלטת תשלום') : '';
+  }
+
+  function renderPayDecisions() {
+    var box = $('#payDecisionAlerts');
+    if (!box) return;
+    var counter = $('#payDecisionCount');
+    var pending = pendingPayDecisions();
+    if (counter) counter.textContent = pending.length ? '(' + pending.length + ')' : '';
+    if (!pending.length) {
+      box.innerHTML = '<div class="renewals-empty">✅ אין מפגשים הממתינים להחלטת תשלום</div>';
+      return;
+    }
+    box.innerHTML = pending.map(function (r) {
+      var chips =
+        '<span class="chip">מטפל: ' + escapeHtml(r.therapist || '—') + '</span>' +
+        (r.clinicalTreatmentType ? '<span class="chip chip-next">' + escapeHtml(displayServiceTypeSafe(r.clinicalTreatmentType)) + '</span>' : '') +
+        (r.date ? '<span class="chip">' + escapeHtml(displayDate(r.date)) + '</span>' : '') +
+        '<span class="chip chip-amount">' + money(toNum(r.rateIfApproved)) + ' אם יאושר</span>';
+      var actions = state.role === 'editor'
+        ? '<button class="btn btn-primary edit-only" data-action="approve-pay" ' +
+            'data-session-id="' + escapeHtml(r.sessionId) + '">אשר תשלום</button>' +
+          '<button class="btn btn-ghost edit-only" data-action="decline-pay" ' +
+            'data-session-id="' + escapeHtml(r.sessionId) + '">דחה</button>'
+        : '';
+      return '<div class="renewal-row renewal-warn" data-session-id="' + escapeHtml(r.sessionId) + '">' +
+        '<div class="renewal-main">' +
+          '<div class="renewal-name">' + escapeHtml(r.patientName || '— ללא שם —') + '</div>' + chips +
+        '</div>' +
+        '<div class="renewal-actions">' + actions + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Re-fetch the queue after a decision (and after any write that could change
+  // it). Fail-soft: the queue is an indicator, never a gate.
+  function reloadPayDecisions() {
+    return apiGetPendingSessionPay()
+      .then(function (d) {
+        state.payDecisions = (d.pending || []).filter(function (r) { return !!r.sessionId; });
+      })
+      .catch(function (e) {
+        console.warn('[ezone] getPendingSessionPay reload failed:', e.message);
+      });
+  }
+
+  // Shared tail for both decisions: refresh the queue, refresh the payout view
+  // if it is showing (its totals just changed), and re-render.
+  function afterPayDecision(msg) {
+    return reloadPayDecisions().then(function () {
+      if (state.sessionLog !== null) reloadSessionLog();
+      render();
+      toast(msg);
+    });
+  }
+
+  function decisionErrorText(err) {
+    var reason = (err && err.message) || '';
+    if (reason === 'not_authorized') return 'רק ורד או סנדרה יכולות לאשר תשלום';
+    if (reason === 'not_pending') return 'ההחלטה כבר בוצעה — רענן את הדף';
+    if (reason === 'already_forwarded') return 'המפגש כבר הועבר לחשבת שכר — לא ניתן לשנות תשלום';
+    if (reason === 'not_found') return 'המפגש לא נמצא ביומן';
+    if (reason === 'decline_reason_required') return 'דחייה מחייבת סיבה';
+    if (reason === 'unknown_therapist') return 'המטפל לא נמצא בטבלת התעריפים';
+    return 'ההחלטה לא נשמרה: ' + reason;
+  }
+
+  // Delegated click handler for the pay-decision queue (approve + decline).
+  function handlePayDecisionClick(e) {
+    var btn = e.target.closest('[data-action="approve-pay"], [data-action="decline-pay"]');
+    if (!btn) return;
+    if (state.role !== 'editor') return;
+    var sessionId = btn.getAttribute('data-session-id');
+    var row = pendingPayDecisions().find(function (r) { return r.sessionId === sessionId; });
+    if (!row) { toast('המפגש לא נמצא — רענן את הדף', true); return; }
+
+    if (btn.getAttribute('data-action') === 'decline-pay') {
+      openDeclinePayModal(row);
+      return;
+    }
+    // Approve: a confirm is enough — the amount is the ordinary rate, and the
+    // server recomputes it rather than trusting anything sent from here.
+    if (!confirm('לאשר תשלום של ' + money(toNum(row.rateIfApproved)) + ' ל' +
+                 (row.therapist || 'מטפל') + ' עבור מפגש שבו המטופל לא הגיע?')) return;
+    btn.disabled = true;
+    apiDecideSessionPay(sessionId, 'approve')
+      .then(function () { return afterPayDecision('התשלום אושר'); })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(decisionErrorText(err), true);
+        // A stale queue is the most likely cause — resync so the row goes away.
+        reloadPayDecisions().then(render);
+      });
+  }
+
+  var declinePaySessionId = null;
+  function openDeclinePayModal(row) {
+    if (state.role !== 'editor') return;
+    declinePaySessionId = row.sessionId;
+    $('#declinePayTherapist').textContent = row.therapist || '—';
+    $('#declinePayPatient').textContent = row.patientName || '—';
+    $('#declinePayDate').textContent = row.date ? displayDate(row.date) : '—';
+    var form = $('#declinePayForm');
+    if (form) form.declineReason.value = '';
+    $('#declinePayModal').hidden = false;
+  }
+  function closeDeclinePayModal() {
+    var m = $('#declinePayModal');
+    if (m) m.hidden = true;
+    declinePaySessionId = null;
+  }
+  function submitDeclinePay() {
+    if (!declinePaySessionId) return;
+    var form = $('#declinePayForm');
+    var submit = $('#declinePaySubmit');
+    var reason = (form.declineReason.value || '').trim();
+    // The server refuses a reason-less decline too; this only spares a trip.
+    if (!reason) { toast('דחייה מחייבת סיבה', true); return; }
+    if (submit) submit.disabled = true;
+    var id = declinePaySessionId;
+    apiDecideSessionPay(id, 'decline', reason)
+      .then(function () {
+        closeDeclinePayModal();
+        return afterPayDecision('התשלום נדחה');
+      })
+      .catch(function (err) {
+        toast(decisionErrorText(err), true);
+        reloadPayDecisions().then(render);
+      })
+      .then(function () { if (submit) submit.disabled = false; });
+  }
 
   function handleExtraRequestClick(e) {
     var btn = e.target.closest('[data-action="approve-extra"]');
@@ -3043,6 +3231,11 @@
         payoutStat('לפני מע״מ', money(t.preVatTotal)) +
         payoutStat('כולל מע״מ', money(t.vatTotal)) +
         payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
+        // Pending decisions are SHOWN, never hidden — and never summed into the
+        // totals above. The amount is exposure (what approving them would add).
+        (t.pendingCount
+          ? payoutStat('ממתין להחלטת תשלום', t.pendingCount + ' (' + money(t.pendingRate) + ')')
+          : '') +
         (opts.isDiff ? payoutStat('חודשים', (t.months || []).join(', ') || '—') : '') +
       '</div>';
 
@@ -3052,6 +3245,16 @@
       var monthCol = opts.isDiff;
       var rows = t.sessions.map(function (s) {
         var dimmed = s.paid ? '' : 'opacity:0.55;';
+        // A pending row is visible but visually distinct: it is a real session
+        // whose pay nobody has decided yet, not a session that pays nothing.
+        var payCell = s.pending
+          ? '<span class="pay-pending-chip" title="ממתין להחלטת ורד — לא נכלל בסכום ולא יועבר לחשבת שכר">' +
+              'ממתין (' + money(toNum(s.rateIfApproved)) + ')</span>'
+          : (s.declined
+              ? '<span class="pay-declined-chip" title="' +
+                  escapeHtml(s.declineReason ? ('סיבה: ' + s.declineReason) : 'התשלום נדחה') +
+                  '">נדחה</span>'
+              : money(s.pay));
         // Stash the session payload on the correct button so the handler can
         // re-send the identity fields (server recomputes pay + reverses credit).
         var correctBtn = canEdit
@@ -3068,7 +3271,7 @@
           '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
           '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
           '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
-          '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
+          '<td style="padding:6px 10px;text-align:left;">' + payCell + '</td>' +
           (canEdit ? '<td style="padding:6px 10px;text-align:left;">' + correctBtn + '</td>' : '') +
         '</tr>';
       }).join('');
@@ -3609,11 +3812,23 @@
   function markTherapistForwarded(therapist, btn) {
     if (!therapist) return;
     var month = state.payoutMonth || currentMonthStr();
-    if (!window.confirm('לסמן את ' + therapist + ' לחודש ' + month + ' כהועבר לחשבת שכר?\nהסשנים יוסרו מהתצוגה ולא יופיעו שוב.')) return;
+    // Rows still awaiting a pay decision are NEVER forwarded (the server
+    // refuses them). Say so up front rather than letting מורן discover that
+    // fewer sessions went out than the card showed.
+    var pendingHere = 0;
+    var card = (lastPayoutSummary && lastPayoutSummary.therapists || [])
+      .find(function (t) { return t.therapist === therapist; });
+    if (card) pendingHere = card.pendingCount || 0;
+    var warn = pendingHere
+      ? '\n\nשים לב: ' + pendingHere + ' מפגשים ממתינים להחלטת תשלום ולא יועברו — הם יופיעו כהפרש אחרי ההחלטה.'
+      : '';
+    if (!window.confirm('לסמן את ' + therapist + ' לחודש ' + month + ' כהועבר לחשבת שכר?\nהסשנים יוסרו מהתצוגה ולא יופיעו שוב.' + warn)) return;
     if (btn) btn.disabled = true;
     apiPostAction('markForwarded', { therapist: therapist, month: month })
       .then(function (r) {
-        toast('הועבר: ' + (r.forwarded || 0) + ' סשנים');
+        var held = r.skippedPending || 0;
+        toast('הועבר: ' + (r.forwarded || 0) + ' סשנים' +
+          (held ? ' · ' + held + ' ממתינים להחלטה לא הועברו' : ''));
         reloadSessionLog();
       })
       .catch(function (err) {
@@ -4897,7 +5112,7 @@
 
   async function loadAll() {
     try {
-      // All six reads are independent Apps Script round-trips (~1-3s each).
+      // All eight reads are independent Apps Script round-trips (~1-3s each).
       // Fired in PARALLEL: total load = slowest call, not the sum (was serial,
       // 6-18s worst case). Non-critical reads fall back to empty on failure —
       // same semantics as before; only the main load (apiLoad) is fatal.
@@ -4918,6 +5133,10 @@
         apiGetExtraRequests().catch(function (ere) {
           console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
           return { requests: [] };
+        }),
+        apiGetPendingSessionPay().catch(function (pspe) {
+          console.warn('[ezone] getPendingSessionPay failed, assuming empty:', pspe.message);
+          return { pending: [] };
         }),
         apiLoadSettings().catch(function () { return {}; }),
         apiGetMyStopAlerts().catch(function (mse) {
@@ -4954,7 +5173,10 @@
       state.charges = excludeOrphanCharges(state.charges, state.clients);
       state.stopFlags = (results[3].stopFlags || []).map(normalizeStopFlagFromSheet).filter(function (f) { return !!f.id; });
       state.extraRequests = (results[4].requests || []).filter(function (r) { return !!r.id; });
-      var s = results[5];
+      // Pay decisions awaiting a person (patient_no_show). Drives the dashboard
+      // queue AND the persistent count badge on the תשלומי מטפלים tab.
+      state.payDecisions = (results[5].pending || []).filter(function (r) { return !!r.sessionId; });
+      var s = results[6];
       state.settings = {
         bankName: s.bankName || '',
         bankBranch: s.bankBranch || '',
@@ -4964,7 +5186,7 @@
       // This app's own stop/resume alerts (minimal fields) — sent-state source of
       // truth across sessions. Replaces any in-session optimistic entries with the
       // real server rows on each load.
-      state.myStopAlerts = (results[6].myStopAlerts || []).filter(function (a) { return a && a.clientId; });
+      state.myStopAlerts = (results[7].myStopAlerts || []).filter(function (a) { return a && a.clientId; });
       state.loaded = true;
       render();
     } catch (e) {
@@ -5039,6 +5261,16 @@
     if (stopFlagsBox) stopFlagsBox.addEventListener('click', handleStopFlagClick);
     var extraBox = $('#extraRequestsAlerts');
     if (extraBox) extraBox.addEventListener('click', handleExtraRequestClick);
+
+    // Pay-decision queue (patient_no_show approval gate): approve is a confirm,
+    // decline opens the reason modal (a reason is required, server-enforced).
+    var payDecisionBox = $('#payDecisionAlerts');
+    if (payDecisionBox) payDecisionBox.addEventListener('click', handlePayDecisionClick);
+    var declineForm = $('#declinePayForm');
+    if (declineForm) declineForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      submitDeclinePay();
+    });
     var dupReportBox = $('#duplicateClientsReport');
     if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
     var mergeConfirmBtn = $('#mergeClientsConfirm');
@@ -5084,7 +5316,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeDeclinePayModal();
       });
     });
 

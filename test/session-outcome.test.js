@@ -131,6 +131,15 @@ function computePay(outcome, therapist, clinical, billingType) {
   if (billingType === GROUP_BILLING) return 0;
   return therapistPay(therapist, clinical);
 }
+/* The patient-no-show PAY APPROVAL GATE (see CHANGELOG-no-show-pay-approval.md).
+ * A non-group patient_no_show no longer pays automatically: the row is written
+ * with therapistPay 0 and payStatus 'pending_decision' until a person decides.
+ * Group is excluded because its pay is a decided 0 no approval could change.
+ * Full gate coverage lives in test/no-show-pay-approval.test.js; it is mirrored
+ * here so this file's rows stay byte-accurate. */
+function payGateApplies(outcome, billingType) {
+  return outcome === 'patient_no_show' && billingType !== GROUP_BILLING;
+}
 function computeValue(billingType, freq) {
   if (isDayCenter(billingType) && (freq === undefined || freq === null || freq === '')) return null;
   return billingPrice(billingType, freq);
@@ -155,9 +164,13 @@ function recordSessionOutcome(payload, rows, clients) {
   let freq;
   if (payload && payload.freqPerWeek != null && payload.freqPerWeek !== '') freq = payload.freqPerWeek;
 
-  let pay, value;
-  try { pay = computePay(outcome, therapist, clinical, billingType); }
+  let rateIfPaid, value;
+  // The rate is still computed for a gated row (an unknown therapist must still
+  // reject at write time); the value WRITTEN is 0 while it waits on a person.
+  try { rateIfPaid = computePay(outcome, therapist, clinical, billingType); }
   catch (e) { return { res: { ok: false, reason: 'unknown_therapist' }, rows }; }
+  const payGated = payGateApplies(outcome, billingType);
+  const pay = payGated ? 0 : rateIfPaid;
   try { value = computeValue(billingType, freq); }
   catch (e) { return { res: { ok: false, reason: 'invalid_frequency' }, rows }; }
 
@@ -180,14 +193,17 @@ function recordSessionOutcome(payload, rows, clients) {
     clinicalTreatmentType: clinical, billingType,
     date: String((payload && payload.date) || '').trim(), outcome,
     therapistPay: pay, clientSessionValue: value, sessionStatus, matchStatus,
-    recordedAt: '2026-06-18T00:00:00.000Z'
+    recordedAt: '2026-06-18T00:00:00.000Z',
+    payStatus: payGated ? 'pending_decision' : '',
+    decision: '', approvedBy: '', declineReason: '', decidedAt: ''
   };
 
   const idx = rows.findIndex((r) => String(r.sessionId) === sessionId);
   let upserted = false;
   if (idx !== -1) { rows[idx] = rowObj; upserted = true; } else rows.push(rowObj);
 
-  const res = { ok: true, sessionId, therapistPay: pay, clientSessionValue: value, sessionStatus };
+  const res = { ok: true, sessionId, therapistPay: pay, clientSessionValue: value, sessionStatus,
+    payStatus: rowObj.payStatus };
   if (upserted) res.upserted = true; else res.appended = true;
   return { res, rows };
 }
@@ -248,13 +264,17 @@ test('happened -> consumed, pays the flat rate, bills the session value', () => 
   assert.equal(rows[0].billingType, 'פרטני');
 });
 
-test('patient_no_show -> forfeited, therapist STILL paid, value still billed', () => {
+test('patient_no_show -> forfeited, pay GATED (0 + pending), value still billed', () => {
+  // BEHAVIOUR CHANGE: this used to pay 250 automatically. The therapist still
+  // showed up, so the money may well be owed — but it is now a PERSON's call,
+  // so the row is written at 0 and waits. The client is billed either way.
   const { res } = recordSessionOutcome(
     { sessionId: 's2', therapist: 'מעיין דלומי', clinicalTreatmentType: 'פרטני CBT', outcome: 'patient_no_show' }, []
   );
-  assert.equal(res.therapistPay, 250);          // showed up -> paid
-  assert.equal(res.clientSessionValue, 500);
-  assert.equal(res.sessionStatus, 'forfeited');
+  assert.equal(res.therapistPay, 0);                    // not paid until approved
+  assert.equal(res.payStatus, 'pending_decision');
+  assert.equal(res.clientSessionValue, 500);            // unchanged
+  assert.equal(res.sessionStatus, 'forfeited');         // unchanged
 });
 
 test('therapist_cancelled -> credited, pay 0 (never delivered), value still computed', () => {
@@ -287,6 +307,9 @@ test('group (קבוצה) -> 0 pay AND 0 value, regardless of (paid) outcome', ()
   ).res;
   assert.equal(noShow.therapistPay, 0);
   assert.equal(noShow.clientSessionValue, 0);
+  // A GROUP no-show is NOT gated: group pay is a decided 0 that no approval
+  // could change, so queueing it would ask for an approval of ₪0.
+  assert.equal(noShow.payStatus, '');
 });
 
 // ============================================================================
@@ -451,18 +474,23 @@ test('multiple phone matches log flagged multi_match', () => {
 // ============================================================================
 // Positional safety on the new tab.
 // ============================================================================
-test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, forwardedToPayroll last', () => {
+test('SESSION_LOG_HEADERS: sessionId first (upsert key), APPEND-ONLY prefix intact', () => {
   assert.equal(H[0], 'sessionId');
   assert.ok(H.indexOf('phone') !== -1);
-  // forwardedToPayroll (payout forwarding) was appended after creditStatus, which
-  // itself was appended after recordedAt.
-  assert.equal(H[H.length - 1], 'forwardedToPayroll');
-  assert.equal(H[H.length - 2], 'creditStatus');
-  assert.equal(H[H.length - 3], 'recordedAt');
+  // The append-only contract, stated as a PREFIX rather than "X is last": every
+  // column that existed keeps its exact position, and later work appends after
+  // them. (Pinning the final element froze the array against the next append —
+  // the pay-decision columns — while testing nothing extra.)
+  assert.deepEqual(H.slice(0, 16), [
+    'sessionId', 'phone', 'patientName', 'clientId',
+    'therapist', 'clinicalTreatmentType', 'billingType', 'date',
+    'outcome', 'therapistPay', 'clientSessionValue', 'sessionStatus',
+    'matchStatus', 'recordedAt', 'creditStatus', 'forwardedToPayroll'
+  ], 'an existing SessionLog column moved, was renamed or was removed');
   // every field the receiver writes has a column
   ['sessionId', 'phone', 'patientName', 'clientId', 'therapist', 'clinicalTreatmentType',
    'billingType', 'date', 'outcome', 'therapistPay', 'clientSessionValue',
-   'sessionStatus', 'matchStatus', 'recordedAt', 'creditStatus'].forEach((k) => {
+   'sessionStatus', 'matchStatus', 'recordedAt', 'creditStatus', 'payStatus'].forEach((k) => {
     assert.ok(H.indexOf(k) !== -1, 'missing column ' + k);
   });
 });

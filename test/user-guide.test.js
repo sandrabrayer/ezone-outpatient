@@ -119,7 +119,10 @@ test('10. no external links (the guide is offline-safe and cannot leak a URL)', 
 test('11. UI wording the guide relies on still exists in public/index.html', () => {
   // Tabs referenced by the guide's daily-operations / payouts sections.
   for (const tab of ['לידים', 'מטופלים', 'תשלומי מטפלים']) {
-    assert.ok(new RegExp(`<button class="tab[^"]*" data-view="[a-z]+">${tab}</button>`).test(indexHtml),
+    // The label may be followed by a badge span (e.g. the pay-decision backlog
+    // count), so match the label at the start of the button's content rather
+    // than requiring it to be the whole of it.
+    assert.ok(new RegExp(`<button class="tab[^"]*" data-view="[a-z]+">${tab}(<|</button>)`).test(indexHtml),
       `tab "${tab}" exists in the topbar`);
   }
   // Statuses / sections the guide names.

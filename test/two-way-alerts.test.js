@@ -211,7 +211,11 @@ test('wiring(app.js): getMyStopAlerts is fetched in loadAll and stored on state.
   assert.match(APP, /function apiGetMyStopAlerts\(\)/, 'apiGetMyStopAlerts reader');
   assert.match(APP, /action=getMyStopAlerts/, 'reads via GET');
   assert.match(APP, /apiGetMyStopAlerts\(\)\.catch/, 'wired into loadAll Promise.all');
-  assert.match(APP, /state\.myStopAlerts = \(results\[6\]\.myStopAlerts \|\| \[\]\)/, 'stored from results[6]');
+  // Index-agnostic: loadAll's Promise.all grows as reads are added, and the
+  // exact slot is an implementation detail. What must hold is that the result
+  // is read out of that batch and stored on state.myStopAlerts.
+  assert.match(APP, /state\.myStopAlerts = \(results\[\d+\]\.myStopAlerts \|\| \[\]\)/,
+    'stored from the loadAll results batch');
 });
 
 test('wiring(app.js): latestAlertFor / stopAlertStanding / renderStopAlertControl exist', () => {

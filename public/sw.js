@@ -23,8 +23,12 @@
  * - v5 (2026-09-12): ירדן added to the login name picker / assignedTo list
  *   (lib/users.js + index.html). CACHE bumped so an installed app cannot keep
  *   serving the old index.html whose משוייך ל dropdown lacks her.
+ * - v6 (2026-09-15): patient-no-show pay approval gate — new dashboard queue
+ *   panel, a count badge on the תשלומי מטפלים tab, the decline-reason modal
+ *   and their CSS, all in index.html. CACHE bumped so an installed app cannot
+ *   serve the old shell (no badge, no queue) with the new app.js.
  */
-var CACHE = 'ezone-outpatient-v5';
+var CACHE = 'ezone-outpatient-v6';
 var SHELL = [
   './',
   './index.html',

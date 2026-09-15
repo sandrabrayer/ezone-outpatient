@@ -47,7 +47,7 @@
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="retention">שימור לידים</button>
         <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
-        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
+        <button class="tab" data-view="payouts">תשלומי מטפלים<span id="payTabBadge" class="tab-badge" hidden>0</span></button>
         <button class="tab" data-view="continuation">מסלול המשך</button>
       </nav>
       <div class="topbar-right">
@@ -106,6 +106,16 @@
         <div class="panel stopflags-panel">
           <div class="panel-title">➕ בקשות לטיפול נוסף (מעבר לחבילה)</div>
           <div id="extraRequestsAlerts" class="renewals-list"></div>
+        </div>
+
+        <!-- Therapist-pay decisions awaiting ורד (or סנדרה as backup): a
+             patient did not show up, so whether the therapist is paid for that
+             session is a PERSON's call. Nothing here auto-resolves — no timeout
+             pays and none declines. A pending row is worth ₪0 until decided and
+             can never be forwarded to payroll. -->
+        <div class="panel stopflags-panel">
+          <div class="panel-title">⏳ אישור תשלום — לא הגיע מטופל <span id="payDecisionCount" class="panel-sub"></span></div>
+          <div id="payDecisionAlerts" class="renewals-list"></div>
         </div>
 
         <div class="grid-2">
@@ -499,6 +509,28 @@
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="exitSubmit">סיום</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Declining a no-show pay decision REQUIRES a written reason (the server
+         refuses a reason-less decline). Approving needs no modal — it is a
+         confirm, since the amount is the ordinary rate. -->
+    <div id="declinePayModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">דחיית תשלום — לא הגיע מטופל</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="declinePayTherapist"></span> · <span id="declinePayPatient"></span> · <span id="declinePayDate"></span>
+        </div>
+        <form id="declinePayForm" class="form-grid">
+          <label class="wide">סיבת הדחייה (חובה)
+            <input name="declineReason" type="text" maxlength="300" required
+                   placeholder="למה המטפל לא מקבל תשלום על מפגש זה" />
+          </label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="declinePaySubmit">דחה תשלום</button>
           </div>
         </form>
       </div>

@@ -310,9 +310,14 @@ test('Clients.creditsOwed round-trips positionally (frozen physical order: last 
   assert.equal(toCredits(readRow(CLIENTS_H, legacy).creditsOwed), 0);
 });
 
-test('SessionLog.creditStatus round-trips positionally (now second-to-last, before forwardedToPayroll)', () => {
-  assert.equal(LOG_H[LOG_H.length - 1], 'forwardedToPayroll');
-  assert.equal(LOG_H[LOG_H.length - 2], 'creditStatus');
+test('SessionLog.creditStatus round-trips positionally (after recordedAt, before forwardedToPayroll)', () => {
+  // Stated as POSITIONS rather than "X is last": the header array is
+  // append-only, so pinning the final element freezes it against the next
+  // append while testing nothing extra. What matters is that creditStatus and
+  // forwardedToPayroll keep the exact slots the live sheet already has.
+  assert.equal(LOG_H.indexOf('creditStatus'), 14);
+  assert.equal(LOG_H.indexOf('forwardedToPayroll'), 15);
+  assert.equal(LOG_H[LOG_H.indexOf('creditStatus') - 1], 'recordedAt');
   const clients = [client2pw()]; clients[0].creditsOwed = 1; const log = [];
   for (let i = 1; i <= 8; i++) record(HAPPENED('s' + i, '2026-06-' + String(i).padStart(2, '0')), clients, log);
   record(HAPPENED('s9', '2026-06-20'), clients, log);

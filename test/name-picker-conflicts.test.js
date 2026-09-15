@@ -165,7 +165,10 @@ test('A: GET /api/users serves SESSION_USERS (the picker list) and is session-ga
   const ok = await request('GET', '/api/users', null, { Cookie: cookieOf(login) });
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.json, { ok: true, users: SESSION_USERS });
-  assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל', 'ירדן'], 'the four names, nothing invented');
+  // The list is append-only; pin the prefix so a later addition (סנדרה, for the
+  // therapist-pay approval gate) does not fail a test about the ROUTE.
+  assert.deepEqual(ok.json.users.slice(0, 4), ['ורד', 'שירן', 'יעל', 'ירדן'],
+    'the original four, in order, nothing invented');
   // gated in the router (the F test in session-who-when pins the open set)
   const route = server._router.stack.find((m) => m.route && m.route.path === '/api/users');
   assert.ok(route, '/api/users mounted');

@@ -79,6 +79,20 @@
       round2(num(totals.vatTotal))
     ]);
 
+    // Sessions still awaiting a pay decision are NOT in any figure above (they
+    // are worth 0 until a person decides and are never forwarded). Say so on the
+    // sheet, so חשבת שכר knows a follow-up הפרש may arrive rather than assuming
+    // this month is closed. A NOTE ONLY — it changes no number.
+    if (num(totals.pendingCount) > 0) {
+      rows.push([]);
+      rows.push([
+        'ממתינים להחלטת תשלום (לא נכללים בסכומים)',
+        num(totals.pendingCount),
+        round2(num(totals.pendingRate)),
+        '', ''
+      ]);
+    }
+
     // הפרשים — late sessions for already-forwarded prior months (only if any).
     if (diffs.length) {
       rows.push([]);

@@ -5,6 +5,57 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **⚠️ Patient-no-show no longer pays the therapist automatically — it is now an
+  APPROVAL GATE.** This changes live pay. Until now a `patient_no_show` reported
+  by the therapists app paid the ordinary rate the instant it landed
+  (`_computeSessionPay`) and went straight into the payout total. Now the row is
+  logged at **₪0** with `payStatus: 'pending_decision'` and waits for **ורד**
+  (or **סנדרה** as backup) to decide. **Approve** → `_therapistPay(...)`, the
+  exact rate it would have paid, recomputed at decision time. **Decline** → stays
+  0, with a written `declineReason` **required** (server-enforced). **Nothing
+  auto-resolves** — no timeout pays, none declines; there is no clock input in
+  the pay path at all. `happened` and `therapist_cancelled` are **untouched end
+  to end**; a GROUP no-show is deliberately **not** gated (its pay is a decided 0
+  no approval could change, so queueing it would ask for an approval of ₪0).
+  **Payout:** `PAID_OUTCOMES` no longer decides alone — every row now routes
+  through `paysFor(row)`, which checks `payStatus` too; `_markForwarded`
+  **skips** pending rows and reports `skippedPending`, so a pending session can
+  never reach payroll; pending rows stay **visible** in the payout view with pay
+  0, a `ממתין` chip and the would-be amount, counted in `pendingCount` /
+  `pendingRate` (exposure, never folded into any money total). The rule
+  **withholds** on an explicit pending/declined rather than requiring an explicit
+  `approved` — deliberately, because every no-show row logged before this change
+  carries a blank `payStatus` with its real paid rate, and requiring `approved`
+  would have silently dropped all of them out of past payout totals.
+  **Re-marking:** moving away from a no-show **voids** the decision (the normal
+  rule applies); staying a no-show **carries** it; `happened` → no-show opens a
+  fresh pending decision. **⚠️ New guard, not a preservation:** a row with
+  `forwardedToPayroll` now has its pay **frozen** across a re-mark — previously
+  only the stamp was preserved and `therapistPay` was recomputed, silently
+  rewriting money payroll had already sent. This freeze applies to **every**
+  outcome, so an already-forwarded `happened` row is also no longer recomputed.
+  **Approvers:** new `lib/approvers.js` `PAY_APPROVERS = ['ורד', 'סנדרה']`,
+  checked server-side and **fail-closed**; the name comes from the **signed
+  session cookie** via `_requestUser`, never the payload — a hardening over
+  `_approveExtraSession`, which takes `approvedBy` from the client (fine for
+  scheduling, not for money). Deliberately **not** `SESSION_USERS`: that list is
+  "who may log in", this one is "whose name may move money". סנדרה was added to
+  `SESSION_USERS` so she can log in, but **not** to the leads `assignedTo`
+  dropdown. **Queue:** a new dashboard panel **⏳ אישור תשלום — לא הגיע מטופל**
+  beside the two approval queues ורד already works, with the backlog count as a
+  **persistent badge on the תשלומי מטפלים tab** (rendered from every view), fed
+  by a new minimal `getPendingSessionPay` read. `SESSION_LOG_HEADERS` gains five
+  APPENDED columns (`payStatus`, `decision`, `approvedBy`, `declineReason`,
+  `decidedAt`) — no existing column moved. No new endpoint and `server.js`
+  unchanged. **Requires an Apps Script redeploy** (no new Script Property).
+  `sw.js` cache `v5` -> `v6`. Tests: new `test/no-show-pay-approval.test.js`
+  (46); six pre-existing files had snapshot-style pins rewritten as real
+  invariants (append-only prefixes instead of "X is last", allow-list
+  containment instead of equality, a cache-version floor, an index-agnostic
+  `loadAll` assertion); suite 883 -> 929. See
+  `CHANGELOG-no-show-pay-approval.md`.
+
 ### Added
 - **ירדן added as an outpatient user.** `lib/users.js` `SESSION_USERS`
   `[ורד, שירן, יעל]` -> `[ורד, שירן, יעל, ירדן]` (appended, existing order

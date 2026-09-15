@@ -240,9 +240,10 @@ checkout ever drifts back.
   with the same id overwrites the row and recomputes pay — never a duplicate,
   never stale pay). **Fail-closed:** `SESSION_OUTCOME_SECRET` (Apps Script Script
   Property) must exist and match. `outcome ∈ happened | therapist_cancelled |
-  patient_no_show` (any other rejects). Pay: `happened`/`patient_no_show` →
-  therapist showed up, **paid**; `therapist_cancelled` → **0**; `קבוצה` (group)
-  → **0** pay and **0** value. `sessionStatus`: `consumed` / `credited` /
+  patient_no_show` (any other rejects). Pay: `happened` → **paid** the rate;
+  `therapist_cancelled` → **0**; `קבוצה` (group) → **0** pay and **0** value;
+  **`patient_no_show` → 0 + `payStatus: 'pending_decision'`** — it no longer
+  pays automatically, see the approval gate below. `sessionStatus`: `consumed` / `credited` /
   `forfeited`. `ליווי יומי בקהילה` with no frequency in the event stores
   `clientSessionValue` **null** (flagged, never guessed). An unknown clinical type
   or unknown outcome **writes nothing**; the log is keyed by session so it always
@@ -333,8 +334,8 @@ checkout ever drifts back.
   never inside `therapistPay`. See `CHANGELOG-therapist-pay-table.md`.
 - `public/therapist-payout.js` is the monthly payout summary:
   `monthlyPayoutSummary(sessionLogRows, 'YYYY-MM')` groups `SessionLog` rows per
-  therapist, sums the pay for paying outcomes (`happened` + `patient_no_show`)
-  into a pre-VAT total, derives the +VAT total via `withVat`, and reports the
+  therapist, sums the pay for paying outcomes (`happened`, plus an **approved**
+  `patient_no_show` — see the approval gate below) into a pre-VAT total, derives the +VAT total via `withVat`, and reports the
   excluded `therapist_cancelled` count plus a per-session breakdown. It is
   **forwarding-aware**: rows stamped `forwardedToPayroll` are excluded forever,
   and a session logged late for an already-forwarded month surfaces under
@@ -351,6 +352,26 @@ checkout ever drifts back.
   (`forwardedToPayroll = 'YYYY-MM'`, the append-only `SessionLog` column) so those
   sessions never reappear; per-therapist independent. See
   `CHANGELOG-payout-correct-export-forward.md`.
+- **Patient-no-show pay is an APPROVAL GATE, not automatic.** A
+  `patient_no_show` used to pay the therapist the moment the therapists app
+  reported it. It is now logged at **₪0** with `payStatus: 'pending_decision'`
+  and waits for **ורד** (or **סנדרה** as backup, `lib/approvers.js`
+  `PAY_APPROVERS`) to approve — `_therapistPay(...)`, the same rate as before —
+  or decline, which keeps it at 0 and **requires a written reason**. **Nothing
+  auto-resolves:** no timeout pays and none declines. `happened` and
+  `therapist_cancelled` are unchanged, and a GROUP no-show is not gated (its pay
+  is a decided 0 no approval could change). A pending row is **excluded from
+  every payout total and can never be forwarded to payroll** (`_markForwarded`
+  skips it and reports `skippedPending`), but it stays **visible** in the payout
+  view at pay 0 with the amount approving it would cost. The queue is the
+  dashboard panel **⏳ אישור תשלום — לא הגיע מטופל**, and the backlog count is a
+  persistent badge on the **תשלומי מטפלים** tab. The approver's name comes from
+  the **signed session cookie** (`_requestUser`), never the request body, and a
+  name outside `PAY_APPROVERS` is refused. Actions `decideSessionPay` /
+  `getPendingSessionPay` are **internal** — session-cookie-gated through
+  `/api/sheets`; `server.js` is unchanged. A row already stamped
+  `forwardedToPayroll` has its pay **frozen** against re-marks. See
+  `CHANGELOG-no-show-pay-approval.md`.
 - `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
   type as recorded by the therapists app. On save, `_saveAll` derives
   `serviceType` from it via an inline mirror of `treatment-map.js`

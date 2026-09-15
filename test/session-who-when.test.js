@@ -159,13 +159,20 @@ test('A: missing SESSION_SECRET fails closed — create throws, verify/read neve
 
 /* ================= B. server.js session routes ================= */
 
-test('B: SESSION_USERS equals the index.html assignedTo options (nothing invented)', () => {
+test('B: every index.html assignedTo option is an allow-listed name (nothing invented)', () => {
   const m = INDEX.match(/<select name="assignedTo"[^>]*>([\s\S]*?)<\/select>/);
   assert.ok(m, 'assignedTo select missing');
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
-  assert.deepEqual(SESSION_USERS, options);
-  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל', 'ירדן']);
+  // CONTAINMENT, not equality — the safety property is that no assignee exists
+  // whom /api/verify-pin would refuse. The reverse is deliberately allowed:
+  // סנדרה logs in to decide therapist pay (lib/approvers.js) but takes no
+  // leads, so she is on the allow-list and not in this dropdown.
+  options.forEach((o) => assert.ok(SESSION_USERS.includes(o),
+    'assignedTo offers "' + o + '", which is not an allow-listed user'));
+  assert.deepEqual(options, ['ורד', 'שירן', 'יעל', 'ירדן'], 'the assignable set');
+  assert.deepEqual(SESSION_USERS.slice(0, 4), ['ורד', 'שירן', 'יעל', 'ירדן'],
+    'the existing four keep their order in the allow-list');
 });
 
 test('B: verify-pin sets an HttpOnly SameSite=Lax 7-day cookie; Secure only behind HTTPS', async () => {
