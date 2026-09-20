@@ -221,6 +221,39 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `CHANGELOG-treatment-plans-dates.md`.
 
 ### Fixed
+- **A re-marked session no longer rewrites therapist pay on a row already
+  forwarded to payroll.** `SessionLog.forwardedToPayroll` stamps the `YYYY-MM`
+  payroll cycle a session was handed to חשבת שכר in. Only that **stamp**
+  survived an outcome upsert — `therapistPay` was recomputed unconditionally
+  from the new outcome — so re-marking (or re-sending) an already-forwarded
+  session silently overwrote the pay on a row payroll had **already paid out**.
+  Nothing surfaced it: the payout view filters forwarded rows out, so the
+  rewritten figure never appears in a total again and the sheet quietly stops
+  agreeing with the money that actually left. The worst case is a forwarded
+  `happened` (paid the rate) re-marked to `therapist_cancelled`, which rewrote
+  the row to **₪0** — the shekels were paid, the record says they were not.
+  `_recordSessionOutcome` now derives `wasForwarded` once and, when set,
+  carries the **stored** `therapistPay` across the upsert via a new
+  `_toNumberOrZero` helper (a blank or stray string coerces to 0, never `NaN`
+  into the cell); the returned `therapistPay` reads from the row object, so a
+  caller sees the frozen figure rather than the discarded recomputation.
+  **The freeze applies to every outcome** — `happened`, `patient_no_show` and
+  `therapist_cancelled` alike — because the question is not what the session
+  turned out to be, it is what payroll was already sent. Everything else about
+  the correction still runs: `outcome`, `sessionStatus` and the **credit
+  engine** are unchanged (`creditsOwed` is a separate, still-open ledger, so a
+  cancellation credit is still granted on a forwarded row), validation still
+  runs **before** the freeze (an unknown therapist still rejects and writes
+  nothing), and the stamp itself is still preserved. A genuine pay correction
+  on a settled row belongs in the next cycle as a **הפרש**, not as a silent
+  rewrite. Un-forwarded rows are untouched — they still recompute from scratch
+  and still pick up a `TherapistRates` change. **No schema change**
+  (`SESSION_LOG_HEADERS` is unmodified), no new endpoint, `server.js`
+  unchanged, and `PAID_OUTCOMES` stays the plain outcome-based map. **Requires
+  an Apps Script redeploy** to take effect. Tests: new
+  `test/forwarded-pay-freeze.test.js` (24, incl. source-scan guards that assert
+  the guard exists in the real `Code.gs`); suite 944 -> 968. See
+  `CHANGELOG-forwarded-pay-freeze.md`.
 - **The package chip toggles paid ⇄ unpaid reliably again.** After the cycle
   fix (#95) the chip's click was still gated on the underlying Payments ROW
   status, while its visible state comes from the anchor (`packagePaidState`) —
