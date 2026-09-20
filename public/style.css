@@ -1047,3 +1047,75 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   .credit-payout-row { flex-direction: column; align-items: stretch; }
   .credit-payout-actions { margin-inline-start: 0; justify-content: space-between; }
 }
+
+/* ===== הכנסות חודשיות — monthly revenue view =============================
+ * A separate view from the daily גבייה worklist; none of these rules touch
+ * the .billing-* classes that screen uses, except by reusing .billing-row as
+ * the base for a detail row (additively, via .rev-detail-row).
+ *
+ * The colour language carries the view's whole point: RECEIVED is green
+ * (money), EXPECTED is blue (a forecast), CREDITS amber (money going out),
+ * NET neutral-bright. Two different certainties must not look alike. */
+.revenue-vat-note {
+  margin-inline-start: auto;
+  color: var(--muted); font-size: 12px;
+  border: 1px dashed var(--border); border-radius: 8px;
+  padding: 4px 10px; white-space: nowrap;
+}
+.revenue-kpis { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1000px) { .revenue-kpis { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px)  { .revenue-kpis { grid-template-columns: 1fr; } }
+
+.revenue-kpis .kpi-sub {
+  color: var(--muted); font-size: 11px; margin-top: 4px; line-height: 1.35;
+}
+/* RECEIVED — money in hand. */
+.revenue-kpi-received { border-inline-start: 3px solid var(--green-2); }
+.revenue-kpi-received .kpi-value { color: var(--green-2); }
+/* EXPECTED — a forecast. Deliberately NOT green: it is not money. */
+.revenue-kpi-expected { border-inline-start: 3px solid var(--blue-soft); }
+.revenue-kpi-expected .kpi-value { color: var(--blue-soft); }
+/* CREDITS — money going back out. */
+.revenue-kpi-credits { border-inline-start: 3px solid var(--amber); }
+.revenue-kpi-credits .kpi-value { color: var(--amber); }
+/* NET — the only place the two meet, and a projection by construction. */
+.revenue-kpi-net { border-inline-start: 3px solid var(--text-soft); }
+.revenue-kpi-net .kpi-value { color: var(--text-soft); }
+
+.revenue-basis-note {
+  color: var(--muted); font-size: 12.5px; line-height: 1.6;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px; padding: 9px 12px;
+}
+.revenue-basis-note strong { color: var(--text); }
+
+.billing-breakdown .bd-line.rev-warn { border-color: var(--amber); }
+.billing-breakdown .rev-exp { color: var(--blue-soft); }
+.rev-loc-line .rev-loc-name { font-weight: 700; }
+.rev-loc-line .rev-loc-vals { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.rev-detail-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin: 12px 0 6px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+.rev-detail-head:first-child { margin-top: 0; }
+
+/* The detail row carries one more column than a גבייה row (the month share). */
+.billing-row.rev-detail-row {
+  grid-template-columns: 1.6fr 1fr 1.5fr 1.1fr 1fr 1fr 1.1fr;
+}
+@media (max-width: 900px) {
+  .billing-row.rev-detail-row { grid-template-columns: 1fr 1fr; }
+}
+.billing-row.rev-detail-row.rev-warn { border-inline-start: 3px solid var(--amber); }
+.billing-row .rev-portion { color: var(--green-2); font-weight: 700; }
+.rev-chip {
+  display: inline-block; margin-inline-start: 6px;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  color: var(--muted); font-size: 10.5px; font-weight: 600;
+  vertical-align: middle;
+}
+.rev-chip-soft { opacity: 0.75; font-style: italic; }
