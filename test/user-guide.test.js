@@ -29,6 +29,7 @@ const h2s = lines.filter((l) => l.startsWith('## ')).map((l) => l.slice(3).trim(
 const REQUIRED_SECTIONS = [
   'כניסה',
   'פעולות יומיומיות',
+  'הכנסות חודשיות',
   'תשלום למטפלים',
   'כללי עבודה חשובים (מונעים תקלות)',
   'בעיות נפוצות',

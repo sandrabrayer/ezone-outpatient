@@ -45,6 +45,7 @@
         <button class="tab" data-view="leads">לידים</button>
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
+        <button class="tab" data-view="revenue">הכנסות חודשיות</button>
         <button class="tab" data-view="retention">שימור לידים</button>
         <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
         <button class="tab" data-view="payouts">תשלומי מטפלים</button>
@@ -185,6 +186,82 @@
           </div>
           <div class="billing-list-note">זיכויים משולמים ב־15 בחודש, לעולם לא במועד סיום הטיפול</div>
           <div id="creditsPayoutList" class="credit-payout-list"></div>
+        </div>
+      </section>
+
+      <!-- Monthly revenue (הכנסות חודשיות) -------------------------------
+           A SEPARATE view from the daily גבייה worklist above, which is
+           untouched. That one answers "who do I collect from today"; this one
+           answers "how much revenue BELONGS to month X" — allocated by each
+           payment's coverage window, so a cycle straddling a month boundary
+           lands partly in each, and neither the payment date nor the dueDate
+           month key moves a shekel.
+
+           RECEIVED and EXPECTED are rendered as two cards and are never added
+           together anywhere but NET, which is labelled as the projection it
+           is. All figures display EX-VAT (÷1.18) to match E-Zone-Dashboard —
+           outpatient amounts are stored VAT-inclusive. -->
+      <section id="view-revenue" class="view">
+        <div class="toolbar">
+          <input id="revenueSearch" class="search" placeholder="חיפוש לפי שם…" />
+          <label class="billing-date-label">חודש
+            <input id="revenueMonth" type="month" />
+          </label>
+          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">
+            הכנסות חודשיות <span id="revenueMonthLabel" class="panel-sub"></span>
+          </h2>
+          <div class="revenue-vat-note">כל הסכומים ללא מע״מ</div>
+        </div>
+
+        <div class="kpis revenue-kpis">
+          <div class="kpi revenue-kpi-received">
+            <div class="kpi-label">נגבה בפועל</div>
+            <div id="revReceived" class="kpi-value">₪0</div>
+            <div class="kpi-sub">כסף שהתקבל ומשויך לחודש זה</div>
+          </div>
+          <div class="kpi revenue-kpi-expected">
+            <div class="kpi-label">צפוי</div>
+            <div id="revExpected" class="kpi-value">₪0</div>
+            <div class="kpi-sub">מטופלים פעילים × סכום חודשי, טרם נגבה</div>
+          </div>
+          <div class="kpi revenue-kpi-credits">
+            <div class="kpi-label">זיכויים</div>
+            <div id="revCredits" class="kpi-value">₪0</div>
+            <div class="kpi-sub">מוחזר למטופלים — מקטין את ההכנסה</div>
+          </div>
+          <div class="kpi revenue-kpi-net">
+            <div class="kpi-label">נטו</div>
+            <div id="revNet" class="kpi-value">₪0</div>
+            <div class="kpi-sub">נגבה + צפוי − זיכויים (תחזית)</div>
+          </div>
+        </div>
+
+        <!-- Two different certainties. Spelled out rather than implied: the
+             single most expensive mistake this view can invite is reading the
+             forecast as cash. -->
+        <div class="revenue-basis-note">
+          <strong>נגבה</strong> הוא כסף שכבר בקופה. <strong>צפוי</strong> הוא הנחה שהמטופלים ימשיכו וישלמו.
+          השניים לעולם אינם מוצגים כמספר אחד — רק <strong>נטו</strong> מחבר ביניהם, והוא תחזית.
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">הרכב הצפוי</div>
+          <div id="revExpectedBreakdown" class="billing-breakdown"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">לפי סניף</div>
+          <div class="billing-list-note">סניף המטופל. תשלומים ללא מטופל משויך מרוכזים תחת „ללא סניף”</div>
+          <div id="revByLocation" class="billing-breakdown"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">
+            פירוט תשלומים
+            <span class="panel-sub">החלק מכל תשלום שנפל בחודש זה</span>
+          </div>
+          <div class="billing-list-note">לפי חלון הכיסוי של כל תשלום — לא לפי מועד התשלום</div>
+          <div id="revDetail" class="billing-list"></div>
         </div>
       </section>
 
@@ -875,6 +952,7 @@
   <script src="therapist-payout.js?v=__BUILD__" defer></script>
   <script src="payout-export.js?v=__BUILD__" defer></script>
   <script src="credits-ledger.js?v=__BUILD__" defer></script>
+  <script src="monthly-revenue.js?v=__BUILD__" defer></script>
   <script src="conflicts.js?v=__BUILD__" defer></script>
   <script>
     // PWA: register the service worker so the app is installable to the home

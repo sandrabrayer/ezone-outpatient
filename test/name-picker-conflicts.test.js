@@ -619,7 +619,19 @@ test('D: no other UI change — the PIN card, its buttons and the topbar tabs ar
   assert.match(INDEX, /<button type="button" id="pinSubmit" class="btn btn-primary">כניסה<\/button>/);
   assert.match(INDEX, /<button type="button" id="pinViewer" class="btn btn-ghost">המשך כצופה בלבד<\/button>/);
   assert.match(INDEX, /<button id="logoutBtn" class="btn btn-ghost">יציאה<\/button>/);
-  assert.equal((INDEX.match(/class="tab(?: active)?" data-view=/g) || []).length, 8, 'eight tabs, unchanged');
+  // The eight tabs THIS PR left untouched must all still be there, and none
+  // may be dropped. The exact COUNT is deliberately not pinned: a later PR
+  // adding a tab is not a regression in the name-picker UI, and an equality
+  // here would fail every such PR for no reason (the sw-cache assertion in
+  // test E below is pinned as a floor for exactly the same reason — and the
+  // monthly-revenue PR is the one that proved this one needed it too).
+  const tabs = INDEX.match(/class="tab(?: active)?" data-view="([^"]+)"/g) || [];
+  const views = tabs.map((t) => t.match(/data-view="([^"]+)"/)[1]);
+  for (const v of ['dashboard', 'leads', 'clients', 'billing', 'retention',
+                   'inactive', 'payouts', 'continuation']) {
+    assert.ok(views.includes(v), 'tab still present: ' + v);
+  }
+  assert.ok(views.length >= 8, 'no tab was dropped, got ' + views.length);
 });
 
 /* ================= E. service worker ================= */

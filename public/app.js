@@ -163,6 +163,12 @@
     billingSearch: '',
     clientTab: 'all',
     billingDate: '',
+    /* הכנסות חודשיות (monthly revenue) — a SEPARATE view from the daily
+     * גבייה worklist, which keeps its own billingDate/billingSearch above
+     * and is not touched by any of this. */
+    revenueMonth: '',      // 'YYYY-MM'; defaults to the current month
+    revenueSearch: '',     // per-tab name search, same idiom as the other tabs
+    revenueExpanded: {},   // detail row key -> expanded (bool)
     sessionLog: null,    // SessionLog rows for the payout view; null = not yet fetched
     sessionLogLoading: false,
     sessionLogError: '',
@@ -1151,6 +1157,7 @@
     else if (state.view === 'leads') renderLeads();
     else if (state.view === 'clients') renderClients();
     else if (state.view === 'billing') renderBilling();
+    else if (state.view === 'revenue') renderRevenue();
     else if (state.view === 'retention') renderRetention();
     else if (state.view === 'inactive') renderInactive();
     else if (state.view === 'payouts') renderPayouts();
@@ -2759,6 +2766,206 @@
         ' · <span class="bd-out">יתרה ' + money(c.outstanding) + '</span></span>';
       clientEl.appendChild(row);
     });
+  }
+
+  // ======================================================================
+  // הכנסות חודשיות — MONTHLY REVENUE VIEW
+  // ======================================================================
+  // Read-only. Adds no endpoint and no write path: every figure is derived in
+  // the browser from data already loaded for the other tabs (state.clients,
+  // state.payments) plus the credits ledger, which loads lazily through the
+  // same session-cookie-gated /api/sheets proxy every other read uses.
+  //
+  // The whole calculation lives in public/monthly-revenue.js and is pure — this
+  // function only formats what it returns. The daily גבייה view above is not
+  // touched by anything here.
+  var MR = (typeof MonthlyRevenue !== 'undefined') ? MonthlyRevenue : null;
+
+  /* Every figure in this view is EX-VAT. Outpatient amounts are STORED
+   * VAT-inclusive (see public/treatment-map.js: "the client-facing price table
+   * (incl. VAT)"), and E-Zone-Dashboard displays the same basis ÷1.18 — so a
+   * figure from here and a figure from there can be added up. money() renders
+   * the already-converted ex-VAT number; it does not convert. */
+  function revMoney(exVatAmount) { return money(exVatAmount); }
+
+  function renderRevenue() {
+    if (!MR) {
+      var host = $('#revDetail');
+      if (host) host.innerHTML = '<div class="billing-empty">מודול ההכנסות לא נטען</div>';
+      return;
+    }
+    if (!state.revenueMonth) state.revenueMonth = currentMonthStr();
+    var monthInput = $('#revenueMonth');
+    if (monthInput && monthInput.value !== state.revenueMonth) monthInput.value = state.revenueMonth;
+
+    // The ledger loads on first use, exactly as the גבייה payout panel does.
+    // Until it lands, credits read as 0 — the view is still correct about cash
+    // and forecast, and re-renders once when the rows arrive.
+    ensureCredits(function () { if (state.view === 'revenue') renderRevenue(); });
+
+    var model = MR.buildMonthlyRevenue({
+      month: state.revenueMonth,
+      clients: state.clients,
+      payments: state.payments,
+      credits: creditRows(),
+      today: today(),
+      // The manual סכום גבייה override layer, injected rather than reached for
+      // — the pure module never learns what a client record looks like.
+      amountDueFor: function (payment, computed) {
+        return effectivePaymentAmount(payment, computed);
+      }
+    });
+    if (!model) return;
+
+    var labelEl = $('#revenueMonthLabel');
+    if (labelEl) labelEl.textContent = '— ' + model.monthLabel;
+
+    $('#revReceived').textContent = revMoney(model.received.exVat);
+    $('#revExpected').textContent = revMoney(model.expected.exVat);
+    // Credits are a deduction; the minus sign is part of the figure so the
+    // card cannot be misread as income.
+    $('#revCredits').textContent = model.credits.exVat ? '−' + revMoney(model.credits.exVat) : revMoney(0);
+    $('#revNet').textContent = revMoney(model.net.exVat);
+
+    renderRevenueExpectedBreakdown(model);
+    renderRevenueByLocation(model);
+    renderRevenueDetail(model);
+  }
+
+  /* The three confidences inside צפוי. Kept apart on screen because they are
+   * not equally believable: a row already billed, a cycle still ahead, and a
+   * cycle whose date passed with nothing recorded — that last one usually
+   * means a missing payment row rather than future income, so it is flagged. */
+  function renderRevenueExpectedBreakdown(model) {
+    var el = $('#revExpectedBreakdown');
+    if (!el) return;
+    el.innerHTML = '';
+    var parts = [
+      { b: model.expected.billedUnpaid, label: 'חויב וטרם נגבה', cls: '' },
+      { b: model.expected.projected,    label: 'טרם חויב — מחזור עתידי', cls: '' },
+      { b: model.expected.unbilledPast, label: 'מחזור שחלף ללא רישום תשלום', cls: 'rev-warn' }
+    ];
+    var any = false;
+    parts.forEach(function (p) {
+      if (!p.b.count) return;
+      any = true;
+      var row = document.createElement('div');
+      row.className = 'bd-line' + (p.cls ? ' ' + p.cls : '');
+      row.innerHTML =
+        '<span>' + escapeHtml(p.label) + '</span>' +
+        '<span><span class="bd-col">' + revMoney(p.b.exVat) + '</span>' +
+        ' · <span class="bd-out">' + p.b.count + ' שורות</span></span>';
+      el.appendChild(row);
+    });
+    if (!any) el.innerHTML = '<div class="bd-line muted">אין הכנסה צפויה בחודש זה</div>';
+  }
+
+  /* BREAKDOWN DIMENSION: סניף (location). The outpatient app has no houses,
+   * but its locations ARE the same physical sites the Dashboard calls houses,
+   * so this is the one dimension along which the two apps' figures can be
+   * added up per site. */
+  function renderRevenueByLocation(model) {
+    var el = $('#revByLocation');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!model.byLocation.length) {
+      el.innerHTML = '<div class="bd-line muted">אין נתונים לחודש זה</div>';
+      return;
+    }
+    model.byLocation.forEach(function (b) {
+      var row = document.createElement('div');
+      row.className = 'bd-line rev-loc-line';
+      row.innerHTML =
+        '<span class="rev-loc-name">' + escapeHtml(b.location) + '</span>' +
+        '<span class="rev-loc-vals">' +
+          '<span class="bd-col">נגבה ' + revMoney(b.received.exVat) + '</span>' +
+          ' · <span class="rev-exp">צפוי ' + revMoney(b.expected.exVat) + '</span>' +
+          (b.credits.exVat ? ' · <span class="bd-out">זיכויים −' + revMoney(b.credits.exVat) + '</span>' : '') +
+          ' · <strong>נטו ' + revMoney(b.net.exVat) + '</strong>' +
+        '</span>';
+      el.appendChild(row);
+    });
+  }
+
+  /* Drill-down: every payment, and WHICH PORTION of it landed in this month.
+   * The window and the day count are on the row, so the arithmetic is visible
+   * rather than asserted. */
+  function renderRevenueDetail(model) {
+    var el = $('#revDetail');
+    if (!el) return;
+    el.innerHTML = '';
+    var q = state.revenueSearch.trim().toLowerCase();
+    function match(r) {
+      return !q || String(r.clientName || '').toLowerCase().indexOf(q) !== -1;
+    }
+    var groups = [
+      { key: 'received', title: 'נגבה בפועל', rows: model.received.rows.filter(match), sign: '' },
+      { key: 'expected', title: 'צפוי',        rows: model.expected.rows.filter(match), sign: '' },
+      { key: 'credits',  title: 'זיכויים',     rows: model.credits.rows.filter(match),  sign: '−' }
+    ];
+    var any = false;
+    groups.forEach(function (g) {
+      if (!g.rows.length) return;
+      any = true;
+      var head = document.createElement('div');
+      head.className = 'rev-detail-head';
+      var sum = g.rows.reduce(function (s, r) { return s + r.amountInMonthExVat; }, 0);
+      head.innerHTML = '<span>' + escapeHtml(g.title) + '</span>' +
+        '<span>' + g.sign + revMoney(sum) + '</span>';
+      el.appendChild(head);
+      g.rows.forEach(function (r) {
+        el.appendChild(buildRevenueDetailRow(r, g.key, g.sign));
+      });
+    });
+    if (!any) {
+      el.innerHTML = '<div class="billing-empty">אין תנועות בחודש זה</div>';
+    }
+  }
+
+  var REV_KIND_LABELS = {
+    billed_unpaid: 'חויב וטרם נגבה',
+    projected: 'טרם חויב — מחזור עתידי',
+    unbilled_past: 'מחזור שחלף ללא רישום תשלום'
+  };
+
+  function buildRevenueDetailRow(r, groupKey, sign) {
+    var row = document.createElement('div');
+    row.className = 'billing-row rev-detail-row'
+      + (r.kind === 'unbilled_past' ? ' rev-warn' : '');
+
+    var windowText = displayDate(r.coverageStart || r.spanStart) + ' → ' +
+                     displayDate(r.coverageEnd || r.spanEnd);
+    // The split, shown as the fraction it is: 12 מתוך 31 ימים.
+    var daysText = r.daysInMonth + ' מתוך ' + r.windowDays + ' ימים';
+
+    var kindChip = '';
+    if (groupKey === 'expected' && REV_KIND_LABELS[r.kind]) {
+      kindChip = '<span class="rev-chip">' + escapeHtml(REV_KIND_LABELS[r.kind]) + '</span>';
+    }
+    if (groupKey === 'credits') {
+      var typeLabel = (CL && CL.CREDIT_TYPE_LABELS[r.creditType]) || r.creditType || '';
+      kindChip = '<span class="rev-chip">' + escapeHtml(typeLabel) + '</span>';
+      // A credit with no usable coverage window fell back to its
+      // allocationMonth — say so rather than implying a day-level split.
+      if (r.spanSource === 'allocation_month') {
+        kindChip += '<span class="rev-chip rev-chip-soft">לפי חודש שיוך</span>';
+      }
+    }
+    // paymentDate is displayed but took NO part in the allocation — the whole
+    // point of this view. Labelled so nobody reads it as the driver.
+    var paidOn = r.paymentDate
+      ? '<div><span class="p-label">שולם בפועל</span><span class="p-val">' + displayDate(r.paymentDate) + '</span></div>'
+      : '';
+
+    row.innerHTML =
+      '<div><span class="p-label">מטופל</span><span class="p-name">' + escapeHtml(r.clientName || '—') + '</span>' + kindChip + '</div>' +
+      '<div><span class="p-label">סניף</span><span class="p-val">' + escapeHtml(r.location || '') + '</span></div>' +
+      '<div><span class="p-label">חלון כיסוי</span><span class="p-val" dir="ltr">' + escapeHtml(windowText) + '</span></div>' +
+      '<div><span class="p-label">בחודש זה</span><span class="p-val">' + escapeHtml(daysText) + '</span></div>' +
+      paidOn +
+      '<div><span class="p-label">סכום מלא</span><span class="p-val">' + revMoney(MR.exVat(r.fullAmount)) + '</span></div>' +
+      '<div><span class="p-label">שיוך לחודש</span><span class="p-val rev-portion">' + sign + revMoney(r.amountInMonthExVat) + '</span></div>';
+    return row;
   }
 
   function renderBars(sel, obj) {
@@ -5551,6 +5758,16 @@
     });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
+    /* הכנסות חודשיות — its own month + search state, so switching months or
+     * searching here never disturbs the daily גבייה screen's date. */
+    on('#revenueMonth', 'change', function (e) {
+      state.revenueMonth = e.target.value || currentMonthStr();
+      renderRevenue();
+    });
+    on('#revenueSearch', 'input', function (e) {
+      state.revenueSearch = String(e.target.value || '');
+      renderRevenue();
+    });
 
     // Therapist payouts: month picker, detail toggle, correct, mark-forwarded,
     // add-missing-session, and Excel export.
