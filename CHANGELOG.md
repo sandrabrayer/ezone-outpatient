@@ -6,6 +6,49 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Credits / refunds ledger (`Credits` sheet)** — ported from
+  E-Zone-Dashboard PR #124, **money only**. Records what the clinic owes
+  **back** to a patient when treatment ends: a month paid in advance, a
+  mid-month exit, or the explicit decision that **nothing** is owed (a zero
+  is still a row). **No session-level or cancellation logic is ported** —
+  that stays in the therapists app, and this ledger has **no relation to
+  `Clients.creditsOwed`**, the per-*session* balance `_recordSessionOutcome`
+  keeps (sessions vs. ₪; guard-tested that `_upsertCredit` never touches it).
+  New pure module `public/credits-ledger.js`: per Payments row, window =
+  `[dueDate, dueDate + 1 month − 1 day]`, `unusedDays` = days in it strictly
+  after the exit, `rate` = **that row's** `amountPaid ÷ 30` (a fixed
+  constant, never the month length), `raw` = rate × days **capped at that
+  row's `amountPaid`**. Classified by the window: starting on/before the exit
+  → `days_unused`; starting after it → `prepaid_return`, returned **in full
+  at `amountPaid`**, not rate × windowDays. Overlapping windows credit only
+  days an earlier window did not (`creditedFrom` /
+  `alreadyCreditedThrough` in `basis`). **Policy: pro-rata at any tenure.**
+  The Dashboard's 14-day cutoff and last-7-days rule are **deliberately not
+  ported** — they are residential bed rules with no outpatient meaning (their
+  absence is guard-tested). Differences from the Dashboard schema: `clientId`
+  is a real persistent key, so the dual `patientId`/`patientKey` columns
+  **collapse to one**, and `houseId`/`facilityType` are dropped; `dueDate`
+  and `paymentDate` already existed, so the window logic ported unchanged.
+  Payout: `decidedDate`, `payoutDate` derived server-side as the 15th on or
+  after it, `status` `pending|paid|cancelled`, and **marking paid is
+  explicit** (`paidDate` + `method` required — nothing flips when the payout
+  date passes). New "זיכויים ממתינים לתשלום" view on **גבייה**, grouped by
+  payout date with per-date and grand totals. Override: `calculatedAmount`
+  and `amount` **both persist**, `calculatedAmount` immutable,
+  `overrideReason` required when they differ, `approvedBy` recorded.
+  Security: **no new endpoint and `server.js` unchanged** — `getCredits` /
+  `saveCredit` ride the session-cookie-gated `/api/sheets` proxy;
+  `createdBy`/`updatedBy` come from the **signed cookie** via `_requestUser`,
+  never the payload; everything re-validated server-side; only
+  `CREDIT_EDITABLE_COLUMNS` are taken from an edit payload; stale-save
+  refusal names who saved first; refusals are never swallowed by the client.
+  **Requires an Apps Script redeploy** (no new Script Property). `sw.js` cache
+  `ezone-outpatient-v5` -> `v6` (index.html changed, per the house rule); the
+  v5 assertion in `test/add-user-yarden.test.js` hard-pinned that exact
+  version, so it now asserts the **floor** (`>= v5`) plus its own documented
+  bump — same intent, without freezing `sw.js` against every future bump (its
+  monotonicity checks are unchanged). Tests: new `test/credits-ledger.test.js`
+  (61); suite 883 -> 944. See `CHANGELOG-credits-ledger.md`.
 - **ירדן added as an outpatient user.** `lib/users.js` `SESSION_USERS`
   `[ורד, שירן, יעל]` -> `[ורד, שירן, יעל, ירדן]` (appended, existing order
   kept) and the matching `<option>ירדן</option>` on the single

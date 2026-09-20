@@ -198,6 +198,108 @@ var PAYMENTS_HEADERS = [
   'notes', 'bundleSize', 'sessionsUsed'
 ];
 
+/* ===== Credits / refunds ledger (ported from E-Zone-Dashboard PR #124) ======
+ *
+ * One row per credit decision: money a client paid that covers days they did
+ * not use (or the explicit decision that NOTHING is owed — a zero is still a
+ * row, never silence). Written on exit and editable afterwards.
+ *
+ * SCOPE — MONEY ONLY. This ledger knows nothing about sessions. It does not
+ * read SessionLog, does not count sessions, and has NO relation to the
+ * Clients.creditsOwed column (the per-SESSION credit balance the therapists-app
+ * receiver maintains in _recordSessionOutcome — a different concept that shares
+ * only the word "credit"). Session-level and cancellation logic stay in the
+ * therapists app.
+ *
+ * DIFFERENCE FROM THE DASHBOARD SCHEMA: clientId is a real persistent key here
+ * (Payments.clientId joins straight to Clients.id), so the Dashboard's dual
+ * patientId/patientKey columns collapse to ONE clientId column. houseId /
+ * facilityType are dropped entirely — outpatient has no facility bed rules.
+ *
+ * APPEND-ONLY contract, same rule as PAYMENTS_HEADERS / CLIENTS_HEADERS: never
+ * insert, delete or reorder — _readAll/_writeAll map by POSITION, so position IS
+ * the data contract. New columns go at the END. Guard-tested in
+ * test/credits-ledger.test.js. Rules: CHANGELOG-credits-ledger.md.
+ *
+ *   id               — 'credit::<clientId>::<allocationMonth>::<seq>', MINTED
+ *                      SERVER-SIDE under the script lock (seq = 1-based count of
+ *                      rows already carrying that clientId+month). A client never
+ *                      mints ids; an unknown id on an edit is REFUSED.
+ *   clientId         — the persisted Clients `id`. Joins to Clients AND to
+ *                      Payments (whose clientId column is the same key).
+ *   clientName       — denormalized display copy.
+ *   creditType       — one of CREDIT_TYPES, validated server-side:
+ *                        days_unused    — pro-rata for days paid but not used,
+ *                                         capped at that payment row's
+ *                                         amountPaid. PRO-RATA AT ANY TENURE:
+ *                                         outpatient has no 14-day cutoff and no
+ *                                         last-7-days rule (those are the
+ *                                         Dashboard's residential BED rules).
+ *                        prepaid_return — a payment whose coverage window starts
+ *                                         AFTER the exit, returned in full at
+ *                                         amountPaid (never rate × windowDays).
+ *                        other          — manual credit; `reason` required.
+ *   allocationMonth  — plain-text 'YYYY-MM' (the billed month the credit belongs
+ *                      to). REPORTING METADATA — it never enters the math.
+ *   calculatedAmount — what the rule computed. IMMUTABLE after creation: an edit
+ *                      never overwrites it — the override lives in `amount`.
+ *   amount           — the credit actually granted. Defaults to
+ *                      calculatedAmount; when it DIFFERS, overrideReason is
+ *                      REQUIRED (server-enforced, not only in the UI).
+ *   overrideReason   — why amount ≠ calculatedAmount ('' when equal).
+ *   reason           — human-readable calculation trail written at creation; the
+ *                      free-text justification for 'other'. Immutable.
+ *   approvedBy       — free text, who approved the credit.
+ *   decidedDate      — 'YYYY-MM-DD' the credit was decided (defaults to the save
+ *                      day in the spreadsheet timezone).
+ *   payoutDate       — SERVER-DERIVED: the 15th of the next month on or after
+ *                      decidedDate (_payoutDateFor). Credits pay out on the
+ *                      15th, never at exit.
+ *   status           — pending | paid | cancelled. 'paid' is an EXPLICIT action:
+ *                      it requires paidDate AND method, and nothing ever flips
+ *                      to paid on its own when payoutDate passes.
+ *   paidDate, method — when/how the refund was actually paid out.
+ *   notes            — free text (editable).
+ *   basis            — compact JSON of the calculation inputs/outputs (rule,
+ *                      window, days, divisor, the UNCAPPED figure, the cap, and
+ *                      creditedFrom / alreadyCreditedThrough for overlapping
+ *                      windows) written at creation. Immutable.
+ *   createdAt/By     — server clock + the user from the SIGNED SESSION COOKIE
+ *                      (via _requestUser — never a client-supplied value).
+ *                      Immutable.
+ *   updatedAt/By     — server-owned stamps of the last write. The client echoes
+ *                      updatedAt back on an edit; a differing sheet stamp
+ *                      REFUSES the write (stale-save conflict).
+ */
+var CREDITS_SHEET = 'Credits';
+var CREDIT_COLUMNS = [
+  'id', 'clientId', 'clientName', 'creditType', 'allocationMonth',
+  'calculatedAmount', 'amount', 'overrideReason', 'reason', 'approvedBy',
+  'decidedDate', 'payoutDate', 'status', 'paidDate', 'method', 'notes',
+  'basis', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+];
+var CREDIT_TYPES    = ['days_unused', 'prepaid_return', 'other'];
+var CREDIT_STATUSES = ['pending', 'paid', 'cancelled'];
+/* Day of month credits pay out on. Mirrors CREDIT_PAYOUT_DAY in
+ * public/credits-ledger.js (test-guarded). */
+var CREDIT_PAYOUT_DAY = 15;
+/* Columns forced to plain text ('@') so Sheets never Date-coerces a 'YYYY-MM'
+ * or an ISO stamp. Applied to the whole column at ensure time AND to the target
+ * row on every write (belt and suspenders). `updatedAt`/`createdAt` are covered
+ * by the global STAMP_COLUMNS rule too; listed here so the Credits sheet is
+ * self-contained. */
+var CREDIT_TEXT_COLUMNS = [
+  'allocationMonth', 'decidedDate', 'payoutDate', 'paidDate', 'createdAt', 'updatedAt'
+];
+/* The ONLY columns a later edit may change. Everything else on an existing row
+ * is carried from the SHEET whatever the payload says — identity, the computed
+ * figure, the trail, the basis and the creation stamps are immutable, and
+ * payoutDate is always re-derived from decidedDate. */
+var CREDIT_EDITABLE_COLUMNS = [
+  'amount', 'overrideReason', 'approvedBy', 'decidedDate', 'status',
+  'paidDate', 'method', 'notes'
+];
+
 /* Extra charges per client (חיובים נוספים). One row per ad-hoc treatment,
  * layered on top of the base monthly subscription. billingType is either
  * 'one_time' (chargeDate is the single due date) or 'monthly' (chargeDate
@@ -1340,6 +1442,282 @@ function _restoreRemovedClient(payload) {
 function _getPayments() {
   var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
   return { ok: true, payments: _readAll(sh, PAYMENTS_HEADERS) };
+}
+
+/* ===== Credits / refunds ledger =============================================
+ *
+ * The WRITE half of the credits ledger. The CALCULATION lives in
+ * public/credits-ledger.js (pure, test-covered, browser + Node); nothing is
+ * recomputed here — the server validates, derives payoutDate, mints the id and
+ * owns the stamps. See CREDIT_COLUMNS above for the schema contract.
+ *
+ * MONEY ONLY: no session or cancellation logic, and no relation to
+ * Clients.creditsOwed (the per-session balance _recordSessionOutcome keeps).
+ */
+
+/* Today in the spreadsheet timezone as 'YYYY-MM-DD'. */
+function _todayISODate() {
+  return Utilities.formatDate(
+    new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+}
+
+/* Any date-ish cell -> bare 'YYYY-MM-DD', or '' when unusable. A Date cell is
+ * read through the SPREADSHEET timezone (never toISOString, which would shift
+ * the day back in Israel). Mirrors isoDate() in public/credits-ledger.js. */
+function _asISODate(v) {
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return '';
+    return Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+  }
+  var s = String(v == null ? '' : v).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+}
+
+/* Credits sheet + the text-format guard on its own date/month columns. The
+ * global _formatPhoneColumns rule only covers phones and updatedAt/updatedBy,
+ * so the credit-specific text columns are forced here — scoped to this sheet,
+ * nothing else changes. */
+function _ensureCreditsSheet() {
+  var sh = _ensureSheet(CREDITS_SHEET, CREDIT_COLUMNS);
+  var maxRows = sh.getMaxRows();
+  if (maxRows >= 2) {
+    for (var i = 0; i < CREDIT_TEXT_COLUMNS.length; i++) {
+      var c = CREDIT_COLUMNS.indexOf(CREDIT_TEXT_COLUMNS[i]);
+      if (c >= 0) sh.getRange(2, c + 1, maxRows - 1, 1).setNumberFormat('@');
+    }
+  }
+  return sh;
+}
+
+function _getCredits() {
+  var sh = _ensureCreditsSheet();
+  return { ok: true, credits: _readAll(sh, CREDIT_COLUMNS) };
+}
+
+/* Deterministic credit id. The SERVER mints every persisted id (it owns the seq
+ * counter under the lock). */
+function _creditId(clientId, allocationMonth, seq) {
+  return 'credit::' + clientId + '::' + allocationMonth + '::' + seq;
+}
+
+/* The 15th of the next month on or after decidedDate ('YYYY-MM-DD'): decided on
+ * the 1st–15th -> the 15th of that month; the 16th onward -> the 15th of the
+ * following month. Pure string arithmetic on the parts (no Date object, so no
+ * timezone can shift it). Mirrors payoutDateFor() in public/credits-ledger.js —
+ * THIS copy is authoritative on write; the client's only previews. */
+function _payoutDateFor(decidedISO) {
+  var m = String(decidedISO || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  var y = Number(m[1]), mo = Number(m[2]);
+  if (Number(m[3]) > CREDIT_PAYOUT_DAY) { mo += 1; if (mo > 12) { mo = 1; y += 1; } }
+  return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + CREDIT_PAYOUT_DAY).slice(-2);
+}
+
+/* Free-text sanitizer for credit fields: angle brackets and control characters
+ * stripped, trimmed, length-capped. Every string the client sends goes through
+ * it before it reaches a cell. */
+function _creditStr(v, max) {
+  return String(v == null ? '' : v)
+    .replace(/[<>\u0000-\u001f]/g, '')
+    .trim()
+    .slice(0, max);
+}
+/* Finite, non-negative money -> 2dp. null (a REFUSAL signal) for anything else;
+ * '' / null / undefined also return null so the caller decides the default. */
+function _creditAmount(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  var n = Number(v);
+  if (!isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+/* '' (absent, allowed) or a valid 'YYYY-MM-DD'; null when present-but-unparseable
+ * so the caller can REFUSE rather than silently blank a date. */
+function _creditDate(v) {
+  if (v === undefined || v === null || v === '') return '';
+  var iso = _asISODate(v);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+}
+
+/**
+ * Create or edit ONE credit row. Every field is validated HERE — the client
+ * value is never trusted, even though the UI validates too:
+ *   - creditType ∈ CREDIT_TYPES, status ∈ CREDIT_STATUSES, allocationMonth
+ *     'YYYY-MM', amounts finite and ≥ 0, clientId present;
+ *   - amount ≠ calculatedAmount without a non-empty overrideReason -> REFUSED
+ *     (override_reason_required); 'other' without a reason -> REFUSED;
+ *   - status 'paid' without paidDate AND method -> REFUSED (marking paid is an
+ *     explicit action, never automatic when payoutDate passes); a non-paid
+ *     status carries no paidDate;
+ *   - decidedDate defaults to today (spreadsheet tz); payoutDate is ALWAYS
+ *     re-derived from it, whatever the payload claims;
+ *   - CREATE (no id in the payload): id minted here under the lock; basis
+ *     stored as JSON; createdAt/By + updatedAt/By stamped from the server clock
+ *     and the proxy-injected (signed-cookie) user;
+ *   - EDIT (id present): the row must exist (unknown_credit otherwise — a
+ *     client never mints ids); only CREDIT_EDITABLE_COLUMNS are taken from the
+ *     payload, everything else is carried from the SHEET (calculatedAmount is
+ *     never overwritten by the edited amount); a payload updatedAt that differs
+ *     from the sheet's REFUSES the write as a stale-save conflict.
+ * A ZERO amount is a valid row — "no refund owed" is a decision, not silence.
+ */
+function _upsertCredit(credit, user) {
+  if (!credit || typeof credit !== 'object') return { ok: false, error: 'missing_credit' };
+  var stampUser = String(user == null ? '' : user);
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var sh = _ensureCreditsSheet();
+    var idIdx = CREDIT_COLUMNS.indexOf('id');
+    var lastRow = sh.getLastRow();
+    var nowIso = new Date().toISOString();
+    var existing = lastRow > 1
+      ? sh.getRange(2, 1, lastRow - 1, CREDIT_COLUMNS.length).getValues()
+      : [];
+
+    var wantId = _creditStr(credit.id, 200);
+    var record, targetRow = 0;
+
+    if (wantId) {
+      // ---- EDIT ----
+      var rowIdx = -1;
+      for (var i = 0; i < existing.length; i++) {
+        if (String(existing[i][idIdx]) === wantId) { rowIdx = i; break; }
+      }
+      if (rowIdx < 0) return { ok: false, error: 'unknown_credit', id: wantId };
+      var sheetObj = {};
+      for (var c = 0; c < CREDIT_COLUMNS.length; c++) {
+        sheetObj[CREDIT_COLUMNS[c]] = existing[rowIdx][c];
+      }
+
+      // Stale-save refusal: the stamp this tab loaded vs the sheet's now.
+      var seenStamp  = _creditStr(credit.updatedAt, 60);
+      var sheetStamp = _creditStr(sheetObj.updatedAt, 60);
+      if (sheetStamp !== '' && seenStamp !== '' && seenStamp !== sheetStamp) {
+        var conflict = {
+          id: wantId,
+          name: String(sheetObj.clientName || ''),
+          clientId: String(sheetObj.clientId || ''),
+          sheetUpdatedAt: sheetStamp,
+          sheetUpdatedBy: String(sheetObj.updatedBy || '')
+        };
+        logAudit_('credit_save_conflict', '_upsertCredit', String(sheetObj.clientId || ''),
+          conflict.name, { seenUpdatedAt: seenStamp, updatedBy: stampUser, conflict: conflict });
+        return { ok: false, error: 'conflict', conflicts: [conflict] };
+      }
+
+      record = {};
+      for (var sk in sheetObj) {
+        if (Object.prototype.hasOwnProperty.call(sheetObj, sk)) record[sk] = sheetObj[sk];
+      }
+      for (var k = 0; k < CREDIT_EDITABLE_COLUMNS.length; k++) {
+        var col = CREDIT_EDITABLE_COLUMNS[k];
+        if (credit[col] !== undefined) record[col] = credit[col];
+      }
+      targetRow = rowIdx + 2;
+    } else {
+      // ---- CREATE ----
+      record = {};
+      for (var ck in credit) {
+        if (Object.prototype.hasOwnProperty.call(credit, ck)) record[ck] = credit[ck];
+      }
+      record.createdAt = nowIso;
+      record.createdBy = stampUser;
+      record.basis = typeof credit.basis === 'string'
+        ? credit.basis
+        : JSON.stringify(credit.basis || {});
+    }
+
+    // ---- Validation (both paths; on an edit the immutable fields are the sheet's) ----
+    var clientId   = _creditStr(record.clientId, 200);
+    var month      = _creditStr(record.allocationMonth, 7);
+    var creditType = _creditStr(record.creditType, 40);
+    var status     = _creditStr(record.status, 20) || 'pending';
+    if (!clientId) return { ok: false, error: 'missing_clientId' };
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { ok: false, error: 'bad_month' };
+    if (CREDIT_TYPES.indexOf(creditType) < 0)  return { ok: false, error: 'bad_creditType', creditType: creditType };
+    if (CREDIT_STATUSES.indexOf(status) < 0)   return { ok: false, error: 'bad_status', status: status };
+
+    var calculated = _creditAmount(record.calculatedAmount);
+    var amount = _creditAmount(
+      (record.amount === undefined || record.amount === '') ? record.calculatedAmount : record.amount);
+    if (calculated === null || amount === null) return { ok: false, error: 'bad_amount' };
+
+    var overrideReason = _creditStr(record.overrideReason, 300);
+    var reason         = _creditStr(record.reason, 1000);
+    if (amount !== calculated && !overrideReason) return { ok: false, error: 'override_reason_required' };
+    if (creditType === 'other' && !reason)        return { ok: false, error: 'reason_required' };
+
+    var decidedRaw = _creditDate(record.decidedDate);
+    if (decidedRaw === null) return { ok: false, error: 'bad_decidedDate' };
+    var decidedDate = decidedRaw || _todayISODate();   // blank -> today; invalid -> refused above
+    var paidDate = _creditDate(record.paidDate);
+    if (paidDate === null) return { ok: false, error: 'bad_paidDate' };
+    var method = _creditStr(record.method, 40);
+    if (status === 'paid' && (!paidDate || !method)) {
+      return { ok: false, error: 'paid_requires_paidDate_method' };
+    }
+
+    var out = {
+      id:               wantId,
+      clientId:         clientId,
+      clientName:       _creditStr(record.clientName, 120),
+      creditType:       creditType,
+      allocationMonth:  month,
+      calculatedAmount: calculated,
+      amount:           amount,
+      overrideReason:   amount !== calculated ? overrideReason : '',
+      reason:           reason,
+      approvedBy:       _creditStr(record.approvedBy, 40),
+      decidedDate:      decidedDate,
+      payoutDate:       _payoutDateFor(decidedDate),
+      status:           status,
+      paidDate:         status === 'paid' ? paidDate : '',
+      method:           method,
+      notes:            _creditStr(record.notes, 500),
+      basis:            String(record.basis == null ? '' : record.basis).slice(0, 4000),
+      createdAt:        String(record.createdAt || nowIso),
+      createdBy:        String(record.createdBy == null ? '' : record.createdBy),
+      updatedAt:        nowIso,
+      updatedBy:        stampUser
+    };
+
+    if (!targetRow) {
+      // Mint: seq = rows already carrying this clientId + month, plus one.
+      var cIdx = CREDIT_COLUMNS.indexOf('clientId');
+      var mIdx = CREDIT_COLUMNS.indexOf('allocationMonth');
+      var seq = 1;
+      for (var e = 0; e < existing.length; e++) {
+        if (String(existing[e][cIdx]) === clientId && String(existing[e][mIdx]) === month) seq++;
+      }
+      out.id = _creditId(clientId, month, seq);
+      targetRow = sh.getLastRow() + 1;
+    }
+
+    // Belt-and-suspenders over the whole-column '@' format _ensureCreditsSheet
+    // applies: force the text cells of THIS row before the values land.
+    for (var t = 0; t < CREDIT_TEXT_COLUMNS.length; t++) {
+      var tc = CREDIT_COLUMNS.indexOf(CREDIT_TEXT_COLUMNS[t]);
+      if (tc >= 0) sh.getRange(targetRow, tc + 1, 1, 1).setNumberFormat('@');
+    }
+    var rowArr = CREDIT_COLUMNS.map(function (h) {
+      var v = out[h];
+      return (v === undefined || v === null) ? '' : v;
+    });
+    sh.getRange(targetRow, 1, 1, CREDIT_COLUMNS.length).setValues([rowArr]);
+
+    logAudit_(wantId ? 'credit_updated' : 'credit_created', '_upsertCredit', clientId, out.clientName, {
+      id: out.id, creditType: creditType, allocationMonth: month,
+      calculatedAmount: calculated, amount: amount, override: amount !== calculated,
+      status: status, payoutDate: out.payoutDate, paidDate: out.paidDate, updatedBy: stampUser
+    });
+    return wantId
+      ? { ok: true, credit: out, updated: true }
+      : { ok: true, credit: out, created: true };
+  } finally {
+    try { lock.releaseLock(); } catch (_) { /* no-op */ }
+  }
 }
 
 function _upsertPayment(payment) {
@@ -3394,6 +3772,10 @@ function doGet(e) {
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
+    // INTERNAL dashboard read (same trust level as getData): the credits /
+    // refunds ledger. No new unauthenticated surface — the browser only ever
+    // reaches this through the session-cookie-gated /api/sheets proxy.
+    if (action === 'getCredits') return _json(_getCredits());
     // INTERNAL dashboard read (same trust level as getData): un-restored
     // Clients-removed tombstones, for the admin restore surface.
     if (action === 'getRemovedClients') return _json(_getRemovedClients());
@@ -3602,6 +3984,15 @@ function doPost(e) {
     }
     if (action === 'savePayment' || action === 'updatePayment') {
       return _json(_upsertPayment(payload.payment));
+    }
+    if (action === 'getCredits') return _json(_getCredits());
+    if (action === 'saveCredit') {
+      // INTERNAL write (same trust level as savePayment) — the outpatient app
+      // posts it same-origin through the session-cookie-gated Node proxy; no
+      // cross-app secret, and no new public endpoint. createdBy/updatedBy come
+      // from _requestUser: the `user` the PROXY overwrote from the SIGNED
+      // session cookie, never a browser-supplied value.
+      return _json(_upsertCredit(payload.credit, _requestUser(payload)));
     }
     if (action === 'savePaymentAmountOverride') {
       // INTERNAL write (same trust level as savePayment) — the outpatient app posts
