@@ -1092,6 +1092,14 @@ function _toCredits(v) {
   return (isNaN(n) || n < 0) ? 0 : n;
 }
 
+/* A sheet cell -> a finite number, else 0. Used to carry a frozen pay amount
+ * across an upsert without a blank or a stray string becoming NaN in the sheet. */
+function _toNumberOrZero(v) {
+  if (v === '' || v === null || v === undefined) return 0;
+  var n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
 /* Weekly session frequency from the client's PLAN. sessionsPerWeek is stored as
  * a JSON breakdown ({"פרטני":2}) — sum the values; a bare number also works.
  * Returns a non-negative integer (0 = undeterminable). */
@@ -2850,8 +2858,26 @@ function _recordSessionOutcome(payload) {
     }
     // Preserve an already-forwarded stamp across the upsert: a correction re-runs
     // pay/credit but must not silently un-forward a session payroll already received.
-    if (oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '') {
+    var wasForwarded = !!(oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '');
+    if (wasForwarded) {
       rowObj.forwardedToPayroll = String(oldRow.forwardedToPayroll).trim();
+    }
+
+    // ---- FORWARDED ROWS ARE PAY-FROZEN -------------------------------------
+    // Once a session's month has gone to חשבת שכר, that money is out the door.
+    // Before this guard only the forwardedToPayroll STAMP survived the upsert —
+    // therapistPay was recomputed unconditionally, so a re-mark silently rewrote
+    // the pay on a row payroll had already been sent, and the payout view (which
+    // excludes forwarded rows) never showed the change to anyone.
+    //
+    // Carry the stored amount instead, for EVERY outcome: the frozen figure is
+    // the record of what payroll actually received. A genuine correction belongs
+    // in the next cycle as a הפרש, not as a silent rewrite of a settled row.
+    //
+    // Credit effects are deliberately NOT frozen — creditsOwed is a separate,
+    // still-open ledger and the reversal below stays correct.
+    if (wasForwarded) {
+      rowObj.therapistPay = _toNumberOrZero(oldRow.therapistPay);
     }
 
     if (matchedClient) {
@@ -2936,7 +2962,9 @@ function _recordSessionOutcome(payload) {
     var result = {
       ok: true,
       sessionId: sessionId,
-      therapistPay: therapistPay,
+      // Read from rowObj, not the local: the freeze above may have kept the
+      // already-forwarded row's stored pay instead of the recomputed figure.
+      therapistPay: rowObj.therapistPay,
       clientSessionValue: clientSessionValue,
       sessionStatus: sessionStatus,
       creditStatus: rowObj.creditStatus
