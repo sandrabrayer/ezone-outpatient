@@ -28,8 +28,12 @@
  *   "זיכויים ממתינים לתשלום" section on גבייה) and CSS. CACHE bumped so an
  *   installed app cannot serve the old shell, whose index.html never loads
  *   credits-ledger.js, alongside the new app.js that needs it.
+ * - v7 (2026-09-20): monthly revenue view — new monthly-revenue.js module, a
+ *   new הכנסות חודשיות tab + section in index.html, and CSS. CACHE bumped so
+ *   an installed app cannot serve the old shell, whose index.html never loads
+ *   monthly-revenue.js, alongside the new app.js that renders the tab.
  */
-var CACHE = 'ezone-outpatient-v6';
+var CACHE = 'ezone-outpatient-v7';
 var SHELL = [
   './',
   './index.html',
