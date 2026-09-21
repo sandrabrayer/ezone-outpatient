@@ -399,7 +399,11 @@ body.viewer .edit-only { display: none !important; }
   background: var(--bg-elev); border: 1px solid var(--border);
   border-radius: 10px; padding: 10px 12px;
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1.1fr 1.1fr 1.1fr 1fr;
+  /* מטופל · סכום · תקופת כיסוי · סטטוס · שולם בפועל · יתרה ·
+     תאריך תשלום · גבייה הבאה. The coverage cell is the widest of the
+     middle columns: it prints two dates side by side and must not wrap
+     mid-period. */
+  grid-template-columns: 1.25fr .9fr 1.5fr .95fr 1fr .9fr 1fr .95fr;
   gap: 10px; align-items: center;
 }
 .billing-row:hover { border-color: var(--green-deep); }
@@ -440,6 +444,68 @@ body.viewer .edit-only { display: none !important; }
   font-size: 12px;
 }
 .billing-row .billing-paid-wrap.hidden { visibility: hidden; }
+
+/* ===== תקופת כיסוי (the recorded coverage period + its month split) =====
+   The period a payment bought, and where its money lands. The split is the
+   figure that decides which MONTH the revenue belongs to, so it gets a full
+   row of its own under the cells rather than a tooltip. */
+.billing-row .billing-cov-view { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.billing-row .billing-cov-view.hidden { display: none; }
+.billing-row .billing-cov-text { font-size: 13px; font-weight: 600; }
+.billing-row .billing-cov-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--green-deep);
+  color: var(--green-2); font-size: 10px; font-weight: 600;
+}
+.billing-row .billing-cov-badge.onetime { border-color: #5a4818; color: var(--amber); }
+.billing-row .billing-cov-edit,
+.billing-row .billing-cov-reset {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-soft); border-radius: 6px;
+  width: 22px; height: 22px; line-height: 1; font-size: 12px;
+  cursor: pointer; padding: 0; vertical-align: middle;
+}
+.billing-row .billing-cov-edit:hover,
+.billing-row .billing-cov-reset:hover { background: color-mix(in srgb, var(--blue-deep) 22%, transparent); }
+/* Two dates side by side, שמור / ביטול beneath them — a 2×2 grid rather than a
+   wrapping flex row, so the editor keeps its shape at every width. */
+.billing-row .billing-cov-edit-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.billing-row .billing-cov-edit-wrap.hidden { display: none; }
+.billing-row .billing-cov-edit-wrap input[type="date"] {
+  width: 100%; min-width: 0; padding: 5px 6px; font-size: 12px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text);
+}
+.billing-row .billing-cov-edit-wrap .btn { padding: 4px 6px; font-size: 12px; }
+
+.billing-row .billing-cov-split {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 6px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.billing-row .billing-cov-parts { display: flex; flex-wrap: wrap; gap: 8px; }
+.billing-row .billing-cov-part {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--green-deep) 18%, transparent);
+  border: 1px solid var(--green-deep);
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+/* A month the money has NOT been earned in yet reads as deferred: muted, and
+   labelled, so nobody reads the whole payment as this month's revenue. */
+.billing-row .billing-cov-part.deferred {
+  background: var(--panel-2); border-color: var(--border);
+  color: var(--muted); font-weight: 500;
+}
+.billing-row .billing-cov-part .cov-part-month { font-weight: 700; }
+.billing-row .billing-cov-part .cov-part-days { color: var(--muted); font-size: 12px; }
+.billing-row .billing-cov-part.deferred .cov-part-amount { color: var(--muted); }
+.billing-row .billing-cov-part .cov-part-tag {
+  font-size: 10px; letter-spacing: .4px; color: var(--amber);
+  border: 1px solid #5a4818; border-radius: 999px; padding: 0 6px;
+}
+.billing-row .billing-cov-split-err { color: var(--red); font-size: 12px; font-weight: 600; }
 .bt-chip {
   display: inline-block; padding: 2px 8px; border-radius: 999px;
   background: var(--panel-2); border: 1px solid var(--border);

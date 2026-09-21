@@ -131,13 +131,197 @@
     return isFinite(v) ? Math.round(v * 100) / 100 : 0;
   }
 
-  /* The period a payment row pays for: dueDate D through D + 1 month − 1 day
-   * (local parts, day clamped) — never "until the next payment row", which is
-   * usually absent at exit. { start, end } as local Dates, or null. */
-  function paymentCoverage(payment) {
+  /* ===== COVERAGE PERIOD — what a payment ACTUALLY paid for =================
+   *
+   * Until coverageStart / coverageEnd existed, the period was INFERRED: the
+   * row's dueDate plus "one month paid in advance". Nothing on the row
+   * recorded whether that was true, so when it was not, the revenue landed in
+   * the wrong month, the refund was computed against the wrong window, and no
+   * screen could say so.
+   *
+   * These two columns are APPENDED to the Payments sheet (PAYMENTS_HEADERS in
+   * apps-script/Code.gs; append-only, readers map by position). A BLANK PAIR
+   * IS LEGAL and is what every row written before this change carries: it
+   * reads as the inference that was already in force, DERIVED ON READ. No
+   * historical row is ever rewritten.
+   *
+   * paymentCoverage() below stays THE ONE ANSWER to "what period does this
+   * payment pay for", for every consumer (the credits ledger here, the
+   * הכנסות חודשיות allocation in monthly-revenue.js, and the גבייה row in
+   * app.js). It is extended, not forked: the recorded period wins when there
+   * is one, the inference answers when there is not. */
+
+  /* Longest period one payment row may claim. A cycle is a month; a year is
+   * already absurd. This exists so a mistyped year ('2027-01-05' for
+   * '2026-01-05') is refused at the keyboard instead of silently swallowing a
+   * whole year of allocation. Mirrored by COVERAGE_MAX_DAYS in Code.gs. */
+  var COVERAGE_MAX_DAYS = 366;
+
+  /* The billingType of a ONE-OFF charge (חיוב נוסף חד פעמי). Named once here so
+   * the write side (withDefaultCoverage), the read side
+   * (MonthlyRevenue.coverageWindowFor) and the server guard all mean the same
+   * thing by it. */
+  var ONE_TIME_BILLING_TYPE = 'one_time';
+  function isOneTimePayment(payment) {
+    return !!payment && str(payment.billingType) === ONE_TIME_BILLING_TYPE;
+  }
+
+  /* Do (y, m1, day) name a day that actually EXISTS? Feb 30 and month 13 do
+   * not; Date rolls both over silently, so the parts are compared back. */
+  function isRealCalendarDate(y, m1, day) {
+    if (!(m1 >= 1 && m1 <= 12) || !(day >= 1 && day <= 31)) return false;
+    var d = new Date(y, m1 - 1, day);
+    return d.getFullYear() === y && d.getMonth() === m1 - 1 && d.getDate() === day;
+  }
+
+  /* Normalize ONE coverage-period value to bare 'YYYY-MM-DD'.
+   *   ''    — blank / absent (LEGAL: it means "infer")
+   *   null  — present but unusable (the caller refuses; nothing is coerced)
+   *
+   * Deliberately STRICTER than isoDate() above, which is a read-side healer
+   * and returns '' for anything it cannot parse. A value being WRITTEN must be
+   * refused, not healed — silently turning garbage into '' would store "infer"
+   * for a period somebody meant to record. Three shapes only: a bare ISO date
+   * naming a real day, a full ISO timestamp, and a Date object (both read
+   * through LOCAL parts — never toISOString().slice(), which lands a day early
+   * in Israel). Anything else, including a loose '2026-1-5' whose parsing is
+   * engine-dependent, is refused. EXACT MIRROR of _coverageDateISO() in
+   * apps-script/Code.gs; a parity sweep pins the two together. */
+  function coverageDateISO(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (v instanceof Date) return isNaN(v.getTime()) ? null : isoFromLocalDate(v);
+    if (typeof v !== 'string') return null;   // a number/boolean/object is not a date
+    var t = v.trim();
+    if (!t) return '';
+    var m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      return isRealCalendarDate(Number(m[1]), Number(m[2]), Number(m[3])) ? t : null;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(t)) return null;
+    var ts = new Date(t);
+    return isNaN(ts.getTime()) ? null : isoFromLocalDate(ts);
+  }
+
+  /* Validate a recorded coverage period. '' when acceptable, otherwise the
+   * Hebrew reason. The SAME rule the גבייה editor checks before saving and
+   * _coveragePeriodError() enforces in Code.gs on write — the server is the
+   * authority; this copy only spares a round-trip and names the field.
+   *
+   * REFUSED: a half-filled pair, a malformed date, a day that does not exist,
+   * an end before its start, a span longer than COVERAGE_MAX_DAYS.
+   * NOT REFUSED: a blank pair (means "infer" — what every historical row
+   * carries), and overlaps or gaps against OTHER rows. Both of those are real:
+   * two months paid at once, a skipped month, a re-dated cycle — and
+   * suggestCredits() already de-duplicates overlapping days (creditedThrough),
+   * so an overlap costs nothing. Refusing one would force the recorder to lie
+   * about what the money bought. */
+  function coveragePeriodError(startRaw, endRaw) {
+    /* PRESENCE first, then validity — the same order as the server. Deciding
+     * "half-filled" from the PARSED value would report '' + 'garbage' as a
+     * malformed date on one side and a missing date on the other. */
+    var rawS = str(startRaw), rawE = str(endRaw);
+    if (!rawS && !rawE) return '';
+    if (!rawS || !rawE) return 'יש למלא גם תאריך התחלה וגם תאריך סיום לתקופת הכיסוי';
+    var s = coverageDateISO(startRaw), e = coverageDateISO(endRaw);
+    if (!s || !e) return 'תאריך לא תקין בתקופת הכיסוי';
+    var ds = localDateFromISO(s), de = localDateFromISO(e);
+    if (!ds || !de) return 'תאריך לא תקין בתקופת הכיסוי';
+    if (de < ds) return 'תאריך הסיום מוקדם מתאריך ההתחלה';
+    var days = diffWholeDays(ds, de) + 1;
+    if (days > COVERAGE_MAX_DAYS) {
+      return 'תקופת כיסוי ארוכה מדי (' + days + ' ימים, המקסימום ' + COVERAGE_MAX_DAYS + ')';
+    }
+    return '';
+  }
+
+  /* The period a payment row pays for, INFERRED from its due date: dueDate D
+   * through D + 1 month − 1 day (local parts, day clamped) — never "until the
+   * next payment row", which is usually absent at exit. This was the whole
+   * rule before the two columns existed, and it is still the DEFAULT offered
+   * when a payment is recorded and the fallback for every row carrying none.
+   * { start, end } as local Dates, or null. */
+  function inferredCoverage(payment) {
     var start = localDateFromISO(isoDate(payment && payment.dueDate));
     if (!start) return null;
     return { start: start, end: addDays(addMonthsClamped(start, 1), -1) };
+  }
+
+  /* The period a payment row RECORDS, or null when it records none (blank
+   * pair) or records something unusable. An unusable stored pair is treated as
+   * ABSENT rather than thrown: a row corrupted by a manual sheet edit must
+   * still produce a window, and the inferred one is the honest fallback. */
+  function recordedCoverage(payment) {
+    if (!payment) return null;
+    if (coveragePeriodError(payment.coverageStart, payment.coverageEnd)) return null;
+    var s = coverageDateISO(payment.coverageStart), e = coverageDateISO(payment.coverageEnd);
+    if (!s || !e) return null;                       // blank pair — nothing recorded
+    var start = localDateFromISO(s), end = localDateFromISO(e);
+    if (!start || !end) return null;
+    return { start: start, end: end };
+  }
+
+  /* THE ONE SOURCE OF TRUTH for "what period does this payment pay for".
+   *
+   * THE RECORDED PERIOD WINS. coverageStart/coverageEnd are columns ON the
+   * payment row: when both are stored and usable they ARE the answer — the
+   * person who took the money said what it bought, and an assumption does not
+   * get to overrule them. When they are absent — every row written before
+   * this change — the period is inferred exactly as it always was, derived on
+   * read, so history reads today exactly as it read yesterday.
+   *
+   * -> { start, end, source } as local Dates; source is 'recorded' |
+   *    'inferred', carried so a screen can say which it is rather than
+   *    implying a precision it lacks. null only when there is neither a usable
+   *    recorded pair nor a due date.
+   *
+   * NOTE for חיובים נוספים חד פעמיים: the הכנסות חודשיות view narrows a
+   * one-off charge to its single due day (MonthlyRevenue.coverageWindowFor,
+   * unchanged). That narrowing is the revenue view's rule and stays there; the
+   * credits ledger reads this function directly, exactly as it always has. */
+  function paymentCoverage(payment) {
+    var rec = recordedCoverage(payment);
+    if (rec) return { start: rec.start, end: rec.end, source: 'recorded' };
+    var inf = inferredCoverage(payment);
+    if (!inf) return null;
+    return { start: inf.start, end: inf.end, source: 'inferred' };
+  }
+
+  /* Does this row's recorded period DIFFER from the cycle that would have been
+   * inferred for it? Drives the מותאמת badge. A row recording exactly the
+   * default is NOT marked — the badge means "somebody decided otherwise", and
+   * a badge on every row would mean nothing. */
+  function coverageDiffersFromDefault(payment) {
+    var rec = recordedCoverage(payment);
+    if (!rec) return false;
+    var inf = inferredCoverage(payment);
+    if (!inf) return true;      // recorded a period for a row with no cycle to infer
+    return isoFromLocalDate(rec.start) !== isoFromLocalDate(inf.start)
+        || isoFromLocalDate(rec.end)   !== isoFromLocalDate(inf.end);
+  }
+
+  /* Stamp the inferred cycle onto a payment that records no period, so the
+   * value lands in the sheet as a FACT instead of being re-derived from an
+   * assumption on every future read. Called on the one write path
+   * (paymentForSheet in app.js), so accepting the default costs the recorder
+   * zero clicks and changes zero figures — the default IS what was being
+   * inferred. A row that already records a period is returned untouched.
+   *
+   * ONE-OFF EXTRA CHARGES ARE LEFT BLANK, DELIBERATELY. A חיוב נוףס חד פעמי
+   * covers the day of the session it charges for, not a month
+   * (MonthlyRevenue.coverageWindowFor), so stamping a month-long window on it
+   * would be a lie — and stamping its single day would change what the
+   * credits ledger reads for that row today. Blank keeps BOTH readers exactly
+   * where they are. */
+  function withDefaultCoverage(payment) {
+    if (!payment) return payment;
+    if (isOneTimePayment(payment)) return payment;
+    if (recordedCoverage(payment)) return payment;
+    var inf = inferredCoverage(payment);
+    if (!inf) return payment;
+    return assign({}, payment, {
+      coverageStart: isoFromLocalDate(inf.start),
+      coverageEnd: isoFromLocalDate(inf.end)
+    });
   }
 
   /* The 15th of the next month on or after decidedDate: decided on the 1st–15th
@@ -525,7 +709,17 @@
     addMonthsClamped: addMonthsClamped,
     addDays: addDays,
     roundMoney: roundMoney,
+    COVERAGE_MAX_DAYS: COVERAGE_MAX_DAYS,
+    ONE_TIME_BILLING_TYPE: ONE_TIME_BILLING_TYPE,
+    isOneTimePayment: isOneTimePayment,
+    isRealCalendarDate: isRealCalendarDate,
+    coverageDateISO: coverageDateISO,
+    coveragePeriodError: coveragePeriodError,
+    inferredCoverage: inferredCoverage,
+    recordedCoverage: recordedCoverage,
     paymentCoverage: paymentCoverage,
+    coverageDiffersFromDefault: coverageDiffersFromDefault,
+    withDefaultCoverage: withDefaultCoverage,
     payoutDateFor: payoutDateFor,
     applyCreditCap: applyCreditCap,
     suggestCredits: suggestCredits,

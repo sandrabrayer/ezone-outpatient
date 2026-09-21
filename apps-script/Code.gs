@@ -192,11 +192,39 @@ var CLIENTS_REMOVED_HEADERS = [
  * Currently used for bank transfer details. */
 var SETTINGS_HEADERS = ['key', 'value'];
 
+/* Payments sheet columns.
+ *
+ * APPEND-ONLY contract: _readAll maps by POSITION, so inserting or reordering
+ * a column silently re-reads every historical row against the wrong field.
+ * New columns go at the END.
+ *
+ * coverageStart / coverageEnd (appended) — the period the payment ACTUALLY
+ * covers, as 'YYYY-MM-DD' text. Until these existed the period was inferred
+ * from the due date plus "one month paid in advance", and nothing recorded
+ * whether that was true. They are written on every save from the client's
+ * default (the inferred cycle, so nothing changes) and editable when it was
+ * wrong. BLANK IS LEGAL and is what every pre-existing row carries: readers
+ * fall back to the inferred cycle (paymentCoverage() in
+ * public/credits-ledger.js), so no old row is ever rewritten. Validated on
+ * write by _coveragePeriodError(). */
 var PAYMENTS_HEADERS = [
   'id', 'clientId', 'clientName', 'billingType', 'dueDate',
   'amountDue', 'amountPaid', 'status', 'paymentDate', 'method',
-  'notes', 'bundleSize', 'sessionsUsed'
+  'notes', 'bundleSize', 'sessionsUsed', 'coverageStart', 'coverageEnd'
 ];
+/* Longest period a single payment row may claim. Mirrors COVERAGE_MAX_DAYS in
+ * public/credits-ledger.js. A mistyped year would otherwise swallow a whole
+ * year of allocation. */
+var COVERAGE_MAX_DAYS = 366;
+/* The two coverage columns are plain 'YYYY-MM-DD' TEXT and must stay that way:
+ * a date-TYPED cell reads back as a Date, serializes as a UTC timestamp and
+ * drifts the day −1 for Israel — here that would move money between months.
+ * Only the NEW columns are forced; the existing ones keep whatever format they
+ * already have (changing a live column's format is a migration, not a guard). */
+var PAYMENT_TEXT_COLUMNS = ['coverageStart', 'coverageEnd'];
+/* The billingType of a one-off charge (חיוב נוסף חד פעמי). Mirrors
+ * ONE_TIME_BILLING_TYPE in public/credits-ledger.js. */
+var ONE_TIME_BILLING_TYPE = 'one_time';
 
 /* ===== Credits / refunds ledger (ported from E-Zone-Dashboard PR #124) ======
  *
@@ -1447,8 +1475,107 @@ function _restoreRemovedClient(payload) {
 /* ===== Payments =====
  * id is deterministic (built on the client) so the same monthly /
  * single / bundle bill always upserts into the same row. */
-function _getPayments() {
+
+/* Payments sheet + the text-format guard on the two APPENDED coverage
+ * columns. The global _formatPhoneColumns rule covers phones and stamps only,
+ * so these are forced here — scoped to this sheet, nothing else changes. */
+function _ensurePaymentsSheet() {
   var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+  var maxRows = sh.getMaxRows();
+  if (maxRows >= 2) {
+    for (var i = 0; i < PAYMENT_TEXT_COLUMNS.length; i++) {
+      var c = PAYMENTS_HEADERS.indexOf(PAYMENT_TEXT_COLUMNS[i]);
+      if (c >= 0) sh.getRange(2, c + 1, maxRows - 1, 1).setNumberFormat('@');
+    }
+  }
+  return sh;
+}
+
+/* Do (y, m1, day) name a day that actually exists? Feb 30 and month 13 do not;
+ * Date rolls both over silently, so the parts are compared back. Mirrors
+ * isRealCalendarDate() in public/credits-ledger.js. */
+function _isRealCalendarDate(y, m1, day) {
+  if (!(m1 >= 1 && m1 <= 12) || !(day >= 1 && day <= 31)) return false;
+  var d = new Date(y, m1 - 1, day);
+  return d.getFullYear() === y && d.getMonth() === m1 - 1 && d.getDate() === day;
+}
+
+/* Normalize ONE coverage-period cell to bare 'YYYY-MM-DD'.
+ *   ''   — blank / absent (legal: it means "infer")
+ *   null — present but unusable (the caller refuses; nothing is coerced)
+ *
+ * Deliberately stricter than _asISODate(), which heals what it reads: a value
+ * being WRITTEN must be refused, not healed — quietly turning garbage into ''
+ * would store "infer" for a period somebody meant to record. Three shapes
+ * only: a bare ISO date naming a REAL day, a full ISO timestamp, and a Date
+ * cell (both read through the SPREADSHEET timezone, never toISOString, which
+ * lands a day early in Israel). A loose '2026-1-5' is refused rather than
+ * handed to new Date(), whose tolerance is engine-dependent and would fork the
+ * rule away from the client mirror. EXACT MIRROR of coverageDateISO() in
+ * public/credits-ledger.js; a parity sweep pins the two together. */
+function _coverageDateISO(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    return Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+  }
+  if (typeof v !== 'string') return null;   // a number/boolean/object is not a date
+  var t = v.trim();
+  if (!t) return '';
+  var m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    return _isRealCalendarDate(Number(m[1]), Number(m[2]), Number(m[3])) ? t : null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(t)) return null;
+  var ts = new Date(t);
+  if (isNaN(ts.getTime())) return null;
+  return Utilities.formatDate(ts, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+}
+
+/* SERVER-SIDE validation of a payment's recorded coverage period — THE
+ * AUTHORITY, mirroring coveragePeriodError() in public/credits-ledger.js. The
+ * client checks the same rule for immediate feedback, but a hand-built POST
+ * bypasses the client entirely, so nothing reaches the Payments sheet without
+ * passing here.
+ *
+ * Returns '' when acceptable, otherwise the Hebrew reason, surfaced to the
+ * caller as { ok:false, error } — never swallowed, never "fixed" by writing a
+ * guessed period.
+ *
+ * REFUSED: a half-filled pair, a malformed date, a day that does not exist, an
+ * end before its start, a span longer than COVERAGE_MAX_DAYS.
+ * NOT REFUSED: a blank pair (means "use the inferred cycle" — what every
+ * historical row carries), and overlaps or gaps against OTHER rows, which are
+ * legitimate (two months paid at once, a skipped month, a re-dated cycle) and
+ * which the credits ledger already de-duplicates day by day. */
+function _coveragePeriodError(startRaw, endRaw) {
+  /* PRESENCE first, then validity — the same order as the client. Deciding
+   * "half-filled" from the PARSED value would report '' + 'garbage' as a
+   * malformed date here and as a missing date there, and the two messages must
+   * match (parity is asserted in test/payment-coverage-period.test.js). */
+  var rawS = (startRaw === null || startRaw === undefined) ? '' : String(startRaw).trim();
+  var rawE = (endRaw === null || endRaw === undefined) ? '' : String(endRaw).trim();
+  if (!rawS && !rawE) return '';
+  if (!rawS || !rawE) return 'יש למלא גם תאריך התחלה וגם תאריך סיום לתקופת הכיסוי';
+  var s = _coverageDateISO(startRaw), e = _coverageDateISO(endRaw);
+  if (!s || !e) return 'תאריך לא תקין בתקופת הכיסוי';
+  // Local-midnight Dates from the PARTS — never Date.parse, which reads a bare
+  // ISO date as UTC midnight.
+  var sp = s.split('-'), ep = e.split('-');
+  var ds = new Date(Number(sp[0]), Number(sp[1]) - 1, Number(sp[2]));
+  var de = new Date(Number(ep[0]), Number(ep[1]) - 1, Number(ep[2]));
+  if (isNaN(ds.getTime()) || isNaN(de.getTime())) return 'תאריך לא תקין בתקופת הכיסוי';
+  if (de.getTime() < ds.getTime()) return 'תאריך הסיום מוקדם מתאריך ההתחלה';
+  // Math.round absorbs the ±1h a DST switch injects between local midnights.
+  var days = Math.round((de.getTime() - ds.getTime()) / 86400000) + 1;
+  if (days > COVERAGE_MAX_DAYS) {
+    return 'תקופת כיסוי ארוכה מדי (' + days + ' ימים, המקסימום ' + COVERAGE_MAX_DAYS + ')';
+  }
+  return '';
+}
+
+function _getPayments() {
+  var sh = _ensurePaymentsSheet();
   return { ok: true, payments: _readAll(sh, PAYMENTS_HEADERS) };
 }
 
@@ -1733,10 +1860,35 @@ function _upsertPayment(payment) {
     return { ok: false, error: 'missing_payment' };
   }
   if (!payment.id) return { ok: false, error: 'missing_id' };
+  /* Coverage period: validated BEFORE the lock is taken and before a single
+   * cell is touched, so a bad period is refused outright rather than
+   * half-written. The client validates the same rule, but THIS is the
+   * authority — savePayment is reachable by any caller that reaches doPost,
+   * and a wrong period here silently moves money between months on the
+   * הכנסות חודשיות screen. The reason is returned verbatim, not swallowed:
+   * the client surfaces it on the row. */
+  var coverageError = _coveragePeriodError(payment.coverageStart, payment.coverageEnd);
+  if (coverageError) return { ok: false, error: coverageError };
+  /* Store the NORMALIZED pair, so a Date cell or an ISO timestamp from any
+   * caller lands as the same bare 'YYYY-MM-DD' text every reader expects. A
+   * blank pair stays blank — it means "infer", and writing a guessed period
+   * would be exactly the assumption these columns replace. */
+  payment.coverageStart = _coverageDateISO(payment.coverageStart) || '';
+  payment.coverageEnd   = _coverageDateISO(payment.coverageEnd) || '';
+  /* A ONE-OFF extra charge (חיוב נוסף חד פעמי) covers the day of the session
+   * it charges for, not a month: the הכנסות חודשיות view allocates it whole
+   * to its due date's month and must never spread it. Nothing in the app
+   * offers a period for such a row; a pair arriving on one anyway is dropped
+   * (not refused — the row itself is fine, only the period is meaningless)
+   * so it can never widen a one-off into a window. */
+  if (String(payment.billingType || '').trim() === ONE_TIME_BILLING_TYPE) {
+    payment.coverageStart = '';
+    payment.coverageEnd = '';
+  }
   var lock = LockService.getScriptLock();
   lock.tryLock(10000);
   try {
-    var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
+    var sh = _ensurePaymentsSheet();
     var idIdx = PAYMENTS_HEADERS.indexOf('id');
     var lastRow = sh.getLastRow();
     var row = PAYMENTS_HEADERS.map(function (h) {
@@ -1747,15 +1899,28 @@ function _upsertPayment(payment) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(payment.id)) {
+          _forcePaymentTextCells(sh, i + 2);
           sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
           return { ok: true, payment: payment, updated: true };
         }
       }
     }
     sh.appendRow(row);
+    _forcePaymentTextCells(sh, sh.getLastRow());
     return { ok: true, payment: payment, created: true };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/* Belt-and-suspenders over the whole-column '@' format _ensurePaymentsSheet
+ * applies: force the coverage cells of THIS row to plain text, so a row
+ * appended past the formatted range still stores its dates verbatim. */
+function _forcePaymentTextCells(sh, rowNum) {
+  if (!rowNum || rowNum < 2) return;
+  for (var t = 0; t < PAYMENT_TEXT_COLUMNS.length; t++) {
+    var c = PAYMENTS_HEADERS.indexOf(PAYMENT_TEXT_COLUMNS[t]);
+    if (c >= 0) sh.getRange(rowNum, c + 1, 1, 1).setNumberFormat('@');
   }
 }
 

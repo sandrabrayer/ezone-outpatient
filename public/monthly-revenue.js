@@ -228,21 +228,118 @@
   }
 
   /**
-   * coverageWindowFor(payment) -> { start, end } local Dates, or null.
+   * coverageWindowFor(payment) -> { start, end, source } local Dates, or null.
    *
    * The monthly-package window comes from CreditsLedger.paymentCoverage
-   * unchanged. ONE-TIME extra charges are the exception: a one-off is not a
-   * month of treatment, so spreading it over 30 days would post most of a
-   * one-day charge into the FOLLOWING month. Its window is the single day it
-   * falls due, so it lands wholly in that month.
+   * unchanged — which now means: the period the row RECORDS
+   * (coverageStart/coverageEnd) when it has one, and the cycle inferred from
+   * its dueDate when it does not. The WHOLE ROW is handed over, never a
+   * { dueDate } stub, or the recorded period would be thrown away and this
+   * screen would go on assuming exactly what the two columns exist to stop it
+   * assuming. `source` says which ('recorded' | 'inferred'); it is reported,
+   * never used in the arithmetic.
+   *
+   * ONE-TIME extra charges are the exception, unchanged by the coverage
+   * columns: a one-off is not a month of treatment, so spreading it over 30
+   * days would post most of a one-day charge into the FOLLOWING month. Its
+   * window is the single day it falls due, so it lands wholly in that month —
+   * and that stays true whatever a coverage pair on such a row might say
+   * (nothing writes one; see withDefaultCoverage in credits-ledger.js).
    */
   function coverageWindowFor(payment) {
     if (!payment) return null;
-    if (str(payment.billingType) === 'one_time') {
+    if (CL.isOneTimePayment(payment)) {
       var d = localDateFromISO(isoDate(payment.dueDate));
-      return d ? { start: d, end: d } : null;
+      return d ? { start: d, end: d, source: 'one_time_due_date' } : null;
     }
     return paymentCoverage(payment);
+  }
+
+  /**
+   * splitByMonth(amount, win) -> {
+   *   months: [{ month, label, monthName, daysInMonth, windowDays, share,
+   *              allocated, amount, deferred }],
+   *   windowDays, total, residual
+   * }
+   *
+   * The window's own calendar-month split, month by month, using allocate()
+   * — the SAME function the הכנסות חודשיות view allocates with, so the split
+   * printed on a גבייה row is the very arithmetic that screen will report and
+   * not a second opinion about it. The denominator is the WINDOW's own length,
+   * never the calendar month's.
+   *
+   * `allocated` is exactly what the monthly view puts in that month.
+   * `amount` is what is DISPLAYED: the same figure, except that the last
+   * agora of rounding drift is absorbed by the longest month so the printed
+   * lines add up to the payment exactly. Independently rounding each month's
+   * share can leave ₪0.01 unaccounted for (100 over three equal months →
+   * 33.33 × 3 = 99.99), and a split that does not sum to the row's own amount
+   * reads as a bug to the person checking it. Both figures are returned so
+   * neither truth is hidden: `allocated` reconciles with the monthly view,
+   * `amount` reconciles with the row.
+   *
+   * `deferred` marks every month AFTER the one the window starts in — the
+   * money is collected now and earned later. Clock-independent on purpose: the
+   * split of a row must not change meaning because the calendar turned over.
+   */
+  function splitByMonth(amount, win) {
+    if (!win || !win.start || !win.end) return null;
+    var total = roundMoney(num(amount));
+    var windowDays = diffWholeDays(win.start, win.end) + 1;
+    if (windowDays <= 0) return null;
+
+    var firstKey = monthKeyOf(isoFromLocalDate(win.start));
+    var lastKey  = monthKeyOf(isoFromLocalDate(win.end));
+    var months = [], key = firstKey, guard = 0;
+    while (key && guard++ < 24) {
+      var bounds = monthBounds(key);
+      var a = allocate(total, win, bounds);
+      if (a.daysInMonth > 0) {
+        months.push({
+          month: key,
+          label: monthLabel(key),
+          monthName: bounds.start.toLocaleDateString('he-IL', { month: 'long' }),
+          daysInMonth: a.daysInMonth,
+          windowDays: a.windowDays,
+          share: a.share,
+          allocated: a.amount,
+          amount: a.amount,
+          deferred: months.length > 0
+        });
+      }
+      if (key === lastKey) break;
+      key = shiftMonthKey(key, 1);
+    }
+    if (!months.length) return null;
+
+    /* The rounding residual, parked on the month carrying the most days — the
+     * one where an agora is least visible, and deterministically chosen (ties
+     * go to the earlier month) so the same payment always splits identically. */
+    var sum = 0;
+    months.forEach(function (m) { sum = roundMoney(sum + m.allocated); });
+    var residual = roundMoney(total - sum);
+    if (residual) {
+      var target = 0;
+      for (var i = 1; i < months.length; i++) {
+        if (months[i].daysInMonth > months[target].daysInMonth) target = i;
+      }
+      months[target].amount = roundMoney(months[target].allocated + residual);
+    }
+    return { months: months, windowDays: windowDays, total: total, residual: residual };
+  }
+
+  /**
+   * paymentMonthSplit(payment, amount) -> splitByMonth over THAT payment's
+   * coverage window (recorded or inferred; a one-off charge's single day).
+   * `amount` is passed in rather than read off the row, because the גבייה row
+   * shows the EFFECTIVE amount (the manual סכום גבייה override layer lives in
+   * app.js and this module never reaches for it). VAT-inclusive, like every
+   * amount stored on a payment row and like the amount printed beside it.
+   */
+  function paymentMonthSplit(payment, amount) {
+    var win = coverageWindowFor(payment);
+    if (!win) return null;
+    return splitByMonth(amount, win);
   }
 
   /* ---- billing-cycle projection ------------------------------------------
@@ -416,6 +513,12 @@
         paymentDate: isoDate(p.paymentDate),
         coverageStart: isoFromLocalDate(win.start),
         coverageEnd: isoFromLocalDate(win.end),
+        /* Where [start, end] came from: 'recorded' — the row says what it
+         * covered; 'inferred' — the cycle was assumed from the due date;
+         * 'one_time_due_date' — a one-off charge, its own day. Reported,
+         * never used in the arithmetic. */
+        coverageWindowSource: win.source || 'inferred',
+        coverageAdjusted: CL.coverageDiffersFromDefault(p) && !CL.isOneTimePayment(p),
         billedAmount: billed,
         amountPaid: paid
       };
@@ -493,6 +596,9 @@
           dueDate: dueISO, paymentDate: '',
           coverageStart: isoFromLocalDate(win.start),
           coverageEnd: isoFromLocalDate(win.end),
+          // A projected cycle has no payment row, so there is nothing recorded
+          // to honour — inferred by construction, and it says so.
+          coverageWindowSource: 'inferred', coverageAdjusted: false,
           billedAmount: monthly, amountPaid: 0,
           fullAmount: monthly,
           amountInMonth: a.amount,
@@ -689,6 +795,8 @@
     overlapDays: overlapDays,
     allocate: allocate,
     coverageWindowFor: coverageWindowFor,
+    splitByMonth: splitByMonth,
+    paymentMonthSplit: paymentMonthSplit,
     billingAnchorISO: billingAnchorISO,
     projectedCycleDueDates: projectedCycleDueDates,
     creditSpan: creditSpan,
