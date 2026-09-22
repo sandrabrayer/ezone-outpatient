@@ -6,6 +6,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **תקופת כיסוי — the coverage period a payment actually bought**
+  (`coverageStart` / `coverageEnd`, appended to `Payments`) — ported from
+  E-Zone-Dashboard PR #135. A payment's period was **inferred** (`dueDate` +
+  one month − 1 day) and nothing recorded whether that was true, so a payment
+  covering something else landed in the wrong month on **הכנסות חודשיות** and
+  was refunded against the wrong window by the **credits ledger**, with no
+  screen able to say so. The period is now **recorded on the row**, defaulted
+  to the cycle that was previously inferred (so the normal case costs zero
+  clicks and **moves no figure**), and **editable** on any persisted row —
+  **paid rows included**, since a settled payment is exactly the one whose
+  period must be correctable. **NOTHING IS BACKFILLED**: a blank pair is legal,
+  is what every historical row carries, and reads as the old inference
+  **derived on read** — no old row is rewritten. `CreditsLedger.paymentCoverage`
+  stays the **single source of truth** and now returns `{ start, end, source }`
+  with the recorded period winning and the inference as the fallback; the
+  credits ledger, `buildMonthlyRevenue` and the גבייה row all read it (the
+  no-fork guard was widened to pin every consumer). **No arithmetic changed** —
+  only where `[start, end]` comes from. The גבייה row now shows the period in
+  the app's date format (`06/09/2026 – 05/10/2026`, never ISO) with the
+  **automatic split by calendar month** underneath
+  (`ספטמבר · 25 ימים · ₪2,500` / `אוקטובר · 5 ימים · ₪500`), computed with the
+  **same `allocate()`** the monthly view uses, VAT-inclusive like the row,
+  denominated by the **window's own length**, summing to the payment exactly,
+  updating **live** while the period is edited, with the later month marked
+  **נדחה**. **חיובים נוספים חד פעמיים keep their existing allocation** — a
+  one-off covers **its own day**, is never stamped with a window, never
+  editable, never split; `paymentDate` remains the **cash** date and still
+  plays no part in allocation. Validation is one rule on both sides (half-
+  filled, malformed, impossible day, backwards, > 366 days; overlaps and gaps
+  between rows are **deliberately allowed**), pinned by a **441-pair
+  client/server parity sweep**; the server validates **before the lock and
+  before any cell is written**, returns the Hebrew reason **verbatim**, and the
+  two columns are **text-forced** so a date-typed cell cannot drift −1 day and
+  move revenue between months. **No new endpoint; `server.js` unchanged.**
+  52 new tests (1,059 total). See `CHANGELOG-payment-coverage-period.md`.
 - **Credits / refunds ledger (`Credits` sheet)** — ported from
   E-Zone-Dashboard PR #124, **money only**. Records what the clinic owes
   **back** to a patient when treatment ends: a month paid in advance, a

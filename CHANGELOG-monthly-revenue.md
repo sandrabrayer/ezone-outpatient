@@ -280,3 +280,21 @@ house rule), so an installed app cannot serve the old shell alongside the new
 | `test/name-picker-conflicts.test.js` | tab-count pin → presence + floor |
 | `test/user-guide.test.js` | new section registered |
 | `docs/USER-GUIDE.he.md` | new `הכנסות חודשיות` section |
+
+---
+
+## Follow-up: the window can now be RECORDED (`CHANGELOG-payment-coverage-period.md`)
+
+The coverage window this view allocates by is no longer always inferred from
+`dueDate`. A payment row may now **record** the period it covered
+(`coverageStart` / `coverageEnd`, appended columns), and
+`CreditsLedger.paymentCoverage` prefers it. `coverageWindowFor()` therefore
+receives the **whole row** instead of a `{ dueDate }` stub, and every revenue
+row carries `coverageWindowSource` (`'recorded' | 'inferred' |
+'one_time_due_date'`) and `coverageAdjusted` for the drill-down.
+
+**The allocation arithmetic is untouched** — only where `[start, end]` comes
+from. A blank pair (every historical row) reads as exactly the inference
+described above, so no figure on this screen moved. The **one-off extra charge**
+rule documented here is unchanged: a חיוב נוסף חד פעמי still covers its own due
+day and is never spread across months.

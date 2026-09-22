@@ -56,8 +56,15 @@ test('#1 setCurrentMonthPaid persists via persistPayment → savePayment (not cl
   const reloadIdx = fn[0].indexOf('loadAll()');
   assert.ok(persistIdx !== -1 && reloadIdx !== -1 && reloadIdx < persistIdx,
     'the client advance must reload (loadAll) before persist()');
-  // persistPayment is the savePayment upsert path
-  assert.match(APP, /async function persistPayment\(payment\)\s*\{\s*await apiPostAction\('savePayment'/);
+  // persistPayment is the savePayment upsert path. It now opens with the
+  // shared coverage-period refusal (CreditsLedger.coveragePeriodError, the
+  // same rule _upsertPayment enforces server-side), so the post is no longer
+  // the first statement — but it is still the ONLY one this function makes.
+  const pp = APP.match(/async function persistPayment\(payment\)[\s\S]*?\n  \}/);
+  assert.ok(pp, 'persistPayment not found');
+  assert.match(pp[0], /apiPostAction\('savePayment', \{ payment: paymentForSheet\(payment\) \}\)/);
+  assert.equal((pp[0].match(/apiPostAction\(/g) || []).length, 1,
+    'persistPayment must remain the single savePayment write path');
 });
 
 test('#1 the frontend never posts a setClinicalType action (only Code.gs receives it)', () => {

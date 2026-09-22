@@ -149,6 +149,27 @@ Both coordinators properties are set and verified (roster line shows «מנוה�
   live sheet BY POSITION and `_ensureSheet` never migrates data — NEVER reorder
   or remove mid-array columns; append only. Guard tests enforce the exact order.
 
+## Outpatient: PAYMENTS_HEADERS is APPEND-ONLY too (תקופת כיסוי, Sep 2026)
+
+- `coverageStart` / `coverageEnd` appended to `Payments` (positions 14–15) —
+  the period a payment ACTUALLY covered, ported from E-Zone-Dashboard PR #135.
+  Same append-only rule as `CLIENTS_HEADERS`: `_readAll` maps BY POSITION, so
+  never insert or reorder — append only. Guard tests pin the exact order.
+- Both columns are **text-forced** (`PAYMENT_TEXT_COLUMNS`,
+  `_ensurePaymentsSheet` + per-row before write): a date-typed cell would read
+  back as a Date, serialize UTC and drift −1 day in Israel — here that moves
+  revenue between months.
+- **Blank is legal and is never backfilled.** Every pre-existing row keeps blank
+  cells and reads as the previously inferred cycle
+  (`[dueDate, dueDate + 1 month − 1 day]`), derived on read.
+  `CreditsLedger.paymentCoverage` is the single source of truth for the credits
+  ledger, הכנסות חודשיות and the גבייה row alike.
+- חיוב נוסף חד פעמי is unchanged: it covers its own due day, is never
+  stamped with a window and is never split across months.
+- Validation is server-authoritative (`_coveragePeriodError`, before the lock
+  and before any write), mirrored client-side, pinned by a 441-pair parity
+  sweep. No new endpoint; `server.js` unchanged.
+
 ## Outpatient therapist-payout subsystem (shipped July 1–4)
 
 - "תשלומי מטפלים" tab: monthly per-therapist totals (pre-VAT / with VAT),

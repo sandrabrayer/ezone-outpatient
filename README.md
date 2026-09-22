@@ -388,6 +388,25 @@ checkout ever drifts back.
   `getCredits` / `saveCredit` are **internal** — session-cookie-gated through
   `/api/sheets`, with `createdBy`/`updatedBy` from the signed cookie; `server.js`
   is unchanged. See `CHANGELOG-credits-ledger.md`.
+- **תקופת כיסוי** (`coverageStart` / `coverageEnd`, appended LAST to
+  `Payments`) records **what a payment actually covered**, instead of the app
+  inferring `[dueDate, dueDate + 1 month − 1 day]` and nobody knowing whether
+  that was true. Defaulted to that same inferred cycle on every write (so the
+  normal case changes nothing), editable on any persisted row — **paid rows
+  included**. **A blank pair is legal**: it is what every historical row
+  carries and reads as the old inference, **derived on read, never backfilled**.
+  `CreditsLedger.paymentCoverage(payment)` is the **single source of truth** —
+  recorded period first, inference second, `{ start, end, source }` — and the
+  credits ledger, `buildMonthlyRevenue` and the גבייה row all read it (widened
+  no-fork guard). The גבייה row prints the period in `DD/MM/YYYY` plus the
+  **month split** (`MonthlyRevenue.paymentMonthSplit`, the same `allocate()`
+  the monthly view uses, VAT-inclusive, summing to the payment exactly, live
+  while editing). **חיוב נוסף חד פעמי keeps its #109 allocation**: its own due
+  day, never a window, never split, never editable. Validated identically on
+  both sides (441-pair parity sweep); the server validates **before the lock
+  and before any write**, returns the Hebrew reason verbatim, and the columns
+  are text-forced against date coercion. No new endpoint; `server.js`
+  unchanged. See `CHANGELOG-payment-coverage-period.md`.
 - `clinicalTreatmentType` (Clients column, appended LAST) is the **clinical**
   type as recorded by the therapists app. On save, `_saveAll` derives
   `serviceType` from it via an inline mirror of `treatment-map.js`

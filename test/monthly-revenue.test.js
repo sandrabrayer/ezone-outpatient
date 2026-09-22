@@ -519,6 +519,67 @@ test('H: the coverage window comes from credits-ledger.js and is not copied', ()
   assert.equal(CL.isoFromLocalDate(theirs.end), '2026-02-27', 'Jan 31 + 1 month clamps to Feb 28, minus a day');
 });
 
+test('H: EVERY consumer of the coverage window reads the one primitive', () => {
+  /* Three screens answer "what period did this payment pay for": the credits
+   * ledger, this view, and the גבייה row. Since the period can now be RECORDED
+   * on the row, a consumer that infers it on its own would quietly ignore what
+   * somebody wrote down — so each one is pinned to paymentCoverage() here. */
+  const CL_SRC = fs.readFileSync(path.join(ROOT, 'public', 'credits-ledger.js'), 'utf8');
+
+  // 1. the primitive itself: recorded first, inferred as the fallback.
+  const prim = fnSource(CL_SRC, 'paymentCoverage');
+  assert.match(prim, /recordedCoverage\(payment\)/);
+  assert.match(prim, /inferredCoverage\(payment\)/);
+  assert.match(prim, /source: 'recorded'/);
+  assert.match(prim, /source: 'inferred'/);
+  // The inference is defined ONCE, and only inside the primitive's fallback.
+  assert.equal((CL_SRC.match(/addDays\(addMonthsClamped\(start, 1\), -1\)/g) || []).length, 1);
+  assert.doesNotMatch(MODULE_SRC, /addMonthsClamped\(/);
+  assert.doesNotMatch(APP, /addMonthsClamped\(/);
+
+  // 2. the credits ledger hands over the WHOLE ROW — a { dueDate } stub would
+  //    throw the recorded period away.
+  assert.match(fnSource(CL_SRC, 'suggestCredits'), /var cov = paymentCoverage\(r\);/);
+
+  // 3. this view does too, on the stored-payment pass. The PROJECTED pass
+  //    deliberately keeps the stub: a cycle with no payment row has nothing
+  //    recorded to honour.
+  const build = fnSource(MODULE_SRC, 'buildMonthlyRevenue');
+  assert.match(build, /var win = coverageWindowFor\(p\);/);
+  assert.match(build, /var win = paymentCoverage\(\{ dueDate: dueISO \}\);/);
+  assert.equal((build.match(/paymentCoverage\(\{ dueDate/g) || []).length, 1,
+    'only the projection may use a stub');
+
+  // 4. the גבייה row reads this module's window (so a one-off charge keeps its
+  //    single day) and never rebuilds one of its own.
+  const rowWin = fnSource(APP, 'rowCoverageWindow');
+  assert.match(rowWin, /MR\.coverageWindowFor\(payment\)/);
+  assert.match(rowWin, /CL\.paymentCoverage\(payment\)/);
+  for (const name of ['paymentCoverage', 'inferredCoverage', 'recordedCoverage',
+                      'coverageDateISO', 'coveragePeriodError', 'coverageDiffersFromDefault',
+                      'withDefaultCoverage', 'splitByMonth', 'paymentMonthSplit', 'allocate']) {
+    assert.doesNotMatch(APP, new RegExp('function\\s+' + name + '\\s*\\('),
+      name + ' must be reused from the shared modules, not reimplemented in app.js');
+  }
+  // 5. and the row's split is the view's own allocation, not a second one.
+  assert.match(fnSource(APP, 'coverageSplitHtml'), /MR\.paymentMonthSplit\(/);
+  assert.match(fnSource(MODULE_SRC, 'splitByMonth'), /allocate\(total, win, bounds\)/);
+});
+
+test('H: the row split and this view agree, month for month, on the same payment', () => {
+  const p = {
+    id: 'pay::c1::base::2026-01', clientId: 'c1', billingType: 'monthly',
+    dueDate: '2026-01-20', amountDue: 3000, amountPaid: 3000, status: 'paid',
+  };
+  const split = MR.paymentMonthSplit(p, 3000);
+  for (const m of split.months) {
+    const view = MR.buildMonthlyRevenue({ month: m.month, clients: [], payments: [p], credits: [], today: '2026-01-20' });
+    assert.equal(view.received.rows[0].amountInMonth, m.allocated,
+      m.month + ': the \u05d2\u05d1\u05d9\u05d9\u05d4 row must print what the view will report');
+  }
+  assert.deepEqual(split.months.map((m) => m.allocated), [1161.29, 1838.71]);
+});
+
 test('H: the module is PURE — no DOM, no network, no app state', () => {
   const code = MODULE_SRC
     .slice(MODULE_SRC.indexOf('function (root, factory)'))

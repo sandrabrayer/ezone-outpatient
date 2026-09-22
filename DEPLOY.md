@@ -58,3 +58,17 @@ npm i -g @google/clasp@3.3.0 && clasp login
 clasp push -f
 clasp deploy -i <DEPLOYMENT_ID> -d "manual deploy"
 ```
+
+## Sheet columns appended by recent changes (no migration needed)
+
+`_ensureSheet` rewrites the header row and every reader maps by **position**, so
+appended columns appear on the next Apps Script deploy and existing rows simply
+carry blank cells.
+
+| Sheet | Appended | Notes |
+| --- | --- | --- |
+| `Payments` | `coverageStart`, `coverageEnd` | תקופת כיסוי (`CHANGELOG-payment-coverage-period.md`). Plain `'YYYY-MM-DD'` **text** — `_ensurePaymentsSheet` forces the `@` format on both columns, and `_upsertPayment` forces the target row's two cells before writing, so a date-typed cell can never drift −1 day and move revenue between months. **Blank is legal and is not backfilled**: a blank pair reads as the previously inferred cycle. |
+
+**Nothing is migrated and nothing is rewritten.** If the Apps Script deploy has
+not run yet, the client simply posts two fields the sheet does not have — the
+row still upserts, and the period continues to be inferred, exactly as before.

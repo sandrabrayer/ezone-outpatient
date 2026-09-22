@@ -894,10 +894,56 @@
       method: row.method || '',
       notes: row.notes || '',
       bundleSize: toNum(row.bundleSize),
-      sessionsUsed: toNum(row.sessionsUsed)
+      sessionsUsed: toNum(row.sessionsUsed),
+      /* The RECORDED coverage period (appended columns). Kept verbatim — blank
+       * stays blank, and CreditsLedger.paymentCoverage() falls back to the
+       * inferred cycle for it, exactly as every reader did before the columns
+       * existed. fmtDate() strips a timestamp to its day, the same guard
+       * dueDate gets, so a period read back from the sheet can never drift
+       * −1 day in Israel. An unusable pair is left as-is here and treated as
+       * absent by recordedCoverage() — refusing is the write path's job. */
+      coverageStart: fmtDate(row.coverageStart),
+      coverageEnd: fmtDate(row.coverageEnd)
     };
   }
+
+  /* The coverage period a payment row is written with.
+   *
+   * ONE rule, applied on the ONE write path (paymentForSheet below), in this
+   * order:
+   *   1. an explicit pair on the object being written — the recorder said what
+   *      the money bought, including a deliberate blank/blank "back to the
+   *      cycle" reset, which step 3 then re-stamps with the default;
+   *   2. otherwise the pair already stored on the live row with this id. Every
+   *      payment write in this app REBUILDS the row object from scratch
+   *      (recompute(), setCurrentMonthPaid(), the renewal paths...); without
+   *      this step a status click would silently replace a period somebody
+   *      recorded with the inferred default;
+   *   3. otherwise the inferred cycle (withDefaultCoverage), so every row
+   *      written from today forward carries an explicit period and nobody has
+   *      to re-derive it from an assumption later. A חיוב נוסף חד פעמי is
+   *      left blank on purpose — see withDefaultCoverage in credits-ledger.js.
+   *
+   * The rule lives here, once, rather than in each of the eight places that
+   * build a payment object. */
+  function paymentWithCoverage(p) {
+    if (!CL) return p;
+    var merged = p;
+    if (!CL.recordedCoverage(merged)) {
+      var live = findPaymentById(p && p.id);
+      var stored = live && live !== p ? CL.recordedCoverage(live) : null;
+      if (stored) {
+        merged = Object.assign({}, p, {
+          coverageStart: CL.isoFromLocalDate(stored.start),
+          coverageEnd: CL.isoFromLocalDate(stored.end)
+        });
+      }
+    }
+    return CL.withDefaultCoverage(merged);
+  }
+
   function paymentForSheet(p) {
+    var cov = paymentWithCoverage(p) || p;
     return {
       id: p.id,
       clientId: p.clientId || '',
@@ -911,10 +957,21 @@
       method: p.method || '',
       notes: p.notes || '',
       bundleSize: toNum(p.bundleSize),
-      sessionsUsed: toNum(p.sessionsUsed)
+      sessionsUsed: toNum(p.sessionsUsed),
+      coverageStart: cov.coverageStart || '',
+      coverageEnd: cov.coverageEnd || ''
     };
   }
   async function persistPayment(payment) {
+    /* Refuse a period the server would refuse, before the round-trip. The
+     * SERVER re-validates every write and is the authority (_upsertPayment in
+     * apps-script/Code.gs); this only spares a round-trip and names the field
+     * in Hebrew. Throwing keeps the failure on the caller's existing catch, so
+     * it is surfaced on the row instead of swallowed. */
+    if (CL) {
+      var covErr = CL.coveragePeriodError(payment && payment.coverageStart, payment && payment.coverageEnd);
+      if (covErr) throw new Error(covErr);
+    }
     await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
   }
 
@@ -2387,6 +2444,103 @@
     });
   }
 
+  /* ===== תקופת כיסוי on the גבייה row =====================================
+   *
+   * The period a payment covers, and the split of its money across the
+   * calendar months that period touches. Both are READ through the shared
+   * primitives — CreditsLedger.paymentCoverage for the window (recorded when
+   * the row records one, inferred when it does not) and
+   * MonthlyRevenue.paymentMonthSplit for the split, which allocates with the
+   * SAME function the הכנסות חודשיות screen uses. The row therefore shows the
+   * very arithmetic that screen will report, not a second opinion about it. */
+
+  /* The window to SHOW for a row: the revenue view's window, so a חיוב נוסף
+   * חד פעמי reads as the single day it actually covers. Falls back to the
+   * ledger's window when the revenue module is absent. */
+  function rowCoverageWindow(payment) {
+    if (MR) return MR.coverageWindowFor(payment);
+    return CL ? CL.paymentCoverage(payment) : null;
+  }
+  function isOneTimePayment(payment) {
+    return CL ? CL.isOneTimePayment(payment) : false;
+  }
+  /* People-facing, never ISO: the app's own displayDate (DD/MM/YYYY) on both
+   * ends. STORAGE stays 'YYYY-MM-DD' — this is the display layer only. */
+  function coveragePeriodText(win) {
+    if (!win || !win.start || !win.end) return '—';
+    var a = CL.isoFromLocalDate(win.start), b = CL.isoFromLocalDate(win.end);
+    return a === b ? displayDate(a) : displayDate(a) + ' – ' + displayDate(b);
+  }
+
+  /* The month-by-month split of `amount` over a row's coverage window, as the
+   * lines shown under the period:
+   *
+   *     ספטמבר · 25 ימים · ₪2,500
+   *     אוקטובר · 5 ימים · ₪500
+   *
+   * VAT-INCLUSIVE, because the amount printed beside it on the row is
+   * (outpatient stores client-facing prices; the הכנסות חודשיות screen is the
+   * only place that divides by VAT, and it says so). The denominator is the
+   * window's OWN length, never the calendar month's. A period inside one month
+   * yields one line. Months after the first are marked נדחה — the money is
+   * collected now and earned then.
+   *
+   * `startISO` / `endISO` override the stored period, so the preview can
+   * follow the date inputs while a period is being edited. */
+  function coverageSplitHtml(payment, amount, startISO, endISO) {
+    if (!MR || !CL) return '';
+    var probe = payment;
+    if (startISO !== undefined || endISO !== undefined) {
+      var err = CL.coveragePeriodError(startISO, endISO);
+      if (err) {
+        return '<span class="billing-cov-split-err">' + escapeHtml(err) + '</span>';
+      }
+      probe = Object.assign({}, payment, { coverageStart: startISO || '', coverageEnd: endISO || '' });
+    }
+    var split = MR.paymentMonthSplit(probe, amount);
+    if (!split || !split.months.length) return '';
+    // One year in the window -> the month name alone reads cleanest; a window
+    // crossing December must say which year, or two lines look identical.
+    var oneYear = split.months.every(function (m) {
+      return m.month.slice(0, 4) === split.months[0].month.slice(0, 4);
+    });
+    return split.months.map(function (m) {
+      return '<span class="billing-cov-part' + (m.deferred ? ' deferred' : '') + '"' +
+        (m.deferred ? ' title="נדחה: הכסף נגבה עכשיו ונזקף לחודש הבא"' : '') + '>' +
+        '<span class="cov-part-month">' + escapeHtml(oneYear ? m.monthName : m.label) + '</span>' +
+        '<span class="cov-part-days">' + m.daysInMonth + ' ימים</span>' +
+        '<span class="cov-part-amount">' + escapeHtml(money(m.amount)) + '</span>' +
+        (m.deferred ? '<span class="cov-part-tag">נדחה</span>' : '') +
+        '</span>';
+    }).join('');
+  }
+
+  /* Record what a payment ACTUALLY covered.
+   *
+   * Writes the two columns ON the payment row — no override sheet, no second
+   * identity — through saveBillingRow(), the same optimistic upsert, rollback
+   * and error toast every other payment edit uses. Only the period changes:
+   * amount, status, amountPaid and paymentDate ride through untouched, so this
+   * can never move money, only say which month it belongs to.
+   *
+   * A blank pair means "back to the billing cycle": paymentForSheet re-stamps
+   * the inferred window, so the row keeps an explicit period rather than a
+   * blank cell somebody would have to interpret later.
+   *
+   * Validated HERE (shared rule, immediate feedback) and AGAIN in
+   * _upsertPayment() on the server, which is the authority — a hand-built
+   * request never reaches the sheet unchecked. */
+  function saveCoveragePeriod(payment, startISO, endISO) {
+    if (state.role !== 'editor') return;
+    var start = String(startISO || '').trim();
+    var end = String(endISO || '').trim();
+    var err = CL ? CL.coveragePeriodError(start, end) : '';
+    if (err) { toast(err, true); return; }
+    var updated = Object.assign({}, payment, { coverageStart: start, coverageEnd: end });
+    saveBillingRow(updated);
+    renderBilling();
+  }
+
   function buildBillingRow(client, payment, dueDateISO, isCarry, kind, charge) {
     var isExtra = kind === 'extra';
     var row = document.createElement('div');
@@ -2412,6 +2566,68 @@
     var dateCellLabel = isCarry ? 'תאריך מקורי' : 'סכום חודשי';
     var dateCellVal = isCarry ? displayDate(dueDateISO) : money(amount);
 
+    /* ---- תקופת כיסוי -------------------------------------------------
+     * WHERE IT LIVES: its own cell right after the amount — the two facts a
+     * recorder decides together ("how much, for what period") sit side by
+     * side, with the month split spelled out underneath.
+     *
+     * WHEN IT IS EDITABLE: editors only, and only when the payment row
+     * actually EXISTS in the sheet.
+     *   - Paid and partial rows ARE editable. The amount override is refused
+     *     on settled money; the period is the opposite — a payment already
+     *     taken is exactly the one whose period must be correctable, because
+     *     that is the row הכנסות חודשיות allocates.
+     *   - A due-list row never saved is NOT editable: its payment is an
+     *     in-memory placeholder (paymentForClientOn), so writing a period
+     *     would conjure an unpaid Payments row that does not exist today.
+     *     Record the payment first, then adjust its period.
+     *   - A חיוב נוסף חד פעמי is NOT editable: a one-off covers the day of
+     *     the session it charges for, and the revenue view posts it whole to
+     *     that day's month. There is no period to decide. */
+    var covWindow = rowCoverageWindow(payment);
+    var covIsOneTime = isOneTimePayment(payment);
+    var covStartISO = covWindow ? CL.isoFromLocalDate(covWindow.start) : '';
+    var covEndISO = covWindow ? CL.isoFromLocalDate(covWindow.end) : '';
+    var covAdjusted = !covIsOneTime && CL && CL.coverageDiffersFromDefault(payment);
+    var covPersisted = state.payments.some(function (x) { return x && x.id === payment.id; });
+    var covEditable = state.role === 'editor' && covPersisted && !covIsOneTime;
+    var covBadgeHtml = covAdjusted
+      ? '<span class="billing-cov-badge" title="תקופה שנרשמה ידנית, שונה ממחזור החיוב הרגיל">מותאמת</span>'
+      : '';
+    var covOneTimeHtml = covIsOneTime
+      ? '<span class="billing-cov-badge onetime" title="חיוב חד פעמי — משויך ליום הטיפול שלו, ללא פיצול בין חודשים">חד פעמי</span>'
+      : '';
+    var covCellHtml =
+      '<div class="billing-cov-cell">' +
+        '<span class="p-label">תקופת כיסוי</span>' +
+        '<span class="p-val billing-cov-view">' +
+          '<span class="billing-cov-text" dir="ltr">' + escapeHtml(coveragePeriodText(covWindow)) + '</span>' +
+          covBadgeHtml + covOneTimeHtml +
+          (covEditable
+            ? '<button type="button" class="billing-cov-edit edit-only" title="עריכת תקופת הכיסוי של תשלום זה">✏️</button>'
+            : '') +
+          (covEditable && covAdjusted
+            ? '<button type="button" class="billing-cov-reset edit-only" title="חזרה למחזור החיוב הרגיל">↩</button>'
+            : '') +
+        '</span>' +
+        (covEditable
+          ? '<span class="billing-cov-edit-wrap hidden">' +
+              '<input class="billing-cov-start" type="date" value="' + escapeHtml(covStartISO) + '" />' +
+              '<input class="billing-cov-end" type="date" value="' + escapeHtml(covEndISO) + '" />' +
+              '<button type="button" class="btn billing-cov-save">שמור</button>' +
+              '<button type="button" class="btn billing-cov-cancel">ביטול</button>' +
+            '</span>'
+          : '') +
+      '</div>';
+    /* The split, spelled out across the full width of the row: this is the
+     * figure that decides which month the money lands in, so it is not a
+     * tooltip. */
+    var covSplitHtml =
+      '<div class="billing-cov-split">' +
+        '<span class="p-label">פיצול לפי חודשים</span>' +
+        '<span class="billing-cov-parts">' + coverageSplitHtml(payment, amount) + '</span>' +
+      '</div>';
+
     // Show next billing date if available on client
     var nextBillHtml = '';
     if (client.nextBillingDate) {
@@ -2428,6 +2644,7 @@
       '<div><span class="p-label">' + dateCellLabel + '</span><span class="p-val">' + escapeHtml(dateCellVal) + '</span>' +
         (isCarry ? '' : amountEditHtml) +
       '</div>' +
+      covCellHtml +
       '<div><span class="p-label">סטטוס</span><select class="billing-status"' + disabled + '>' + statusSelect + '</select></div>' +
       '<div class="billing-paid-wrap ' + (payment.status === 'partial' ? '' : 'hidden') + '">' +
         '<span class="p-label">שולם בפועל</span>' +
@@ -2438,7 +2655,8 @@
       '</div>' +
       '<div class="billing-paid-date-wrap"><span class="p-label">תאריך תשלום</span>' +
         '<input class="billing-paid-date" type="date" value="' + (payment.paymentDate || today()) + '"' + disabled + ' /></div>' +
-      nextBillHtml;
+      nextBillHtml +
+      covSplitHtml;
 
     var statusSel = row.querySelector('.billing-status');
     var paidWrap  = row.querySelector('.billing-paid-wrap');
@@ -2465,7 +2683,13 @@
           ? ((paidDateInput && paidDateInput.value) || today())
           : (payment.paymentDate || ''),
         method: payment.method || '', notes: payment.notes || '',
-        bundleSize: 0, sessionsUsed: 0
+        bundleSize: 0, sessionsUsed: 0,
+        /* The recorded period rides through every status/amount change. This
+         * object REPLACES the row in state and on the sheet, so dropping the
+         * pair here would quietly revert a period somebody recorded back to
+         * the inferred cycle on the next click. */
+        coverageStart: payment.coverageStart || '',
+        coverageEnd: payment.coverageEnd || ''
       };
     }
 
@@ -2484,6 +2708,49 @@
       if (statusSel.value !== 'paid') return;
       saveBillingRow(recompute('paid', paidInput.value));
     });
+
+    /* תקופת כיסוי editor (present only when covEditable). Saving goes through
+     * saveBillingRow — the ONE payment write path — so the period cannot be
+     * persisted by a route the rest of the app does not know about. The split
+     * preview under the row follows the inputs LIVE, because the split is the
+     * consequence the person is actually deciding about. */
+    var covEditBtn = row.querySelector('.billing-cov-edit');
+    var covPartsEl = row.querySelector('.billing-cov-parts');
+    if (covEditBtn) {
+      var covViewEl = row.querySelector('.billing-cov-view');
+      var covWrapEl = row.querySelector('.billing-cov-edit-wrap');
+      var covStartIn = row.querySelector('.billing-cov-start');
+      var covEndIn = row.querySelector('.billing-cov-end');
+      var previewSplit = function () {
+        if (covPartsEl) covPartsEl.innerHTML = coverageSplitHtml(payment, amount, covStartIn.value, covEndIn.value);
+      };
+      covEditBtn.addEventListener('click', function () {
+        covViewEl.classList.add('hidden');
+        covWrapEl.classList.remove('hidden');
+        if (covStartIn.focus) covStartIn.focus();
+      });
+      covStartIn.addEventListener('input', previewSplit);
+      covEndIn.addEventListener('input', previewSplit);
+      covStartIn.addEventListener('change', previewSplit);
+      covEndIn.addEventListener('change', previewSplit);
+      row.querySelector('.billing-cov-cancel').addEventListener('click', function () {
+        covWrapEl.classList.add('hidden');
+        covViewEl.classList.remove('hidden');
+        // Discard the half-typed values — reopening must show what is stored.
+        covStartIn.value = covStartISO;
+        covEndIn.value = covEndISO;
+        previewSplit();
+      });
+      row.querySelector('.billing-cov-save').addEventListener('click', function () {
+        saveCoveragePeriod(payment, covStartIn.value, covEndIn.value);
+      });
+    }
+    var covResetBtn = row.querySelector('.billing-cov-reset');
+    if (covResetBtn) {
+      // Back to the billing cycle: clear the stored pair and let
+      // paymentForSheet re-stamp the inferred window.
+      covResetBtn.addEventListener('click', function () { saveCoveragePeriod(payment, '', ''); });
+    }
 
     // ✏️ edit the collection amount (open-balance rows, editor only). Opens the
     // small edit-amount modal prefilled with the current EFFECTIVE amount.

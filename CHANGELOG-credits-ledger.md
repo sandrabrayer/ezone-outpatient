@@ -321,3 +321,20 @@ editor → **Deploy → Manage deployments → ✏️ → Version: New version �
 The two new actions live in `Code.gs`, so a fresh `/exec` version is required.
 No new Script Property and no new environment variable — the ledger rides the
 existing session-gated proxy.
+
+---
+
+## Follow-up: the coverage window can now be RECORDED (`CHANGELOG-payment-coverage-period.md`)
+
+`paymentCoverage()` is still the one primitive behind every credit, but it now
+answers with the period the payment row **records** (`coverageStart` /
+`coverageEnd`, appended Payments columns) when it has one, and infers
+`[dueDate, dueDate + 1 month − 1 day]` when it does not — which is every row
+written before that change, **derived on read, never backfilled**.
+
+`suggestCredits` hands it the **whole row** (the row copy already kept every
+column, which is what makes this work), so a credit is computed against what the
+money actually bought. **The credits arithmetic is unchanged**: same ÷30 daily
+rate, same cap, same de-duplication of overlapping days, same classification —
+only the window's origin can differ, and only on a row somebody deliberately
+edited.
