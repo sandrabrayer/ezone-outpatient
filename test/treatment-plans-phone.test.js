@@ -297,7 +297,7 @@ test('C: every module mirrors the SAME recoverPhone as Code.gs _recoverPhone', (
 const FIXTURE = [
   { id: 'c-valid', name: 'אורי', status: 'פעיל', phone: '0501234567' },
   { id: 'c-dashed', name: 'דנה', status: 'פעיל', phone: '052-765-4321' },
-  { id: 'c-lostzero', name: 'נועם', status: 'פעיל', phone: 543123276 },          // a number cell
+  { id: 'c-lostzero', name: 'נועם', status: 'פעיל', phone: 541234567 },          // a number cell
   { id: 'c-intl', name: 'מאיה', status: 'הפסקה זמנית', phone: '+972 54 111 1111' },
   { id: 'c-contact', name: 'רון', status: 'פעיל', phone: '', treatmentContactPhone: '0532222222' },
   { id: 'c-badphone', name: 'גל', status: 'פעיל', phone: '050123456', treatmentContactPhone: '0533333333' },
@@ -311,7 +311,7 @@ const FIXTURE = [
 const EXPECTED = {
   'c-valid':     { phone: '0501234567', phoneIssue: '' },
   'c-dashed':    { phone: '0527654321', phoneIssue: '' },
-  'c-lostzero':  { phone: '0543123276', phoneIssue: '' },
+  'c-lostzero':  { phone: '0541234567', phoneIssue: '' },
   'c-intl':      { phone: '0541111111', phoneIssue: '' },
   'c-contact':   { phone: '0532222222', phoneIssue: '' },
   'c-badphone':  { phone: '0533333333', phoneIssue: '' },
