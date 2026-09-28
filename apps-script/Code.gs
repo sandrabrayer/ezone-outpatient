@@ -448,6 +448,46 @@ function _recoverPhone(raw) {
   return s;
 }
 
+/* ===== Cross-app patient phone (the therapists roster join key) =====
+ *
+ * getTreatmentPlans and getDebtStatus are the two base sources of the E-Zone
+ * Therapists roster, which is keyed by phone: a row whose phone yields no match
+ * key is DROPPED there without a trace. Both feeds used to project
+ * _recoverPhone(phone) || _recoverPhone(treatmentContactPhone) unvalidated, so a
+ * client with no number vanished silently, and a malformed non-empty `phone`
+ * short-circuited the `||` and hid a valid treatmentContactPhone behind it.
+ *
+ * Rule (mirrors public/phone-issue.js — keep in sync; the parity test runs this
+ * file in a sandbox): candidates `phone`, then `treatmentContactPhone`; each is
+ * normalized with _recoverPhone (the same normalization every inbound receiver
+ * applies, so an emitted phone always matches back) and ACCEPTED only when it is
+ * exactly canonical, /^0\d{9}$/. The first accepted candidate wins; otherwise
+ * phone is '' and phoneIssue is 'missing' (no digits anywhere) or 'invalid'
+ * (digits that are not a canonical mobile). NEVER guesses: an invalid value is
+ * never truncated, padded or split, and payerPhone is never a candidate. */
+var CANONICAL_PHONE_RE = /^0\d{9}$/;
+var CROSS_APP_PHONE_SOURCES = ['phone', 'treatmentContactPhone'];
+
+/* One raw cell -> { phone: canonical | '', issue: '' | 'missing' | 'invalid' }. */
+function _canonicalPhone(raw) {
+  var s = _recoverPhone(raw);
+  if (!s) return { phone: '', issue: 'missing' };
+  if (CANONICAL_PHONE_RE.test(s)) return { phone: s, issue: '' };
+  return { phone: '', issue: 'invalid' };
+}
+
+/* A Clients row -> { phone, phoneIssue }; phoneIssue is '' exactly when phone
+ * is non-empty. */
+function _crossAppPhone(cl) {
+  var sawInvalid = false;
+  for (var i = 0; i < CROSS_APP_PHONE_SOURCES.length; i++) {
+    var r = _canonicalPhone(cl ? cl[CROSS_APP_PHONE_SOURCES[i]] : '');
+    if (r.phone) return { phone: r.phone, phoneIssue: '' };
+    if (r.issue === 'invalid') sawInvalid = true;
+  }
+  return { phone: '', phoneIssue: sawInvalid ? 'invalid' : 'missing' };
+}
+
 /* Columns that must be stored as plain text: phones (leading zeros) and the
  * who/when stamps (ISO timestamps that Sheets would otherwise Date-coerce). */
 function _isTextForcedColumn(name) {
@@ -2469,9 +2509,12 @@ function _getWinbackSource() {
  * The consumer adds: phone matches no client -> flag; matches >1 -> flag.
  *
  * Matching contract: the consumer matches on NAME + the canonical patient
- * phone (the `phone` column, falling back to `treatmentContactPhone`, leading-
- * zero recovered). payerPhone, paymentLink, prices, bundle* and every other
- * billing/payer field are deliberately NOT included.
+ * phone — _crossAppPhone: the `phone` column, falling back to
+ * `treatmentContactPhone`, leading-zero recovered, and only a canonical
+ * /^0\d{9}$/ value is ever emitted ('' otherwise). It is the SAME value
+ * getTreatmentPlans emits for the client, so the two base sources of the
+ * therapists roster always agree on its key. payerPhone, paymentLink, prices,
+ * bundle* and every other billing/payer field are deliberately NOT included.
  *
  * Per-row rule (lockstep with public/debt-status.js and billing-status.js):
  * for a row that EXISTS, owed = (status paid or blank) ? 0 :
@@ -2553,7 +2596,7 @@ function _getDebtStatus() {
       sourceApp:  'ezone-outpatient',
       clientId:   id,
       name:       cl.name || '',
-      phone:      _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone),
+      phone:      _crossAppPhone(cl).phone,
       debtStatus: debtStatus,
       amountOwed: amountOwed
     });
@@ -2565,9 +2608,11 @@ function _getDebtStatus() {
 /* ===== Treatment plans (read-only cross-app endpoint) =====
  *
  * Consumed by E-Zone Therapists to show each outpatient's treatment plan.
- * Minimal projection: clientId, name, phone (treatmentContactPhone),
- * serviceType, sessions (sessionsPerWeek), status, startDate, exitDate,
- * renewalDate (date only). NO billing/payer data.
+ * Minimal projection: clientId, name, phone (the canonical cross-app phone —
+ * see _crossAppPhone), phoneIssue ('' | 'missing' | 'invalid': why phone is
+ * blank, so the consumer can explain a patient it cannot key instead of
+ * dropping them silently), serviceType, sessions (sessionsPerWeek), status,
+ * startDate, exitDate, renewalDate (date only). NO billing/payer data.
  *
  * Auth: optional shared secret 'TREATMENT_PLANS_SECRET', same model as
  * getWinbackSource / getDebtStatus.
@@ -2617,18 +2662,18 @@ function _getTreatmentPlans() {
     // Cross-app-deactivated clients (deleted in the therapists app) leave the
     // roster — exclude them so the therapists roster union does not re-add them.
     if (cl.status === DEACTIVATED_CLIENT_STATUS_HE) continue;
-    // Cross-app join key for the therapists app — must be the populated
-    // canonical patient phone. The patient number lives in the `phone` column
-    // (added in the stop-flow work); the legacy `treatmentContactPhone` column
-    // is empty for every live client, so projecting it returned "phone":"" for
-    // all. Prefer `phone`, fall back to `treatmentContactPhone`, and recover the
-    // leading zero either way so consumers get the canonical 10-digit form.
-    var phone = _recoverPhone(cl.phone) || _recoverPhone(cl.treatmentContactPhone);
+    // Cross-app join key for the therapists app (_crossAppPhone): the first
+    // CANONICAL value of `phone`, then `treatmentContactPhone` — an invalid
+    // `phone` no longer hides a valid contact phone. Same value getDebtStatus
+    // emits. When neither is canonical, phone is '' and phoneIssue says why
+    // ('missing' / 'invalid'); never a guessed number.
+    var ph = _crossAppPhone(cl);
     out.push({
       sourceApp:   'ezone-outpatient',
       clientId:    id,
       name:        cl.name || '',
-      phone:       phone,
+      phone:       ph.phone,
+      phoneIssue:  ph.phoneIssue,
       serviceType: cl.serviceType || '',
       sessions:    cl.sessionsPerWeek || '',
       status:      cl.status || '',

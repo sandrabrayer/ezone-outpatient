@@ -125,6 +125,24 @@ test('computeClientDebt: a client with no number on either column projects an em
   assert.equal(rows[0].phone, '');
 });
 
+test('computeClientDebt: only a canonical join key is ever emitted — the SAME one getTreatmentPlans emits', () => {
+  // The debt feed and the plans feed are the two base sources of the therapists
+  // roster: they must carry the same key, or one patient splits into two cards.
+  const PhoneIssue = require('../public/phone-issue.js');
+  const clients = [
+    { id: 'c1', name: 'a', phone: '050123456' },                                    // 9 digits -> ''
+    { id: 'c2', name: 'b', phone: '0501234567 / 0527654321' },                      // two numbers -> ''
+    { id: 'c3', name: 'c', phone: '050123456', treatmentContactPhone: '052-7654321' } // falls through
+  ];
+  const byId = Object.fromEntries(DebtStatus.computeClientDebt(clients, []).map((r) => [r.clientId, r]));
+  assert.equal(byId.c1.phone, '');
+  assert.equal(byId.c2.phone, '');
+  assert.equal(byId.c3.phone, '0527654321');
+  clients.forEach((c) => assert.equal(byId[c.id].phone, PhoneIssue.crossAppPhone(c).phone, c.id));
+  // The debt row's key set is unchanged: no phoneIssue here.
+  assert.deepEqual(Object.keys(byId.c1).sort(), ['amountOwed', 'clientId', 'debtStatus', 'name', 'phone']);
+});
+
 test('computeClientDebt: a debtor is included even after discharge', () => {
   const clients = [{ id: 'c1', name: 'אורי', treatmentContactPhone: '050-1', status: 'סיים טיפול' }];
   const payments = [{ clientId: 'c1', status: 'unpaid', amountDue: 200, amountPaid: 0 }];
