@@ -556,6 +556,9 @@ body.viewer .edit-only { display: none !important; }
 .chip-partial { background: #fff3cd; color: #856404; }
 .chip-unpaid  { background: #f8d7da; color: #721c24; }
 .chip-next    { background: var(--blue-soft); color: var(--blue-deep); font-weight: 600; }
+/* «חסר טלפון» / «טלפון לא תקין» on a patient card: no canonical mobile, so the
+   therapists app cannot key this patient. Same amber family as .status-pause. */
+.chip-phone-issue { background: #3a310f; color: var(--amber); border-color: #5a4818; font-weight: 600; }
 
 /* Clickable monthly-payment chip on the patient card (editor, unpaid). */
 button.month-pay-btn {
