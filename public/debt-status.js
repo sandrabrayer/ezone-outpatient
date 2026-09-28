@@ -89,6 +89,22 @@
     return s;
   }
 
+  // Mirror of _crossAppPhone in apps-script/Code.gs (public/phone-issue.js holds
+  // the documented rule; a parity test pins all three): the first CANONICAL
+  // (/^0\d{9}$/) value of `phone`, then `treatmentContactPhone`, else ''. An
+  // invalid `phone` never hides a valid contact phone, and a non-canonical value
+  // is never emitted — so this feed and getTreatmentPlans always carry the same
+  // join key for a client (they are the two base sources of the therapists
+  // roster). payerPhone is never a candidate.
+  var CROSS_APP_PHONE_SOURCES = ['phone', 'treatmentContactPhone'];
+  function crossAppPhone(cl) {
+    for (var i = 0; i < CROSS_APP_PHONE_SOURCES.length; i++) {
+      var s = recoverPhone(cl ? cl[CROSS_APP_PHONE_SOURCES[i]] : '');
+      if (/^0\d{9}$/.test(s)) return s;
+    }
+    return '';
+  }
+
   /**
    * Amount still owed for a single payment row that EXISTS.
    * @param {{status?:*, amountDue?:*, amountPaid?:*}} row
@@ -138,8 +154,9 @@
    * Matching contract (decided with the product owner): a patient is matched on
    * NAME + the phone registered in the system. On the outpatient side that is
    * the canonical patient phone — the `phone` column, falling back to
-   * `treatmentContactPhone` when blank, leading-zero recovered — NOT the payer
-   * phone. `treatmentContactPhone` is empty for every live client, so projecting
+   * `treatmentContactPhone`, leading-zero recovered, and only ever a canonical
+   * 10-digit value ('' otherwise — see crossAppPhone) — NOT the payer phone.
+   * `treatmentContactPhone` is empty for almost every live client, so projecting
    * it alone returned a blank join key. Only the fields needed for the gate are
    * projected — no prices, payer details, links.
    *
@@ -171,7 +188,7 @@
       out.push({
         clientId: id,
         name: cl.name || '',
-        phone: recoverPhone(cl.phone) || recoverPhone(cl.treatmentContactPhone),
+        phone: crossAppPhone(cl),
         debtStatus: st.debtStatus,
         amountOwed: st.amountOwed
       });
@@ -183,6 +200,7 @@
     PAYMENT_STATUS_ALIASES: PAYMENT_STATUS_ALIASES,
     resolvePaymentStatus: resolvePaymentStatus,
     recoverPhone: recoverPhone,
+    crossAppPhone: crossAppPhone,
     rowOwed: rowOwed,
     amountOwedForRows: amountOwedForRows,
     clientDebtStatus: clientDebtStatus,

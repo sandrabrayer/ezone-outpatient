@@ -4843,12 +4843,27 @@
     return 'status-done';
   }
 
+  // Amber «חסר טלפון» / «טלפון לא תקין» chip: this client has no canonical
+  // mobile on `phone` / treatmentContactPhone, so getTreatmentPlans emits
+  // phone:'' + phoneIssue and the E-Zone Therapists roster cannot show them.
+  // SAME rule as the feed (public/phone-issue.js, parity-tested against
+  // Code.gs). Advisory only: '' if the module failed to load.
+  function phoneIssueChipHtml(c) {
+    var mod = (typeof self !== 'undefined' && self.EzonePhoneIssue) || null;
+    if (!mod || typeof mod.cardPhoneIssue !== 'function') return '';
+    var issue = mod.cardPhoneIssue(c);
+    if (!issue) return '';
+    return '<span class="chip chip-phone-issue" title="' + escapeHtml(mod.PHONE_ISSUE_HINT) + '">⚠ ' +
+      escapeHtml(mod.PHONE_ISSUE_LABELS[issue] || '') + '</span>';
+  }
+
   function clientCard(c) {
     var card = document.createElement('div');
     card.className = 'client-card';
     var services = parseServices(c.serviceType);
     var locationChip = c.location ? '<span class="chip">' + escapeHtml(c.location) + '</span>' : '';
     var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
+    var phoneIssueChip = phoneIssueChipHtml(c);
     var assignedChip = c.assignedTo ? '<span class="chip">משוייך: ' + escapeHtml(c.assignedTo) + '</span>' : '';
 
     // Monthly session-credit balance (server-managed): cancelled-by-therapist
@@ -4999,7 +5014,7 @@
           '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
           '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
         '</div>' +
-        ((phoneChip || locationChip || assignedChip) ? '<div class="client-meta">' + phoneChip + locationChip + assignedChip + '</div>' : '') +
+        ((phoneChip || phoneIssueChip || locationChip || assignedChip) ? '<div class="client-meta">' + phoneChip + phoneIssueChip + locationChip + assignedChip + '</div>' : '') +
       '</div>' +
       '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
       '<div class="client-actions edit-only"></div>';

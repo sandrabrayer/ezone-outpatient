@@ -32,8 +32,12 @@
  *   new הכנסות חודשיות tab + section in index.html, and CSS. CACHE bumped so
  *   an installed app cannot serve the old shell, whose index.html never loads
  *   monthly-revenue.js, alongside the new app.js that renders the tab.
+ * - v8 (2026-09-28): patient-card phone chip — new phone-issue.js module, a
+ *   new index.html script tag, and CSS. CACHE bumped so an installed app cannot
+ *   serve the old shell, whose index.html never loads phone-issue.js, alongside
+ *   the new app.js that renders the «חסר טלפון» / «טלפון לא תקין» chip.
  */
-var CACHE = 'ezone-outpatient-v7';
+var CACHE = 'ezone-outpatient-v8';
 var SHELL = [
   './',
   './index.html',

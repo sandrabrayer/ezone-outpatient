@@ -170,6 +170,26 @@ Both coordinators properties are set and verified (roster line shows «מנוה�
   and before any write), mirrored client-side, pinned by a 441-pair parity
   sweep. No new endpoint; `server.js` unchanged.
 
+## Outpatient → Therapists: validated join phone + `phoneIssue` (Sep 28, 2026)
+
+- The therapists roster is keyed by phone and silently DROPS a row with none.
+  `getTreatmentPlans` and `getDebtStatus` (its two base sources) now emit the
+  SAME validated phone, following one rule (`public/phone-issue.js`, mirrored in
+  `Code.gs` `_crossAppPhone`):
+  - candidates are `phone`, then `treatmentContactPhone` (never `payerPhone`);
+  - normalization is `_recoverPhone`: separators stripped, `+972`/`972` → `0`,
+    a lost leading zero restored;
+  - a value is accepted only if it matches `/^0\d{9}$/`; otherwise `''`, never
+    a guess.
+- `getTreatmentPlans` gains ONE key: `phoneIssue` = `''` | `'missing'` |
+  `'invalid'`, so the therapists app can list patients it cannot key (a
+  therapists-side follow-up; its roster ignores the key today).
+  `getDebtStatus` keys are unchanged. `CLIENTS_HEADERS` is untouched.
+- The live audit found 13 of the 14 hidden outpatient patients have NO phone
+  in any column. The fix is data entry; outpatient cards now show an amber
+  «חסר טלפון» / «טלפון לא תקין» chip. Details:
+  `CHANGELOG-treatment-plans-phone-issue.md` (ezone-outpatient).
+
 ## Outpatient therapist-payout subsystem (shipped July 1–4)
 
 - "תשלומי מטפלים" tab: monthly per-therapist totals (pre-VAT / with VAT),

@@ -7,28 +7,17 @@
  * `_getTreatmentPlans` in apps-script/Code.gs cannot be imported in the Node
  * runtime, so `projectPlans` below is a pure mirror of that projection. Any
  * change to the projected shape must update both. The point of the test is to
- * lock the minimal contract: phone is the populated canonical patient phone
- * (the `phone` column, falling back to `treatmentContactPhone`), recovered to
- * the leading-zero 10-digit form, and NO payer / billing fields ever leak.
+ * lock the minimal contract: phone is the canonical patient phone (the first
+ * CANONICAL value of the `phone` column, then `treatmentContactPhone` —
+ * public/phone-issue.js), phoneIssue says why it is '' ('missing' / 'invalid'),
+ * and NO payer / billing fields ever leak. test/treatment-plans-phone.test.js
+ * runs the REAL Code.gs and pins it to the same rule.
  */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const chargesLogic = require('../public/charges-logic.js');
-
-// Mirror of _recoverPhone in apps-script/Code.gs — restore a dropped leading
-// zero and normalize to the canonical leading-zero form. Idempotent.
-function recoverPhone(raw) {
-  if (raw === null || raw === undefined) return '';
-  let s = String(raw).replace(/[\s\-()]/g, '');
-  if (s.indexOf('+') === 0) s = s.slice(1);
-  if (s.indexOf('00') === 0) s = s.slice(2);
-  s = s.replace(/\D/g, '');
-  if (!s) return '';
-  if (s.indexOf('972') === 0) s = '0' + s.slice(3);
-  else if (s.charAt(0) !== '0') s = '0' + s;
-  return s;
-}
+const PhoneIssue = require('../public/phone-issue.js');
 
 // Mirror of _addMonthIso in apps-script/Code.gs — add 1 calendar month to a
 // 'yyyy-MM-dd' string, clamping to the last day of the target month. Must
@@ -57,12 +46,13 @@ function renewalDueDate(cl) {
 }
 
 // Pure projection mirror of _getTreatmentPlans for unit coverage. The cross-app
-// phone is the canonical patient phone: `phone` column, falling back to
-// `treatmentContactPhone`, recovered either way.
+// phone is the canonical patient phone (PhoneIssue.crossAppPhone = Code.gs
+// _crossAppPhone): `phone`, then `treatmentContactPhone`, first canonical wins.
 function projectPlans(clients) {
   return (clients || []).filter(c => c && c.id != null && String(c.id)).map(cl => ({
     sourceApp: 'ezone-outpatient', clientId: String(cl.id), name: cl.name || '',
-    phone: recoverPhone(cl.phone) || recoverPhone(cl.treatmentContactPhone),
+    phone: PhoneIssue.crossAppPhone(cl).phone,
+    phoneIssue: PhoneIssue.crossAppPhone(cl).phoneIssue,
     serviceType: cl.serviceType || '',
     sessions: cl.sessionsPerWeek || '', status: cl.status || '',
     // Treatment period — consumed by the therapists app's patient card. Blank
@@ -101,7 +91,7 @@ test('treatment plans: rows without an id are skipped; blanks default to empty s
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0], {
     sourceApp: 'ezone-outpatient', clientId: 'c1', name: 'דנה',
-    phone: '', serviceType: '', sessions: '', status: '',
+    phone: '', phoneIssue: 'missing', serviceType: '', sessions: '', status: '',
     startDate: '', exitDate: '', renewalDate: ''
   });
 });
@@ -161,13 +151,32 @@ test('treatment plans: a client with a phone always projects a non-blank canonic
   ]);
   rows.forEach((r) => {
     assert.notEqual(r.phone, '');
-    assert.match(r.phone, /^0\d{8,9}$/); // canonical leading-zero form
+    assert.match(r.phone, /^0\d{9}$/); // canonical leading-zero 10-digit form
+    assert.equal(r.phoneIssue, '');
   });
 });
 
 test('treatment plans: a client with no number on either column projects an empty phone', () => {
   const rows = projectPlans([{ id: 'c1', name: 'דנה' }]);
   assert.equal(rows[0].phone, '');
+  assert.equal(rows[0].phoneIssue, 'missing');
+});
+
+test('treatment plans: a non-canonical number projects "" + phoneIssue "invalid", never a guess', () => {
+  const rows = projectPlans([
+    { id: 'c1', name: 'דנה', phone: '050123456' },                        // 9 digits
+    { id: 'c2', name: 'אורי', phone: '0501234567 / 0527654321' }          // two numbers
+  ]);
+  rows.forEach((r) => {
+    assert.equal(r.phone, '');
+    assert.equal(r.phoneIssue, 'invalid');
+  });
+});
+
+test('treatment plans: an invalid `phone` falls through to a valid treatmentContactPhone', () => {
+  const rows = projectPlans([{ id: 'c1', name: 'דנה', phone: '050123456', treatmentContactPhone: '052-7654321' }]);
+  assert.equal(rows[0].phone, '0527654321');
+  assert.equal(rows[0].phoneIssue, '');
 });
 
 test('treatment plans: tolerates null / empty input', () => {
@@ -224,7 +233,7 @@ test('renewalDate is the empty string when the client has no anchor at all', () 
   assert.equal('renewalDate' in rows[0], true); // present as '', not missing
 });
 
-test('contract guard: key set is exactly the previous projection + renewalDate; no billing keys, no payment rows', () => {
+test('contract guard: key set is exactly the previous projection + renewalDate + phoneIssue; no billing keys, no payment rows', () => {
   const rows = projectPlans([
     { id: 'c1', name: 'אורי', phone: '0501234567', serviceType: 'פרטני',
       sessionsPerWeek: '{"פרטני":1}', status: 'פעיל',
@@ -238,7 +247,8 @@ test('contract guard: key set is exactly the previous projection + renewalDate; 
   ]);
   const expectedKeys = [
     'sourceApp', 'clientId', 'name', 'phone', 'serviceType', 'sessions',
-    'status', 'startDate', 'exitDate', 'renewalDate'
+    'status', 'startDate', 'exitDate', 'renewalDate',
+    'phoneIssue' // '' | 'missing' | 'invalid' — why phone is blank (2026-09-28)
   ];
   assert.deepEqual(Object.keys(rows[0]).sort(), expectedKeys.slice().sort());
   // No key smells of money: nextBillingDate itself is NOT projected — only its

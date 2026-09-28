@@ -256,6 +256,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `CHANGELOG-treatment-plans-dates.md`.
 
 ### Fixed
+- **Outpatient patients no longer vanish silently from the therapists app —
+  `getTreatmentPlans` emits a validated join phone + `phoneIssue`.** The
+  E-Zone Therapists roster is keyed by phone and drops rows with none. Both of
+  its base feeds projected
+  `_recoverPhone(phone) || _recoverPhone(treatmentContactPhone)` unvalidated,
+  so a client with no number disappeared with no explanation. A malformed,
+  non-empty `phone` also short-circuited the `||` and hid a valid contact
+  phone.
+  - **The new rule** is one documented rule (`public/phone-issue.js`),
+    mirrored in `Code.gs` (`_canonicalPhone` / `_crossAppPhone`) and
+    `public/debt-status.js`:
+    - candidates are `phone`, then `treatmentContactPhone` (never
+      `payerPhone`);
+    - each is normalized with `_recoverPhone` (separators stripped,
+      `+972` / `972` / `00972` → `0`, a Sheets-dropped leading zero restored);
+    - a candidate is accepted **only** when it is canonical, `/^0\d{9}$/`;
+    - otherwise `phone: ''` and `phoneIssue: 'missing' | 'invalid'`. The code
+      never guesses: nothing is truncated, padded or split.
+  - **`getDebtStatus`** emits the same phone (value only, no new key), so the
+    roster's two sources always agree on a client's key.
+  - **Contract:** the only change is the `phoneIssue` key on
+    `getTreatmentPlans`. No billing keys, and `CLIENTS_HEADERS` is untouched.
+  - **Patient cards** show an amber «⚠ חסר טלפון» / «⚠ טלפון לא תקין» chip,
+    under the same rule, so Vered can fix them. SW `v7 → v8`.
+  - **Phase 0** (live read-only audit): 13 of the 14 reported patients have
+    **no phone in any column**. This is a data-entry gap, not a format bug.
+  - **Order:** `phone` stays first. A contact-first order would re-key the
+    one live row that has a legacy contact phone to another person's number.
+  - **Tests:** 35 new, including a 1,521-pair parity sweep that runs the real
+    `Code.gs` (1,094 total). See `CHANGELOG-treatment-plans-phone-issue.md`.
 - **A re-marked session no longer rewrites therapist pay on a row already
   forwarded to payroll.** `SessionLog.forwardedToPayroll` stamps the `YYYY-MM`
   payroll cycle a session was handed to חשבת שכר in. Only that **stamp**

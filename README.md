@@ -186,8 +186,9 @@ checkout ever drifts back.
 - `GET /api/sheets?action=getDebtStatus&secret=<DEBT_STATUS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, debtStatus, amountOwed }] }` for the
   E-Zone Therapists intake gate. `phone` is the canonical patient phone (the
-  `phone` column, falling back to `treatmentContactPhone`, leading-zero
-  recovered) — non-blank for any client with a number. Every
+  first canonical `/^0\d{9}$/` value of the `phone` column, then
+  `treatmentContactPhone`, leading-zero recovered; `''` when neither is valid)
+  — the SAME value `getTreatmentPlans` emits for the client. Every
   client is returned with a tri-state `debtStatus` (`debt` / `clear` /
   `unknown`) — never-fail-open: a client with no payment rows is `unknown`, not
   silently "clear", so the consumer can flag it for manual resolution. Each
@@ -195,12 +196,18 @@ checkout ever drifts back.
   open (URL-obscurity). The Node proxy forwards `?secret=` automatically. See
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
-  `{ ok, clients:[{ clientId, name, phone, serviceType, sessions, status,
-  startDate, exitDate, renewalDate }] }`
+  `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
+  status, startDate, exitDate, renewalDate }] }`
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the
-  canonical patient phone (the `phone` column, falling back to
-  `treatmentContactPhone`, leading-zero recovered) — the cross-app join key, so
-  it is non-blank for any client with a number; `sessions` is `sessionsPerWeek`;
+  canonical patient phone and the cross-app join key: the first value of the
+  `phone` column, then `treatmentContactPhone`, that normalizes (separators
+  stripped, `+972`/`972` → `0`, lost leading zero restored) to exactly
+  `/^0\d{9}$/`. `payerPhone` is never used, and a value is never guessed. When
+  neither column is valid, `phone` is `''` and `phoneIssue` says why
+  (`'missing'` / `'invalid'`; `''` when phone is set), so the consumer can
+  explain the patient instead of dropping them. Patient cards show the same
+  verdict as an amber «חסר טלפון» / «טלפון לא תקין» chip. See
+  `CHANGELOG-treatment-plans-phone-issue.md`. `sessions` is `sessionsPerWeek`;
   `renewalDate` is the package-end/renewal date (the SAME value the גבייה הבאה
   chip shows: stored `nextBillingDate`, else anchor + 1 month; `'yyyy-MM-dd'`
   or `''`), date only. A minimal,

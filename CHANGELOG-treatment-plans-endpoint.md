@@ -48,6 +48,14 @@ Every client with an `id` is returned; rows without an id are skipped.
 > prefers `phone` and falls back to `treatmentContactPhone`. **Requires an Apps
 > Script redeploy.**
 
+> **Validated join phone + `phoneIssue` (2026-09-28):** only a canonical
+> `/^0\d{9}$/` value is emitted now. An invalid `phone` falls through to a
+> valid `treatmentContactPhone` instead of hiding it. A client with neither
+> gets `phone: ''` plus `phoneIssue: 'missing' | 'invalid'` (`''` otherwise),
+> so the therapists app can explain the patient instead of silently dropping
+> them. `getDebtStatus` emits the same phone. See
+> `CHANGELOG-treatment-plans-phone-issue.md`.
+
 ## Auth
 
 Same model as `getWinbackSource`/`getDebtStatus`:
