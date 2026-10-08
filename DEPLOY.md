@@ -7,6 +7,10 @@ Two independent deploy paths:
 | **Node/Express + frontend** | Railway | Auto-deploys the connected branch (`claude/youthful-volta-laarnk`, per `EZONE-ECOSYSTEM-STATUS.md`). |
 | **Apps Script backend** (`apps-script/**`) | GitHub Actions → clasp | Push to `claude/youthful-volta-laarnk` touching `apps-script/**` (below). |
 
+**Verify a Railway deploy:** `GET https://ezone-outpatient.up.railway.app/api/version`
+→ `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
+updates, Railway skipped the deploy.
+
 ## Automatic Apps Script deployment (clasp in CI)
 
 **Workflow:** [`.github/workflows/deploy-apps-script.yml`](.github/workflows/deploy-apps-script.yml)

@@ -30,6 +30,8 @@ const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // 604800 seconds (7 days), matches th
 const DASHBOARD_SHEETS_URL = process.env.DASHBOARD_SHEETS_URL || '';
 const OCCUPANCY_SECRET = process.env.OCCUPANCY_SECRET || '';
 const BUILD = String(Date.now());
+// Fixed once per process: GET /api/version reports the commit + this start time.
+const VERSION_INFO = require('./lib/version').buildVersion(process.env, Number(BUILD));
 
 if (!APP_PIN) {
   console.warn('APP_PIN env var is not set — /api/verify-pin will reject every attempt.');
@@ -499,6 +501,13 @@ app.post('/api/debug/cache/clear', (req, res) => {
 });
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+// Public deploy-verification endpoint: { commit, builtAt } only, never cached,
+// so a poll after a merge sees the live build rather than a stale copy.
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(VERSION_INFO);
+});
 
 app.get('*', (req, res) => sendIndex(res));
 

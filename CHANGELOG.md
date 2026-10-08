@@ -6,6 +6,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`GET /api/version`** — public, `no-store`, returns only `{ commit, builtAt }`
+  (`commit` = hex-validated `RAILWAY_GIT_COMMIT_SHA`, else `null`) so a merge
+  can be verified live. Plus **`CLAUDE.md`** with repo facts and autonomous-work
+  rules, and an `npm audit fix` clearing the critical `proxy-addr` advisory.
+  See `CHANGELOG-api-version-claude-md.md`.
 - **תקופת כיסוי — the coverage period a payment actually bought**
   (`coverageStart` / `coverageEnd`, appended to `Payments`) — ported from
   E-Zone-Dashboard PR #135. A payment's period was **inferred** (`dueDate` +
