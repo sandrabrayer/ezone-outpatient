@@ -289,6 +289,12 @@ checkout ever drifts back.
   delete-propagation sender. See `CHANGELOG-deactivate-client.md`. **Requires an
   Apps Script redeploy.**
 
+### Deploy verification (public)
+
+- `GET /api/version` → `{ commit, builtAt }` — the deployed git SHA
+  (`RAILWAY_GIT_COMMIT_SHA`, `null` if unset/malformed) and process start
+  time. `Cache-Control: no-store`; exposes nothing else.
+
 ### Debug endpoints (session-gated)
 
 - `GET /api/debug/env` – confirms `SHEETS_URL` is configured (no secret leak).

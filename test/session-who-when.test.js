@@ -705,7 +705,7 @@ test('E: source-scan — every Clients write path stamps (no writer left behind)
 
 /* ================= F. cross-app endpoints unchanged ================= */
 
-test('F: no Railway route serves another app — the only open routes are /healthz, /api/verify-pin, /api/logout and static files', () => {
+test('F: no Railway route serves another app — the only open routes are /healthz, /api/verify-pin, /api/logout, /api/version and static files', () => {
   // every /api route except verify-pin + logout is mounted behind requireSession
   const routes = [];
   server._router.stack.forEach((m) => {
@@ -713,7 +713,9 @@ test('F: no Railway route serves another app — the only open routes are /healt
   });
   const api = routes.filter((r) => r.path.indexOf('/api/') === 0);
   const open = api.filter((r) => !r.gated).map((r) => r.path).sort();
-  assert.deepEqual(open, ['/api/debug/cache', '/api/debug/cache/clear', '/api/debug/env', '/api/debug/last-load', '/api/debug/routes', '/api/logout', '/api/verify-pin'].sort());
+  assert.deepEqual(open, ['/api/debug/cache', '/api/debug/cache/clear', '/api/debug/env', '/api/debug/last-load', '/api/debug/routes', '/api/logout', '/api/verify-pin',
+    // public deploy check: returns only { commit, builtAt } (lib/version.js, test/api-version.test.js)
+    '/api/version'].sort());
   // the debug routes are gated by the router-level app.use('/api/debug', requireSession)
   assert.match(SERVER_SRC, /app\.use\('\/api\/debug', requireSession\)/);
   for (const p of ['/api/sheets', '/api/continuation-roster', '/api/me']) {
