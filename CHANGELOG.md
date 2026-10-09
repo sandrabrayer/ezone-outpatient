@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Lead save preservation
+- Preserve leads added by another user or app when an older tab saves a full
+  snapshot. Keep intentional removal and conversion, prevent stale resurrection,
+  and retain existing per-row conflict checks and server-owned stamps. No UI,
+  financial calculation, schema or dependency change. Adds 17 tests executing
+  the real Apps Script handlers. See `CHANGELOG-concurrent-leads.md`.
+- Record Sandra's current approval and cross-agent handoff requirements in
+  `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
+
 ### Added
 - **`GET /api/version`** — public, `no-store`, returns only `{ commit, builtAt }`
   (`commit` = hex-validated `RAILWAY_GIT_COMMIT_SHA`, else `null`) so a merge

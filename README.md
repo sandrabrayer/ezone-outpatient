@@ -49,6 +49,18 @@ secret-looking is added to it.
 
 ## Stack
 
+### Concurrent lead saves
+
+`saveAll` preserves current lead rows missing from an older browser snapshot.
+Intentional removal still uses `removeLead`; conversion still uses the accepted
+client's `fromLead`. A stale snapshot cannot reintroduce an archived, absent lead
+or a lead already linked to a saved client. Reconciliation sets `staleSave` so
+the existing UI reloads server data. Normal edits do not read the removal archive.
+See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
+release precautions and remaining limitations of full-sheet writes.
+
+### Components
+
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).
 - Frontend: plain HTML/JS/CSS. No build step.
 - Database: Google Sheets via Apps Script Web App (`doGet` / `doPost`).

@@ -1327,32 +1327,13 @@ function _saveAll(payload) {
       // Payload stamps are never trusted in either case.
       if (_reconcileStamps(_clientDiffCols, clients[i], existingRow, user).length) stampedClients++;
     }
-    // Leads: same who/when reconciliation by id (Leads rows already carry ids).
-    var existingLeadsById = {};
-    var existingLeads = _readAll(leadsSh, LEADS_HEADERS);
-    for (var el = 0; el < existingLeads.length; el++) {
-      var lid = (existingLeads[el] && existingLeads[el].id != null) ? String(existingLeads[el].id) : '';
-      if (lid) existingLeadsById[lid] = existingLeads[el];
-    }
-    var stampedLeads = 0;
-    for (var li = 0; li < leads.length; li++) {
-      var lidIn = (leads[li] && leads[li].id != null) ? String(leads[li].id) : '';
-      var existingLead = lidIn && _hasOwn(existingLeadsById, lidIn) ? existingLeadsById[lidIn] : null;
-      // Same conflict rule as Clients (by id, _leadDiffCols).
-      var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
-      if (leadConflictCols) {
-        conflicts.push(_conflictEntry('lead', leads[li], existingLead, leadConflictCols, user));
-        leads[li] = existingLead;
-        continue;
-      }
-      if (_reconcileStamps(_leadDiffCols, leads[li], existingLead, user).length) stampedLeads++;
-    }
     // Staleness signal (stale-save prevention): the frontend echoes back the
     // dataVersion it loaded; an echo older than current means another device
     // wrote Clients since this tab loaded. The save still proceeds — merge-
     // don't-drop below makes it safe — but the response carries
     // staleSave:true so the tab can toast + reload. FAIL-OPEN: a payload with
-    // no echoed version (old clients) is never flagged.
+    // no echoed version (old clients) is not flagged by the version check.
+    // The lead reconciliation below can independently detect a stale snapshot.
     var curVersion = _readDataVersion();
     var echoedRaw = payload ? payload.dataVersion : null;
     var echoed = (echoedRaw === undefined || echoedRaw === null || echoedRaw === '') ? NaN : Number(echoedRaw);
@@ -1411,6 +1392,79 @@ function _saveAll(payload) {
       // a preserved row is never re-stamped).
       for (var p = 0; p < preservedRows.length; p++) clients.push(preservedRows[p]);
     }
+    // Leads also arrive as a full browser snapshot. Absence alone is NOT a
+    // deletion: another tab or createLead may have added the row meanwhile.
+    // Resolve conversions against the FINAL clients (after conflict refusal
+    // and preservation), not an unaccepted client edit from the payload.
+    var convertedLeadIds = Object.create(null);
+    for (var cl = 0; cl < clients.length; cl++) {
+      var fromLead = clients[cl].fromLead == null ? '' : String(clients[cl].fromLead);
+      if (fromLead) convertedLeadIds[fromLead] = true;
+    }
+    var existingLeadsById = Object.create(null);
+    var existingLeads = _readAll(leadsSh, LEADS_HEADERS);
+    for (var el = 0; el < existingLeads.length; el++) {
+      var lid = (existingLeads[el] && existingLeads[el].id != null) ? String(existingLeads[el].id) : '';
+      if (lid) existingLeadsById[lid] = existingLeads[el];
+    }
+    // removeLead already archives intentional removals. Read only its id
+    // column; do not create/mutate the archive or load its other fields.
+    // A restored, currently live row takes precedence over an old archive id.
+    var removedLeadIds = Object.create(null);
+    var needsRemovalCheck = false;
+    for (var nl = 0; nl < leads.length; nl++) {
+      var candidateId = (leads[nl] && leads[nl].id != null) ? String(leads[nl].id) : '';
+      if (candidateId && !existingLeadsById[candidateId] && !convertedLeadIds[candidateId]) {
+        needsRemovalCheck = true;
+        break;
+      }
+    }
+    // Ordinary edits of live leads need no additional archive sheet read.
+    var removedLeadsSh = needsRemovalCheck ? _ss().getSheetByName('לידים שהוסרו') : null;
+    var removedLeadCount = removedLeadsSh ? removedLeadsSh.getLastRow() - 1 : 0;
+    if (removedLeadCount > 0) {
+      var removedLeadValues = removedLeadsSh.getRange(2, REMOVED_LEADS_HEADERS.indexOf('id') + 1, removedLeadCount, 1).getValues();
+      for (var rl = 0; rl < removedLeadValues.length; rl++) {
+        var removedLeadId = removedLeadValues[rl][0] == null ? '' : String(removedLeadValues[rl][0]);
+        if (removedLeadId) removedLeadIds[removedLeadId] = true;
+      }
+    }
+    var incomingLeadIds = Object.create(null);
+    var acceptedLeads = [];
+    for (var il = 0; il < leads.length; il++) {
+      var incomingLeadId = (leads[il] && leads[il].id != null) ? String(leads[il].id) : '';
+      if (incomingLeadId && (convertedLeadIds[incomingLeadId] ||
+          (removedLeadIds[incomingLeadId] && !existingLeadsById[incomingLeadId]))) {
+        staleSave = true; // refresh the tab so a removed/converted lead disappears
+        continue;
+      }
+      if (incomingLeadId) incomingLeadIds[incomingLeadId] = true;
+      acceptedLeads.push(leads[il]);
+    }
+    var preservedLeads = 0;
+    for (var pl = 0; pl < existingLeads.length; pl++) {
+      var preservedLeadId = (existingLeads[pl] && existingLeads[pl].id != null) ? String(existingLeads[pl].id) : '';
+      if (preservedLeadId && !incomingLeadIds[preservedLeadId] && !convertedLeadIds[preservedLeadId]) {
+        acceptedLeads.push(existingLeads[pl]);
+        preservedLeads++;
+      }
+    }
+    leads = acceptedLeads;
+    if (preservedLeads) staleSave = true;
+    // Same who/when and per-row conflict rules as before. Preserved rows are
+    // unchanged echoes of their on-sheet values, so their stamps stay intact.
+    var stampedLeads = 0;
+    for (var li = 0; li < leads.length; li++) {
+      var lidIn = (leads[li] && leads[li].id != null) ? String(leads[li].id) : '';
+      var existingLead = lidIn && _hasOwn(existingLeadsById, lidIn) ? existingLeadsById[lidIn] : null;
+      var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
+      if (leadConflictCols) {
+        conflicts.push(_conflictEntry('lead', leads[li], existingLead, leadConflictCols, user));
+        leads[li] = existingLead;
+        continue;
+      }
+      if (_reconcileStamps(_leadDiffCols, leads[li], existingLead, user).length) stampedLeads++;
+    }
     _writeAll(leadsSh, LEADS_HEADERS, leads);
     _writeAll(clientsSh, CLIENTS_HEADERS, clients);
     var newVersion = _bumpDataVersion();
@@ -1420,6 +1474,7 @@ function _saveAll(payload) {
       savedClients: clients.length,
       tombstoned: tombstoned,
       preserved: preservedRows.length,
+      preservedLeads: preservedLeads,
       staleSave: staleSave,
       dataVersion: newVersion,
       // who/when: rows whose stamps were rewritten by this save (changed or

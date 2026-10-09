@@ -34,8 +34,12 @@ generic defaults; ask Sandra only when a rule below says to.
    - Never force-push the deployed branch.
    - Check the PR's state before every push; **never push to a merged PR's
      branch** — restart from the deployed branch instead.
-4. **Merging.** You are authorized to merge your own PRs when **all CI checks
-   are green**. Never merge on red or pending. After merging:
+4. **Merging (Sandra's current project instruction, 2026-10-09).** Prepare a
+   reviewable draft PR and obtain Sandra's explicit approval before merging or
+   deploying. **All CI checks must also be green**; green CI alone does not
+   authorize a release. Keep the running apps available while changes are
+   developed separately. See `AGENTS.md` for the shared project agreement.
+   After an approved merge:
    1. Apps Script deploy is **automatic on merge** here: if `apps-script/**`
       or `Code.gs` changed, find the "Deploy Apps Script" run for the merge
       commit and wait for it to be green. (Only if it did not trigger, run it
