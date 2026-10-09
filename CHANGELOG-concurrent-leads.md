@@ -32,11 +32,24 @@ refused client edits, server stamps, GET/POST compatibility, lock refusal and
 archive-read failure. The initial 15 regressions produced 10 failures before
 the fix; the completed suite contains 17 cases.
 
-Local full-suite verification (`node --test --test-concurrency=1`, Node 24.19.0)
-completed with 1,115 tests: 1,109 passed, 6 skipped, 0 failed. All 17 new cases
-passed. The default parallel run exited zero but did not emit a completion
-summary locally, so it is not counted as the full-suite evidence; CI runs the
-repo's normal `npm test` on Node 22. A moderate
+`test/lead-save-browser.test.js` adds three end-to-end browser scenarios: two
+signed-in users creating/editing, removing, and converting leads from different
+snapshots. The actual UI, `server.js` session/proxy/cache and `Code.gs` run
+together; Google runtime services alone use the shared in-memory fixture in
+`test-support/apps-script-sandbox.js`. Browser traffic is restricted to the
+local test server. The test-only browser version is Playwright 1.51.1 / Chromium
+134; production dependencies are unchanged.
+
+The separate `lead-save-browser` CI job runs these scenarios on Node 22 with
+`EZONE_REQUIRE_BROWSER_TESTS=1`: missing tooling fails the job rather than
+silently skipping it. The original `npm test` job is retained. Earlier local
+verification without a browser passed 1,109 of 1,115 cases and skipped six
+existing browser cases. Final browser-enabled verification on Node 24.19.0
+completed with **1,118 passed, 0 failed, 0 skipped** (including all nine browser
+cases). The local default parallel run exited zero without a completion
+summary, so full-suite local verification uses `--test-concurrency=1`.
+
+A moderate
 `qs` advisory was found in the existing dependency tree; no dependency update
 is bundled with this save-path change. The audit reports 0 high / 0 critical.
 Track the moderate finding as a separate maintenance task.
@@ -46,7 +59,10 @@ Track the moderate finding as a separate maintenance task.
 1. Keep this PR a draft until Sandra approves the release and CI is green.
 2. Before production, repeat the two-tab create/edit, remove and conversion
    scenarios in an isolated Apps Script project using dummy Sheets. The local
-   tests are not a live staging verification.
+   browser tests verify the application integration but do not verify Google's
+   live runtime, OAuth permissions, quotas or real-Sheets writes. No separate
+   Google staging project is documented in this repository, and none was
+   created or accessed by this change.
 3. Confirm a restorable Sheets backup and record the current Apps Script
    deployment version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.

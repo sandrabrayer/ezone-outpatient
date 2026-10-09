@@ -17,7 +17,7 @@ generic defaults; ask Sandra only when a rule below says to.
 
 ## Rules
 
-1. **Language.** Talk to Sandra in English — concise, action-first. Hebrew UI
+1. **Language.** Talk to Sandra in Hebrew — concise, action-first. Hebrew UI
    text is RTL. Code, comments, commit messages: English.
 2. **Every change** ships with:
    - tests added/updated, and the **full suite green** (`npm test`);

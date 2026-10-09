@@ -59,6 +59,13 @@ the existing UI reloads server data. Normal edits do not read the removal archiv
 See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
 release precautions and remaining limitations of full-sheet writes.
 
+`test/lead-save-browser.test.js` exercises the real UI, session/proxy/cache
+server and Apps Script handlers with dummy Sheets. The `lead-save-browser`
+CI job installs test-only browser tooling outside the application dependency
+tree and sets `EZONE_REQUIRE_BROWSER_TESTS=1`; a missing browser fails that
+job. Browser network access is restricted to the local test server. No Google
+credentials or live data are used, and this is not a real-Google staging run.
+
 ### Components
 
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).

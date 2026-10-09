@@ -38,3 +38,32 @@ jobs:
 
       - name: Run test suite
         run: npm test
+
+  lead-save-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install application dependencies
+        run: npm ci
+
+      # Browser tooling is test-only, separately pinned and outside the app's
+      # dependency tree. Tests allow browser traffic only to their local server.
+      - name: Install isolated browser tooling
+        run: |
+          npm install --prefix /tmp/ezone-browser-tools --no-save --package-lock=false playwright@1.51.1
+          node /tmp/ezone-browser-tools/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+
+      - name: Run real UI and server lead-save scenarios
+        env:
+          NODE_PATH: /tmp/ezone-browser-tools/node_modules
+          EZONE_REQUIRE_BROWSER_TESTS: '1'
+        run: node --test --test-concurrency=1 test/lead-save-browser.test.js

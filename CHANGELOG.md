@@ -11,6 +11,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   and retain existing per-row conflict checks and server-owned stamps. No UI,
   financial calculation, schema or dependency change. Adds 17 tests executing
   the real Apps Script handlers. See `CHANGELOG-concurrent-leads.md`.
+- Add three browser scenarios through the real UI, signed-session proxy and
+  Apps Script handlers against in-memory Sheets. Reuse one Google-runtime
+  fixture across unit/browser coverage. A separate `lead-save-browser` CI job
+  requires a browser and fails instead of skipping these scenarios.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
   Budget guidance now permits justified spending without a numeric cap,

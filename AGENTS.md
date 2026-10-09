@@ -11,6 +11,10 @@ Claude work in this repository, alongside the repo facts in `CLAUDE.md`.
 - Use one implementation owner per task/branch. Before work, check current open
   PRs and the deployed branch. Use another tool where its existing context or
   capabilities help; do not let two agents edit the same task concurrently.
+- Progress through authorized work without pausing for routine questions.
+  Sandra wants to be called only for indispensable access, a business decision
+  or the separate production approval. Report actual progress; do not imply
+  work continues between chat turns unless a background job is really running.
 - Sandra authorizes necessary project spending without a fixed numeric cap,
   with fair, professional cost management (2026-10-09). Choose proportionate
   services/models and reuse existing paid capabilities when suitable. Track
