@@ -1,0 +1,179 @@
+{
+  "runId": "2026-10-09T12:55:53.805Z",
+  "endpoint": "https://script.google.com/macros/s/AKfycbzjnrVJiZKIWbtt7kDIzz99qYZzs07ShRASyJLi_EMHysNl_tpo-0Yh0WQNJr5bUt2gTw/exec",
+  "stagingSpreadsheetId": "1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0",
+  "sourceCodeSHA256": "d1f030c3aec035a2fed69fa2f577a41ab1ba8edee54fcebacdbfda55b7971f56",
+  "executionMode": "Real local public UI, server.js signed sessions/proxy/cache, deployed Google HTTP and native Sheets. Two independent browser contexts. Sequential stale snapshots, not a load test.",
+  "results": [
+    {
+      "scenario": "http_stale_create_edit",
+      "status": "PASS",
+      "durationMs": 73004,
+      "preservedLeadId": "id_mv0yzigz_dxqm2p",
+      "freshLeadUnchanged": true,
+      "sessionIdentityVerified": true
+    },
+    {
+      "scenario": "http_removal_stale_save",
+      "status": "PASS",
+      "durationMs": 56810,
+      "removedLeadId": "id_mv0yzigz_dxqm2p",
+      "staleResurrectionBlocked": true
+    },
+    {
+      "scenario": "http_conversion_and_stale_resurrection",
+      "status": "PASS",
+      "durationMs": 78483,
+      "convertedClientId": "id_mv0z2nly_fzv6qq",
+      "remainingLeadId": "id_mv0z2amu_g2rsj7",
+      "clientAndBillingFieldsUnchanged": true
+    }
+  ],
+  "pageErrors": [],
+  "writes": [
+    {
+      "action": "saveAll",
+      "user": "יעל",
+      "leadIds": [
+        "fixture-a",
+        "id_mv0yzigz_dxqm2p"
+      ],
+      "ok": true,
+      "preservedLeads": 0,
+      "staleSave": false,
+      "durationMs": 14357
+    },
+    {
+      "action": "saveAll",
+      "user": "ורד",
+      "leadIds": [
+        "fixture-a"
+      ],
+      "ok": true,
+      "preservedLeads": 1,
+      "staleSave": true,
+      "durationMs": 16140
+    },
+    {
+      "action": "removeLead",
+      "user": "יעל",
+      "leadIds": [],
+      "ok": true,
+      "durationMs": 14577
+    },
+    {
+      "action": "saveAll",
+      "user": "ורד",
+      "leadIds": [
+        "fixture-a",
+        "id_mv0yzigz_dxqm2p"
+      ],
+      "ok": true,
+      "preservedLeads": 0,
+      "staleSave": true,
+      "durationMs": 14596
+    },
+    {
+      "action": "saveAll",
+      "user": "יעל",
+      "leadIds": [
+        "fixture-a",
+        "id_mv0z2amu_g2rsj7"
+      ],
+      "ok": true,
+      "preservedLeads": 0,
+      "staleSave": true,
+      "durationMs": 16690
+    },
+    {
+      "action": "saveAll",
+      "user": "ורד",
+      "leadIds": [],
+      "ok": true,
+      "preservedLeads": 1,
+      "staleSave": true,
+      "durationMs": 13282
+    },
+    {
+      "action": "saveAll",
+      "user": "יעל",
+      "leadIds": [
+        "fixture-a",
+        "id_mv0z2amu_g2rsj7"
+      ],
+      "ok": true,
+      "preservedLeads": 0,
+      "staleSave": true,
+      "durationMs": 18611
+    }
+  ],
+  "node": "v24.19.0",
+  "playwright": "1.62.1",
+  "chromium": "134.0.6998.35",
+  "sourceCommit": "e8eba02ba8794eae9c3b0cb1c5e1387bcd038550",
+  "approval": "Sandra explicitly approved temporary staging-only anonymous web-app access executing as her account in this conversation on 2026-10-09.",
+  "deployment": {
+    "scriptId": "1IMz_TagTQBCsoK84TNHL5kBnBslH5W7jaZ20RFKA4dqkqfrbDHN42oE_",
+    "id": "AKfycbzjnrVJiZKIWbtt7kDIzz99qYZzs07ShRASyJLi_EMHysNl_tpo-0Yh0WQNJr5bUt2gTw",
+    "version": 1,
+    "oauthScopes": [
+      "https://www.googleapis.com/auth/spreadsheets.currentonly"
+    ],
+    "archived": true,
+    "archiveUIConfirmation": "Deployment successfully archived.",
+    "postArchiveGET": {
+      "applicationJSONReturned": false,
+      "bodyTitle": "הדף לא נמצא",
+      "bodyMessage": "מצטערים, לא ניתן לפתוח את הקובץ כרגע."
+    }
+  },
+  "independentNativeReadback": {
+    "liveLeads": 1,
+    "clients": 1,
+    "archivedLeads": 2,
+    "removedId": "id_mv0yzigz_dxqm2p",
+    "archivedOnce": true,
+    "remover": "יעל",
+    "sourceLeadAbsent": true,
+    "convertedFromLead": "fixture-a",
+    "pricePerSession": 1200,
+    "leadingZeroPhones": {
+      "lead": true,
+      "client": true,
+      "archive": false
+    },
+    "acceptanceRowsMatch": true,
+    "archivePhone": {
+      "nativeCellType": "number",
+      "nativeValue": 500000002,
+      "sourceRecoverPhoneResult": "0500000002",
+      "note": "Existing archive append behavior. Actual _recoverPhone source verified locally; no new archive restore flow tested."
+    }
+  },
+  "validation": {
+    "fullSuite": {
+      "tests": 1119,
+      "passed": 1119,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 23272.547668,
+      "node": "v24.19.0",
+      "playwright": "1.51.1",
+      "testConcurrency": 1,
+      "requireBrowserTests": true
+    },
+    "audit": {
+      "high": 0,
+      "critical": 0,
+      "moderate": 1,
+      "existingModeratePackage": "qs"
+    }
+  },
+  "productionModified": false,
+  "limits": [
+    "Local UI and server.js with real Google HTTP; not hosted Railway staging.",
+    "Sequential stale snapshots, not overlapping write or load testing.",
+    "Synthetic data only. Daily backup gap and production binding/backup/rollback version remain release gates.",
+    "No scheduled triggers, cross-app credentials, new paid service or extra OAuth scopes."
+  ]
+}

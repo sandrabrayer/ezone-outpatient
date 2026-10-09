@@ -118,8 +118,9 @@ script ID and refuses fixture resets if non-fixture records are present.
 Only `spreadsheets.currentonly` is requested in the staging manifest, with
 timezone `Asia/Jerusalem`. Google's consent screen confirmed access to the
 spreadsheet where the script is installed. No Drive, email, external-request
-or trigger-management scopes were granted. No web-app deployment, scheduled
-trigger, cross-app credential or paid service was created.
+or trigger-management scopes were granted. No scheduled trigger, cross-app
+credential or paid service was created. The later, explicitly approved temporary
+web-app deployment is documented below and has been archived.
 
 **Native run at `2026-10-09T12:18:16.602Z`: 4 passed, 0 failed.** The Google
 execution log showed `Execution completed`; `_Acceptance!A1:G5` was independently
@@ -142,11 +143,65 @@ Reproducible staging-only files (excluded by production `.clasp.json` rootDir):
 `test-support/google-staging-appsscript.json`, and
 `test-support/google-staging-results-20261009.json`.
 
-This verifies the Google runtime and the current-document OAuth scope through
-editor execution. It does **not** exercise HTTP dispatch, deployed web-app
-permissions, overlapping requests, production quotas, or the browser/proxy
-against Google in one combined run. The connected staging application remains
-the next acceptance gate; do not label it complete from these results.
+This editor run verifies the Google runtime and the current-document OAuth
+scope. The separate combined HTTP acceptance below now covers deployed
+dispatch and the browser/proxy against Google. Neither run tests overlapping
+requests, production quotas or load capacity.
+
+### Combined browser/proxy/Google HTTP acceptance
+
+Sandra explicitly approved temporary staging-only anonymous web-app access,
+executing as her account. Version 1 was deployed from the isolated project
+above with the unchanged `spreadsheets.currentonly` scope. No production
+configuration, integration credentials or scheduled triggers were introduced.
+
+**Run at `2026-10-09T12:55:53.805Z`: 3 passed, 0 failed; no browser page errors.**
+The actual local UI and unchanged `server.js` signed-session proxy/cache used
+the deployed Google HTTP endpoint and native Sheets, with two independent
+browser contexts. Google services were not mocked in this run.
+
+| Scenario | Result | Complete scenario duration |
+| --- | --- | --- |
+| Another user creates a lead, then an older tab edits | PASS | 73,004 ms |
+| Intentional removal followed by stale save | PASS | 56,810 ms |
+| Conversion with an unseen lead, then stale resurrection attempt | PASS | 78,483 ms |
+
+The first scenario verified the preserved lead's exact fields and stamps,
+`preservedLeads: 1`, and the signed user's identity. The last verified the
+converted client's fields, price (1200) and next billing date (2026-11-09).
+Independent native-sheet readback confirmed one live lead, one client and the
+removed lead archived exactly once under the removing user. `_Acceptance!A6:G8`
+was read back and matched the three result rows exactly.
+
+The existing removal handler stores the archived phone as a numeric cell in
+this fixture (`500000002`). The existing `_recoverPhone` returns `0500000002`;
+that behavior was checked using the actual source. Live lead/client phones
+remain text with the leading zero. This run does not claim exact raw cell-type
+preservation in the removal archive or a new automated lead-restore flow.
+
+The seven captured UI writes took 13,282–18,611 ms end to end in this test
+environment. These are sequential stale-snapshot checks, not overlapping
+writes or a production performance benchmark. The app was served locally;
+no Railway staging service or production application was used.
+
+After acceptance, Google confirmed **Deployment successfully archived**.
+A subsequent anonymous GET returned Google's unavailable-page HTML instead
+of application JSON. No active test endpoint is left from this deployment.
+The dummy workbook and owner-only test reports remain available.
+
+Evidence and the opt-in runner are `test-support/google-http-results-20261009.json`
+and `test-support/google-http-browser-acceptance.cjs`, outside the production
+clasp root and automatic CI tests. The runner pins the approved endpoint and
+refuses an unexpected fixture baseline; it is historical evidence, not a
+command to reactivate or reset this completed run. UI-generated IDs now exist
+in the fixture, so the editor runner's reset guard will intentionally refuse it.
+Any future rerun needs a separately prepared, authorized dummy baseline and
+approved endpoint; do not weaken either guard.
+
+Full browser-enabled serial verification was rerun with the new runner present:
+**1,119 passed, 0 failed, 0 skipped**. Production dependencies and `Code.gs`
+are unchanged from the earlier accepted source hash. Audit remains
+0 high / 0 critical with one existing moderate `qs` finding.
 
 ## Release and rollback
 
@@ -177,31 +232,21 @@ Before release take and verify a fresh whole-workbook backup after pausing
 writes, retaining the existing workbook binding. Never replace the production
 spreadsheet ID with a copy as an implicit restore.
 
-Combined UI/proxy/Google HTTP acceptance remains BLOCKED. The existing
-isolated staging project's New deployment form was prepared with Web app,
-execute as Sandra and access Anyone. Automatic approval review rejected
-the Deploy action because it creates persistent anonymous access executing
-as the account owner without specific user approval. No deployment was
-created; no endpoint exists. Do not retry through another API or silently
-broaden OAuth scopes. Sandra must explicitly authorize this staging-only
-access before retrying. The current manifest still grants only
-`spreadsheets.currentonly`; cross-app credentials and triggers are absent.
-If approved, verify the effective scope and actual HTTP behavior, use only
-synthetic data, and archive the test deployment when acceptance is finished.
+The initial Deploy attempt was blocked by automatic approval review because
+the temporary anonymous access lacked specific user approval. Sandra then
+explicitly approved that staging-only access. The same deployment workflow
+was completed, all three HTTP scenarios passed, and the endpoint was archived
+as documented above. No alternate method or broader OAuth scope was used.
 
 ### Production gates
 
 1. Keep this PR a draft until Sandra approves the release and CI is green.
-2. Complete the combined two-browser-session create/edit, removal and conversion
-   scenarios through the real UI/proxy and an isolated Google HTTP endpoint.
-   Local browser integration and native Google handler execution have passed
-   separately; the combined path remains unverified. Use the pinned dummy
-   workbook and bound project above. Do not reuse production `.clasp.json`,
-   script/deployment IDs, credentials or Railway settings. Keep cross-app
-   integrations disabled. Do not install scheduled triggers or run Drive-wide
-   snapshot/cleanup helpers. Reset only fixture rows in the dummy workbook.
-   Record the tested source hash and results before requesting production approval.
-3. Confirm a restorable Sheets backup and record the current Apps Script
+2. Combined two-session create/edit, removal and conversion acceptance is
+   complete on synthetic staging data. Preserve the recorded source hash and
+   results. This is not a load test or authorization to connect to production.
+3. Verify the production workbook binding, complete the daily backup coverage
+   for Leads and its archive, verify a fresh restorable whole-workbook backup
+   after pausing writes, and record the current Apps Script
    deployment version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.
 4. Verify the deployment run and the agreed smoke checks. If rollback is
@@ -219,8 +264,9 @@ unchanged. Do not infer production load capacity from the local or native
 sequential smoke tests.
 
 Current task owner: Codex. Coordinate before Claude picks up this branch.
-Next milestone: combined browser/proxy/Google acceptance, confirmed lead backup
-coverage and a restore check, then Sandra's production decision.
+Next milestone: complete and verify daily lead/archive backup coverage, confirm
+the production binding, backup and rollback version, then Sandra's production
+decision. Combined HTTP acceptance and the manual dummy restore drill passed.
 Sandra has authorized necessary spending without a fixed cap, subject to
 professional cost management; see `AGENTS.md`. The actual cost baseline and
 billing access remain unverified. No new paid service was provisioned for this

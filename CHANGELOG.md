@@ -22,9 +22,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   Script runtime, using a separate bound project with current-document-only
   access. Keep the runner and evidence outside the production clasp root.
   A native backup/restore drill now also passes on synthetic records across
-  Leads, Clients and both archives, with exact typed-cell readback. Combined
-  browser/proxy/Google HTTP acceptance and a fresh production backup remain
-  release gates; the public staging deployment awaits explicit approval.
+  Leads, Clients and both archives, with exact typed-cell readback. After
+  Sandra's specific approval, all three combined browser/proxy/Google HTTP
+  scenarios passed on dummy data. The temporary endpoint was then archived
+  and stopped returning application data. Full serial suite: 1,119 passed,
+  0 failed, 0 skipped. Daily lead/archive backup coverage, a fresh verified
+  production backup and separate production approval remain release gates.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
   Budget guidance now permits justified spending without a numeric cap,
