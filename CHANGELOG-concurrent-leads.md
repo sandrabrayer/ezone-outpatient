@@ -247,9 +247,13 @@ as documented above. No alternate method or broader OAuth scope was used.
 3. The production binding and active web-app version 92 have now been recorded.
    Daily four-dataset backup code and six native helper/restore scenarios are
    ready on this draft, with 1,134 local tests passing; see
-   `CHANGELOG-daily-backup-coverage.md`. Before release verify a fresh restorable
-   whole-workbook backup after an agreed pause in writes, and recheck the
-   active source/version. Merge only into the deployed branch after approval;
+   `CHANGELOG-daily-backup-coverage.md`. The authorized whole-workbook backup
+   passed on October 9 at 21:15 Israel: all 18 sheets and 3,649 entered cells
+   match, with owner-only access. See
+   `test-support/production-backup-results-20261009.json`. Normal writes have
+   resumed; recheck backup freshness and active source/version before release.
+   The latest browser recheck was signed out, so renew access before confirming
+   the live version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.
 4. Verify the deployment run and the agreed smoke checks. If rollback is
    needed, redeploy the recorded previous version to the SAME deployment ID
@@ -262,15 +266,16 @@ as documented above. No alternate method or broader OAuth scope was used.
 
 Full-sheet writes are still not transactional across Leads and Clients, and
 this patch does not make saves independent of Google availability. Row-level
-durable writes, production monitoring and verified backup/restore remain
+durable writes, production monitoring and a production restore exercise remain
 separate work. Existing legacy behavior for edits lacking version stamps is
 unchanged. Do not infer production load capacity from the local or native
 sequential smoke tests.
 
 Current task owner: Codex. Coordinate before Claude picks up this branch.
-Next milestone: verify the fresh full production backup during a coordinated
-pause in writes, recheck release candidate CI/baseline and obtain Sandra's
-production decision. Combined HTTP acceptance, the manual dummy restore drill
+Next milestone: obtain Sandra's separate production decision, then recheck
+backup freshness, release candidate CI/baseline and live version before merge.
+The full production workbook backup is verified; source writes may resume.
+Combined HTTP acceptance, the manual dummy restore drill
 and six native daily-backup scenarios passed. The production binding, version
 92 and one Head-based nightly trigger were inspected read-only. The extended
 daily backup is implemented but remains inactive until the approved release.

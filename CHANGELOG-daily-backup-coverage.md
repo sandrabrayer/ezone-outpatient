@@ -75,6 +75,31 @@ intentional; do not weaken them to reuse a completed fixture.
 Evidence: `test-support/google-backup-results-20261009.json` and native
 `_BackupAcceptance!A1:G7`.
 
+## Authorized full production backup — 2026-10-09
+
+Sandra approved a short write pause at 21:11:20 Israel for backup only.
+A native whole-workbook copy was created at `2026-10-09T18:12:58.585Z` in
+the same owner's My Drive. Backup ID:
+`1pzINQ3p73bKo7bISBFkxrVN6z-pt5esz3wIHUZCfyz8`.
+
+Independent readback completed at `2026-10-09T18:15:47.586Z`:
+
+- All 18 sheet properties, including grid dimensions, order, hidden state
+  and frozen headers, match the source.
+- Every allocated cell's entered value/type matches: 3,649 nonempty cells,
+  with no formula cells in this source at capture time.
+- Formatting, data validation, notes, text runs and chips match across each
+  populated bounding rectangle.
+- Both files have only the owner's permission. Source modified time stayed
+  `2026-10-09T12:26:46.957Z`; source data and settings were not changed.
+
+Actual cell data were compared in memory, not logged or committed. The
+count/digest report is `test-support/production-backup-results-20261009.json`.
+Sandra was told normal writes could resume after verification. The snapshot
+is a point-in-time copy; recheck freshness before release and make a newer
+verified copy if source data changed. No production restore was performed;
+restore methods were exercised on synthetic staging records.
+
 ## Limits and release
 
 These are values-only data backups, not whole-workbook copies of formulas,
@@ -99,10 +124,13 @@ Exactly one time-driven `nightlyIntegrityJob` trigger was visible on **Head**,
 with a displayed 0% error rate. This does not prove alert delivery or data
 coverage. No production source, data, deployment, trigger or setting changed.
 
-Before release: verify a fresh complete production workbook backup during an
-agreed pause in writes, confirm candidate CI and source baseline, and obtain
-Sandra's explicit production approval. Recheck the active version immediately
-before deployment because another owner may have released since this record.
+The later browser recheck reached Google's signed-out Apps Script landing
+page, so version 92 remains the earlier read-only observation, not a fresh
+confirmation. Before release: obtain Sandra's explicit production approval,
+confirm candidate CI/source baseline, renew browser access and recheck the
+active version, and confirm the verified whole-workbook backup is still
+current. Another owner may have released or data may have changed since
+these records. Recreate/verify the backup under a write pause when needed.
 After release, verify four current daily snapshots and the next scheduled run.
 Reuse the existing trigger; do not run the installer unnecessarily.
 
