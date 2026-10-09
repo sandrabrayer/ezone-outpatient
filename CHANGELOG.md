@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Daily backup coverage
+- Extend the existing nightly backup to Leads and both removal archives as
+  well as Clients. Capture under the save lock, then release it before backup
+  writes. Verify typed values and literal text in a new sheet before replacing
+  the prior daily copy; keep it on write/verification failure. Retention covers
+  only the four daily families and runs after all four succeed.
+- Add 15 regression cases and six passing native Google helper/restore
+  scenarios on synthetic data. Full serial suite: 1,134 passed, 0 failed,
+  0 skipped. Production binding, web version 92 and the existing Head trigger
+  were inspected read-only. Not deployed; see `CHANGELOG-daily-backup-coverage.md`.
+
 ### Lead save preservation
 - Preserve leads added by another user or app when an older tab saves a full
   snapshot. Keep intentional removal and conversion, prevent stale resurrection,

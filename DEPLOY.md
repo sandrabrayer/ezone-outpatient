@@ -1,5 +1,25 @@
 # Deploy — E-ZONE Outpatient
 
+## Pending data-integrity release (draft PR #113)
+
+Sandra's explicit production approval and green candidate CI are required.
+Before merge, agree a pause in writes, verify a fresh whole-workbook backup
+and recheck the current source/deployment version. Do not change the source
+workbook binding. Read-only inspection on 2026-10-09 verified the `.clasp.json`
+project is bound to `17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc` and its
+active web app ending `FOwWYIw` is version 92.
+
+One existing time-driven `nightlyIntegrityJob` trigger runs **Head**. Keep it;
+no new installer or scopes are needed for the staged four-dataset backup.
+After approval/deployment, verify the Clients, Leads and two archive snapshots
+in the existing backup workbook and verify the next scheduled run.
+
+Rolling the web deployment back to the recorded version does not revert
+**Head**, which runs the nightly job. A scheduled-job rollback also requires
+reverting the source through the approved repository/CI workflow. Neither
+code rollback restores data nor changing a spreadsheet ID constitutes recovery.
+See `CHANGELOG-daily-backup-coverage.md` for evidence and limitations.
+
 Two independent deploy paths:
 
 | Layer | Runs it | Trigger |

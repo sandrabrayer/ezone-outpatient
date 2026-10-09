@@ -74,8 +74,8 @@ and header rows only. Leads has 18 matching headers, Clients has 36 matching
 headers, and `לידים שהוסרו` has the matching first 18 headers but lacks
 `updatedAt`/`updatedBy`. Those trailing columns already exist in the deployed
 branch's source; this PR does not add them or modify the live headers. The
-binding between that workbook and the production Apps Script project has not
-yet been independently verified through Google.
+binding was initially unverified. Read-only Google project inspection later
+confirmed it on October 9; see the daily-backup follow-up below.
 
 The dummy workbook reproduces those header shapes. After native import, all
 fixture values were read back and matched exactly, including leading-zero
@@ -244,14 +244,18 @@ as documented above. No alternate method or broader OAuth scope was used.
 2. Combined two-session create/edit, removal and conversion acceptance is
    complete on synthetic staging data. Preserve the recorded source hash and
    results. This is not a load test or authorization to connect to production.
-3. Verify the production workbook binding, complete the daily backup coverage
-   for Leads and its archive, verify a fresh restorable whole-workbook backup
-   after pausing writes, and record the current Apps Script
-   deployment version. Merge only into the deployed branch after approval;
+3. The production binding and active web-app version 92 have now been recorded.
+   Daily four-dataset backup code and six native helper/restore scenarios are
+   ready on this draft, with 1,134 local tests passing; see
+   `CHANGELOG-daily-backup-coverage.md`. Before release verify a fresh restorable
+   whole-workbook backup after an agreed pause in writes, and recheck the
+   active source/version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.
 4. Verify the deployment run and the agreed smoke checks. If rollback is
    needed, redeploy the recorded previous version to the SAME deployment ID
-   with approval. Code rollback cannot recover data already lost by the old
+   with approval. The existing nightly trigger runs Head, so rolling back that
+   job also requires reverting source through the repository/CI workflow.
+   Code rollback cannot recover data already lost by the old
    behavior; recovery needs the verified backup or other retained evidence.
 
 ## Remaining work / handoff
@@ -264,9 +268,12 @@ unchanged. Do not infer production load capacity from the local or native
 sequential smoke tests.
 
 Current task owner: Codex. Coordinate before Claude picks up this branch.
-Next milestone: complete and verify daily lead/archive backup coverage, confirm
-the production binding, backup and rollback version, then Sandra's production
-decision. Combined HTTP acceptance and the manual dummy restore drill passed.
+Next milestone: verify the fresh full production backup during a coordinated
+pause in writes, recheck release candidate CI/baseline and obtain Sandra's
+production decision. Combined HTTP acceptance, the manual dummy restore drill
+and six native daily-backup scenarios passed. The production binding, version
+92 and one Head-based nightly trigger were inspected read-only. The extended
+daily backup is implemented but remains inactive until the approved release.
 Sandra has authorized necessary spending without a fixed cap, subject to
 professional cost management; see `AGENTS.md`. The actual cost baseline and
 billing access remain unverified. No new paid service was provisioned for this

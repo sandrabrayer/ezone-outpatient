@@ -4348,10 +4348,11 @@ function doPost(e) {
  *   2. Orphan-payment sweep — every clientId across Payments must match a
  *      Clients row or a tombstone (orphaned payments were how the original
  *      incident surfaced).
- *   3. Daily snapshot — values-only copy of Clients into the EZONE-Backups
- *      spreadsheet, one sheet per day ('outpatient-YYYY-MM-DD' — prefixed so
- *      the Dashboard app's job can later share the same backup spreadsheet),
- *      then delete snapshot sheets older than 30 days.
+ *   3. Daily snapshots — a short locked capture of Clients, Leads and both
+ *      removal archives, then verified values-only copies in EZONE-Backups.
+ *      Clients retain 'outpatient-YYYY-MM-DD'; added datasets have explicit
+ *      prefixes. Backup writes do not hold the app's script lock. Retention
+ *      runs only after all four snapshots pass typed-value readback.
  *
  * Alerting: ONE email per run, ONLY when something is wrong (no daily noise),
  * to the ALERT_EMAIL Script Property. Fail-open: no property / send failure
@@ -4373,6 +4374,9 @@ var INTEGRITY_ALERT_SUBJECT    = '⚠️ E-ZONE: אי-התאמה בנתוני מ
  * sync — the round-trip test locks them together. */
 var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
+// Clients keep their existing names for sentinel lookup and old backups.
+// Only these exact daily families are eligible for this job's retention.
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -4436,7 +4440,7 @@ function _integritySnapshotName(date) {
  * app's snapshots, a manual tab) is untouchable. Expired = strictly older
  * than retentionDays days before today. */
 function _integrityIsExpiredSnapshot(sheetName, todayName, retentionDays) {
-  var m = INTEGRITY_SNAPSHOT_RE.exec(String(sheetName == null ? '' : sheetName));
+  var m = INTEGRITY_DATA_SNAPSHOT_RE.exec(String(sheetName == null ? '' : sheetName));
   if (!m) return false;
   var t = INTEGRITY_SNAPSHOT_RE.exec(String(todayName == null ? '' : todayName));
   if (!t) return false;
@@ -4482,24 +4486,97 @@ function _integrityLookupNames(snapshotSheet, ids) {
   return names;
 }
 
-/* Write today's values-only snapshot into the BACKUP spreadsheet (only —
- * never the live one). Idempotent for a same-day re-run: an existing sheet
- * with today's name is cleared and rewritten in place (never deleted first,
- * so this also works when it is the spreadsheet's only sheet). */
-function _integrityWriteSnapshot(backupSs, snapName, grid) {
-  var sh = backupSs.getSheetByName(snapName);
-  if (sh) sh.clear();
-  else sh = backupSs.insertSheet(snapName);
-  if (grid && grid.length) {
-    sh.getRange(1, 1, grid.length, grid[0].length).setValues(grid);
+/* Capture a coherent lead/client/archive set under the SAME script lock as
+ * saves, then release it BEFORE any backup write. Missing live sheets or a
+ * failed read abort the set. Archives need not exist before the first removal;
+ * record that explicitly instead of creating/relabeling a live sheet. */
+function _integrityCaptureData(sourceSs) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error('Backup capture lock unavailable');
+  try {
+    var specs = [
+      { source: 'Clients', prefix: '', required: true },
+      { source: 'Leads', prefix: 'leads-', required: true },
+      { source: 'לידים שהוסרו', prefix: 'leads-removed-', headers: REMOVED_LEADS_HEADERS },
+      { source: 'Clients-removed', prefix: 'clients-removed-', headers: CLIENTS_REMOVED_HEADERS }
+    ];
+    return specs.map(function (spec) {
+      var sh = sourceSs.getSheetByName(spec.source);
+      if (!sh && spec.required) throw new Error('Missing backup source: ' + spec.source);
+      var range = sh ? sh.getDataRange() : null;
+      var grid = range ? range.getValues() : [spec.headers.slice()];
+      if (!grid.length || grid[0].indexOf('id') === -1) {
+        throw new Error('Invalid backup headers: ' + spec.source);
+      }
+      return { source: spec.source, prefix: spec.prefix, absent: !sh,
+        grid: grid, formats: range ? range.getNumberFormats() : null };
+    });
+  } finally { lock.releaseLock(); }
+}
+
+/* Values-only snapshots preserve scalar types and Date instants. All strings
+ * are written literally (including =... and leading apostrophes); readback
+ * must match before a previous snapshot can be replaced. */
+function _integrityVerifyGrid(expected, actual) {
+  if (expected.length !== actual.length) throw new Error('Backup row count mismatch');
+  for (var r = 0; r < expected.length; r++) {
+    if (expected[r].length !== actual[r].length) throw new Error('Backup column count mismatch');
+    for (var c = 0; c < expected[r].length; c++) {
+      var a = expected[r][c], b = actual[r][c];
+      var equal = a instanceof Date ? b instanceof Date && a.getTime() === b.getTime() : a === b;
+      if (!equal) throw new Error('Backup value mismatch at row ' + (r + 1) + ', column ' + (c + 1));
+    }
   }
-  // A just-created backup spreadsheet's default sheet is dead weight once a
-  // snapshot exists; drop it (guarded — never a snapshot, never the last sheet).
-  var def = backupSs.getSheetByName('Sheet1') || backupSs.getSheetByName('גיליון1');
-  if (def && !INTEGRITY_SNAPSHOT_RE.test(def.getName()) && backupSs.getSheets().length > 1) {
-    backupSs.deleteSheet(def);
-  }
-  return sh;
+}
+
+/* The caller must supply the separate backup spreadsheet. Never clear the
+ * previous good snapshot. Build and verify a temporary sheet, then publish
+ * it; on a publish failure restore the old name. UserLock serializes backup
+ * writers without holding the script lock needed by interactive app saves.
+ * An interrupted run can leave a -pending/-previous sheet for manual review;
+ * retention never deletes those recovery remnants. */
+function _integrityWriteSnapshot(backupSs, snapName, grid, formats) {
+  if (!INTEGRITY_DATA_SNAPSHOT_RE.test(snapName)) throw new Error('Invalid backup name');
+  if (!grid || !grid.length || !grid[0].length) throw new Error('Empty backup grid');
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(1)) throw new Error('Backup writer already running');
+  var sh = null, old = null, renamedOld = false, published = false;
+  try {
+    var token = Utilities.getUuid();
+    sh = backupSs.insertSheet('outpatient-pending-' + token);
+    if (sh.getMaxRows() < grid.length) sh.insertRowsAfter(sh.getMaxRows(), grid.length - sh.getMaxRows());
+    if (sh.getMaxColumns() < grid[0].length) sh.insertColumnsAfter(sh.getMaxColumns(), grid[0].length - sh.getMaxColumns());
+    var target = sh.getRange(1, 1, grid.length, grid[0].length);
+    var safeFormats = grid.map(function (row, r) {
+      return row.map(function (value, c) {
+        return typeof value === 'string' ? '@' :
+          (formats && formats[r] && formats[r][c]) || (value instanceof Date ? 'yyyy-mm-dd hh:mm:ss.000' : 'General');
+      });
+    });
+    target.setNumberFormats(safeFormats);
+    target.setValues(grid.map(function (row) {
+      return row.map(function (value) { return typeof value === 'string' && value ? "'" + value : value; });
+    }));
+    SpreadsheetApp.flush();
+    _integrityVerifyGrid(grid, target.getValues());
+    var formulas = target.getFormulas();
+    for (var r = 0; r < formulas.length; r++) {
+      if (formulas[r].some(function (formula) { return !!formula; })) throw new Error('Backup contains a formula');
+    }
+    old = backupSs.getSheetByName(snapName);
+    if (old) { old.setName('outpatient-previous-' + token); renamedOld = true; }
+    sh.setName(snapName);
+    published = true;
+    if (old) backupSs.deleteSheet(old);
+    return sh;
+  } catch (err) {
+    if (renamedOld && !published) {
+      try { old.setName(snapName); } catch (_) { /* Keep both recovery remnants. */ }
+    }
+    // A partial temporary sheet is never a published backup. Leave it visible
+    // for diagnosis; do not risk deleting a good copy after an ambiguous RPC.
+    throw err;
+  } finally { lock.releaseLock(); }
 }
 
 /* Delete OUR expired snapshot sheets from the backup spreadsheet. Strictly
@@ -4581,10 +4658,9 @@ function nightlyIntegrityJob() {
   var clients = [], clientsGrid = null, clientsReadOk = false;
   try {
     var clientsSh = _ss().getSheetByName('Clients');
-    if (clientsSh) {
-      clients = _readAll(clientsSh, CLIENTS_HEADERS);
-      clientsGrid = clientsSh.getDataRange().getValues();
-    }
+    if (!clientsSh) throw new Error('Missing Clients sheet');
+    clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    clientsGrid = clientsSh.getDataRange().getValues();
     clientsReadOk = true;
   } catch (err) { errors.push('קריאת Clients נכשלה: ' + err); }
 
@@ -4659,15 +4735,25 @@ function nightlyIntegrityJob() {
     }
   } catch (err) { errors.push('בדיקת תשלומים יתומים נכשלה: ' + err); }
 
-  // ---- CHECK 3: daily snapshot + retention (AFTER check 1's name lookup) ----
+  // ---- CHECK 3: daily snapshots + retention (AFTER check 1's name lookup) ----
   try {
-    if (clientsGrid && clientsGrid.length) {
+    if (clientsReadOk && clientsGrid && clientsGrid.length) {
+      var sourceSs = _ss();
+      var captured = _integrityCaptureData(sourceSs);
       if (!backupSs) {
         backupSs = SpreadsheetApp.create(INTEGRITY_BACKUP_NAME);
         props.setProperty(INTEGRITY_PROP_BACKUP_SSID, backupSs.getId());
       }
+      if (backupSs.getId() === sourceSs.getId()) throw new Error('Backup destination is the live spreadsheet');
       var todayName = _integritySnapshotName(new Date());
-      _integrityWriteSnapshot(backupSs, todayName, clientsGrid);
+      var day = todayName.slice(INTEGRITY_SNAPSHOT_PREFIX.length);
+      for (var b = 0; b < captured.length; b++) {
+        var item = captured[b];
+        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day, item.grid, item.formats);
+        Logger.log('nightlyIntegrityJob: backup verified (%s; sourceAbsent=%s; rows=%s)',
+          item.source, String(item.absent), String(item.grid.length - 1));
+      }
+      // Retention runs only after ALL four snapshots verify successfully.
       var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
       if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
     }

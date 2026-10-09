@@ -1,5 +1,10 @@
 # CHANGELOG — Nightly data-integrity job (detection + backup)
 
+The initial implementation below is historical. The staged October 9 extension
+adds Leads and both archives, verifies replacements before retiring old copies,
+and broadens only the four explicit retention families. See
+`CHANGELOG-daily-backup-coverage.md` for current behavior and test results.
+
 ## Summary
 A time-driven nightly job (`nightlyIntegrityJob`, 2:00 AM Asia/Jerusalem)
 that DETECTS silent patient-row loss and keeps a daily off-spreadsheet
