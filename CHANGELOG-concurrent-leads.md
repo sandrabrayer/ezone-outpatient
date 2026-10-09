@@ -150,6 +150,47 @@ the next acceptance gate; do not label it complete from these results.
 
 ## Release and rollback
 
+### Staging restore drill follow-up (2026-10-09)
+
+An independent copy of the dummy workbook was prepared for a restore drill:
+`10ZkpWZKGL0jfA7dXAwd4qzWALpp5VqPvnHYYwet-ytQ`. A synthetic Clients record
+was added so the test includes actual client fields as well as a live lead,
+an archived lead and the existing synthetic Clients-removed row. A second
+native whole-workbook copy serves as the immutable backup:
+`1SE4N50lLriJ8d8uznxUJDV-GJ_geJf76JSa5RtugPS8`.
+
+The backup matched all six bounded populated ranges and associated cell
+metadata exactly. Deliberate edits to the name cell of each of the four
+synthetic records were read back. All four rows were restored IN PLACE from
+the independent backup using typed `userEnteredValue`, preserving the
+workbook and sheet IDs and leaving existing formatting untouched. The
+subsequent readback matched the entire six-range baseline exactly, including
+text phones, numeric amounts, dates, audit stamps and cell formatting.
+Both copies have only the owner's permission. No production rows were read,
+copied or modified. Evidence hashes and limits are recorded in
+`test-support/google-staging-restore-results-20261009.json`.
+
+This verifies a MANUAL recovery path on dummy data. It does not repair the
+existing daily Clients-only job, prove a production backup is complete, or
+recover Apps Script properties, triggers, deployments or Railway settings.
+Before release take and verify a fresh whole-workbook backup after pausing
+writes, retaining the existing workbook binding. Never replace the production
+spreadsheet ID with a copy as an implicit restore.
+
+Combined UI/proxy/Google HTTP acceptance remains BLOCKED. The existing
+isolated staging project's New deployment form was prepared with Web app,
+execute as Sandra and access Anyone. Automatic approval review rejected
+the Deploy action because it creates persistent anonymous access executing
+as the account owner without specific user approval. No deployment was
+created; no endpoint exists. Do not retry through another API or silently
+broaden OAuth scopes. Sandra must explicitly authorize this staging-only
+access before retrying. The current manifest still grants only
+`spreadsheets.currentonly`; cross-app credentials and triggers are absent.
+If approved, verify the effective scope and actual HTTP behavior, use only
+synthetic data, and archive the test deployment when acceptance is finished.
+
+### Production gates
+
 1. Keep this PR a draft until Sandra approves the release and CI is green.
 2. Complete the combined two-browser-session create/edit, removal and conversion
    scenarios through the real UI/proxy and an isolated Google HTTP endpoint.

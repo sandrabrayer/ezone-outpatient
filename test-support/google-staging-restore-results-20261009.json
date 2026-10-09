@@ -1,0 +1,84 @@
+{
+  "performedAt": "2026-10-09T12:39:11.278610+00:00",
+  "sourceCommit": "3b70994a204f488977658997f52fea55865ca8b5",
+  "status": "PASS",
+  "method": "Native whole-workbook Drive copy, deliberate edits to four synthetic record names, in-place typed-value restore from the independent backup, exact readback of six bounded ranges.",
+  "stagingSourceId": "10ZkpWZKGL0jfA7dXAwd4qzWALpp5VqPvnHYYwet-ytQ",
+  "backupId": "1SE4N50lLriJ8d8uznxUJDV-GJ_geJf76JSa5RtugPS8",
+  "originalStagingId": "1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0",
+  "productionModified": false,
+  "syntheticDataOnly": true,
+  "ownerOnlyPermissionReadback": true,
+  "damageConfirmedInFourTabs": true,
+  "copyMatched": true,
+  "restoreMatched": true,
+  "sheets": [
+    {
+      "name": "Leads",
+      "sheetId": 727014086,
+      "nonemptyRowsIncludingHeader": 2,
+      "checkedColumns": 18,
+      "checkedRows": 10,
+      "metadataAndCellDataSHA256": "725d2be898b96de5a5a90ccb208fa4f5460331dbfaff5fe76571a7137ad92155",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    },
+    {
+      "name": "_Acceptance",
+      "sheetId": 1370236569,
+      "nonemptyRowsIncludingHeader": 5,
+      "checkedColumns": 7,
+      "checkedRows": 5,
+      "metadataAndCellDataSHA256": "fe0c0f2ad05b1300ac683c9cfd18f7fc1fc2459a9ba2da631d45556557926902",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    },
+    {
+      "name": "Clients-removed",
+      "sheetId": 1306542355,
+      "nonemptyRowsIncludingHeader": 2,
+      "checkedColumns": 39,
+      "checkedRows": 10,
+      "metadataAndCellDataSHA256": "9812626b80272677cbed64a50a41f50b5333f6ff84449a5de5cb12fe02d638ba",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    },
+    {
+      "name": "Clients",
+      "sheetId": 1505374932,
+      "nonemptyRowsIncludingHeader": 2,
+      "checkedColumns": 36,
+      "checkedRows": 10,
+      "metadataAndCellDataSHA256": "e6d8c093160319565c6b286a7df95ee974662d6de2c5e96f7c77466fa87d9708",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    },
+    {
+      "name": "לידים שהוסרו",
+      "sheetId": 1493498639,
+      "nonemptyRowsIncludingHeader": 2,
+      "checkedColumns": 20,
+      "checkedRows": 10,
+      "metadataAndCellDataSHA256": "3de1441fcae59c7d55915a910853f2a87fc2a7d48ebff3e7312ea73a208db986",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    },
+    {
+      "name": "_Staging",
+      "sheetId": 1273844713,
+      "nonemptyRowsIncludingHeader": 12,
+      "checkedColumns": 5,
+      "checkedRows": 12,
+      "metadataAndCellDataSHA256": "5ee423640b52a2d53f5c33425c9f83cb0b36eaa380cc00b85dfee50a13fb7b66",
+      "nativeCopyMatch": true,
+      "restoreMatch": true
+    }
+  ],
+  "limitations": [
+    "This is a manual staging restore drill, not automated daily backup coverage.",
+    "No production records were read, copied, restored, or modified.",
+    "Only populated synthetic ranges and adjacent empty rows were compared, not every unused cell.",
+    "Workbook copies do not establish recovery of Apps Script properties, deployments, credentials, triggers, or Railway configuration.",
+    "Production release still needs fresh complete backup, verified workbook binding, recorded previous deployment, combined HTTP acceptance and Sandra approval."
+  ]
+}

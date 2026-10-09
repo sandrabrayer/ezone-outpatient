@@ -21,8 +21,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   sequential stale-snapshot scenarios also passed in the real Google Apps
   Script runtime, using a separate bound project with current-document-only
   access. Keep the runner and evidence outside the production clasp root.
-  Combined browser/proxy/Google HTTP acceptance and a verified restore remain
-  release gates.
+  A native backup/restore drill now also passes on synthetic records across
+  Leads, Clients and both archives, with exact typed-cell readback. Combined
+  browser/proxy/Google HTTP acceptance and a fresh production backup remain
+  release gates; the public staging deployment awaits explicit approval.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
   Budget guidance now permits justified spending without a numeric cap,
