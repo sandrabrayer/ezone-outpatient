@@ -11,9 +11,16 @@ Claude work in this repository, alongside the repo facts in `CLAUDE.md`.
 - Use one implementation owner per task/branch. Before work, check current open
   PRs and the deployed branch. Use another tool where its existing context or
   capabilities help; do not let two agents edit the same task concurrently.
-- Track infrastructure, AI/API and other service costs separately. Budget and
-  billing visibility are not yet established. Do not invent measured costs or
-  create paid resources/upgrade subscriptions without an approved budget.
+- Sandra authorizes necessary project spending without a fixed numeric cap,
+  with fair, professional cost management (2026-10-09). Choose proportionate
+  services/models and reuse existing paid capabilities when suitable. Track
+  infrastructure, AI/API and other service costs separately, with actuals and
+  forecasts distinguished. Billing visibility is not yet established; do not
+  invent measured costs or claim continuous cost monitoring is installed.
+  Routine justified work need not wait for another budget question. Inform
+  Sandra before a material commitment or a new recurring charge, explaining
+  purpose, expected cost and alternatives. This budget discretion does not
+  change the separate requirement for production approval.
 - Sandra reports Astra at High is selected for this milestone. Recommend model
   changes at task boundaries based on difficulty, data/production risk and
   cost. Keep strong reasoning for architecture, security and data integrity;

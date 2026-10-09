@@ -65,4 +65,7 @@ unchanged. Do not infer production load capacity from these offline tests.
 
 Current task owner: Codex. Coordinate before Claude picks up this branch.
 Next milestone: isolated staging validation, then Sandra's production decision.
-Project cost baseline and monthly budget remain to be established.
+Sandra has authorized necessary spending without a fixed cap, subject to
+professional cost management; see `AGENTS.md`. The actual cost baseline and
+billing access remain unverified. No new paid service was provisioned for this
+patch.

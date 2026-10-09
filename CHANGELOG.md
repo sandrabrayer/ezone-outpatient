@@ -13,6 +13,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the real Apps Script handlers. See `CHANGELOG-concurrent-leads.md`.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
+  Budget guidance now permits justified spending without a numeric cap,
+  with advance notice for material commitments or new recurring charges.
 
 ### Added
 - **`GET /api/version`** — public, `no-store`, returns only `{ commit, builtAt }`
