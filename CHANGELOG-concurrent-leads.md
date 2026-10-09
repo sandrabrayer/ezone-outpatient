@@ -30,7 +30,10 @@ in-memory Sheets and dummy records. It covers concurrent tabs/retries, the real
 cross-app creation and lead removal paths, conversion, stale resurrection,
 refused client edits, server stamps, GET/POST compatibility, lock refusal and
 archive-read failure. The initial 15 regressions produced 10 failures before
-the fix; the completed suite contains 17 cases.
+the fix; the completed suite contains 18 cases. The added case uses the
+18-column archive observed in Google (headers only), blocks stale resurrection,
+then verifies the existing removal handler appends its two stamp columns without
+shifting the older archive data. All row values in that test are synthetic.
 
 `test/lead-save-browser.test.js` adds three end-to-end browser scenarios: two
 signed-in users creating/editing, removing, and converting leads from different
@@ -45,7 +48,7 @@ The separate `lead-save-browser` CI job runs these scenarios on Node 22 with
 silently skipping it. The original `npm test` job is retained. Earlier local
 verification without a browser passed 1,109 of 1,115 cases and skipped six
 existing browser cases. Final browser-enabled verification on Node 24.19.0
-completed with **1,118 passed, 0 failed, 0 skipped** (including all nine browser
+completed with **1,119 passed, 0 failed, 0 skipped** (including all nine browser
 cases). The local default parallel run exited zero without a completion
 summary, so full-suite local verification uses `--test-concurrency=1`.
 
@@ -54,15 +57,72 @@ A moderate
 is bundled with this save-path change. The audit reports 0 high / 0 critical.
 Track the moderate finding as a separate maintenance task.
 
+## Google staging preparation (2026-10-09)
+
+Native dummy workbook:
+https://docs.google.com/spreadsheets/d/1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0/edit
+
+It contains one synthetic live lead (`fixture-a`), one synthetic archived lead
+(`fixture-removed`), an empty Clients sheet and a `_Staging` instruction tab.
+`test-support/google-staging-fixture.json` is the repeatable initial state.
+No patient records were read or copied. No production sheet, Apps Script
+project, deployment, Railway configuration or access permission was changed.
+
+The Drive workbook titled `EZONE OUTPATIENT`
+(`17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc`) was inspected through metadata
+and header rows only. Leads has 18 matching headers, Clients has 36 matching
+headers, and `לידים שהוסרו` has the matching first 18 headers but lacks
+`updatedAt`/`updatedBy`. Those trailing columns already exist in the deployed
+branch's source; this PR does not add them or modify the live headers. The
+binding between that workbook and the production Apps Script project has not
+yet been independently verified through Google.
+
+The dummy workbook reproduces those header shapes. After native import, all
+fixture values were read back and matched exactly, including leading-zero
+phones and ISO timestamp strings. The import's two timestamp cells were
+normalized to native `stringValue`, and the workbook timezone was set to
+`Asia/Jerusalem`. No formulas or native tables were introduced. Visual QA uses
+an XLSX exported from the native Sheet; Google UI rendering is not yet checked.
+
+Drive returned 56 version-history entries for the identified outpatient
+workbook, most recently `6560` at `2026-10-08T17:24:22.141Z`. The separate
+`EZONE-Backups` workbook (`1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM`)
+contains 31 `outpatient-YYYY-MM-DD` tabs through `outpatient-2026-10-09`.
+Its latest outpatient header matches Clients. The existing
+`nightlyIntegrityJob` code snapshots `clientsGrid` only, with 30-day retention;
+these outpatient snapshots do not cover Leads or its removal archive. The
+same backup workbook also has separately prefixed Dashboard snapshots; do not
+assume they back up the outpatient lead records. This is evidence of existing
+backup work to preserve, but backup row contents, trigger health, completeness
+and an actual restore have not been verified. No backup rows were read.
+
+Older manual copies and seven `EZONE-OUT-SNAPSHOT-AUTO-*` revision-harvesting
+files were also found. The latter were created September 4 and refer to dates
+through August 31; they are not evidence of a current daily outpatient-lead
+backup. No backup or snapshot was modified.
+
+The connected Drive tools can read/write Sheets but expose no Apps Script
+project creation, code upload or execution action. Therefore the native
+workbook is a prepared data fixture, **not a running staging application**.
+Do not mark live Google acceptance complete based on fixture readback or the
+local browser tests. No new paid service was provisioned.
+
 ## Release and rollback
 
 1. Keep this PR a draft until Sandra approves the release and CI is green.
 2. Before production, repeat the two-tab create/edit, remove and conversion
    scenarios in an isolated Apps Script project using dummy Sheets. The local
    browser tests verify the application integration but do not verify Google's
-   live runtime, OAuth permissions, quotas or real-Sheets writes. No separate
-   Google staging project is documented in this repository, and none was
-   created or accessed by this change.
+   live runtime, OAuth permissions, quotas or real-Sheets writes. Use the dummy
+   workbook above and a separate, verified bound staging project. That project
+   has not yet been created or accessed. Do not reuse `.clasp.json`, the
+   production script ID or the production deployment ID for staging. Verify
+   the staging spreadsheet ID before any write. Keep cross-app integrations
+   disabled and use only dummy data. Do not install scheduled triggers or run
+   Drive-wide snapshot/cleanup helpers in staging. Reset only the dummy workbook between
+   scenarios; also check phone strings, archive append-only behavior and
+   unchanged conversion pricing/billing dates. Record the staging script ID,
+   tested commit and observed results before requesting production approval.
 3. Confirm a restorable Sheets backup and record the current Apps Script
    deployment version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.

@@ -9,12 +9,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Preserve leads added by another user or app when an older tab saves a full
   snapshot. Keep intentional removal and conversion, prevent stale resurrection,
   and retain existing per-row conflict checks and server-owned stamps. No UI,
-  financial calculation, schema or dependency change. Adds 17 tests executing
+  financial calculation, schema or dependency change. Adds 18 tests executing
   the real Apps Script handlers. See `CHANGELOG-concurrent-leads.md`.
 - Add three browser scenarios through the real UI, signed-session proxy and
   Apps Script handlers against in-memory Sheets. Reuse one Google-runtime
   fixture across unit/browser coverage. A separate `lead-save-browser` CI job
   requires a browser and fails instead of skipping these scenarios.
+- Prepare a separate native Google Sheets fixture with synthetic records and
+  headers checked against the identified outpatient workbook. Verify the
+  existing 18-column removal archive without reading production rows. Google
+  Apps Script runtime acceptance and a verified restore remain release gates.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
   Budget guidance now permits justified spending without a numeric cap,

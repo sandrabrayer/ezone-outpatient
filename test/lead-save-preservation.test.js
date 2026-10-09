@@ -164,3 +164,31 @@ test('failure to acquire the script lock makes no change', () => {
   assert.equal(result.ok, false);
   assert.deepEqual(ids(sb), [A.id, B.id]);
 });
+
+test('the observed 18-column archive blocks resurrection and upgrades without shifting existing data', () => {
+  // Headers only were read from Google. All row values are synthetic.
+  const fixture = require('../test-support/google-staging-fixture.json');
+  const sb = sandbox();
+  for (const spec of fixture.sheets) sb.seed(spec.name, spec.headers, spec.rows);
+  const live = sb.rows('Leads')[0];
+  const archived = sb.rows('לידים שהוסרו')[0];
+  const archiveBefore = JSON.parse(JSON.stringify(sb.sheets['לידים שהוסרו'].grid));
+
+  const stale = sb.save([live, archived]);
+  assert.equal(stale.ok, true);
+  assert.equal(stale.staleSave, true);
+  assert.deepEqual(ids(sb), [live.id]);
+  assert.deepEqual(sb.sheets['לידים שהוסרו'].grid, archiveBefore,
+    'a stale save reads the existing ID column without rewriting the archive');
+
+  const removal = sb.post({ action: 'removeLead', lead: live, user: 'fixture-remover' });
+  assert.equal(removal.ok, true);
+  assert.deepEqual(ids(sb), []);
+  assert.deepEqual(sb.sheets['לידים שהוסרו'].grid[0], Array.from(sb.ctx.REMOVED_LEADS_HEADERS));
+  const retained = sb.rows('לידים שהוסרו').find(row => row.id === archived.id);
+  for (const key of Object.keys(archived)) assert.equal(retained[key], archived[key], key);
+  const removed = sb.rows('לידים שהוסרו').find(row => row.id === live.id);
+  assert.equal(removed.phone, '0500000001');
+  assert.equal(removed.updatedBy, 'fixture-remover');
+  assert.match(removed.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
