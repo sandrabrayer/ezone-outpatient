@@ -57,13 +57,13 @@ A moderate
 is bundled with this save-path change. The audit reports 0 high / 0 critical.
 Track the moderate finding as a separate maintenance task.
 
-## Google staging preparation (2026-10-09)
+## Google staging validation (2026-10-09)
 
 Native dummy workbook:
 https://docs.google.com/spreadsheets/d/1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0/edit
 
-It contains one synthetic live lead (`fixture-a`), one synthetic archived lead
-(`fixture-removed`), an empty Clients sheet and a `_Staging` instruction tab.
+The initial fixture contains one synthetic live lead (`fixture-a`), one synthetic
+archived lead (`fixture-removed`), an empty Clients sheet and `_Staging` instructions.
 `test-support/google-staging-fixture.json` is the repeatable initial state.
 No patient records were read or copied. No production sheet, Apps Script
 project, deployment, Railway configuration or access permission was changed.
@@ -81,8 +81,9 @@ The dummy workbook reproduces those header shapes. After native import, all
 fixture values were read back and matched exactly, including leading-zero
 phones and ISO timestamp strings. The import's two timestamp cells were
 normalized to native `stringValue`, and the workbook timezone was set to
-`Asia/Jerusalem`. No formulas or native tables were introduced. Visual QA uses
-an XLSX exported from the native Sheet; Google UI rendering is not yet checked.
+`Asia/Jerusalem`. No formulas or native tables were introduced. The initial
+visual QA used an XLSX exported from the native Sheet. Google browser access
+was subsequently authorized and used for project setup and execution.
 
 Drive returned 56 version-history entries for the identified outpatient
 workbook, most recently `6560` at `2026-10-08T17:24:22.141Z`. The separate
@@ -101,28 +102,64 @@ files were also found. The latter were created September 4 and refer to dates
 through August 31; they are not evidence of a current daily outpatient-lead
 backup. No backup or snapshot was modified.
 
-The connected Drive tools can read/write Sheets but expose no Apps Script
-project creation, code upload or execution action. Therefore the native
-workbook is a prepared data fixture, **not a running staging application**.
-Do not mark live Google acceptance complete based on fixture readback or the
-local browser tests. No new paid service was provisioned.
+Sandra authorized the browser fallback for the missing Apps Script operations.
+The separate bound project is **EZONE Outpatient STAGING ONLY 20261009**, script
+ID `1IMz_TagTQBCsoK84TNHL5kBnBslH5W7jaZ20RFKA4dqkqfrbDHN42oE_`:
+https://script.google.com/u/0/home/projects/1IMz_TagTQBCsoK84TNHL5kBnBslH5W7jaZ20RFKA4dqkqfrbDHN42oE_/edit
+
+The staging `Code.gs` is an exact editor-copy match to source commit
+`ce3ec62a9c83dcc5c0e4a672b4653a11e095a159`, SHA-256
+`d1f030c3aec035a2fed69fa2f577a41ab1ba8edee54fcebacdbfda55b7971f56`.
+The production file is not modified for staging. A separate test file invokes
+the actual `doGet`/`doPost` handlers with real Google Sheets, LockService,
+PropertiesService and ContentService. It rejects the wrong spreadsheet or
+script ID and refuses fixture resets if non-fixture records are present.
+
+Only `spreadsheets.currentonly` is requested in the staging manifest, with
+timezone `Asia/Jerusalem`. Google's consent screen confirmed access to the
+spreadsheet where the script is installed. No Drive, email, external-request
+or trigger-management scopes were granted. No web-app deployment, scheduled
+trigger, cross-app credential or paid service was created.
+
+**Native run at `2026-10-09T12:18:16.602Z`: 4 passed, 0 failed.** The Google
+execution log showed `Execution completed`; `_Acceptance!A1:G5` was independently
+read back through Drive with the same results:
+
+| Scenario | Result | Complete scenario duration |
+| --- | --- | --- |
+| Older snapshot edits after another writer adds a lead | PASS | 24,177 ms |
+| Removal followed by a stale save; 18-column archive upgrade | PASS | 23,762 ms |
+| Conversion with an unseen lead; stale resurrection attempt | PASS | 29,278 ms |
+| Existing 18-column archive read without rewriting it | PASS | 19,212 ms |
+
+These timings include fixture resets, safety checks, multiple reads/writes and
+assertions. They are **not per-save latency or a load benchmark**. Conversion
+checks verify the submitted price/billing date remain intact; the browser suite
+separately tests the existing UI calculation.
+
+Reproducible staging-only files (excluded by production `.clasp.json` rootDir):
+`test-support/google-staging-acceptance.gs`,
+`test-support/google-staging-appsscript.json`, and
+`test-support/google-staging-results-20261009.json`.
+
+This verifies the Google runtime and the current-document OAuth scope through
+editor execution. It does **not** exercise HTTP dispatch, deployed web-app
+permissions, overlapping requests, production quotas, or the browser/proxy
+against Google in one combined run. The connected staging application remains
+the next acceptance gate; do not label it complete from these results.
 
 ## Release and rollback
 
 1. Keep this PR a draft until Sandra approves the release and CI is green.
-2. Before production, repeat the two-tab create/edit, remove and conversion
-   scenarios in an isolated Apps Script project using dummy Sheets. The local
-   browser tests verify the application integration but do not verify Google's
-   live runtime, OAuth permissions, quotas or real-Sheets writes. Use the dummy
-   workbook above and a separate, verified bound staging project. That project
-   has not yet been created or accessed. Do not reuse `.clasp.json`, the
-   production script ID or the production deployment ID for staging. Verify
-   the staging spreadsheet ID before any write. Keep cross-app integrations
-   disabled and use only dummy data. Do not install scheduled triggers or run
-   Drive-wide snapshot/cleanup helpers in staging. Reset only the dummy workbook between
-   scenarios; also check phone strings, archive append-only behavior and
-   unchanged conversion pricing/billing dates. Record the staging script ID,
-   tested commit and observed results before requesting production approval.
+2. Complete the combined two-browser-session create/edit, removal and conversion
+   scenarios through the real UI/proxy and an isolated Google HTTP endpoint.
+   Local browser integration and native Google handler execution have passed
+   separately; the combined path remains unverified. Use the pinned dummy
+   workbook and bound project above. Do not reuse production `.clasp.json`,
+   script/deployment IDs, credentials or Railway settings. Keep cross-app
+   integrations disabled. Do not install scheduled triggers or run Drive-wide
+   snapshot/cleanup helpers. Reset only fixture rows in the dummy workbook.
+   Record the tested source hash and results before requesting production approval.
 3. Confirm a restorable Sheets backup and record the current Apps Script
    deployment version. Merge only into the deployed branch after approval;
    merging this source change automatically runs the existing deploy workflow.
@@ -137,10 +174,12 @@ Full-sheet writes are still not transactional across Leads and Clients, and
 this patch does not make saves independent of Google availability. Row-level
 durable writes, production monitoring and verified backup/restore remain
 separate work. Existing legacy behavior for edits lacking version stamps is
-unchanged. Do not infer production load capacity from these offline tests.
+unchanged. Do not infer production load capacity from the local or native
+sequential smoke tests.
 
 Current task owner: Codex. Coordinate before Claude picks up this branch.
-Next milestone: isolated staging validation, then Sandra's production decision.
+Next milestone: combined browser/proxy/Google acceptance, confirmed lead backup
+coverage and a restore check, then Sandra's production decision.
 Sandra has authorized necessary spending without a fixed cap, subject to
 professional cost management; see `AGENTS.md`. The actual cost baseline and
 billing access remain unverified. No new paid service was provisioned for this

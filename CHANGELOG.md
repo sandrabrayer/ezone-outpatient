@@ -17,8 +17,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   requires a browser and fails instead of skipping these scenarios.
 - Prepare a separate native Google Sheets fixture with synthetic records and
   headers checked against the identified outpatient workbook. Verify the
-  existing 18-column removal archive without reading production rows. Google
-  Apps Script runtime acceptance and a verified restore remain release gates.
+  existing 18-column removal archive without reading production rows. Four
+  sequential stale-snapshot scenarios also passed in the real Google Apps
+  Script runtime, using a separate bound project with current-document-only
+  access. Keep the runner and evidence outside the production clasp root.
+  Combined browser/proxy/Google HTTP acceptance and a verified restore remain
+  release gates.
 - Record Sandra's current approval and cross-agent handoff requirements in
   `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
   Budget guidance now permits justified spending without a numeric cap,
