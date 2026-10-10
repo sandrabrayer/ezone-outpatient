@@ -5,6 +5,50 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Daily backup coverage
+- Extend the existing nightly backup to Leads and both removal archives as
+  well as Clients. Capture under the save lock, then release it before backup
+  writes. Verify typed values and literal text in a new sheet before replacing
+  the prior daily copy; keep it on write/verification failure. Retention covers
+  only the four daily families and runs after all four succeed.
+- Add 15 regression cases and six passing native Google helper/restore
+  scenarios on synthetic data. Full serial suite: 1,134 passed, 0 failed,
+  0 skipped. Production binding, web version 92 and the existing Head trigger
+  were inspected read-only. Not deployed; see `CHANGELOG-daily-backup-coverage.md`.
+- After Sandra's backup-only approval, create and independently verify an
+  owner-only full production workbook copy: all 18 sheets, 3,649 entered
+  cells and populated-range cell metadata match. Source unchanged; normal
+  writes may resume. Recheck freshness/live version before an approved release.
+
+### Lead save preservation
+- Preserve leads added by another user or app when an older tab saves a full
+  snapshot. Keep intentional removal and conversion, prevent stale resurrection,
+  and retain existing per-row conflict checks and server-owned stamps. No UI,
+  financial calculation, schema or dependency change. Adds 18 tests executing
+  the real Apps Script handlers. See `CHANGELOG-concurrent-leads.md`.
+- Add three browser scenarios through the real UI, signed-session proxy and
+  Apps Script handlers against in-memory Sheets. Reuse one Google-runtime
+  fixture across unit/browser coverage. A separate `lead-save-browser` CI job
+  requires a browser and fails instead of skipping these scenarios.
+- Prepare a separate native Google Sheets fixture with synthetic records and
+  headers checked against the identified outpatient workbook. Verify the
+  existing 18-column removal archive without reading production rows. Four
+  sequential stale-snapshot scenarios also passed in the real Google Apps
+  Script runtime, using a separate bound project with current-document-only
+  access. Keep the runner and evidence outside the production clasp root.
+  A native backup/restore drill now also passes on synthetic records across
+  Leads, Clients and both archives, with exact typed-cell readback. After
+  Sandra's specific approval, all three combined browser/proxy/Google HTTP
+  scenarios passed on dummy data. The temporary endpoint was then archived
+  and stopped returning application data. Full serial suite: 1,119 passed,
+  0 failed, 0 skipped. Daily lead/archive backup coverage and the full production
+  backup were completed in the follow-up above; separate production approval
+  and pre-deployment freshness/version checks remain required.
+- Record Sandra's current approval and cross-agent handoff requirements in
+  `CLAUDE.md` and `AGENTS.md`; green CI alone no longer authorizes a release.
+  Budget guidance now permits justified spending without a numeric cap,
+  with advance notice for material commitments or new recurring charges.
+
 ### Added
 - **`GET /api/version`** — public, `no-store`, returns only `{ commit, builtAt }`
   (`commit` = hex-validated `RAILWAY_GIT_COMMIT_SHA`, else `null`) so a merge

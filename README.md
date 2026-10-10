@@ -49,6 +49,25 @@ secret-looking is added to it.
 
 ## Stack
 
+### Concurrent lead saves
+
+`saveAll` preserves current lead rows missing from an older browser snapshot.
+Intentional removal still uses `removeLead`; conversion still uses the accepted
+client's `fromLead`. A stale snapshot cannot reintroduce an archived, absent lead
+or a lead already linked to a saved client. Reconciliation sets `staleSave` so
+the existing UI reloads server data. Normal edits do not read the removal archive.
+See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
+release precautions and remaining limitations of full-sheet writes.
+
+`test/lead-save-browser.test.js` exercises the real UI, session/proxy/cache
+server and Apps Script handlers with dummy Sheets. The `lead-save-browser`
+CI job installs test-only browser tooling outside the application dependency
+tree and sets `EZONE_REQUIRE_BROWSER_TESTS=1`; a missing browser fails that
+job. Browser network access is restricted to the local test server. No Google
+credentials or live data are used, and this is not a real-Google staging run.
+
+### Components
+
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).
 - Frontend: plain HTML/JS/CSS. No build step.
 - Database: Google Sheets via Apps Script Web App (`doGet` / `doPost`).

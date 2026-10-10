@@ -69,6 +69,7 @@ function gsHeaders(name) {
 const PURE_SRC = [
   gsVarDecl('INTEGRITY_SNAPSHOT_PREFIX'),
   gsVarDecl('INTEGRITY_SNAPSHOT_RE'),
+  gsVarDecl('INTEGRITY_DATA_SNAPSHOT_RE'),
   gsVarDecl('INTEGRITY_RETENTION_DAYS'),
   gsFunction('_integrityDiffMissingIds'),
   gsFunction('_integrityParsePaymentClientId'),

@@ -1,5 +1,37 @@
 # Deploy — E-ZONE Outpatient
 
+## Pending data-integrity release (draft PR #113)
+
+Sandra's explicit production approval and green candidate CI are required.
+The authorized whole-workbook backup was created at 21:12:58 Israel on
+2026-10-09 and verified at 21:15:47: all 18 sheets, 3,649 entered cells and
+used-range cell metadata match. Backup ID:
+`1pzINQ3p73bKo7bISBFkxrVN6z-pt5esz3wIHUZCfyz8` (owner-only permissions).
+See `test-support/production-backup-results-20261009.json`; source modified
+time remained `2026-10-09T12:26:46.957Z` throughout verification. Sandra was
+told writes could resume after verification. This approval covered backup
+only, not merge/deploy. Before merge, recheck backup freshness, source baseline
+and the active deployment. If data changed, agree another short write pause
+and verify a newer backup. Do not change the source
+workbook binding. Read-only inspection on 2026-10-09 verified the `.clasp.json`
+project is bound to `17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc` and its
+active web app ending `FOwWYIw` is version 92.
+The later browser recheck reached Google's signed-out Apps Script
+landing page, so it did not reconfirm version 92. Renew browser access and
+verify the active version before any approved deployment; do not infer it
+from repository CI or the earlier observation.
+
+One existing time-driven `nightlyIntegrityJob` trigger runs **Head**. Keep it;
+no new installer or scopes are needed for the staged four-dataset backup.
+After approval/deployment, verify the Clients, Leads and two archive snapshots
+in the existing backup workbook and verify the next scheduled run.
+
+Rolling the web deployment back to the recorded version does not revert
+**Head**, which runs the nightly job. A scheduled-job rollback also requires
+reverting the source through the approved repository/CI workflow. Neither
+code rollback restores data nor changing a spreadsheet ID constitutes recovery.
+See `CHANGELOG-daily-backup-coverage.md` for evidence and limitations.
+
 Two independent deploy paths:
 
 | Layer | Runs it | Trigger |

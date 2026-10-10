@@ -1,0 +1,37 @@
+{
+  "runId": "2026-10-09T12:18:16.602Z",
+  "spreadsheetId": "1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0",
+  "scriptId": "1IMz_TagTQBCsoK84TNHL5kBnBslH5W7jaZ20RFKA4dqkqfrbDHN42oE_",
+  "sourceCommit": "ce3ec62a9c83dcc5c0e4a672b4653a11e095a159",
+  "sourceSHA256": "d1f030c3aec035a2fed69fa2f577a41ab1ba8edee54fcebacdbfda55b7971f56",
+  "executionMode": "Apps Script editor: real doGet/doPost handlers and Google services, sequential stale snapshots; not HTTP/browser/load acceptance",
+  "permissionScope": "https://www.googleapis.com/auth/spreadsheets.currentonly",
+  "passed": 4,
+  "failed": 0,
+  "scenarios": [
+    {
+      "scenario": "stale_create_edit",
+      "status": "PASS",
+      "durationMs": 24177,
+      "detail": "Two stale snapshots retained both leads, fields and timestamps."
+    },
+    {
+      "scenario": "removal_and_archive_upgrade",
+      "status": "PASS",
+      "durationMs": 23762,
+      "detail": "Removed lead stayed absent; 18-column archive upgraded without shifting old data."
+    },
+    {
+      "scenario": "conversion_and_stale_resurrection",
+      "status": "PASS",
+      "durationMs": 29278,
+      "detail": "Conversion and the added lead survived a stale save; submitted price/date retained."
+    },
+    {
+      "scenario": "legacy_archive_read",
+      "status": "PASS",
+      "durationMs": 19212,
+      "detail": "Legacy 18-column archive prevented resurrection and was unchanged."
+    }
+  ]
+}

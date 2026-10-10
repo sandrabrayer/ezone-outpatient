@@ -1,0 +1,141 @@
+{
+  "runId": "2026-10-09T17:17:20.088Z",
+  "sourceCodeSHA256": "05aacbbfb5aa883950967d21f5ce486b620ea6dda90223999623fc00dd3e41d0",
+  "helperSHA256": "fe47ac59889fe8d6f326a2f41a13a5332e5f71f35b758b10a391637d5bd3dbae",
+  "stagingSpreadsheetId": "1MdBzX6eDJIi9m7JXNuz-Z5OUh8e1dS6FjTGiw71D6n0",
+  "scriptId": "1IMz_TagTQBCsoK84TNHL5kBnBslH5W7jaZ20RFKA4dqkqfrbDHN42oE_",
+  "execution": "Actual helper bodies nested verbatim in an editor-only runner. Real Google Sheets and LockService, synthetic data in the bound staging workbook. Current-document-only OAuth. No deployment or trigger.",
+  "results": [
+    {
+      "scenario": "four_datasets_native_typed_readback",
+      "status": "PASS",
+      "durationMs": 8481,
+      "detail": ""
+    },
+    {
+      "scenario": "native_literal_strings_and_scalar_types",
+      "status": "PASS",
+      "durationMs": 1582,
+      "detail": ""
+    },
+    {
+      "scenario": "native_same_day_verified_replacement",
+      "status": "PASS",
+      "durationMs": 1747,
+      "detail": ""
+    },
+    {
+      "scenario": "native_failed_readback_keeps_previous",
+      "status": "PASS",
+      "durationMs": 1657,
+      "detail": ""
+    },
+    {
+      "scenario": "restore_four_datasets_in_place_from_verified_backups",
+      "status": "PASS",
+      "durationMs": 9435,
+      "detail": ""
+    },
+    {
+      "scenario": "native_retention_isolated_to_four_families",
+      "status": "PASS",
+      "durationMs": 5757,
+      "detail": ""
+    }
+  ],
+  "independentReadback": {
+    "acceptanceRange": "_BackupAcceptance!A1:G7",
+    "datasets": [
+      {
+        "source": "Clients",
+        "snapshot": "outpatient-2099-10-09",
+        "restored": "_RestoreProbe-0",
+        "snapshotMatches": true,
+        "restoreMatches": true
+      },
+      {
+        "source": "Leads",
+        "snapshot": "outpatient-leads-2099-10-09",
+        "restored": "_RestoreProbe-1",
+        "snapshotMatches": true,
+        "restoreMatches": true
+      },
+      {
+        "source": "לידים שהוסרו",
+        "snapshot": "outpatient-leads-removed-2099-10-09",
+        "restored": "_RestoreProbe-2",
+        "snapshotMatches": true,
+        "restoreMatches": true
+      },
+      {
+        "source": "Clients-removed",
+        "snapshot": "outpatient-clients-removed-2099-10-09",
+        "restored": "_RestoreProbe-3",
+        "snapshotMatches": true,
+        "restoreMatches": true
+      }
+    ],
+    "typedValues": {
+      "phone": "0500000001",
+      "literalFormulaText": "=1+1",
+      "leadingApostrophe": "'literal",
+      "amount": 1200.5,
+      "flag": true,
+      "datePreservedByActualGASReadback": true,
+      "isoTimestamp": "2026-10-09T10:11:12.000Z",
+      "noFormulaCells": true
+    }
+  },
+  "localValidation": {
+    "tests": 1134,
+    "passed": 1134,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 24358.698404,
+    "node": "24.19.0",
+    "playwright": "1.51.1",
+    "newBackupCases": 15,
+    "focusedBackupTests": 42,
+    "audit": {
+      "high": 0,
+      "critical": 0,
+      "moderate": 1
+    }
+  },
+  "productionChanged": false,
+  "permissionsChanged": false,
+  "limits": [
+    "Native test targets helper functions in one dummy workbook; the complete cross-workbook nightly job is covered locally, not executed against production.",
+    "Values and dates are backed up; original formulas, formatting, protections and workbook/project settings are not a full-workbook backup.",
+    "Four daily sheets are published individually, not atomically as one transaction.",
+    "Existing production trigger presence and displayed error rate were inspected. Alert delivery and a fresh full-workbook production backup remain unverified.",
+    "An intentionally failed temporary snapshot remains for inspection and is excluded from retention."
+  ],
+  "productionReadOnlyCheck": {
+    "checkedOn": "2026-10-09",
+    "scriptId": "1JSI3Ahqnen0pxi1x5q24nBku8Nk8I5iFNqRC-yMcTv1EDKTh6KhmSuSX",
+    "boundWorkbookId": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+    "bindingVerifiedIn": "Apps Script Project Details > Container",
+    "activeDeploymentId": "AKfycbxedGgtJxy6ICWnmX12riRZu_ZCMdNgsQecqcOzgqz7c_UzmjyF921NSSnj3syFOwWYIw",
+    "activeVersion": 92,
+    "deploymentDescriptionCommit": "8d9a5be56a69bff18a3debceb4fc5c4fe48db5a6",
+    "deploymentExecuteAs": "Owner",
+    "deploymentAccess": "Anyone",
+    "trigger": {
+      "count": 1,
+      "handler": "nightlyIntegrityJob",
+      "deployment": "Head",
+      "event": "Time-based",
+      "displayedErrorRate": "0%",
+      "displayedLastRun": "Oct 8, 2026, 4:21:15 PM",
+      "timezoneNotYetNormalized": true,
+      "scheduleUI": {
+        "frequency": "Day timer",
+        "window": "2am to 3am",
+        "displayedTimezone": "GMT-07:00",
+        "note": "Recorded exactly as shown; no schedule edit saved. Do not infer an Israel-time schedule from this UI label."
+      }
+    },
+    "mutations": false
+  }
+}

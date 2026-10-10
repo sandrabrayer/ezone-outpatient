@@ -1,0 +1,126 @@
+{
+  "description": "Synthetic records only. Baseline headers observed 2026-10-09; no production rows copied.",
+  "sourceCommit": "970171522f4eca097294d187e13ab4c166d5fb42",
+  "sheets": [
+    {
+      "name": "Leads",
+      "headers": [
+        "id",
+        "name",
+        "phone",
+        "serviceType",
+        "location",
+        "note",
+        "stage",
+        "sessionsPerWeek",
+        "pricePerSession",
+        "startDate",
+        "created",
+        "introDateTime",
+        "house_of_origin",
+        "not_relevant_reason",
+        "not_relevant_note",
+        "assignedTo",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "rows": [
+        {
+          "id": "fixture-a",
+          "name": "פניית בדיקה א",
+          "phone": "0500000001",
+          "serviceType": "פרטני",
+          "location": "רעננה הפרדס",
+          "note": "נתוני דמה בלבד",
+          "stage": "פרטים אישיים",
+          "created": "2026-10-01",
+          "house_of_origin": "raanana",
+          "assignedTo": "ורד",
+          "updatedAt": "2026-10-09T00:00:00.000Z",
+          "updatedBy": "fixture-user"
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "headers": [
+        "id",
+        "name",
+        "serviceType",
+        "location",
+        "sessionsPerWeek",
+        "pricePerSession",
+        "startDate",
+        "status",
+        "exitDate",
+        "fromLead",
+        "source",
+        "notes",
+        "billingType",
+        "billingDay",
+        "bundleSize",
+        "bundlePrice",
+        "sessionsUsed",
+        "bundlePaid",
+        "house_of_origin",
+        "responsiblePerson",
+        "serviceScope",
+        "treatmentContactPhone",
+        "payerName",
+        "payerPhone",
+        "paymentLink",
+        "phone",
+        "paymentStatus",
+        "paymentDate",
+        "nextBillingDate",
+        "creditsOwed",
+        "clinicalTreatmentType",
+        "packageChangeDate",
+        "assignedTo",
+        "paymentAmountOverrides",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "rows": []
+    },
+    {
+      "name": "לידים שהוסרו",
+      "headers": [
+        "id",
+        "name",
+        "phone",
+        "serviceType",
+        "location",
+        "note",
+        "stage",
+        "sessionsPerWeek",
+        "pricePerSession",
+        "startDate",
+        "created",
+        "introDateTime",
+        "house_of_origin",
+        "not_relevant_reason",
+        "not_relevant_note",
+        "removedAt",
+        "originSheet",
+        "assignedTo"
+      ],
+      "rows": [
+        {
+          "id": "fixture-removed",
+          "name": "פניית בדיקה שהוסרה",
+          "phone": "0500000003",
+          "serviceType": "פרטני",
+          "location": "רעננה הפרדס",
+          "note": "נתוני דמה בלבד",
+          "stage": "פרטים אישיים",
+          "created": "2026-10-01",
+          "house_of_origin": "raanana",
+          "removedAt": "2026-10-08T00:00:00.000Z",
+          "originSheet": "Leads",
+          "assignedTo": "ורד"
+        }
+      ]
+    }
+  ]
+}
