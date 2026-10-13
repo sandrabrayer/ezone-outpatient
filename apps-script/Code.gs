@@ -4021,6 +4021,7 @@ function _saveContinuation(payload) {
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
+    if (action === 'getCrmLeads' || action === 'getCrmContinuation') return _json({ ok: false, error: 'unauthorized' });
     if (action === 'getData')      return _json(_getData());
     if (action === 'getPayments')  return _json(_getPayments());
     if (action === 'getCharges')   return _json(_getCharges());
@@ -4095,6 +4096,10 @@ function doPost(e) {
     if (e.postData && e.postData.contents) {
       try { payload = JSON.parse(e.postData.contents); } catch (err) {}
       if (payload && payload.action) action = payload.action;
+    }
+    if (action === 'getCrmLeads' || action === 'getCrmContinuation') {
+      if (payload.action !== action) return _json({ ok: false, error: 'unauthorized' });
+      return crmReadEntry_(payload);
     }
     if (action === 'saveAll') {
       return _json(_saveAll({
@@ -5898,4 +5903,66 @@ function deleteAutoSnapshotsNow() {
   Logger.log('deleteAutoSnapshotsNow: ' + trashed + ' auto-snapshot(s) trashed. ' +
     'A manual ' + SNAPSHOT_NAME_PREFIX + ' copy is never touched.');
   return { trashed: trashed };
+}
+
+
+/* CRM-02 source projections. This path never calls ensure/backfill, caches,
+ * audit logging, locks or writes. One range read per sheet; only allowlisted
+ * fields leave this function. Missing/schema-invalid sources are NOT empty.
+ * complete means the entire selected source was read, not atomic cross-sheet
+ * consistency, a business SLA, a person match or a persistent task queue. */
+function crmReadRows_(sheetName, fields, dates) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sh) throw new Error('crm_source_unavailable');
+  if (sh.getLastRow() > 10001) throw new Error('crm_source_unavailable');
+  const values = sh.getDataRange().getValues();
+  const headers = values[0] || [];
+  const indexes = fields.map(function (field) {
+    const matches = headers.reduce(function (a, h, i) { if (h === field) a.push(i); return a; }, []);
+    if (matches.length !== 1) throw new Error('crm_source_unavailable');
+    return matches[0];
+  });
+  return values.slice(1).filter(function (row) {
+    return row.some(function (v) { return v !== '' && v !== null; });
+  }).map(function (row) {
+    const out = {};
+    fields.forEach(function (field, i) {
+      let v = row[indexes[i]];
+      if (v === undefined || v === null) v = '';
+      if (Object.prototype.toString.call(v) === '[object Date]') {
+        if (isNaN(v.getTime())) throw new Error('crm_source_unavailable');
+        v = dates.indexOf(field) >= 0
+          ? Utilities.formatDate(v, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'yyyy-MM-dd')
+          : v.toISOString();
+      }
+      if (typeof v !== 'string') throw new Error('crm_source_unavailable');
+      out[field] = v;
+    });
+    return out;
+  });
+}
+function crmProjection_(dataset, rows) {
+  return { ok: true, contract: 'crm-source-v1', dataset: dataset,
+    health: 'fresh', complete: true, observedAt: new Date().toISOString(), rows: rows };
+}
+
+function crmReadEntry_(payload) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const expected = props.getProperty('CRM_READ_SECRET');
+    const got = payload && payload.crmReadSecret;
+    if (!expected || typeof got !== 'string' || !crmSecretEqual_(expected, got)) return _json({ ok: false, error: 'unauthorized' });
+    if (props.getProperty('CRM_READS') !== '1') return _json({ ok: false, error: 'crm_disabled' });
+    const leads = payload.action === 'getCrmLeads';
+    const rows = leads
+      ? crmReadRows_('Leads', ['id', 'name', 'stage', 'assignedTo', 'introDateTime', 'updatedAt'], [])
+      : crmReadRows_(CONTINUATION_SHEET, ['key', 'name', 'house', 'entryDate', 'meetingDate', 'outcome', 'updatedAt'], ['entryDate', 'meetingDate']);
+    if (rows.some(function (r) { return !(leads ? r.id : r.key).trim(); })) throw new Error('crm_source_unavailable');
+    return _json(crmProjection_(leads ? 'outpatient.leads' : 'outpatient.continuation', rows));
+  } catch (_) { return _json({ ok: false, error: 'crm_source_unavailable' }); }
+}
+function crmSecretEqual_(a, b) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
 }
