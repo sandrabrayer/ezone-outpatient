@@ -248,7 +248,33 @@ function requireContinuationConfig(res) {
 const ROSTER_CACHE_TTL_MS = 60 * 1000;
 const rosterCache = { data: null, status: null, timestamp: 0 };
 
-app.get('/api/sheets', requireSession, async (req, res) => {
+// Dormant CRM-02 observations: the SAME shared-session authority as the
+// existing leads/continuation source. The chosen user name is NOT a role.
+// No cross-app personal grants are inferred or accepted from a client.
+const { crmPost } = require('./lib/crm/transport');
+const CRM_READ_SECRET = process.env.CRM_READ_SECRET || '';
+require('./lib/crm/read-routes').installCrmReadRoutes(app, {
+  source: 'outpatient', requireSession, authorize: () => true,
+  enabled: process.env.CRM_READS === '1',
+  read: action => {
+    if (!SHEETS_URL || !CRM_READ_SECRET) throw Error('crm_not_configured');
+    return crmPost(SHEETS_URL, { action, crmReadSecret: CRM_READ_SECRET });
+  },
+  readRoster: action => {
+    if (!DASHBOARD_SHEETS_URL || !OCCUPANCY_SECRET) throw Error('crm_not_configured');
+    return crmPost(DASHBOARD_SHEETS_URL, { action, secret: OCCUPANCY_SECRET });
+  },
+});
+
+function refuseCrmProxy(req, res, next) {
+  const action = req.method === 'GET' ? req.query.action : req.body && req.body.action;
+  if (['getCrmLeads', 'getCrmContinuation', 'getCrmAdmittedRoster'].includes(action)) {
+    return res.status(403).json({ ok: false, error: 'crm_use_dedicated_route' });
+  }
+  next();
+}
+
+app.get('/api/sheets', requireSession, refuseCrmProxy, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
 
   const action = (req.query && req.query.action) || 'getData';
@@ -307,7 +333,7 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   }
 });
 
-app.post('/api/sheets', requireSession, async (req, res) => {
+app.post('/api/sheets', requireSession, refuseCrmProxy, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
   try {
     // Pass through whatever action the client asked for. saveAll is the

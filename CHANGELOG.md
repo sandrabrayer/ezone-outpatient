@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM-02 read projections (draft)
+- Add dormant, authenticated operational source readers and connect the tested
+  adapters. No sheet mutation, new roles, client UI or production activation.
+  See `CHANGELOG-crm-read-projections.md` and `docs/crm-read-projections.md`.
+
 ### Daily backup coverage
 - Extend the existing nightly backup to Leads and both removal archives as
   well as Clients. Capture under the save lock, then release it before backup
