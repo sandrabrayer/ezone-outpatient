@@ -65,6 +65,7 @@ function stagingReset_() {
 
 function stagingPost_(payload) {
   stagingGuard_();
+  payload = Object.assign({}, payload, { proxySecret: PropertiesService.getScriptProperties().getProperty('OUTPATIENT_PROXY_SECRET') });
   var response = JSON.parse(doPost({ parameter: {}, postData: { contents: JSON.stringify(payload) } }).getContent());
   stagingAssert_(response.ok === true, 'handler failed: ' + JSON.stringify(response));
   SpreadsheetApp.flush();
@@ -73,7 +74,7 @@ function stagingPost_(payload) {
 
 function stagingGet_() {
   stagingGuard_();
-  var data = JSON.parse(doGet({ parameter: { action: 'getData' } }).getContent());
+  var data = JSON.parse(doGet({ parameter: { action: 'getData', proxySecret: PropertiesService.getScriptProperties().getProperty('OUTPATIENT_PROXY_SECRET') } }).getContent());
   stagingAssert_(data.ok === true, 'getData failed');
   return data;
 }

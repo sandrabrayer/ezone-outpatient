@@ -33,6 +33,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -71,6 +72,11 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))" \
             || { echo "::error::CLASPRC_JSON is not valid JSON. Re-run 'clasp login' locally and re-copy the whole ~/.clasprc.json into the secret. See DEPLOY.md."; exit 1; }
+
+      # The old source ignores proxySecret, so Node can roll forward safely.
+      # Never tighten the source while the old Node version is still serving.
+      - name: Wait for matching authenticated Node proxy
+        run: node scripts/wait-for-source-proxy.js
 
       - name: Push code to the Apps Script project
         run: clasp push -f

@@ -1,6 +1,31 @@
 # Deploy — E-ZONE Outpatient
 
-## Pending data-integrity release (draft PR #113)
+## OP-01 source authentication candidate — release prerequisites
+
+This release needs a new dedicated `OUTPATIENT_PROXY_SECRET` in both the
+Outpatient Railway service and its existing Apps Script Script Properties.
+The value must be identical, randomly generated, at least 32 characters, and
+separate from all existing keys. Do not put it in a PR, chat, code or log.
+Sandra/the configuration owner must set and verify it before approval/merge.
+Under `CLAUDE.md` Codex must not change Railway settings or variables.
+
+Also verify existing `DEBT_STATUS_SECRET` and `TREATMENT_PLANS_SECRET` in BOTH
+Therapists Node and Therapists Apps Script match the Outpatient Script Properties.
+The previously optional source keys now fail closed. Establish whether the
+win-back consumer is in use before tightening its previously optional key.
+All other consumer keys retain their current names/scopes.
+
+The automatic source workflow first waits for the **exact merge commit** at
+Node `/api/version` and successful `/healthz` (which now requires a configured
+proxy credential). Only then does it push/publish Apps Script. The previous
+source ignores the added proxy credential, enabling this ordered transition.
+A timeout leaves the source untouched. No new deployment ID or source workbook.
+The health check confirms only local Node configuration, not key equality,
+consumer configuration or authenticated end-to-end access. Those are separate
+release checks. See the full inventory, manual click paths, acceptance and
+rollback constraints in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
+
+## Historical data-integrity release notes (#113; now deployed)
 
 Sandra's explicit production approval and green candidate CI are required.
 The authorized whole-workbook backup was created at 21:12:58 Israel on

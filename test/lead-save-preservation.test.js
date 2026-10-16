@@ -129,10 +129,11 @@ test('an unchanged echo preserves stamps and does not report a stale save', () =
   assert.equal(result.stamped.leads, 0);
 });
 
-test('the legacy GET save path has the same preservation guard', () => {
+test('the legacy GET save path is blocked without changing leads', () => {
   const sb = sandbox([A, B]);
   const result = JSON.parse(sb.ctx.doGet({ parameter: { action: 'saveAll', payload: JSON.stringify({ leads: [A], clients: [] }) } }).getContent());
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'unauthorized');
   assert.deepEqual(ids(sb), [A.id, B.id]);
 });
 

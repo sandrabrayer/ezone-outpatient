@@ -18,6 +18,7 @@
  * Run with:  npm test
  */
 
+process.env.OUTPATIENT_PROXY_SECRET = 'fixture-proxy-key-with-at-least-32-characters';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

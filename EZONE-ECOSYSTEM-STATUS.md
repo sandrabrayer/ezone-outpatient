@@ -1,3 +1,16 @@
+# Outpatient local update — 2026-10-16
+
+OP-01 source-authentication work is an unmerged candidate based on `afa9e8c`.
+Internal HTTP actions require a new dedicated Outpatient Node → Apps Script key;
+consumer read keys become mandatory. See `docs/source-auth-boundary.md` for
+caller inventory, preconditions, Node-first release order and remaining checks.
+No role expansion, schema/calculation change, production data access or deployment
+is part of this preparation. Other apps and the CRM drafts remain separate.
+The source review also found a legacy Therapists `recordTreatmentGiven` sender
+without a matching route in this Outpatient baseline. Track under OP-06; do not
+add a billing receiver as part of the security fix. The snapshot below is older
+ecosystem history, not evidence that all current apps have been audited.
+
 # E-ZONE Ecosystem Status — updated September 10, 2026
 
 Add this file to the knowledge of EVERY E-Zone app Project (all eight), replacing

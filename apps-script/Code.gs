@@ -2480,10 +2480,9 @@ function _json(obj) {
  * are deliberately NOT included — the dashboard never receives billing
  * or payer data even though it lives in the same sheet.
  *
- * Auth: optional shared secret. If a Script Property named
+ * Auth: required shared secret (fail closed). If a Script Property named
  * 'WINBACK_SECRET' exists, the request must pass ?secret=<value> that
- * matches. If the property is absent the endpoint is open (URL-only
- * obscurity — same security level as every other action on this script).
+ * matches. An absent/empty property rejects the request before source access.
  */
 var LOST_LEAD_STAGE_HE = 'לא רלוונטי';
 var DISCHARGED_CLIENT_STATUS_HE = 'סיים טיפול';
@@ -2501,7 +2500,7 @@ var DEACTIVATED_CLIENT_STATUS_HE = 'לא פעיל';
 
 function _winbackAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('WINBACK_SECRET');
-  if (!expected) return true; // not configured → open
+  if (!expected) return false; // not configured → reject
   var got = (params && params.secret) ? String(params.secret) : '';
   return got === expected;
 }
@@ -2577,14 +2576,12 @@ function _getWinbackSource() {
  * level (zero rows = 'unknown'), not by reinterpreting an existing blank row.
  * Included regardless of client status (debt survives discharge).
  *
- * Auth: optional shared secret, same model as getWinbackSource. If a Script
- * Property named 'DEBT_STATUS_SECRET' exists, the request must pass
- * ?secret=<value> that matches. If the property is absent the endpoint is open
- * (URL-only obscurity — same level as every other action on this script).
+ * Auth: required 'DEBT_STATUS_SECRET', like getWinbackSource. Missing, empty
+ * or mismatching credentials reject the request before source access.
  */
 function _debtAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('DEBT_STATUS_SECRET');
-  if (!expected) return true; // not configured → open
+  if (!expected) return false; // not configured → reject
   var got = (params && params.secret) ? String(params.secret) : '';
   return got === expected;
 }
@@ -2669,12 +2666,12 @@ function _getDebtStatus() {
  * dropping them silently), serviceType, sessions (sessionsPerWeek), status,
  * startDate, exitDate, renewalDate (date only). NO billing/payer data.
  *
- * Auth: optional shared secret 'TREATMENT_PLANS_SECRET', same model as
+ * Auth: required shared secret 'TREATMENT_PLANS_SECRET', same model as
  * getWinbackSource / getDebtStatus.
  */
 function _treatmentPlansAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('TREATMENT_PLANS_SECRET');
-  if (!expected) return true; // not configured -> open
+  if (!expected) return false; // not configured -> reject
   var got = (params && params.secret) ? String(params.secret) : '';
   return got === expected;
 }
@@ -2753,7 +2750,7 @@ function _getTreatmentPlans() {
  *
  * Inbound: the E-Zone Therapists app POSTs { action:'flagStop', secret, phone,
  * name, reportedBy?, note? } directly to this /exec. FAIL-CLOSED auth: the
- * shared secret 'STOP_FLAG_SECRET' Script Property MUST exist and match — unlike
+ * shared secret 'STOP_FLAG_SECRET' Script Property MUST exist and match — like
  * the read endpoints, an unset secret REJECTS (this is an external write).
  *
  * _flagStop validates input, normalizes the phone to canonical leading-zero
@@ -2762,7 +2759,7 @@ function _getTreatmentPlans() {
  * clientId, and appends ONE row with status='pending'. Clients is never touched.
  *
  * getStopFlags / resolveStopFlag(id) are INTERNAL (Vered's dashboard via the Node
- * proxy) — open, same trust level as getData/saveAll. resolveStopFlag(id) marks a
+ * proxy) — authenticated by the dedicated proxy key, like getData/saveAll. resolveStopFlag(id) marks a
  * flag resolved when Vered completes the discharge; it does not discharge.
  *
  * resolveStopFlag can ALSO be called by the therapists app as a SECURED receiver
@@ -2857,7 +2854,7 @@ function _getSessionLog() {
  * Inbound: the E-Zone Therapists app POSTs { action:'setClinicalType', secret,
  * phone, clinicalTreatmentType } directly to this /exec. FAIL-CLOSED auth: the
  * shared secret 'CLINICAL_TYPE_SECRET' Script Property MUST exist and match —
- * same model as flagStop, NOT the fail-open read pattern. An unset/empty/wrong
+ * same model as flagStop, also fail-closed for reads. An unset/empty/wrong
  * secret REJECTS (this is an external write to Clients).
  *
  * Behaviour (never fail-open, never guess):
@@ -2932,7 +2929,7 @@ function _setClinicalType(payload) {
  *   { action:'recordSessionOutcome', secret, sessionId, phone, therapist,
  *     clinicalTreatmentType, date, outcome, patientName?, freqPerWeek? }
  * FAIL-CLOSED auth ('SESSION_OUTCOME_SECRET' Script Property must exist + match —
- * same model as flagStop / setClinicalType, NOT the fail-open read pattern).
+ * same model as flagStop / setClinicalType, also fail-closed for reads).
  *
  * Computes the therapist pay + client session value for the session and logs ONE
  * reconciliation row to the SessionLog tab, UPSERTED by sessionId (a corrected
@@ -3751,7 +3748,7 @@ function _getMyStopAlerts() {
  * disposition "released to outpatient care" — pushing that patient in as a new
  * outpatient lead. FAIL-CLOSED auth (mirrors flagStop, an external write): the
  * shared secret 'CREATE_LEAD_SECRET' Script Property MUST exist and match —
- * unlike the read endpoints (open when unset), a missing/empty/wrong secret is
+ * like the read endpoints, a missing/empty/wrong secret is
  * rejected. The secret is read ONLY from Script Properties and is never logged.
  *
  * Appends ONE Leads row as a brand-new lead (stage 'new', created = today),
@@ -3852,7 +3849,7 @@ function _createLead(payload) {
 
 /* ===== Merge duplicate clients =====
  *
- * Internal dashboard action (open, same trust level as saveAll). Merges one or
+ * Internal dashboard action (dedicated proxy credential, like saveAll). Merges one or
  * more duplicate client rows into a survivor:
  *   1. Repoint every Payments.clientId / ClientCharges.clientId from a dup to
  *      the survivor (and refresh Payments.clientName) — done BEFORE removal so
@@ -3947,8 +3944,8 @@ function _mergeClients(payload) {
 
 /* ===== Continuation track (מסלול המשך) — internal workflow read/write ==========
  *
- * Auth: NONE — same posture as getData / saveAll / savePayment. These are the
- * app's own internal actions, reached only through the Railway server; they
+ * Auth: the dedicated Node proxy credential, like getData / saveAll / savePayment. These are the
+ * app's own internal actions, authenticated at this source boundary; they
  * carry no cross-app secret (unlike getDebtStatus / createLead / flagStop).
  *
  * The sheet is auto-created on first read via _ensureSheet, exactly like every
@@ -4018,9 +4015,108 @@ function _saveContinuation(payload) {
   }
 }
 
+/* ===== Source authentication boundary (OP-01) =============================
+ * Every HTTP action is classified before any business handler or Sheets access.
+ * Browser sessions end at Node; internal actions require its dedicated key.
+ * Cross-app keys retain their existing scopes and never authorize internal CRUD.
+ * Unknown actions/methods and missing configuration fail closed. See
+ * docs/source-auth-boundary.md for the inventory and coordinated rollout.
+ */
+var SOURCE_GET_AUTH = {
+  getData: 'OUTPATIENT_PROXY_SECRET',
+  getPayments: 'OUTPATIENT_PROXY_SECRET',
+  getCharges: 'OUTPATIENT_PROXY_SECRET',
+  getSettings: 'OUTPATIENT_PROXY_SECRET',
+  getExtraSessionRequests: 'OUTPATIENT_PROXY_SECRET',
+  getWinbackSource: 'WINBACK_SECRET',
+  getDebtStatus: 'DEBT_STATUS_SECRET',
+  getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
+  scanClientColumns: 'COLUMN_REPAIR_SECRET',
+  getStopFlags: 'OUTPATIENT_PROXY_SECRET',
+  getStopAlerts: 'STOP_ALERTS_SECRET',
+  getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
+  getSessionLog: 'OUTPATIENT_PROXY_SECRET',
+  getContinuation: 'OUTPATIENT_PROXY_SECRET',
+  getCredits: 'OUTPATIENT_PROXY_SECRET',
+  getRemovedClients: 'OUTPATIENT_PROXY_SECRET'
+};
+var SOURCE_POST_AUTH = {
+  saveAll: 'OUTPATIENT_PROXY_SECRET',
+  getData: 'OUTPATIENT_PROXY_SECRET',
+  getPayments: 'OUTPATIENT_PROXY_SECRET',
+  getCharges: 'OUTPATIENT_PROXY_SECRET',
+  getSettings: 'OUTPATIENT_PROXY_SECRET',
+  getWinbackSource: 'WINBACK_SECRET',
+  getDebtStatus: 'DEBT_STATUS_SECRET',
+  getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
+  flagStop: 'STOP_FLAG_SECRET',
+  createLead: 'CREATE_LEAD_SECRET',
+  scanClientColumns: 'COLUMN_REPAIR_SECRET',
+  setClinicalType: 'CLINICAL_TYPE_SECRET',
+  deactivateClient: 'DEACTIVATE_CLIENT_SECRET',
+  requestExtraSession: 'EXTRA_SESSION_SECRET',
+  approveExtraSession: 'OUTPATIENT_PROXY_SECRET',
+  recordSessionOutcome: 'SESSION_OUTCOME_SECRET',
+  correctSessionOutcome: 'OUTPATIENT_PROXY_SECRET',
+  markForwarded: 'OUTPATIENT_PROXY_SECRET',
+  getStopFlags: 'OUTPATIENT_PROXY_SECRET',
+  createStopAlert: 'OUTPATIENT_PROXY_SECRET',
+  getStopAlerts: 'STOP_ALERTS_SECRET',
+  markStopAlertRead: 'STOP_ALERTS_SECRET',
+  markStopAlertUnread: 'STOP_ALERTS_SECRET',
+  resumeTreatmentAlert: 'OUTPATIENT_PROXY_SECRET',
+  getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
+  getSessionLog: 'OUTPATIENT_PROXY_SECRET',
+  getContinuation: 'OUTPATIENT_PROXY_SECRET',
+  saveContinuation: 'OUTPATIENT_PROXY_SECRET',
+  resolveStopFlag: 'resolveStopFlag',
+  mergeClients: 'OUTPATIENT_PROXY_SECRET',
+  getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
+  restoreRemovedClient: 'OUTPATIENT_PROXY_SECRET',
+  saveSettings: 'OUTPATIENT_PROXY_SECRET',
+  savePayment: 'OUTPATIENT_PROXY_SECRET',
+  updatePayment: 'OUTPATIENT_PROXY_SECRET',
+  getCredits: 'OUTPATIENT_PROXY_SECRET',
+  saveCredit: 'OUTPATIENT_PROXY_SECRET',
+  savePaymentAmountOverride: 'OUTPATIENT_PROXY_SECRET',
+  repairStaleNextBilling: 'OUTPATIENT_PROXY_SECRET',
+  saveCharge: 'OUTPATIENT_PROXY_SECRET',
+  updateCharge: 'OUTPATIENT_PROXY_SECRET',
+  removeCharge: 'OUTPATIENT_PROXY_SECRET',
+  removePayment: 'OUTPATIENT_PROXY_SECRET',
+  removeChargesForClient: 'OUTPATIENT_PROXY_SECRET',
+  removePaymentsForClient: 'OUTPATIENT_PROXY_SECRET',
+  removeLead: 'OUTPATIENT_PROXY_SECRET'
+};
+
+function _sourceAuthOk(action, method, params, payload) {
+  var policy = method === 'GET' ? SOURCE_GET_AUTH : SOURCE_POST_AUTH;
+  if (typeof action !== 'string' || !Object.prototype.hasOwnProperty.call(policy, action)) return false;
+  var key = policy[action];
+  // Match the existing receiver's dispatch exactly: a BODY secret selects the
+  // phone receiver, not a query parameter or the Node-only proxySecret field.
+  if (key === 'resolveStopFlag') {
+    key = payload && payload.secret != null ? 'STOP_FLAG_SECRET' : 'OUTPATIENT_PROXY_SECRET';
+  }
+  var supplied = Object.assign({}, params || {}, payload || {});
+  var field = key === 'OUTPATIENT_PROXY_SECRET' ? 'proxySecret' : 'secret';
+  var got = supplied[field];
+  if (key === 'STOP_FLAG_SECRET' && action === 'resolveStopFlag') got = payload.secret;
+  var expected = PropertiesService.getScriptProperties().getProperty(key);
+  if (typeof expected !== 'string' || !expected || typeof got !== 'string') return false;
+  if (key === 'OUTPATIENT_PROXY_SECRET' && expected.trim().length < 32) return false;
+  if (got.length !== expected.length) return false;
+  var diff = 0;
+  for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}
+
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'getData';
+    if (!_sourceAuthOk(action, 'GET', e && e.parameter, null)) {
+      return _json({ ok: false, error: 'unauthorized' });
+    }
     if (action === 'getData')      return _json(_getData());
     if (action === 'getPayments')  return _json(_getPayments());
     if (action === 'getCharges')   return _json(_getCharges());
@@ -4072,16 +4168,6 @@ function doGet(e) {
     // INTERNAL dashboard read (same trust level as getData): un-restored
     // Clients-removed tombstones, for the admin restore surface.
     if (action === 'getRemovedClients') return _json(_getRemovedClients());
-    if (action === 'saveAll') {
-      var payload = { leads: [], clients: [] };
-      if (e.parameter.payload) {
-        try { payload = JSON.parse(e.parameter.payload); } catch (err) {}
-      } else {
-        if (e.parameter.leads) try { payload.leads = JSON.parse(e.parameter.leads); } catch (_) {}
-        if (e.parameter.clients) try { payload.clients = JSON.parse(e.parameter.clients); } catch (_) {}
-      }
-      return _json(_saveAll(payload));
-    }
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: String(err) });
@@ -4092,9 +4178,17 @@ function doPost(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) || 'saveAll';
     var payload = {};
-    if (e.postData && e.postData.contents) {
-      try { payload = JSON.parse(e.postData.contents); } catch (err) {}
+    if (e && e.postData && e.postData.contents) {
+      try { payload = JSON.parse(e.postData.contents); } catch (err) {
+        return _json({ ok: false, error: 'invalid_payload' });
+      }
       if (payload && payload.action) action = payload.action;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return _json({ ok: false, error: 'invalid_payload' });
+    }
+    if (!_sourceAuthOk(action, 'POST', e && e.parameter, payload)) {
+      return _json({ ok: false, error: 'unauthorized' });
     }
     if (action === 'saveAll') {
       return _json(_saveAll({
@@ -4259,7 +4353,7 @@ function doPost(e) {
     if (action === 'resolveStopFlag') {
       // A request carrying a secret is the secured therapists-app receiver
       // (resolve by canonical phone, fail-closed). Without a secret it is the
-      // internal dashboard path (resolve one row by id, open) — unchanged.
+      // internal dashboard path (resolve one row by id, proxy-key authenticated).
       if (payload && payload.secret != null) {
         return _json(_resolveStopFlagByPhone(payload));
       }

@@ -37,6 +37,7 @@
  * pattern). No live backend, no real secret — dummy fixtures only.
  */
 
+process.env.OUTPATIENT_PROXY_SECRET = 'fixture-proxy-key-with-at-least-32-characters';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -340,7 +341,7 @@ function makeSandbox(opts) {
   const log = [];
   const sheets = {};
   Object.keys(opts.sheets || {}).forEach((n) => { sheets[n] = fakeSheet(n, opts.sheets[n], log); });
-  const props = Object.assign({}, opts.props || {});
+  const props = Object.assign({ OUTPATIENT_PROXY_SECRET: 'fixture-proxy-key-with-at-least-32-characters' }, opts.props || {});
   const ss = {
     getId: () => 'LIVE',
     getSheetByName: (n) => sheets[n] || null,
@@ -366,7 +367,7 @@ function makeSandbox(opts) {
 let uuidSeq = 0;
 
 function post(ctx, payload, params) {
-  const out = ctx.doPost({ postData: { contents: JSON.stringify(payload) }, parameter: params || {} });
+  const out = ctx.doPost({ postData: { contents: JSON.stringify({ proxySecret: 'fixture-proxy-key-with-at-least-32-characters', ...payload }) }, parameter: params || {} });
   return JSON.parse(out.getContent());
 }
 function headersOf(ctx, name) { return plain(ctx[name]); }

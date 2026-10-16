@@ -32,7 +32,7 @@ function sheet(name, initial) {
 }
 
 function sandbox(leads = [], clients = []) {
-  const sheets = {}, props = {};
+  const sheets = {}, props = { OUTPATIENT_PROXY_SECRET: 'fixture-proxy-key-with-at-least-32-characters' };
   let held = false, uuid = 0;
   const lock = { tryLock: () => { held = true; return true; }, waitLock: () => { held = true; }, releaseLock: () => { held = false; } };
   const ctx = {
@@ -52,7 +52,7 @@ function sandbox(leads = [], clients = []) {
     const grid = sheets[name]?.grid || [];
     return grid.slice(1).filter((r) => r.some((v) => v !== '')).map((r) => Object.fromEntries(grid[0].map((h, i) => [h, r[i] ?? ''])));
   }
-  function post(payload) { return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(payload) }, parameter: {} }).getContent()); }
+  function post(payload) { return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ proxySecret: props.OUTPATIENT_PROXY_SECRET, ...payload }) }, parameter: {} }).getContent()); }
   return { ctx, sheets, props, seed, rows, post, lock, isLocked: () => held,
     save: (leads, clients = [], extra = {}) => post({ action: 'saveAll', user: 'fixture-user', leads, clients, ...extra }) };
 }
