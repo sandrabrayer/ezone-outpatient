@@ -1,5 +1,19 @@
 # E-ZONE Ecosystem Status — updated September 10, 2026
 
+## Outpatient incremental checkpoint — 2026-10-16
+
+The deployed branch was rechecked at `afa9e8c`. OP-01 draft #115 remains open
+at `beefa2c`, waiting for owner configuration and separate release approval.
+OP-02a is prepared on `codex/op02-financial-locks-20261016`, with two source
+lock-refusal fixes and 30 new real-handler tests (full local suite: 1,155 pass,
+0 fail, 9 browser skips). No second PR, merge, deployment or live financial
+write. Auth, schema, calculations, dependencies and frontend stay unchanged
+in this candidate. See `docs/financial-write-integrity.md` for reproduced UI
+partial-save bugs and the next OP-02b acceptance criteria. OP-03 scheduled
+backup proof, performance, business controls and CRM remain open. This narrow
+checkpoint does not certify the other apps or refresh the historical inventory
+below; the current ten-app queue is in Sandra's work-plan Page.
+
 Add this file to the knowledge of EVERY E-Zone app Project (all eight), replacing
 the July 22 version, so any future chat/session starts from the true state. This
 Sep 10 revision is the UNION of every repo's copy (the per-repo sections that had

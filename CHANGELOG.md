@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Financial write lock refusal (OP-02a, prepared only)
+- Refuse payment/charge creates and updates when the script lock cannot be
+  acquired. Return `busy` before accessing Sheets and do not release a lock
+  owned by another request. Existing successful writes and calculations stay
+  unchanged. Thirty real-handler cases pass; ten failed on the deployed base.
+- Full local suite: 1,155 passed, 0 failed, 9 browser skips. Audit: 0 high or
+  critical, 1 existing moderate. No frontend, schema or dependency change.
+- OP-01 draft #115 remains separate and first in the release queue. This
+  candidate is a branch, not a second PR or a deployment. Two UI partial-save
+  bugs are reproduced and remain open; see `CHANGELOG-financial-write-locks.md`
+  and `docs/financial-write-integrity.md` for exact return points.
+
 ### Daily backup coverage
 - Extend the existing nightly backup to Leads and both removal archives as
   well as Clients. Capture under the save lock, then release it before backup

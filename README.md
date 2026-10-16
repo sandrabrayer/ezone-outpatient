@@ -4,6 +4,14 @@ Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israe
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
 through an Apps Script Web App.
 
+## Financial integrity review — prepared, not deployed (2026-10-16)
+
+OP-02a refuses payment/charge writes when the script lock is unavailable.
+Its candidate remains on a separate branch behind security draft #115; no
+second PR or production release is implied. Two UI partial-save problems
+(renewal retry identity and optimistic paid state) are reproduced and remain
+the next required repair. See [scope, evidence and return points](docs/financial-write-integrity.md).
+
 ## Screens
 
 1. **Dashboard** – active clients, monthly revenue, breakdowns by service type,

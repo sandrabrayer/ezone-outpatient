@@ -1,5 +1,21 @@
 # Deploy — E-ZONE Outpatient
 
+## Current queue: OP-01 first, OP-02a branch only (2026-10-16)
+
+Security draft #115 waits for owner configuration and Sandra's separate
+production approval. The financial-lock candidate is saved on
+`codex/op02-financial-locks-20261016`, from deployed base `afa9e8c`, without
+opening a second PR or changing #115. After #115 closes, refresh/rebase onto
+the deployed branch, preserve source authentication, run combined candidate
+CI and prepare the next PR. Neither candidate is deployed by this work.
+
+OP-02a only changes two source lock checks. No source-sheet/configuration or
+frontend/cache changes are required. Release/rollback gates and unresolved
+UI partial-save paths: `CHANGELOG-financial-write-locks.md` and
+`docs/financial-write-integrity.md`. These UI issues prevent closing OP-02.
+The PR #113 section below is historical: it has since deployed, but proof of
+the next scheduled four-copy backup remains open in the work-plan Page.
+
 ## Pending data-integrity release (draft PR #113)
 
 Sandra's explicit production approval and green candidate CI are required.

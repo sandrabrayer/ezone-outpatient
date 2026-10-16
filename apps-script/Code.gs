@@ -1981,7 +1981,7 @@ function _upsertPayment(payment) {
     payment.coverageEnd = '';
   }
   var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
     var sh = _ensurePaymentsSheet();
     var idIdx = PAYMENTS_HEADERS.indexOf('id');
@@ -2249,7 +2249,7 @@ function _upsertCharge(charge) {
   }
   if (!charge.id) return { ok: false, error: 'missing_id' };
   var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var idIdx = CHARGES_HEADERS.indexOf('id');
