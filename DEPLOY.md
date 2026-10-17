@@ -1,8 +1,10 @@
 # Deploy — E-ZONE Outpatient
 
-## OP-01 source authentication candidate — release prerequisites
+## Source authentication — configuration prerequisites
 
-This release needs a new dedicated `OUTPATIENT_PROXY_SECRET` in both the
+OP-01 was released in PR #115 on 2026-10-17 (Node `76de4cc5`, Apps Script @94).
+Keep the configured keys; do not generate or rotate them for routine releases.
+Initial setup requires a dedicated `OUTPATIENT_PROXY_SECRET` in both the
 Outpatient Railway service and its existing Apps Script Script Properties.
 The value must be identical, randomly generated, at least 32 characters, and
 separate from all existing keys. Do not put it in a PR, chat, code or log.
@@ -15,7 +17,8 @@ The previously optional source keys now fail closed. Establish whether the
 win-back consumer is in use before tightening its previously optional key.
 All other consumer keys retain their current names/scopes.
 
-The automatic source workflow first waits for the **exact merge commit** at
+The explicitly dispatched source workflow first verifies the production branch
+and approved full SHA, then waits for the **exact merge commit** at
 Node `/api/version` and successful `/healthz` (which now requires a configured
 proxy credential). Only then does it push/publish Apps Script. The previous
 source ignores the added proxy credential, enabling this ordered transition.
@@ -57,31 +60,56 @@ reverting the source through the approved repository/CI workflow. Neither
 code rollback restores data nor changing a spreadsheet ID constitutes recovery.
 See `CHANGELOG-daily-backup-coverage.md` for evidence and limitations.
 
-Two independent deploy paths:
+Two ordered release phases:
 
 | Layer | Runs it | Trigger |
 | --- | --- | --- |
 | **Node/Express + frontend** | Railway | Auto-deploys the connected branch (`claude/youthful-volta-laarnk`, per `EZONE-ECOSYSTEM-STATUS.md`). |
-| **Apps Script backend** (`apps-script/**`) | GitHub Actions → clasp | Push to `claude/youthful-volta-laarnk` touching `apps-script/**` (below). |
+| **Apps Script backend** (`apps-script/**`) | GitHub Actions → clasp | Explicit dispatch after matching Node is live (below). |
 
 **Verify a Railway deploy:** `GET https://ezone-outpatient.up.railway.app/api/version`
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
 
-## Automatic Apps Script deployment (clasp in CI)
+## Apps Script release phase (clasp in GitHub Actions)
 
 **Workflow:** [`.github/workflows/deploy-apps-script.yml`](.github/workflows/deploy-apps-script.yml)
 
-On every push to **`claude/youthful-volta-laarnk`** that changes `apps-script/**`
-(or `.clasp.json` / the workflow), CI installs `@google/clasp@3.3.0`, writes
-`~/.clasprc.json` from the `CLASPRC_JSON` secret, runs `clasp push -f`, then
-`clasp deploy -i <DEPLOYMENT_ID>` — a **new version of the EXISTING deployment**,
-so the `/exec` URL never changes and the outpatient/therapists/dashboard
-consumers keep working. It **fails loudly and early** if a secret is missing or
-`CLASPRC_JSON` isn't valid JSON, and requires clasp's `Deployed …@<version>`
-confirmation (clasp 3.x can reject an id and still exit 0).
+Railway has **Wait for CI** enabled. A push-triggered source workflow that waits
+for Node prevents Node from deploying: each waits on the other. PR #115 exposed
+this on 2026-10-17. The source workflow therefore has **no push trigger**. Keep
+Railway's checks enabled; do not mark a failed check successful to release.
 
-### ⚠️ After this merges, CI fails until you add two secrets
+For each separately approved release:
+
+1. Check the exact PR/head/base and all candidate CI before merging. Merge only
+   after Sandra's production approval; record the full merge SHA.
+2. Wait for Railway to serve that exact SHA at `/api/version` and for `/healthz`
+   to succeed. Do not dispatch Apps Script while Node is waiting for checks.
+3. When `apps-script/**`, `.clasp.json`, the workflow or its gate changed, open
+   GitHub **Actions → Deploy Apps Script → Run workflow**. Select
+   `claude/youthful-volta-laarnk`; set `expected_commit` to the full approved SHA.
+   This is the releasing agent/operator's next step, not a new configuration
+   request for Sandra. GitHub also supports the same dispatch through its API.
+4. The gate rejects a non-dispatch event, wrong branch, invalid SHA or advanced
+   branch before accessing clasp credentials. It then checks exact live SHA and
+   health. Failure leaves Apps Script Head and the deployment unchanged.
+5. The workflow installs `@google/clasp@3.3.0`, validates existing credentials,
+   pushes source and publishes a **new version of the EXISTING deployment**.
+   Require the `Deployed …@<version>` confirmation and a successful workflow.
+6. Verify authenticated reads and rejected unauthenticated requests, plus the
+   relevant changed integration. Record Node SHA, source version and three HTTP
+   timings. A merge or healthy Node alone does not complete the release.
+
+A branch advance invalidates the original dispatch target. Do not replace the
+approved SHA with a newer unreviewed one. Recheck ownership and approval scope.
+If dispatch is omitted, source remains at its previous version; keep the release
+open until both phases and acceptance are complete. Serialize releases across
+both runtimes. The workflow's concurrency lock serializes source jobs, but does
+not lock Railway against another merge. See `CHANGELOG-source-deploy-gate.md`
+for validation, first-release acceptance and rollback.
+
+### Existing credentials (initial setup or authorized refresh only)
 
 **Settings → Secrets and variables → Actions → New repository secret:**
 
@@ -112,7 +140,12 @@ require, so they should already match live. If the live project differs, run
 
 ## Manual fallback
 
-> ⛔ **Emergency use only — not the routine path.** As of the July 2026 clasp CI rollout (verified 22/07/2026, ecosystem-wide), Apps Script deploys are **automatic** on every merge to the deployed branch. Reach for this manual `clasp` fallback only when CI itself is down. The old **copy-paste-into-the-Apps-Script-editor** procedure is **OBSOLETE** — do not hand-paste `Code.gs`. See `EZONE-ECOSYSTEM-STATUS.md` → "Apps Script deployment".
+> **Emergency use only.** Routine releases use the explicit GitHub Actions
+> phase above, including its version/readiness checks. Local `clasp` bypasses
+> those checks and needs a separately approved recovery plan when Actions is
+> unavailable. Never copy/paste source into the editor or create a new deployment.
+> The older ecosystem snapshot describes the previous automatic push path;
+> this Outpatient-specific procedure supersedes that historical description.
 
 ```bash
 npm i -g @google/clasp@3.3.0 && clasp login

@@ -14,9 +14,25 @@ async function proxyReady(fetcher, expectedCommit) {
   }
 }
 
+function deploymentTarget(env) {
+  if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch') {
+    throw new Error('Source deployment requires an explicit release dispatch');
+  }
+  if (env.GITHUB_REF !== 'refs/heads/claude/youthful-volta-laarnk') {
+    throw new Error('Source deployment is restricted to the production branch');
+  }
+  const commit = env.EXPECTED_COMMIT || '';
+  if (commit.length !== 40 || !/^[a-f0-9]{40}$/.test(commit)) {
+    throw new Error('Expected a full approved commit SHA');
+  }
+  if (env.GITHUB_SHA !== commit) {
+    throw new Error('Dispatch commit differs from the approved SHA; recheck the release');
+  }
+  return commit;
+}
+
 async function main() {
-  const commit = process.env.GITHUB_SHA;
-  if (!/^[a-f0-9]{40}$/.test(commit || '')) throw new Error('A full GITHUB_SHA is required');
+  const commit = deploymentTarget(process.env);
   for (let attempt = 0; attempt < 40; attempt++) {
     if (await proxyReady(fetch, commit)) {
       console.log('Matching Node version and source-proxy readiness confirmed.');
@@ -29,4 +45,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(err => { console.error(err.message); process.exitCode = 1; });
-module.exports = { proxyReady };
+module.exports = { proxyReady, deploymentTarget };
