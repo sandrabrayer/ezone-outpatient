@@ -1,26 +1,19 @@
 name: Deploy Apps Script
 
-# Automatically pushes apps-script/** to the Google Apps Script project and
-# publishes a NEW VERSION of the EXISTING deployment (same deployment ID → the
-# /exec URL never changes, so the outpatient/therapists/dashboard consumers keep
-# working).
-#
-# Fires only when the Apps Script sources actually change on the deployed
-# branch. Requires two GitHub secrets — see DEPLOY.md:
-#   - CLASPRC_JSON  : contents of ~/.clasprc.json from a local `clasp login`
-#   - DEPLOYMENT_ID : the existing Web App deployment ID (starts with "AKfyc")
+# Explicit release phase AFTER Railway has deployed the approved commit.
+# Publishes a new version of the EXISTING deployment; the /exec URL stays fixed.
+# Do not add a push trigger: Railway's Wait for CI and this job's Node readiness
+# gate would wait on each other. The releasing operator/agent dispatches this
+# workflow only after the approved Node SHA is live. See DEPLOY.md.
+# Existing GitHub secrets: CLASPRC_JSON and DEPLOYMENT_ID.
 
 on:
-  push:
-    branches:
-      # The Outpatient Railway/production branch (per EZONE-ECOSYSTEM-STATUS.md).
-      - claude/youthful-volta-laarnk
-    paths:
-      - 'apps-script/**'
-      - '.clasp.json'
-      - '.github/workflows/deploy-apps-script.yml'
-  # Manual on-demand deploy from the Actions tab (Run workflow → pick the branch).
   workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: 'Approved full 40-character merge SHA already live on Railway'
+        required: true
+        type: string
 
 # Never let two deploys race on the same Apps Script project.
 concurrency:
@@ -42,6 +35,13 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
+
+      # Reject a wrong branch, stale dispatch or non-ready Node before loading
+      # clasp credentials or changing Apps Script Head/the existing deployment.
+      - name: Verify approved target and matching authenticated Node proxy
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: node scripts/wait-for-source-proxy.js
 
       - name: Verify required secrets are present (fail loudly if not)
         env:
@@ -72,11 +72,6 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))" \
             || { echo "::error::CLASPRC_JSON is not valid JSON. Re-run 'clasp login' locally and re-copy the whole ~/.clasprc.json into the secret. See DEPLOY.md."; exit 1; }
-
-      # The old source ignores proxySecret, so Node can roll forward safely.
-      # Never tighten the source while the old Node version is still serving.
-      - name: Wait for matching authenticated Node proxy
-        run: node scripts/wait-for-source-proxy.js
 
       - name: Push code to the Apps Script project
         run: clasp push -f

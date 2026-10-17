@@ -9,7 +9,7 @@ generic defaults; ask Sandra only when a rule below says to.
 | --- | --- |
 | Deployed branch (Railway + Apps Script) | `claude/youthful-volta-laarnk` — **every PR's base must be this branch**, never `main` |
 | Production URL (Railway) | `https://ezone-outpatient.up.railway.app` (from `scripts/healthcheck.js` / `weekly-healthcheck.yml`) |
-| Apps Script deploy | **Automatic on merge** — `.github/workflows/deploy-apps-script.yml` runs on `push` to the deployed branch touching `apps-script/**`, `.clasp.json` or the workflow; `workflow_dispatch` exists as a manual re-run only |
+| Apps Script deploy | **Explicit second release phase** — after matching Node is live, dispatch `.github/workflows/deploy-apps-script.yml` on the deployed branch with `expected_commit` = approved full merge SHA; no push trigger (avoids Railway Wait for CI deadlock) |
 | Test command | `npm ci && npm test` (Node ≥ 18 built-in runner, `node --test`; CI: `.github/workflows/test.yml`, Node 22) |
 | `GET /api/version` | Exists — public, `no-store`, returns `{ commit, builtAt }` (`commit` = `RAILWAY_GIT_COMMIT_SHA`, hex-validated, else `null`) |
 | Service-worker cache | `public/sw.js` → `var CACHE = 'ezone-outpatient-vN'` |
@@ -40,14 +40,17 @@ generic defaults; ask Sandra only when a rule below says to.
    authorize a release. Keep the running apps available while changes are
    developed separately. See `AGENTS.md` for the shared project agreement.
    After an approved merge:
-   1. Apps Script deploy is **automatic on merge** here: if `apps-script/**`
-      or `Code.gs` changed, find the "Deploy Apps Script" run for the merge
-      commit and wait for it to be green. (Only if it did not trigger, run it
-      via `workflow_dispatch` on the deployed branch.) Never paste `Code.gs`
-      anywhere, never create a new Apps Script deployment.
-   2. Poll `https://ezone-outpatient.up.railway.app/api/version` every 30 s
-      (max 10 min) until `commit` equals the merge SHA. If it never matches,
-      the Railway deploy was likely **SKIPPED** — report it.
+   1. Poll `https://ezone-outpatient.up.railway.app/api/version` every 30 s
+      (max 10 min) until `commit` equals the approved merge SHA, and verify
+      `/healthz`. If it never matches, inspect deployment status and report it;
+      do not disable checks or deploy a different commit.
+   2. If `apps-script/**`, `.clasp.json`, the deploy workflow or its readiness
+      gate changed, dispatch "Deploy Apps Script" on the deployed branch with
+      `expected_commit` set to that full merge SHA. This is the explicit second
+      phase of the already-approved release; the releasing agent/operator owns
+      it. Wait for success and the existing deployment's new version. Never
+      paste `Code.gs` anywhere or create a new Apps Script deployment. If the
+      branch moved, stop and recheck the approved target before dispatching.
    3. Time 3 requests to the production URL; report status codes and times.
 5. **Data invariants.** Sheets headers (`*_HEADERS` in `apps-script/Code.gs`)
    are **append-only**. SW cache version bumps are **monotonic from the LIVE

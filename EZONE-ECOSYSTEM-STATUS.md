@@ -1,15 +1,23 @@
-# Outpatient local update — 2026-10-16
+# Outpatient local update — 2026-10-17
 
-OP-01 source-authentication work is an unmerged candidate based on `afa9e8c`.
-Internal HTTP actions require a new dedicated Outpatient Node → Apps Script key;
-consumer read keys become mandatory. See `docs/source-auth-boundary.md` for
-caller inventory, preconditions, Node-first release order and remaining checks.
-No role expansion, schema/calculation change, production data access or deployment
-is part of this preparation. Other apps and the CRM drafts remain separate.
-The source review also found a legacy Therapists `recordTreatmentGiven` sender
-without a matching route in this Outpatient baseline. Track under OP-06; do not
-add a billing receiver as part of the security fix. The snapshot below is older
-ecosystem history, not evidence that all current apps have been audited.
+OP-01 #115 is released: Node `76de4cc5`, existing Apps Script deployment @94.
+Signed-session settings read succeeded; anonymous Node and direct source dummy
+requests were denied. Consumer key alignment was confirmed by Sandra; full
+cross-app/staff workflows are not thereby proven. No real billing/patient writes
+were used for acceptance. See `docs/source-auth-boundary.md` for evidence.
+
+This branch's source workflow replaces automatic push deployment with an explicit
+second release phase: wait for the approved Node SHA, then dispatch Apps Script
+with that exact SHA. This avoids the observed Railway Wait for CI deadlock;
+readiness/authentication gates remain. It is a separate candidate until merged
+with Sandra's approval. `DEPLOY.md` is the current Outpatient procedure; the
+older shared snapshot below is historical and does not override this local note.
+
+OP-02 remains the next business-integrity task: preserve its isolated lock-fix
+branch, then fix renewal retry and partial charge/payment saves. CRM drafts are
+unchanged. OP-06 still includes the legacy `recordTreatmentGiven` sender without
+a matching Outpatient route; do not invent a billing receiver. The remaining
+apps, scheduled backup/restore evidence and performance review are still open.
 
 # E-ZONE Ecosystem Status — updated September 10, 2026
 

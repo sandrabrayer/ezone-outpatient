@@ -5,14 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Source authentication boundary (OP-01 candidate)
+### Source deployment ordering
+- Replace the push-triggered source deployment with an explicit post-Node
+  dispatch to avoid the Railway Wait for CI circular wait observed in #115.
+- Require the approved full SHA on the production branch; validate the target
+  and live Node before loading source credentials or changing Head/deployment.
+- Preserve existing source URL, credential scopes, concurrency and cleanup.
+  Add release-target/order regressions and update the operating procedure.
+  See `CHANGELOG-source-deploy-gate.md`. Separate production approval required.
+
+### Source authentication boundary (OP-01 released 2026-10-17)
 - Require a dedicated proxy credential for internal Apps Script actions and
   fail closed on previously optional consumer read keys. Unknown actions and
   obsolete GET writes cannot access the source. Keep consumer credential scopes
   and business calculations unchanged.
 - Inject the proxy credential only on the server, suppress credential-bearing
   upstream errors, and order automatic source deployment after matching Node
-  readiness. Requires configuration and separate production approval.
+  readiness. Released in #115 as Node `76de4cc5` and Apps Script @94 after
+  configuration confirmation and approval. The follow-up above removes the
+  circular push dependency discovered during that release.
 - Add tests against the real routers and HTTP proxy, including denied requests
   with zero source access and preserved authenticated save/consumer contracts.
   See `CHANGELOG-source-auth.md` and `docs/source-auth-boundary.md`.

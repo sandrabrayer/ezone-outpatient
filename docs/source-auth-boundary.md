@@ -1,16 +1,35 @@
 # OP-01 — source authentication boundary
 
-Status: candidate prepared 2026-10-16 from Outpatient
-`afa9e8c0d4e3e04a9eabd7230db59a27030dee67`. Owner: Codex. No production
-merge, deployment, source-data access or configuration inspection was performed.
-The separate CRM projection draft #114 remains untouched.
+Status: released 2026-10-17 after Sandra confirmed proxy/consumer key alignment
+and explicitly approved merge/deployment. PR #115 merged as
+`76de4cc5a07057519cf1658a60a9a72f1a76d337`; Node `/api/version` and `/healthz`
+returned 200 at that SHA. Apps Script run
+[39051916594](https://github.com/sandrabrayer/ezone-outpatient/actions/runs/39051916594)
+succeeded on its second attempt and published existing deployment version @94.
+
+The first attempt timed out before any source write: Railway Wait for CI and
+the Node-first source gate waited on each other. After Sandra's specific
+approval, the exact merge commit was deployed through Railway; only after it
+was verified live was the source job rerun. No settings/variables or business
+data were changed by the release operator. The follow-up workflow change uses
+an explicit dispatch after Node readiness; see `../DEPLOY.md` and
+`../CHANGELOG-source-deploy-gate.md`.
+
+Live acceptance: a signed-session `getSettings` read returned `ok:true` through
+Node and the deployed source. Anonymous Node reads returned 401; direct source
+GET without credentials and POST with an invalid dummy key returned
+`ok:false,error:unauthorized` (HTTP 200 envelopes). No real patient/payment writes
+were used. Consumer key alignment is the configuration owner's confirmation;
+live cross-app projections and full staff workflows remain separate checks.
+The CRM projection draft #114 remains untouched.
 
 ## Verified problem and scope
 
 The browser's signed session was checked by Node, but internal source actions
 could reach their handlers directly without a credential. Three cross-app read
 helpers also accepted requests when their Script Property was missing. These
-are verified code/synthetic findings; the live `/exec` was not probed.
+were verified first in code/synthetic tests. The later release checks above
+probed only rejected dummy actions at the live `/exec`.
 
 The fix authenticates all 16 GET and 46 POST method/action pairs before any
 business handler or Sheets operation. Unknown/unclassified actions are denied.
@@ -80,7 +99,7 @@ The security fix does not claim that every legacy integration is functional.
 
 ## Configuration and ordered release
 
-**Not ready to merge until these prerequisites are verified.** `AGENTS.md`
+**For future releases, retain the verified configuration and recheck affected prerequisites.** `AGENTS.md`
 requires Sandra's separate production approval. `CLAUDE.md` forbids Codex from
 changing Railway settings/variables or reading Railway logs. The configuration
 owner performs the following steps; do not paste a key into chat or the PR.
@@ -106,12 +125,13 @@ owner performs the following steps; do not paste a key into chat or the PR.
    version and backup status, and require green candidate CI plus Sandra's
    approval for this specific PR. Existing backup verification remains evidence
    of that run, not proof of a fresh backup or source configuration.
-6. After approved merge, Railway deploys the new Node version first. It continues
-   to work with the previous source because that source ignores `proxySecret`.
-   GitHub's Apps Script workflow waits for the exact merge SHA at `/api/version`
-   and a successful `/healthz`. Missing/short Node proxy configuration returns
-   503. Only after this gate does clasp push and publish a new version of the
-   **same** source deployment. If readiness times out, source is untouched.
+6. After approved merge, wait for Railway to serve the exact approved Node SHA
+   at `/api/version` and a successful `/healthz`. Then explicitly dispatch the
+   Apps Script workflow on the deployed branch with `expected_commit` equal to
+   that SHA. Its pre-credential gate rechecks event, branch, SHA and readiness.
+   Only after this gate does clasp push and publish a new version of the **same**
+   source deployment. Do not restore a push trigger: Railway Wait for CI would
+   deadlock with the Node-first wait. See `../DEPLOY.md` for the complete order.
 7. Verify Apps Script workflow success, Node commit, authenticated reads and
    the relevant consumer projections. Negative source checks must request only
    rejected/dummy actions and must not retrieve patient data. Verify a synthetic
@@ -147,7 +167,7 @@ nightly job. No rollback restores or rewrites patient/billing data.
 - Malformed payloads, unknown methods/actions and GET writes cannot mutate data.
 - Full suite, browser CI and dependency audit must pass the stated gates.
 
-Still open: live configuration/release/acceptance; named-user role permissions
+Still open: live cross-app projections and complete staff workflows; named-user role permissions
 (the current name picker is not RBAC and Ortal has not been added); OP-02 lock
 failure and partial-write integrity; scheduled backup proof; performance; finance
 semantics; OP-06 integration mismatch above. A passing authentication test is
