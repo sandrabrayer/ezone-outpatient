@@ -11,7 +11,7 @@
  * `_getWinbackSource`, LOST_LEAD_STAGE_HE or DISCHARGED_CLIENT_STATUS_HE in
  * Code.gs must be mirrored here. Contract being locked:
  *   - auth reuses the 'WINBACK_SECRET' Script Property. Absent/empty property
- *     => endpoint is OPEN (URL-only obscurity, matching Code.gs). A configured
+ *     => request is rejected (fail closed). A configured
  *     secret => a request must pass a matching ?secret / payload.secret.
  *   - the caller is MOCKED: we pass the same param objects doGet(e.parameter) /
  *     doPost(payload) hand to the endpoint. No live Apps Script call is made.
@@ -33,7 +33,7 @@ const DISCHARGED_CLIENT_STATUS_HE = 'סיים טיפול';
 // 'WINBACK_SECRET' Script Property (null/'' when the property is absent).
 function winbackAuthOk(configuredSecret, params) {
   const expected = configuredSecret;
-  if (!expected) return true; // not configured -> open
+  if (!expected) return false; // not configured -> reject
   const got = (params && params.secret) ? String(params.secret) : '';
   return got === expected;
 }
@@ -88,12 +88,12 @@ function handleGetWinbackSource(configuredSecret, params, leads, clients) {
 
 const SECRET = 'winback-secret-dummy';
 
-// --- auth: unconfigured (open) ---------------------------------------------
+// --- auth: unconfigured (closed) ---------------------------------------------
 
-test('auth is OPEN when the WINBACK_SECRET property is absent', () => {
-  assert.equal(winbackAuthOk(null, {}), true);
-  assert.equal(winbackAuthOk('', { secret: 'anything' }), true);
-  assert.equal(winbackAuthOk(undefined, undefined), true);
+test('auth is closed when the WINBACK_SECRET property is absent', () => {
+  assert.equal(winbackAuthOk(null, {}), false);
+  assert.equal(winbackAuthOk('', { secret: 'anything' }), false);
+  assert.equal(winbackAuthOk(undefined, undefined), false);
 });
 
 // --- auth: configured (fail-closed on mismatch) ----------------------------
@@ -135,7 +135,7 @@ test('projects lost leads and discharged clients into the win-back shape', () =>
     { id: 'c2', name: 'ממשיך', status: 'בטיפול' } // active -> excluded
   ];
 
-  const res = handleGetWinbackSource(null, {}, leads, clients);
+  const res = handleGetWinbackSource(SECRET, { secret: SECRET }, leads, clients);
   assert.equal(res.ok, true);
   assert.equal(res.lostLeads.length, 1);
   assert.equal(res.dischargedClients.length, 1);
@@ -153,7 +153,7 @@ test('projects lost leads and discharged clients into the win-back shape', () =>
 });
 
 test('missing optional fields project to empty strings, never undefined', () => {
-  const res = handleGetWinbackSource(null, {},
+  const res = handleGetWinbackSource(SECRET, { secret: SECRET },
     [{ id: 'l1', stage: LOST_LEAD_STAGE_HE }],
     [{ id: 'c1', status: DISCHARGED_CLIENT_STATUS_HE }]);
   const lead = res.lostLeads[0];
@@ -167,14 +167,14 @@ test('missing optional fields project to empty strings, never undefined', () => 
 });
 
 test('empty / null inputs yield empty lists, not a crash', () => {
-  assert.deepEqual(handleGetWinbackSource(null, {}, [], []),
+  assert.deepEqual(handleGetWinbackSource(SECRET, { secret: SECRET }, [], []),
     { ok: true, lostLeads: [], dischargedClients: [] });
-  assert.deepEqual(handleGetWinbackSource(null, {}, null, null),
+  assert.deepEqual(handleGetWinbackSource(SECRET, { secret: SECRET }, null, null),
     { ok: true, lostLeads: [], dischargedClients: [] });
 });
 
 test('a discharged client survives the win-back list (discharge is the trigger, not an exclusion)', () => {
-  const res = handleGetWinbackSource(null, {}, [],
+  const res = handleGetWinbackSource(SECRET, { secret: SECRET }, [],
     [{ id: 'c1', name: 'x', status: DISCHARGED_CLIENT_STATUS_HE }]);
   assert.equal(res.dischargedClients.length, 1);
 });

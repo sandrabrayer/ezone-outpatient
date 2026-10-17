@@ -97,12 +97,25 @@ calculatedAmount, amount, overrideReason, reason, approvedBy, decidedDate,
 payoutDate, status, paidDate, method, notes, basis, createdAt, createdBy,
 updatedAt, updatedBy`
 
+## Source authentication (OP-01 candidate)
+
+All source HTTP actions are now explicitly authorized before any source access.
+Internal app actions require a dedicated server-held credential; cross-app
+consumers keep their narrower keys. Missing configuration is never an anonymous
+fallback. GET writes are disabled. Source readiness and the Node-first deploy
+sequence are documented in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
+This does not create individual role permissions or add Ortal to this app.
+
 ## Local development
 
 ```bash
 npm install
 export SHEETS_URL="https://script.google.com/macros/s/.../exec"
 export APP_PIN="your-edit-pin"
+export SESSION_SECRET="$(openssl rand -hex 32)"
+# Use a separate test-only Apps Script project for local development.
+# Configure the same OUTPATIENT_PROXY_SECRET in its Script Properties.
+export OUTPATIENT_PROXY_SECRET="$(openssl rand -hex 32)"
 npm start
 # open http://localhost:3000
 ```
@@ -146,7 +159,7 @@ checkout ever drifts back.
 ## Deploy to Railway
 
 - The repo contains `Procfile` and `railway.json` (Nixpacks).
-- Set the environment variables `SHEETS_URL`, `APP_PIN` and `SESSION_SECRET`
+- Set the environment variables `SHEETS_URL`, `APP_PIN`, `SESSION_SECRET` and `OUTPATIENT_PROXY_SECRET`
   on the Railway service. `APP_PIN` is the edit-mode PIN, checked server-side
   — if unset, `/api/verify-pin` rejects every attempt. `SESSION_SECRET` is
   the HMAC key for the session cookie (any long random string, e.g.
@@ -211,8 +224,8 @@ checkout ever drifts back.
   client is returned with a tri-state `debtStatus` (`debt` / `clear` /
   `unknown`) — never-fail-open: a client with no payment rows is `unknown`, not
   silently "clear", so the consumer can flag it for manual resolution. Each
-  secret is an optional Apps Script Script Property — if unset, that action is
-  open (URL-obscurity). The Node proxy forwards `?secret=` automatically. See
+  secret is a required Apps Script Script Property — unset/empty/wrong
+  values reject the action before data access. The Node proxy forwards `?secret=` automatically. See
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
@@ -231,9 +244,9 @@ checkout ever drifts back.
   chip shows: stored `nextBillingDate`, else anchor + 1 month; `'yyyy-MM-dd'`
   or `''`), date only. A minimal,
   read-only projection — no `payerName`/`payerPhone`/`paymentLink`/prices/
-  bundles. Auth mirrors the above: optional `TREATMENT_PLANS_SECRET` Script
+  bundles. Auth mirrors the above: required `TREATMENT_PLANS_SECRET` Script
   Property (separate from `DEBT_STATUS_SECRET` so the two rotate
-  independently); if unset the action is open. The Node proxy forwards
+  independently); if unset the action is rejected. The Node proxy forwards
   `?secret=` automatically. See `CHANGELOG-treatment-plans-endpoint.md`.
 
 ### Stop-treatment flags (inbound, fail-closed write)

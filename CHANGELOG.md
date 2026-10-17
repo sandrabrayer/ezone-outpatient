@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Source authentication boundary (OP-01 candidate)
+- Require a dedicated proxy credential for internal Apps Script actions and
+  fail closed on previously optional consumer read keys. Unknown actions and
+  obsolete GET writes cannot access the source. Keep consumer credential scopes
+  and business calculations unchanged.
+- Inject the proxy credential only on the server, suppress credential-bearing
+  upstream errors, and order automatic source deployment after matching Node
+  readiness. Requires configuration and separate production approval.
+- Add tests against the real routers and HTTP proxy, including denied requests
+  with zero source access and preserved authenticated save/consumer contracts.
+  See `CHANGELOG-source-auth.md` and `docs/source-auth-boundary.md`.
+
 ### Daily backup coverage
 - Extend the existing nightly backup to Leads and both removal archives as
   well as Clients. Capture under the save lock, then release it before backup

@@ -33,6 +33,7 @@
  * in a vm sandbox over in-memory sheets (the session-who-when harness).
  */
 
+process.env.OUTPATIENT_PROXY_SECRET = 'fixture-proxy-key-with-at-least-32-characters';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -265,7 +266,7 @@ function makeSandbox() {
   const log = [];
   const logger = [];
   const sheets = {};
-  const props = {};
+  const props = { OUTPATIENT_PROXY_SECRET: 'fixture-proxy-key-with-at-least-32-characters' };
   const ss = {
     getId: () => 'LIVE',
     getSheetByName: (n) => sheets[n] || null,
@@ -297,7 +298,7 @@ function makeSandbox() {
 }
 
 function post(ctx, payload) {
-  return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(payload) }, parameter: {} }).getContent());
+  return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ proxySecret: 'fixture-proxy-key-with-at-least-32-characters', ...payload }) }, parameter: {} }).getContent());
 }
 function rowsOf(sheet, headers) {
   return sheet._grid.slice(1).filter((r) => r.some((v) => v !== '' && v !== null && v !== undefined)).map((r) => {

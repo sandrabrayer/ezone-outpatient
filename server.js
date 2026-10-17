@@ -4,10 +4,12 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createSessionToken, verifySessionToken, readSessionUser } = require('./lib/session');
 const { SESSION_USERS } = require('./lib/users');
+const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SHEETS_URL = process.env.SHEETS_URL || '';
+const OUTPATIENT_PROXY_SECRET = process.env.OUTPATIENT_PROXY_SECRET || '';
 const APP_PIN = process.env.APP_PIN || '';
 /* Session-cookie signing secret (who/when stamping — port of the Dashboard's
  * PR #113 design). A correct PIN mints an HttpOnly session cookie; every
@@ -224,6 +226,10 @@ function requireSheetsUrl(res) {
     });
     return false;
   }
+  if (!sourceAuthConfigured(OUTPATIENT_PROXY_SECRET)) {
+    res.status(503).json({ ok: false, error: 'source_auth_not_configured' });
+    return false;
+  }
   return true;
 }
 
@@ -252,6 +258,8 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
 
   const action = (req.query && req.query.action) || 'getData';
+  // A GET must never mutate data, including the obsolete saveAll shortcut.
+  if (action === 'saveAll') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
 
   // Serve from cache when possible: only for the bulk read, and only when
@@ -265,12 +273,13 @@ app.get('/api/sheets', requireSession, async (req, res) => {
     const url = SHEETS_URL
       + (SHEETS_URL.includes('?') ? '&' : '?')
       + 'action=' + encodeURIComponent(action)
+      + '&proxySecret=' + encodeURIComponent(OUTPATIENT_PROXY_SECRET)
       + (req.query.secret ? '&secret=' + encodeURIComponent(req.query.secret) : '');
     const r = await fetch(url, { redirect: 'follow' });
     const text = await r.text();
     let data;
     try { data = JSON.parse(text); }
-    catch (_) { throw new Error('Non-JSON from Apps Script: ' + text.slice(0, 200)); }
+    catch (_) { throw new Error('upstream_unavailable'); }
 
     // Track load metrics + populate cache only on the bulk read.
     if (action === 'getData') {
@@ -293,22 +302,27 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   } catch (err) {
     lastLoad.at = new Date().toISOString();
     lastLoad.status = 'error';
-    lastLoad.error = String(err);
+    // Fetch failures can contain the credential-bearing upstream URL or body.
+    // Do not return/log it, including diagnostic headers and cached metadata.
+    lastLoad.error = 'upstream_unavailable';
 
     // Graceful degradation: if Apps Script fails on a getData call but we
     // still have a recent-ish cached copy, serve that instead of erroring.
     if (action === 'getData' && isCacheStaleButUsable()) {
       res.set('X-Cache', 'STALE');
-      res.set('X-Cache-Error', String(err).slice(0, 200));
+      res.set('X-Cache-Error', 'upstream_unavailable');
       return res.status(getDataCache.status || 200).json(getDataCache.data);
     }
 
-    res.status(502).json({ ok: false, error: String(err) });
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
 });
 
 app.post('/api/sheets', requireSession, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ ok: false, error: 'invalid_payload' });
+  }
   try {
     // Pass through whatever action the client asked for. saveAll is the
     // legacy default (back when the client couldn't pick an action) so
@@ -324,6 +338,9 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     // cookie) is forwarded as-is and stamps blank, which is allowed by
     // contract.
     body.user = sessionUserFromRequest(req);
+    // Separate from `secret`: resolveStopFlag uses that field to select the
+    // cross-app phone-based path. A browser cannot supply this credential.
+    body.proxySecret = OUTPATIENT_PROXY_SECRET;
     const r = await fetch(SHEETS_URL, {
       method: 'POST',
       redirect: 'follow',
@@ -333,7 +350,7 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     const text = await r.text();
     let data;
     try { data = JSON.parse(text); }
-    catch (_) { throw new Error('Non-JSON from Apps Script: ' + text.slice(0, 200)); }
+    catch (_) { throw new Error('upstream_unavailable'); }
 
     // Any successful write invalidates the cache so the next read is fresh.
     if (r.status >= 200 && r.status < 300 && data.ok !== false) {
@@ -342,7 +359,7 @@ app.post('/api/sheets', requireSession, async (req, res) => {
 
     res.status(r.status).json(data);
   } catch (err) {
-    res.status(502).json({ ok: false, error: String(err) });
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
 });
 
@@ -500,7 +517,13 @@ app.post('/api/debug/cache/clear', (req, res) => {
   res.json({ ok: true, cleared: true });
 });
 
-app.get('/healthz', (req, res) => res.json({ ok: true }));
+// Deployment readiness: the source must not be tightened before this server
+// can authenticate its requests. No configuration values are exposed.
+app.get('/healthz', (req, res) => {
+  const ready = sourceAuthConfigured(OUTPATIENT_PROXY_SECRET);
+  res.set('Cache-Control', 'no-store');
+  res.status(ready ? 200 : 503).json({ ok: ready });
+});
 
 // Public deploy-verification endpoint: { commit, builtAt } only, never cached,
 // so a poll after a merge sees the live build rather than a stale copy.

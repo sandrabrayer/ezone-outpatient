@@ -11,6 +11,7 @@
  * requiring server.js, capture the outbound URL, fire a real HTTP request.
  */
 
+process.env.OUTPATIENT_PROXY_SECRET = 'fixture-proxy-key-with-at-least-32-characters';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');

@@ -3,6 +3,7 @@
 // Real browser + public UI + server.js (signed sessions/proxy/cache) + Code.gs.
 // Only Google runtime services are replaced with dummy, in-memory Sheets.
 // No production URL, credential, data or external browser request is used.
+process.env.OUTPATIENT_PROXY_SECRET = 'fixture-proxy-key-with-at-least-32-characters';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -45,7 +46,7 @@ async function fixture(t, initial) {
     let result;
     if (options.method === 'POST') {
       const payload = JSON.parse(options.body);
-      result = sb.post(payload);
+      result = JSON.parse(sb.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify(payload) } }).getContent());
       captured.push({ payload, result });
     } else {
       result = JSON.parse(sb.ctx.doGet({ parameter: Object.fromEntries(url.searchParams) }).getContent());

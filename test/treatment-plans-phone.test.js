@@ -367,18 +367,19 @@ test('D: both endpoints are READ-ONLY — no cell is written, nothing appended',
   assert.deepEqual(writes.filter((w) => w.kind !== 'setNumberFormat'), []);
 });
 
-test('D: the doGet route serves phoneIssue, and its secret gate is unchanged', () => {
+test('D: the doGet route serves phoneIssue only with a configured matching secret', () => {
   const open = sandbox(FIXTURE);
   open.ctx.doGet({ parameter: { action: 'getTreatmentPlans' } });
   const body = JSON.parse(open.outputs[open.outputs.length - 1]);
-  assert.equal(body.ok, true);
-  assert.equal(byId(body.clients, 'clientId')['c-missing'].phoneIssue, 'missing');
+  assert.deepEqual(body, { ok: false, error: 'unauthorized' });
 
   const gated = sandbox(FIXTURE, [], { TREATMENT_PLANS_SECRET: 's3cret' });
   gated.ctx.doGet({ parameter: { action: 'getTreatmentPlans', secret: 'wrong' } });
   assert.deepEqual(JSON.parse(gated.outputs[gated.outputs.length - 1]), { ok: false, error: 'unauthorized' });
   gated.ctx.doGet({ parameter: { action: 'getTreatmentPlans', secret: 's3cret' } });
-  assert.equal(JSON.parse(gated.outputs[gated.outputs.length - 1]).ok, true);
+  const authorized = JSON.parse(gated.outputs[gated.outputs.length - 1]);
+  assert.equal(authorized.ok, true);
+  assert.equal(byId(authorized.clients, 'clientId')['c-missing'].phoneIssue, 'missing');
 });
 
 /* ============================ E. contract guard ============================ */
