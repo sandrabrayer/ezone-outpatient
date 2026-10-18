@@ -57,7 +57,8 @@ This inventory is a code contract, not proof every feature is used in production
 | GET | `getData`, `getPayments`, `getCharges`, `getSettings`, `getExtraSessionRequests`, `getStopFlags`, `getMyStopAlerts`, `getSessionLog`, `getContinuation`, `getCredits`, `getRemovedClients` |
 | POST reads | `getData`, `getPayments`, `getCharges`, `getSettings`, `getStopFlags`, `getMyStopAlerts`, `getSessionLog`, `getContinuation`, `getCredits`, `getRemovedClients` |
 | POST writes | `saveAll`, `approveExtraSession`, `correctSessionOutcome`, `markForwarded`, `createStopAlert`, `resumeTreatmentAlert`, `saveContinuation`, `mergeClients`, `restoreRemovedClient`, `saveSettings`, `savePayment`, `updatePayment`, `saveCredit`, `savePaymentAmountOverride`, `repairStaleNextBilling`, `saveCharge`, `updateCharge`, `removeCharge`, `removePayment`, `removeChargesForClient`, `removePaymentsForClient`, `removeLead` |
-| POST renewal candidate | `getRenewalState` (read), `reserveRenewal`, `applyRenewal`, `acknowledgeRenewal`, `cancelRenewal`, `resolveRenewalReview`; all use the same proxy key, GET refused |
+| POST renewal (released #120) | `getRenewalState` (read), `reserveRenewal`, `applyRenewal`, `acknowledgeRenewal`, `cancelRenewal`, `resolveRenewalReview`; all use the same proxy key, GET refused |
+| POST extra-charge candidate | `getExtraChargeState` (read), `reserveExtraCharge`, `applyExtraCharge`, `acknowledgeExtraCharge`, `cancelExtraCharge`, `resolveExtraChargeReview`; existing proxy key/editor session, GET refused |
 | POST dual path | `resolveStopFlag` by id uses the proxy key; by phone uses the existing `STOP_FLAG_SECRET` body field |
 
 ## Consumer inventory and compatibility

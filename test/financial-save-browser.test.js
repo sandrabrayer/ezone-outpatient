@@ -36,9 +36,12 @@ async function fixture(t, options = {}) {
     nextBillingDate: '2026-10-01', paymentDate: '2026-09-01',
     updatedAt: '2026-10-01T00:00:00.000Z' };
   const sb = sandbox([{ ...A, stage: 'תוכנית טיפול' }], [client]);
-  const faults = { payment: options.payment || '', remove: false, renewal: options.renewal || '' };
+  sb.ctx._todayISODate = () => '2026-10-31';
+  const faults = { payment: options.payment || '', remove: false, renewal: options.renewal || '', extra: options.extra || '' };
   if (faults.renewal === 'client_done') failWrite(sb, 'FinancialOps', 'payment_writing', 'before');
   if (faults.renewal === 'ambiguous') failWrite(sb, 'FinancialOps', 'payment_writing', 'after');
+  if (faults.extra === 'charge_done') failWrite(sb, 'FinancialOps', 'payment_writing', 'before');
+  if (faults.extra === 'ambiguous') failWrite(sb, 'FinancialOps', 'payment_writing', 'after');
   const captured = [], errors = [];
   const oldFetch = global.fetch;
   const keys = ['APP_PIN', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
@@ -55,6 +58,7 @@ async function fixture(t, options = {}) {
     if (options.method === 'POST') {
       const payload = JSON.parse(options.body);
       if (payload.action === 'getRenewalState' && faults.renewal === 'source_unavailable') result = { ok: false, error: 'unknown_action' };
+      else if (payload.action === 'getExtraChargeState' && faults.extra === 'source_unavailable') result = { ok: false, error: 'unknown_action' };
       else if (payload.action === 'savePayment' && faults.payment === 'reject') result = { ok: false, error: 'busy' };
       else if (payload.action === 'removePayment' && faults.remove) result = { ok: false, error: 'busy' };
       else {
@@ -64,6 +68,13 @@ async function fixture(t, options = {}) {
           result = { ok: false, error: 'fixture_response_lost' }; faults.renewal = '';
         }
         if (payload.action === 'savePayment' && faults.payment === 'lost') result = { ok: false, error: 'fixture_response_lost' };
+        if (payload.action === 'applyExtraCharge' && faults.extra === 'apply_and_read_lost') {
+          result = { ok:false,error:'fixture_response_lost' }; faults.extra='source_unavailable';
+        }
+        if ((payload.action === 'reserveExtraCharge' && faults.extra === 'reserve_lost') ||
+            (payload.action === 'applyExtraCharge' && faults.extra === 'apply_lost')) {
+          result = { ok: false, error: 'fixture_response_lost' }; faults.extra = '';
+        }
       }
       captured.push({ payload, result });
     } else {
@@ -122,31 +133,117 @@ async function checkWarning(page) {
   assert.match(await page.textContent('#financialSaveWarningText'), /לא התקבל אישור לרישום התשלום/);
   assert.equal(await page.locator('#financialSaveWarning').evaluate((el) => getComputedStyle(el).direction), 'rtl');
 }
-for (const payment of ['reject', 'lost']) {
-  test(`browser: additional charge ${payment}, no false paid badge; reload reconciles actual source`, skipOpt, async (t) => {
-    const fx = await fixture(t, { payment }); if (!fx) return;
-    const page = await fx.login('ורד');
-    await clientCard(page).getByRole('button', { name: '+ הוסף טיפול', exact: true }).click();
-    await page.fill('#addChargeForm [name="description"]', 'טיפול נוסף לבדיקה');
-    await page.fill('#addChargeForm [name="amount"]', '500');
-    await page.check('#addChargeForm [name="chargePaid"]');
-    await submitPayment(page, '#addChargeSubmit');
-    await checkWarning(page);
-    assert.equal(fx.sb.rows('ClientCharges').length, 1);
-    assert.equal(fx.sb.rows('Payments').length, payment === 'lost' ? 1 : 0);
-    assert.equal(await clientCard(page).locator('.charge-status').textContent(), 'לא שולם');
-    assert.equal(await page.isHidden('#addChargeModal'), true);
-    if (process.env.EZONE_FINANCIAL_SCREENSHOT && payment === 'reject') {
-      await page.screenshot({ path: process.env.EZONE_FINANCIAL_SCREENSHOT, fullPage: true });
-    }
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.click('.tab[data-view="clients"]');
+// Additional-charge creation now has source-owned durable recovery; these real
+// browser tests replace its former UI-only savePayment rejection scenarios.
+async function openExtra(page) {
+  await clientCard(page).getByRole('button', {name:'+ הוסף טיפול',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#addChargeSubmit').disabled || !document.querySelector('#extraRecovery').hidden);
+}
+async function fillExtra(page, {monthly=false,paid=true}={}) {
+  await page.selectOption('#addChargeForm [name="billingType"]',monthly?'monthly':'one_time');
+  await page.selectOption('#addChargeTreatmentType','פרטני CBT');
+  await page.fill('#addChargeForm [name="description"]','טיפול נוסף לבדיקה');
+  await page.fill('#addChargeForm [name="amount"]','500');
+  await page.fill('#addChargeForm [name="chargeDate"]','2026-09-01');
+  if(monthly){await page.fill('#addChargeForm [name="frequencyPerWeek"]','2');await page.fill('#addChargeForm [name="billingDay"]','31');}
+  await page.locator('#addChargeForm [name="chargePaid"]').setChecked(paid);
+}
+async function submitExtra(page) {
+  await page.click('#addChargeSubmit');
+  await page.locator('#extraRecovery:not([hidden])').waitFor();
+}
+for(const monthly of [false,true]) for(const paid of [false,true]) {
+  test(`browser: extra ${monthly?'monthly':'once'} ${paid?'paid':'unpaid'} persists original fields and explicit completion`,skipOpt,async t=>{
+    const fx=await fixture(t);if(!fx)return;const page=await fx.login('ורד');
+    const original=JSON.stringify(fx.sb.rows('Clients'));
+    await openExtra(page);await fillExtra(page,{monthly,paid});await submitExtra(page);
+    await page.locator('#extraResume').getByText('אישור וסגירה',{exact:true}).waitFor();
+    assert.equal(fx.sb.rows('FinancialOps')[0].state,'done');
+    assert.equal(fx.sb.rows('ClientCharges').length,1);assert.equal(fx.sb.rows('Payments').length,paid?1:0);
+    const ch=fx.sb.rows('ClientCharges')[0];
+    assert.equal(ch.treatmentType,'פרטני CBT');assert.equal(ch.frequencyPerWeek,monthly?2:'');
+    assert.equal(ch.chargeDate,'2026-09-01');assert.equal(ch.created,'2026-10-31');
+    if(paid){const p=fx.sb.rows('Payments')[0];assert.equal(p.id,'pay::fixture-client::chg-'+ch.id+'::'+(monthly?'2026-10':'once'));
+      assert.equal(p.billingType,'extra');assert.equal(p.paymentDate,'2026-10-31');assert.equal(p.amountPaid,500);
+      assert.equal(p.coverageStart,'2026-10-31');assert.equal(p.coverageEnd,'2026-11-29');}
+    assert.equal(JSON.stringify(fx.sb.rows('Clients')),original);
+    await page.click('#extraResume');await page.waitForSelector('#addChargeModal',{state:'hidden'});
+    assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
+    await page.reload({waitUntil:'networkidle'});await page.click('.tab[data-view="clients"]');
     await clientCard(page).locator('.charge-status').waitFor();
-    assert.equal(await clientCard(page).locator('.charge-status').textContent(), payment === 'lost' ? 'שולם' : 'לא שולם');
-    assert.equal(fx.captured.filter((r) => r.payload.action === 'savePayment').length, 1, 'no automatic retry');
-    assert.deepEqual(fx.errors, []);
+    const ch2=fx.sb.rows('ClientCharges')[0];assert.equal(ch2.treatmentType,'פרטני CBT');
+    assert.equal(fx.captured.filter(r=>['saveCharge','savePayment'].includes(r.payload.action)).length,0);
+    assert.deepEqual(fx.errors,[]);
   });
 }
+for(const extra of ['charge_done','apply_lost','reserve_lost']) {
+  test('browser: extra '+extra+' recovers from second device across month boundary without duplication',skipOpt,async t=>{
+    const fx=await fixture(t,{extra});if(!fx)return;const first=await fx.login('ורד');await openExtra(first);await fillExtra(first,{monthly:true});
+    await first.evaluate(()=>{const f=document.querySelector('#addChargeForm');f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
+    await first.locator('#extraRecovery:not([hidden])').waitFor();
+    assert.equal(fx.captured.filter(r=>r.payload.action==='reserveExtraCharge').length,1);
+    const id=fx.sb.rows('FinancialOps')[0].id;fx.sb.ctx._todayISODate=()=> '2026-11-01';
+    const second=await fx.login('שירן');await openExtra(second);
+    assert.equal(await second.isHidden('#addChargeForm'),true);
+    assert.match(await second.textContent('#extraRecoveryText'),/500/);
+    if(extra!=='apply_lost')await second.click('#extraResume');
+    await second.locator('#extraResume').getByText('אישור וסגירה',{exact:true}).waitFor();
+    assert.equal(fx.sb.rows('FinancialOps')[0].id,id);assert.equal(fx.sb.rows('FinancialOps').length,1);
+    assert.equal(fx.sb.rows('ClientCharges').length,1);assert.equal(fx.sb.rows('Payments').length,1);
+    assert.equal(fx.sb.rows('Payments')[0].paymentDate,'2026-10-31');
+    assert.match(fx.sb.rows('Payments')[0].id,/::2026-10$/);
+    assert.equal(await second.locator('#extraRecovery').evaluate(el=>getComputedStyle(el).direction),'rtl');
+    if(process.env.EZONE_EXTRA_SCREENSHOT && extra==='charge_done'){
+      await second.screenshot({path:process.env.EZONE_EXTRA_SCREENSHOT,fullPage:true});
+      await second.setViewportSize({width:390,height:844});
+      assert.equal(await second.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      await second.screenshot({path:process.env.EZONE_EXTRA_SCREENSHOT.replace('.png','-mobile.png'),fullPage:true});
+    }
+    await second.click('#extraResume');await second.waitForSelector('#addChargeModal',{state:'hidden'});
+    assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');assert.deepEqual(fx.errors,[]);
+  });
+}
+test('browser: extra ambiguous payment requires review; closing records user/reason without financial effects',skipOpt,async t=>{
+  const fx=await fixture(t,{extra:'ambiguous'});if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page);await submitExtra(page);
+  await page.click('#extraResume');await page.locator('#extraReviewResolve:not([hidden])').waitFor();
+  assert.equal(await page.isDisabled('#extraResume'),true);assert.equal(fx.sb.rows('FinancialOps')[0].state,'review');
+  const before=JSON.stringify([fx.sb.rows('Clients'),fx.sb.rows('ClientCharges'),fx.sb.rows('Payments')]);
+  assert.equal(fx.sb.rows('Payments').length,0);
+  page.on('dialog',d=>d.type()==='prompt'?d.accept('נבדק: חיוב קיים ללא רישום תשלום; נדרש בירור בגבייה'):d.accept());
+  await page.click('#extraReviewResolve');await page.waitForSelector('#addChargeModal',{state:'hidden'});
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'reviewed');assert.equal(fx.sb.rows('FinancialOps')[0].updatedBy,'ורד');
+  assert.equal(JSON.stringify([fx.sb.rows('Clients'),fx.sb.rows('ClientCharges'),fx.sb.rows('Payments')]),before);
+  assert.equal(await clientCard(page).locator('.charge-status').textContent(),'לא שולם');assert.deepEqual(fx.errors,[]);
+});
+test('browser: extra source unavailable blocks creation without a legacy fallback',skipOpt,async t=>{
+  const fx=await fixture(t,{extra:'source_unavailable'});if(!fx)return;const page=await fx.login('ורד');
+  await clientCard(page).getByRole('button',{name:'+ הוסף טיפול',exact:true}).click();
+  await page.getByText('לא ניתן לאמת את החיוב הנוסף.',{exact:false}).waitFor();
+  assert.equal(await page.isDisabled('#addChargeSubmit'),true);
+  assert.equal(fx.captured.filter(r=>['saveCharge','savePayment','reserveExtraCharge'].includes(r.payload.action)).length,0);assert.deepEqual(fx.errors,[]);
+});
+test('browser: extra stale client refuses before either financial effect',skipOpt,async t=>{
+  const fx=await fixture(t);if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page);
+  assert.equal(fx.sb.save(fx.sb.rows('Leads'),[{...fx.sb.rows('Clients')[0],notes:'changed after open'}]).ok,true);
+  const response=page.waitForResponse(r=>r.request().method()==='POST'&&r.request().postDataJSON()?.action==='reserveExtraCharge');
+  await page.click('#addChargeSubmit');await response;await page.waitForFunction(()=>!document.querySelector('#addChargeSubmit').disabled);
+  assert.equal(fx.sb.rows('FinancialOps').length,0);assert.equal(fx.sb.rows('ClientCharges').length,0);assert.equal(fx.sb.rows('Payments').length,0);
+  assert.deepEqual(fx.errors,[]);
+});
+test('browser: prepared extra cancels without effects; renewal and extra direct users to the correct pending flow',skipOpt,async t=>{
+  const fx=await fixture(t,{extra:'reserve_lost'});if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page);await submitExtra(page);
+  await page.locator('#extraRecovery [data-close]').click();
+  await clientCard(page).getByRole('button',{name:'חידוש ותשלום',exact:true}).click();
+  await page.getByText('יש חיוב נוסף פתוח',{exact:false}).waitFor();assert.equal(await page.isDisabled('#renewSubmit'),true);
+  await page.locator('#renewForm [data-close]').click();await openExtra(page);
+  await page.click('#extraCancelIntent');await page.waitForSelector('#addChargeModal',{state:'hidden'});
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'cancelled');assert.equal(fx.sb.rows('ClientCharges').length,0);assert.equal(fx.sb.rows('Payments').length,0);
+  fx.faults.renewal='reserve_lost';await openRenew(page);await page.click('#renewSubmit');await page.locator('#renewRecovery:not([hidden])').waitFor();
+  await page.locator('#renewRecovery [data-close]').click();
+  await clientCard(page).getByRole('button',{name:'+ הוסף טיפול',exact:true}).click();
+  await page.getByText('יש חידוש פתוח למטופל.',{exact:false}).waitFor();assert.equal(await page.isDisabled('#addChargeSubmit'),true);
+  assert.deepEqual(fx.errors,[]);
+});
 for (const flow of ['direct', 'activate']) {
   test(`browser: ${flow} payment fails; saved patient survives without a paid chip even after reload`, skipOpt, async (t) => {
     const fx = await fixture(t, { payment: 'reject' }); if (!fx) return;
@@ -272,7 +369,7 @@ for(const renewal of ['client_done','apply_lost','reserve_lost']) {
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveRenewal').length,1);
     const opId=fx.sb.rows('FinancialOps')[0].id;
     assert.equal(fx.sb.rows('FinancialOps')[0].cycleDate,'2026-10-01');
-    const second=await fx.login('ירדן');await openRenew(second);
+    const second=await fx.login('שירן');await openRenew(second);
     assert.match(await second.locator('#renewRecoveryText').textContent(),/650/);
     assert.equal(await second.isHidden('#renewForm'),true);
     if(renewal!=='apply_lost')await second.click('#renewResume');
@@ -339,5 +436,28 @@ test('browser: prepared request may be cancelled without any client or payment e
   await page.click('#renewCancelIntent');await page.waitForSelector('#renewModal',{state:'hidden'});
   assert.equal(fx.sb.rows('FinancialOps')[0].state,'cancelled');
   assert.equal(fx.sb.rows('Clients')[0].nextBillingDate,'2026-10-01');assert.equal(fx.sb.rows('Payments').length,0);
+  assert.deepEqual(fx.errors,[]);
+});
+
+test('browser: failed extra readback disables stale recovery actions until a successful reopen',skipOpt,async t=>{
+  const fx=await fixture(t,{extra:'reserve_lost'});if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page);await submitExtra(page);
+  fx.faults.extra='apply_and_read_lost';await page.click('#extraResume');
+  await page.locator('#extraRecoveryText').getByText('לא ניתן לאמת את החיוב הנוסף.',{exact:false}).waitFor();
+  for(const id of ['extraResume','extraCancelIntent','extraReviewResolve'])assert.equal(await page.isDisabled('#'+id),true);
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'done');assert.equal(fx.sb.rows('Payments').length,1);
+  fx.faults.extra='';await page.locator('#extraRecovery [data-close]').click();await openExtra(page);
+  await page.locator('#extraResume').getByText('אישור וסגירה',{exact:true}).waitFor();await page.click('#extraResume');
+  await page.waitForSelector('#addChargeModal',{state:'hidden'});assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
+  assert.equal(fx.sb.rows('ClientCharges').length,1);assert.equal(fx.sb.rows('Payments').length,1);assert.deepEqual(fx.errors,[]);
+});
+test('browser: midnight before first extra reservation refreshes the displayed day before a new submit',skipOpt,async t=>{
+  const fx=await fixture(t);if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page,{monthly:true});
+  fx.sb.ctx._todayISODate=()=> '2026-11-01';
+  const response=page.waitForResponse(r=>r.request().method()==='POST'&&r.request().postDataJSON()?.action==='reserveExtraCharge');
+  await page.click('#addChargeSubmit');await response;
+  await page.locator('#addChargeClientName').getByText('01/11/2026',{exact:false}).waitFor();
+  await page.waitForFunction(()=>!document.querySelector('#addChargeSubmit').disabled);
+  assert.equal(fx.sb.rows('FinancialOps').length,0);await submitExtra(page);
+  assert.equal(fx.sb.rows('Payments')[0].paymentDate,'2026-11-01');assert.match(fx.sb.rows('Payments')[0].id,/::2026-11$/);
   assert.deepEqual(fx.errors,[]);
 });

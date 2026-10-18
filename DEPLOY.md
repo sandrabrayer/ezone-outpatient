@@ -28,20 +28,24 @@ consumer configuration or authenticated end-to-end access. Those are separate
 release checks. See the full inventory, manual click paths, acceptance and
 rollback constraints in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
 
-## OP-02b2-a renewal candidate (2026-10-18)
+## OP-02b2-b extra-charge candidate (2026-10-18)
 
-Base #119 merged during development: Node `6bdac37f`, SW v10 independently
-verified; its planned-exit feature is retained. Last source evidence is @96;
-recheck #119 source release before the next deployment. This candidate
-changes source and frontend, adds FinancialOps, extends the existing backup set
-and bumps SW to v11 (live v10 checked). No secret/setting changes.
-The new UI refuses renewal until the matching source protocol is deployed.
-After separate Sandra approval: merge, verify exact Node SHA/health, then
-explicitly dispatch Apps Script for that full SHA. Verify source release and
-refresh old tabs. Do not run test payments in production.
-**Do not roll source back to @96 while intents are active:** it has no journal
-guards. Keep journal data/marker and prefer a forward fix. Read the complete
-[release, backup and rollback contract](docs/renewal-journal.md) before release.
+Base PR120 is released: Node 535dc659, source @97, SW v11. New candidate adds
+extra-charge intent to the shared journal and appends ClientCharges columns 11–12
+(treatmentType/frequencyPerWeek). No new secret/setting/deployment id. SW v12 is
+above live v11. After separate Sandra approval, merge, verify exact Node SHA and
+health, then explicitly dispatch source for that SHA. The new extra UI remains
+disabled until source supports it. Refresh old tabs. Never test real payments.
+
+**Do not roll source back to @97 after any extra intent has been recorded, even
+if terminal:** its renewal-only parser blocks guarded writers on that history.
+Retain both intent kinds, appended columns, all journal rows and marker; use a
+forward fix. @96 also lacks required guards. See the complete
+[release/backup/rollback contract](docs/extra-charge-journal.md).
+
+PR120's source release succeeded in run 39117376211 (existing deployment @97)
+after exact Node verification, including #119 planned-exit changes. Its original
+contract remains in [renewal documentation](docs/renewal-journal.md).
 
 ## OP-02b1 confirmation release (2026-10-18)
 

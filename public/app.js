@@ -5582,8 +5582,64 @@
   function closeEditClientModal() { $('#editClientModal').hidden = true; editClientId = null; }
 
   var addChargeClientId = null;
-  function openAddChargeModal(client) {
+  var extraSourceState = null;
+  var extraLoadToken = 0;
+  function extraErrorMessage(err) {
+    var message = String(err && err.message);
+    if (message.indexOf('renewal_pending') >= 0) return 'יש חידוש פתוח למטופל. יש לחזור אל חידוש ותשלום ולהשלים את הבדיקה לפני הוספת טיפול.';
+    if (message.indexOf('extra_recording_day_changed') >= 0) return 'מועד הרישום התחלף מאז פתיחת החלון. יש לבדוק את התאריך המעודכן לפני שמירה חוזרת.';
+    if (message.indexOf('review_observation_too_large') >= 0) return 'נמצאו רשומות רבות מדי לסגירת הבדיקה בחלון זה. יש לפנות לאחראית לבירור הרשומות; הבקשה נשארת פתוחה.';
+    if (message.indexOf('extra_review_changed') >= 0) return 'מצב הבדיקה השתנה. יש לבדוק את המצב המעודכן לפני המשך.';
+    return 'לא ניתן לאמת את החיוב הנוסף. יש לפתוח שוב את החלון ולבדוק מה נשמר לפני הוספת חיוב נוסף.';
+  }
+  function blockExtraRecovery(err) {
+    extraSourceState = null;
+    extraFormEnabled(false);
+    $('#addChargeClientName').textContent = extraErrorMessage(err);
+    $('#extraRecoveryText').textContent = extraErrorMessage(err);
+    ['extraResume','extraCancelIntent','extraReviewResolve'].forEach(function (id) { $('#'+id).disabled = true; });
+  }
+  function extraFormEnabled(enabled) {
+    $('#addChargeForm').querySelectorAll('input,textarea,select').forEach(function (el) { el.disabled = !enabled; });
+    $('#addChargeSubmit').disabled = !enabled;
+  }
+  function showExtraOperation(op) {
+    if (!op || op.kind !== 'extra_charge' || !op.charge) throw new Error('extra_kind_mismatch');
+    extraSourceState = { operation: op };
+    $('#addChargeClientName').textContent = 'בדיקת החיוב הנוסף המקורי';
+    $('#addChargeForm').hidden = true;
+    extraFormEnabled(false);
+    $('#extraRecovery').hidden = false;
+    var text = op.charge.description + ' — ' + money(op.charge.amount) + '. תאריך החיוב: ' + displayDate(op.charge.chargeDate) + '. ';
+    text += op.payment ? 'רישום תשלום מקורי: ' + displayDate(op.payment.paymentDate) + '. ' : 'הבקשה אינה כוללת רישום תשלום. ';
+    if (op.state === 'done') text += 'החיוב' + (op.payment ? ' והתשלום נשמרו' : ' נשמר') + '. יש לאשר ולסגור את הפעולה.';
+    else if (op.state === 'review') text += 'נדרשת בדיקה ידנית מול הגבייה. אין ליצור חיוב נוסף במקום הפעולה הזו.';
+    else if (['acknowledged','cancelled','reviewed'].indexOf(op.state) >= 0) text += 'הפעולה כבר נסגרה. לא נוצר חיוב נוסף.';
+    else text += 'הפעולה טרם אושרה כהושלמה. המשך מתייחס לאותו חיוב ולתשלום המקורי בלבד.';
+    $('#extraRecoveryText').textContent = text;
+    $('#extraResume').textContent = op.state === 'done' ? 'אישור וסגירה' : 'בדיקה והמשך החיוב המקורי';
+    $('#extraResume').disabled = ['review','reviewed','acknowledged','cancelled'].indexOf(op.state) >= 0;
+    $('#extraCancelIntent').hidden = op.state !== 'prepared';
+    $('#extraReviewResolve').hidden = op.state !== 'review';
+    $('#extraCancelIntent').disabled = false;
+    $('#extraReviewResolve').disabled = false;
+  }
+  async function refreshExtraState(cid, token) {
+    var data = await apiPostAction('getExtraChargeState', { clientId: cid });
+    if (!data || data.ok !== true || data.protocol !== 1) throw new Error('extra_protocol_unavailable');
+    if (token !== extraLoadToken || cid !== addChargeClientId) return;
+    if (data.operation) { showExtraOperation(data.operation); return; }
+    if (!data.client || !data.snapshot || !data.cycleDate) throw new Error('extra_state_missing');
+    extraSourceState = data;
+    $('#addChargeForm').hidden = false;
+    $('#extraRecovery').hidden = true;
+    $('#addChargeClientName').textContent = (data.client.name || '') + ' — מועד רישום התשלום, אם סומן שולם: ' + displayDate(data.cycleDate);
+    extraFormEnabled(true);
+  }
+  async function openAddChargeModal(client) {
     addChargeClientId = client.id;
+    extraSourceState = null;
+    var token = ++extraLoadToken;
     var form = $('#addChargeForm');
     if (!form) return;
     form.reset();
@@ -5599,12 +5655,94 @@
         }).join('');
     }
     updateAddChargeBillingDayVisibility(form);
+    form.hidden = false;
+    extraFormEnabled(false);
+    $('#extraRecovery').hidden = true;
+    $('#addChargeClientName').textContent = 'בודק את מצב החיוב הנוסף…';
     $('#addChargeModal').hidden = false;
+    try { await refreshExtraState(client.id, token); }
+    catch (err) { if (token === extraLoadToken) $('#addChargeClientName').textContent = extraErrorMessage(err); }
   }
   function closeAddChargeModal() {
     var m = $('#addChargeModal');
     if (m) m.hidden = true;
     addChargeClientId = null;
+    extraSourceState = null;
+    extraLoadToken++;
+  }
+
+  async function submitDurableExtraCharge(form) {
+    if ($('#addChargeSubmit').disabled || !addChargeClientId || !extraSourceState || extraSourceState.operation) return;
+    var cid = addChargeClientId, token = extraLoadToken, client = extraSourceState.client;
+    var fd = new FormData(form), amount = toNum(fd.get('amount')), description = String(fd.get('description') || '').trim();
+    if (!description || !amount || amount <= 0 || !fd.get('chargeDate')) { toast('יש להזין תיאור, סכום חיובי ותאריך', true); return; }
+    var monthly = fd.get('billingType') === 'monthly', day = extraSourceState.cycleDate;
+    var charge = { id: uid(), clientId: cid, description: description, amount: amount,
+      billingType: monthly ? 'monthly' : 'one_time', chargeDate: fd.get('chargeDate'),
+      billingDay: monthly && fd.get('billingDay') ? toNum(fd.get('billingDay')) : '', active: true,
+      notes: String(fd.get('notes') || '').trim(), created: day,
+      treatmentType: String(fd.get('treatmentType') || ''),
+      frequencyPerWeek: monthly && fd.get('frequencyPerWeek') ? toNum(fd.get('frequencyPerWeek')) : '' };
+    // Do not add an optimistic charge merely so paymentId can find its kind.
+    // Preserve the existing once/month key and initial recording-day semantics.
+    var payment = fd.get('chargePaid') ? paymentForSheet({
+      id: 'pay::' + cid + '::chg-' + charge.id + '::' + (monthly ? day.slice(0,7) : 'once'),
+      clientId: cid, clientName: client.name || '', billingType: 'extra', dueDate: day,
+      amountDue: amount, amountPaid: amount, status: 'paid', paymentDate: day,
+      method: '', notes: '', bundleSize: 0, sessionsUsed: 0 }) : null;
+    var request = { opId: 'extra-' + uid(), clientId: cid, snapshot: extraSourceState.snapshot,
+      cycleDate: day, charge: chargeForSheet(charge), payment: payment };
+    extraFormEnabled(false);
+    try {
+      var reserved = await apiPostAction('reserveExtraCharge', request);
+      if (!reserved || reserved.ok !== true || !reserved.operation) throw new Error('extra_not_reserved');
+      var result = await apiPostAction('applyExtraCharge', { opId: reserved.operation.id });
+      if (!result || result.ok !== true || !result.operation) throw new Error('extra_not_confirmed');
+      if (token === extraLoadToken) showExtraOperation(result.operation);
+      await loadAll();
+    } catch (err) {
+      toast(extraErrorMessage(err), true);
+      if (token === extraLoadToken) {
+        extraSourceState = null;
+        try { await refreshExtraState(cid, token); } catch (readError) { if (token === extraLoadToken) blockExtraRecovery(readError); }
+      }
+    }
+  }
+  async function continueExtraCharge(mode) {
+    var op = extraSourceState && extraSourceState.operation;
+    if (!op || $('#extraCancelIntent').disabled || $('#extraReviewResolve').disabled ||
+        (mode !== 'review' && $('#extraResume').disabled)) return;
+    var token = extraLoadToken, cid = addChargeClientId;
+    ['extraResume','extraCancelIntent','extraReviewResolve'].forEach(function (id) { $('#'+id).disabled = true; });
+    try {
+      var payload = { opId: op.id }, action = mode === 'cancel' ? 'cancelExtraCharge' : op.state === 'done' ? 'acknowledgeExtraCharge' : 'applyExtraCharge';
+      if (mode === 'review') {
+        var fresh = await apiPostAction('getExtraChargeState', { clientId: cid });
+        if (token !== extraLoadToken) return;
+        if (!fresh.operation || fresh.operation.id !== op.id || !fresh.operation.review) throw new Error('extra_review_changed');
+        var view = fresh.operation.review;
+        if (!confirm('נמצאו ' + view.chargeCount + ' רשומות חיוב ו־' + view.paymentCount + ' רשומות תשלום. יש לבדוק את הגבייה בפועל. סגירת הבירור מתעדת את הבדיקה בלבד ואינה מתקנת נתונים או מאשרת תשלום. להמשיך?')) return;
+        var reason = prompt('מה נבדק ומה נשאר לתיקון? לפחות 10 תווים:');
+        if (!reason || reason.trim().length < 10) return;
+        action = 'resolveExtraChargeReview';
+        payload.reviewToken = view.token; payload.reason = reason.trim(); payload.acceptCurrent = true;
+      }
+      var result = await apiPostAction(action, payload);
+      if (!result || result.ok !== true || !result.operation) throw new Error('extra_not_confirmed');
+      if (token !== extraLoadToken) return;
+      if (['acknowledged','cancelled','reviewed'].indexOf(result.operation.state) >= 0) {
+        closeAddChargeModal();
+        toast(result.operation.state === 'acknowledged' ? 'החיוב אושר ונשמר' : result.operation.state === 'reviewed' ? 'הבדיקה תועדה. הנתונים הכספיים לא שונו.' : 'הבקשה בוטלה לפני שינוי הנתונים');
+      } else showExtraOperation(result.operation);
+      await loadAll();
+    } catch (err) {
+      toast(extraErrorMessage(err), true);
+      if (token === extraLoadToken) {
+        try { await refreshExtraState(cid, token); } catch (readError) { if (token === extraLoadToken) blockExtraRecovery(readError); }
+      }
+    } finally {
+      if (token === extraLoadToken && extraSourceState && extraSourceState.operation) showExtraOperation(extraSourceState.operation);
+    }
   }
 
   // --- Edit an existing extra charge (correct wrong amount/type/date/etc.) ----
@@ -5731,11 +5869,13 @@
   var renewLoadToken = 0;
   function renewalErrorMessage(err) {
     var message = String(err && err.message || '');
+    if (message.indexOf('extra_charge_pending') >= 0) return 'יש חיוב נוסף פתוח למטופל. יש לחזור אל הוסף טיפול ולהשלים את הבדיקה לפני חידוש.';
     if (message.indexOf('renewal_payment_exists') >= 0) return 'כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.';
     if (message.indexOf('renewal_snapshot_changed') >= 0 || message.indexOf('renewal_period_changed') >= 0) return 'פרטי המטופל השתנו. יש לפתוח את החידוש מחדש ולבדוק את החודש והסכום.';
     return 'לא ניתן לאמת את מצב החידוש. יש לפתוח שוב את החלון כדי לבדוק מה נשמר; אין ליצור חידוש נוסף בינתיים.';
   }
   function showRenewalOperation(op) {
+    if (op.kind && op.kind !== 'renewal') throw new Error('renewal_kind_mismatch');
     renewSourceState = { operation: op };
     var form = $('#renewForm');
     form.hidden = true;
@@ -6399,78 +6539,12 @@
     var addChargeForm = $('#addChargeForm');
     if (addChargeForm) addChargeForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      var submit = $('#addChargeSubmit');
-      if (submit.disabled) return;
-      if (!addChargeClientId) return;
-      var client = state.clients.find(function (c) { return c.id === addChargeClientId; });
-      if (!client) { toast('מטופל לא נמצא', true); return; }
-      var fd = new FormData(e.target);
-      var billingType = (fd.get('billingType') || 'one_time').toString();
-      var description = (fd.get('description') || '').trim();
-      var amount = toNum(fd.get('amount'));
-      var chargeDate = fd.get('chargeDate') || '';
-      var billingDay = fd.get('billingDay');
-      var notes = (fd.get('notes') || '').trim();
-      var treatmentType = (fd.get('treatmentType') || '').toString().trim();
-      var frequencyPerWeek = fd.get('frequencyPerWeek');
-      var chargePaid = !!fd.get('chargePaid');
-      if (!description) { toast('חסר תיאור', true); return; }
-      if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
-      if (!chargeDate) { toast('יש להזין תאריך', true); return; }
-      submit.disabled = true;
-      var charge = {
-        id: uid(),
-        clientId: client.id,
-        description: description,
-        amount: amount,
-        billingType: billingType === 'monthly' ? 'monthly' : 'one_time',
-        treatmentType: treatmentType,
-        frequencyPerWeek: (billingType === 'monthly' && frequencyPerWeek) ? toNum(frequencyPerWeek) : '',
-        chargeDate: chargeDate,
-        billingDay: billingType === 'monthly' && billingDay ? toNum(billingDay) : '',
-        active: true,
-        notes: notes,
-        created: today()
-      };
-      state.charges.push(charge);
-      // Build the intended row now, but show paid only after source confirmation.
-      var paidRow = null;
-      if (chargePaid) {
-        var pid = paymentId(client, today(), 'extra', charge.id);
-        paidRow = {
-          id: pid, clientId: client.id, clientName: client.name || '',
-          billingType: 'extra', dueDate: today(),
-          amountDue: amount, amountPaid: amount, status: 'paid',
-          paymentDate: today(), method: '', notes: '',
-          bundleSize: 0, sessionsUsed: 0
-        };
-      }
-      render();
-      var chargeSaved = false;
-      persistCharge(charge)
-        .then(function () {
-          chargeSaved = true;
-          return paidRow ? persistPayment(paidRow) : null;
-        })
-        .then(function () {
-          if (paidRow) rememberConfirmedPayment(paidRow);
-          render();
-          toast('הטיפול נוסף'); closeAddChargeModal();
-        })
-        .catch(function (err) {
-          if (chargeSaved) {
-            // The charge exists. Close creation so another click cannot add it
-            // again; verify the uncertain payment in billing before retrying.
-            closeAddChargeModal();
-            showFinancialSaveWarning('החיוב נשמר', client.name);
-          } else {
-            state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
-            toast('לא התקבל אישור לשמירת החיוב. יש לרענן ולבדוק לפני ניסיון נוסף: ' + err.message, true);
-          }
-          render();
-        })
-        .finally(function () { submit.disabled = false; });
+      submitDurableExtraCharge(e.target);
     });
+
+    $('#extraResume').addEventListener('click', function () { continueExtraCharge('resume'); });
+    $('#extraCancelIntent').addEventListener('click', function () { continueExtraCharge('cancel'); });
+    $('#extraReviewResolve').addEventListener('click', function () { continueExtraCharge('review'); });
 
     var renewForm = $('#renewForm');
     if (renewForm) renewForm.addEventListener('submit', function (e) {

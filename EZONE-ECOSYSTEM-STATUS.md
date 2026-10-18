@@ -1,28 +1,41 @@
 # Outpatient local update — 2026-10-18
 
-OP-01 #115, release-order fix #116, OP-02a #117 and OP-02b1 #118 are released.
-#119 merged during this work; production branch / verified Node is now
-`6bdac37f3d788a2d48df680da2ce25746f17b824`, SW v10. Last independently verified
-source is @96; #119 source deployment needs a separate evidence check. #118 corrected dependent financial acknowledgement
-and partial-save/paid-state UI. Keep credentials and the Node-first explicit
-source dispatch gate. Historical notes below do not override `DEPLOY.md`.
+OP-01 #115, release-order #116, OP-02a #117, OP-02b1 #118 and renewal #120 are
+released. Production baseline: 535dc659cae2807987f68002c20ac2ddb4fcc6c4, SW v11,
+source @97 (run 39117376211). #119 planned-exit fields remain included. Keep
+credentials and the Node-first explicit source dispatch gate. Historical notes
+below do not override DEPLOY.md.
 
-Current isolated work: OP-02b2-a renewal-only journal, immutable original cycle,
-exact-evidence reconciliation, cross-device discovery, interference guards and
-an eight-dataset backup set with manifest. See `docs/renewal-journal.md`.
-Separate approval is required for a new release. This is not all of OP-02b2:
-extra charges/intake/activation/edit-paid/monthly toggles still need durable
-recovery. OP-03 real scheduled backup/restore evidence, OP-04 performance and
-OP-05 financial evidence/control work remain open, specifically a durable
-follow-up queue for closed reviews with missing original-cycle payments and
-review access for deleted clients. OP-04 includes whole-journal guard scan cost
-and a safe history archive/repair plan. No real data repair here.
+Current isolated candidate: OP-02b2-b additional-charge creation with optional
+initial payment, shared FinancialOps reservation and mixed-kind recovery. It also
+persists treatmentType/frequencyPerWeek previously lost by the source. See
+`docs/extra-charge-journal.md`, especially the no-@97-rollback rule after any extra
+history. Separate production approval remains required. Intake/activation/edit-paid/
+later toggles remain OP-02b2. OP-03 real scheduled backup and Google restore
+proof, OP-04 latency/journal scans/archive/repair, OP-05 review follow-up queues,
+deleted-client review access and bank/document evidence remain open. OP-05 also
+owns initial extra payment coverage and future-start/current-month inconsistencies;
+this candidate preserves actual existing semantics.
 
 CRM Outpatient #114 / Dashboard #220 and other drafts are unchanged. OP-06 still
-includes the legacy `recordTreatmentGiven` sender without a matching route;
-do not invent a receiver. Keep the ten-app order: Outpatient → Therapists →
-Staffing → Coordinators → Dashboard → Managers → Logistics → Kitchen → Hadrachot
-→ Helpdesk. Security, integrity, backup, speed and business logic stay in scope.
+includes legacy `recordTreatmentGiven` usage and cross-app retry/delivery; do not
+invent a receiver. Keep ten-app order: Outpatient → Therapists → Staffing →
+Coordinators → Dashboard → Managers → Logistics → Kitchen → Hadrachot → Helpdesk.
+For every app assess structure/workflows, business logic, missing information and
+features, security/privacy, save/recovery, backups, speed and controls. Maintain
+return points; finishing one financial step does not complete an app. Use Claude
+for bounded review where available, with one implementation owner and exact
+review/test evidence. Recommend new chat/model at a completed milestone with a
+handoff rather than losing context during unfinished financial work.
+
+Parallel work allocation (Sandra, 2026-10-18): Codex continues financial-safety
+draft #121; Claude owns package catalog/pricing draft #122 and its therapists
+integration. Both are candidates, not releases. #122 was observed at 821a82f5;
+its confidentiality and cross-app completion gaps remain open. Preserve both
+branches. See docs/extra-charge-journal.md for SW, backup and fixture integration
+requirements. After this bounded financial step return to the remaining OP-02b2
+flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
+and broader ten-app review remain in the program.
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 
