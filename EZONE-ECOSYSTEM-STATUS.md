@@ -1,23 +1,26 @@
-# Outpatient local update — 2026-10-17
+# Outpatient local update — 2026-10-18
 
-OP-01 #115 is released: Node `76de4cc5`, existing Apps Script deployment @94.
-Signed-session settings read succeeded; anonymous Node and direct source dummy
-requests were denied. Consumer key alignment was confirmed by Sandra; full
-cross-app/staff workflows are not thereby proven. No real billing/patient writes
-were used for acceptance. See `docs/source-auth-boundary.md` for evidence.
+OP-01 #115 and release-order fix #116 are released. Current production branch
+and independently checked `/api/version`: `941cd8b62f9d7d31aee7fe3dc33c29305473eb83`.
+The last completed source release is @95; #116's Node-first explicit dispatch
+was verified without disabling Railway checks. Keep credentials, source URL,
+authentication and the deployment gate unchanged. `DEPLOY.md` is current;
+the shared historical snapshot below does not override this local procedure.
 
-This branch's source workflow replaces automatic push deployment with an explicit
-second release phase: wait for the approved Node SHA, then dispatch Apps Script
-with that exact SHA. This avoids the observed Railway Wait for CI deadlock;
-readiness/authentication gates remain. It is a separate candidate until merged
-with Sandra's approval. `DEPLOY.md` is the current Outpatient procedure; the
-older shared snapshot below is historical and does not override this local note.
+OP-02a is now integrated on that released tree in
+`codex/op02-locks-auth-20261018`, superseding the preserved queued branch
+`codex/op02-financial-locks-20261016` at `ccd0488`. Only two production lines
+change. 64 financial tests and 196 combined financial/auth tests pass; full
+local suite 1,343 pass, 0 fail, 9 browser skips. Exact-head CI/Claude review and
+Sandra's separate release approval are required. Nothing from OP-02 is live.
 
-OP-02 remains the next business-integrity task: preserve its isolated lock-fix
-branch, then fix renewal retry and partial charge/payment saves. CRM drafts are
-unchanged. OP-06 still includes the legacy `recordTreatmentGiven` sender without
-a matching Outpatient route; do not invent a billing receiver. The remaining
-apps, scheduled backup/restore evidence and performance review are still open.
+OP-02b remains next: renewal retry drift, retained unconfirmed paid state and
+payment attempted after a refused client update were reproduced synthetically.
+Durable identity/recovery, intake/activation and orphan-deletion paths remain
+open. See `docs/financial-write-integrity.md`. Full cross-app/staff workflows,
+OP-03 scheduled backup/financial restore evidence and performance are still open.
+CRM #114 and other drafts are unchanged. OP-06 still includes the legacy
+`recordTreatmentGiven` sender without a matching route; do not invent a receiver.
 
 # E-ZONE Ecosystem Status — updated September 10, 2026
 

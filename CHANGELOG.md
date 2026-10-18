@@ -5,6 +5,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Financial lock refusal (OP-02a candidate)
+- Refuse payment/charge saves before Sheets access when the script lock is
+  unavailable. Keep the released source authentication and deployment gate.
+- Add 64 real-router/handler cases, including auth plus contention; 196 focused
+  financial/auth tests pass. Full local suite: 1,343 pass, 0 fail, 9 browser skips.
+- Preserve and refresh OP-02b failure reproductions and recovery requirements:
+  renewal retry drift, unconfirmed paid state and dependent payment after a
+  client-row conflict are still open. No UI/schema/calculation changes here.
+  See `CHANGELOG-financial-write-locks.md` and `docs/financial-write-integrity.md`.
+
 ### Source deployment ordering
 - Replace the push-triggered source deployment with an explicit post-Node
   dispatch to avoid the Railway Wait for CI circular wait observed in #115.
