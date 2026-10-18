@@ -37,6 +37,13 @@ requirements. After this bounded financial step return to the remaining OP-02b2
 flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
 and broader ten-app review remain in the program.
 
+## Outpatient: price / pay constants no longer public (Oct 18, 2026 — DRAFT, not released)
+
+Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
+served without any session; now session-only, `no-store`, loaded after sign-in, dropped on logout, never
+cached (SW v13). Browser + server tests. Details and limits (shared-PIN holders still see them):
+`CHANGELOG-protect-price-constants.md`. Release BEFORE the package-catalog PR; the later PR re-bumps the SW.
+
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 
 - `getTreatmentPlans` gains one optional key: `plannedExitDate`. It is the

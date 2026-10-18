@@ -45,8 +45,12 @@
  *   and explicit review. Live v10 was verified after #119 before this bump.
  * - v12 (2026-10-18): durable additional-charge creation and recovery UI.
  *   Live v11 was verified before this bump; new markup and app.js stay paired.
+ * - v13 (2026-10-18): price / pay constants are session-only. treatment-map.js and
+ *   therapist-pay.js are no longer cached and no longer static <script> tags; bumping
+ *   the cache name also DELETES every previously cached copy of them on activate.
+ *   Check the LIVE version before releasing (CLAUDE.md rule 5).
  */
-var CACHE = 'ezone-outpatient-v12';
+var CACHE = 'ezone-outpatient-v13';
 var SHELL = [
   './',
   './index.html',
@@ -72,6 +76,9 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.pathname.indexOf('/api/') === 0) return;
+  // Price / pay constants are session-only and never cached (a cached copy would outlive
+  // the sign-in and be readable offline). Let the browser go straight to the network.
+  if (/\/(treatment-map|therapist-pay)\.js$/i.test(url.pathname)) return;
 
   e.respondWith(
     fetch(req).then(function (res) {

@@ -439,7 +439,38 @@
   // client-trusted "logged in" flag. If the cookie is missing or expired the
   // server answers 401 and the ONE handler below sends the user back to the
   // PIN screen — on load, and whenever a session expires mid-use.
+  // --- Price / pay constants (treatment-map.js, therapist-pay.js, therapist-payout.js) ---
+  // Not public assets: the server serves them only to a signed-in session, so they are
+  // fetched after sign-in and DROPPED (script nodes + globals) on logout / 401, so a shared
+  // device does not keep rates in memory behind the PIN screen.
+  var PROTECTED_GLOBALS = ['TreatmentMap', 'TherapistPay', 'TherapistPayout'];
+  var protectedScripts = null;     // Promise while loaded / loading
+  function loadProtectedScripts() {
+    if (protectedScripts) return protectedScripts;
+    var meta = document.querySelector('meta[name="ezone-protected-scripts"]');
+    var list = meta ? String(meta.getAttribute('content') || '').split(/\s+/).filter(Boolean) : [];
+    protectedScripts = list.reduce(function (chain, src) {
+      return chain.then(function () {
+        return new Promise(function (resolve, reject) {
+          var el = document.createElement('script');
+          el.src = src; el.async = false; el.setAttribute('data-protected', '1');
+          el.onload = function () { resolve(); };
+          el.onerror = function () { el.remove(); reject(new Error('protected_script_unavailable')); };
+          document.head.appendChild(el);
+        });
+      });
+    }, Promise.resolve()).catch(function (e) { protectedScripts = null; throw e; });
+    return protectedScripts;
+  }
+  function dropProtectedScripts() {
+    protectedScripts = null;
+    Array.prototype.slice.call(document.querySelectorAll('script[data-protected]')).forEach(function (el) { el.remove(); });
+    PROTECTED_GLOBALS.forEach(function (g) { try { delete window[g]; } catch (_) { window[g] = undefined; } });
+    var t = document.getElementById('sessionTherapist'); if (t) { t.textContent = ''; delete t.dataset.filled; }
+    var c = document.getElementById('sessionClinicalType'); if (c) { c.textContent = ''; delete c.dataset.filled; }
+  }
   function handleUnauthorized() {
+    dropProtectedScripts();
     try { sessionStorage.removeItem('ez_role'); } catch (_) {}
     state.role = 'viewer';
     state.user = '';
@@ -6281,6 +6312,9 @@
           return { myStopAlerts: [] };
         })
       ]);
+      // The main read succeeded, so the session is valid: only now fetch the price / pay
+      // constants (a signed-out page never even requests them). Render below needs them.
+      await loadProtectedScripts();
       var data = results[0];
       // Staleness signal: remember the version this tab loaded; persist()
       // echoes it back so the server can flag a save from a stale tab.
@@ -6375,6 +6409,7 @@
       // Expire the server session cookie too (fire-and-forget) so a shared
       // device does not keep a live 7-day session after יציאה.
       try { fetch('/api/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
+      dropProtectedScripts();
       try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';
       state.user = '';

@@ -968,9 +968,11 @@
   <script src="name-search.js?v=__BUILD__" defer></script>
   <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
-  <script src="treatment-map.js?v=__BUILD__" defer></script>
-  <script src="therapist-pay.js?v=__BUILD__" defer></script>
-  <script src="therapist-payout.js?v=__BUILD__" defer></script>
+  <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
+       the server answers 401 without a session, so they are loaded by app.js AFTER
+       sign-in, in this order (therapist-payout.js reads TherapistPay when it loads).
+       Do not turn these back into static <script> tags. -->
+  <meta name="ezone-protected-scripts" content="treatment-map.js?v=__BUILD__ therapist-pay.js?v=__BUILD__ therapist-payout.js?v=__BUILD__" />
   <script src="payout-export.js?v=__BUILD__" defer></script>
   <script src="credits-ledger.js?v=__BUILD__" defer></script>
   <script src="monthly-revenue.js?v=__BUILD__" defer></script>

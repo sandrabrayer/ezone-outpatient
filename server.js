@@ -208,6 +208,49 @@ function sendIndex(res) {
 app.get('/', (req, res) => sendIndex(res));
 app.get('/index.html', (req, res) => sendIndex(res));
 
+/* PRICE / PAY CONSTANTS ARE NOT PUBLIC ASSETS. treatment-map.js holds the client price
+ * table (incl. VAT) and therapist-pay.js the per-therapist pay rates; before this they were
+ * served to anyone who could reach the site, with no PIN. They are now served ONLY to a
+ * valid session, `no-store`, and the matching names are matched after URL-decoding and
+ * normalisation, case-insensitively, so encoded / dotted / doubled-slash / re-cased
+ * spellings cannot reach express.static below. The browser loads them after sign-in
+ * (public/app.js loadProtectedScripts) and the service worker never caches them. */
+const PROTECTED_STATIC = new Set(['treatment-map.js', 'therapist-pay.js']);
+// 'therapist-payout.js' (pure logic, no constants) shares the prefix and stays public: the stem must
+// not be followed by another name character.
+const PROTECTED_STEM_RE = /(treatment-map|therapist-pay)(?![a-z0-9-])/;
+/* '' = not a protected request; 'invalid' = undecodable (400); otherwise the exact file name
+ * to serve to a signed-in session; 'blocked' = looks like one of the files but is not the exact
+ * name (trailing space/dot, ';x', odd casing tricks ...): never reaches express.static, 404 for
+ * everyone. Matching is by SUBSTRING of the decoded (up to 3 levels), lower-cased path, so no
+ * spelling that still names the file on disk can slip past an exact-name comparison. */
+function protectedStaticName(rawPath) {
+  let decoded = String(rawPath || '');
+  for (let i = 0; i < 3; i++) { // tolerate double-encoding; stop at a fixed point
+    let next;
+    try { next = decodeURIComponent(decoded); } catch (_) { return 'invalid'; }
+    if (next === decoded) break;
+    decoded = next;
+  }
+  const lower = decoded.toLowerCase();
+  if (!PROTECTED_STEM_RE.test(lower)) return '';
+  const norm = path.posix.normalize('/' + decoded.replace(/\\/g, '/')).replace(/\/+$/, '').toLowerCase();
+  const name = norm.replace(/^\/+/, '');
+  return PROTECTED_STATIC.has(name) ? name : 'blocked';
+}
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  const name = protectedStaticName(req.path);
+  if (!name) return next();
+  if (name === 'invalid') return res.status(400).end();
+  return requireSession(req, res, () => {
+    res.set('Cache-Control', 'no-store');
+    if (name === 'blocked') return res.status(404).end();
+    res.type('js');
+    return res.sendFile(path.join(__dirname, 'public', name), { dotfiles: 'deny' });
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const lastLoad = {
@@ -560,6 +603,7 @@ module.exports.sessionAuthStatus = sessionAuthStatus;
 module.exports.sanitizeSessionUser = sanitizeSessionUser;
 module.exports.validateSessionUser = validateSessionUser;
 module.exports.sessionUserFromRequest = sessionUserFromRequest;
+module.exports.protectedStaticName = protectedStaticName;
 module.exports.requireSession = requireSession;
 module.exports.requestIsHttps = requestIsHttps;
 module.exports.buildSessionCookie = buildSessionCookie;
