@@ -728,6 +728,9 @@
     // never loaded), but the tab is showing an incomplete picture.
     if (state.dataVersion != null) payload.dataVersion = state.dataVersion;
     var data = await apiSave(payload);
+    if (opts && opts.requireIds && (!data || data.ok !== true)) {
+      throw new Error('לא התקבל אישור לשמירת הכרטיס');
+    }
     if (data && data.dataVersion != null) state.dataVersion = Number(data.dataVersion);
     // Conflict refusal (PR 2): the server REFUSED the rows another person
     // edited after this tab loaded them (the sheet row was kept, the rest of
@@ -737,13 +740,24 @@
     var conflictMsg = conflictsMessage(data);
     if (conflictMsg) {
       showConflictBanner(conflictMsg);
-      loadAll().catch(function (e) { console.warn('[ezone] conflict reload failed:', e.message); });
+      var conflictReload = loadAll().catch(function (e) { console.warn('[ezone] conflict reload failed:', e.message); });
+      if (opts && opts.requireIds) await conflictReload;
+      // saveAll can accept other rows in the same request. Only a refusal of
+      // this flow's prerequisites blocks its dependent financial write.
+      if (opts && opts.requireIds && data.conflicts.some(function (c) {
+        return !c || !c.id || opts.requireIds.indexOf(String(c.id)) >= 0;
+      })) {
+        var refusal = new Error(conflictMsg);
+        refusal.code = 'save_conflict';
+        throw refusal;
+      }
       return;
     }
     hideConflictBanner();
     if (data && data.staleSave) {
       toast('הנתונים עודכנו ממכשיר אחר — רענני לראות את המצב המלא');
-      loadAll().catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
+      var staleReload = loadAll().catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
+      if (opts && opts.requireIds) await staleReload;
     }
   }
   // Pure wording helper (public/conflicts.js, unit-tested): '' when the
@@ -764,6 +778,30 @@
   function hideConflictBanner() {
     var box = $('#conflictBanner');
     if (box) box.hidden = true;
+  }
+
+  // Financial flows opt into prerequisite refusal. Ordinary snapshot saves
+  // retain their existing conflict-banner behavior.
+  function persistClientChange(client) {
+    return persist({ requireIds: [String(client.id)] });
+  }
+
+  function rememberConfirmedPayment(payment) {
+    var idx = state.payments.findIndex(function (p) { return p.id === payment.id; });
+    if (idx >= 0) state.payments[idx] = payment;
+    else state.payments.push(payment);
+  }
+
+  // A transport error is NOT proof that the payment was rejected: the source
+  // may have committed before the response was lost. Never auto-retry here.
+  // Keep a persistent on-screen warning, separate from transient success toasts.
+  function showFinancialSaveWarning(savedPart, clientName) {
+    var msg = savedPart + (clientName ? ' (' + clientName + ')' : '') +
+      '. לא התקבל אישור לרישום התשלום. יש לרענן ולבדוק בגבייה לפני ניסיון נוסף.';
+    var box = $('#financialSaveWarning');
+    var txt = $('#financialSaveWarningText');
+    if (box && txt) { txt.textContent = msg; box.hidden = false; }
+    toast(msg, true);
   }
 
   // --- Payments API / serialization -------------------------------------
@@ -972,11 +1010,13 @@
       var covErr = CL.coveragePeriodError(payment && payment.coverageStart, payment && payment.coverageEnd);
       if (covErr) throw new Error(covErr);
     }
-    await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
+    var saved = await apiPostAction('savePayment', { payment: paymentForSheet(payment) });
+    if (!saved || saved.ok !== true) throw new Error('לא התקבל אישור לרישום התשלום');
   }
 
   async function removePayment(paymentId) {
-    await apiPostAction('removePayment', { id: paymentId });
+    var saved = await apiPostAction('removePayment', { id: paymentId });
+    if (!saved || saved.ok !== true) throw new Error('לא התקבל אישור למחיקת התשלום');
   }
 
   // Persist one manual collection-amount override (single-cell server write). Pass
@@ -1035,7 +1075,8 @@
     };
   }
   async function persistCharge(charge) {
-    await apiPostAction('saveCharge', { charge: chargeForSheet(charge) });
+    var saved = await apiPostAction('saveCharge', { charge: chargeForSheet(charge) });
+    if (!saved || saved.ok !== true) throw new Error('לא התקבל אישור לשמירת החיוב');
   }
   async function persistRemoveCharge(id) {
     await apiPostAction('removeCharge', { id: id });
@@ -2310,6 +2351,35 @@
     return { paid: paid, until: paid ? until : '' };
   }
 
+  // Payment evidence for the card's existing billing anchor. Recorded coverage
+  // takes precedence over a month-key assumption (e.g. two months prepaid).
+  // Blank legacy periods retain the exact cycle-id lookup; an unrelated old
+  // payment does not prove a manually advanced anchor was paid.
+  function confirmedPackagePayment(c, until, cycleRow) {
+    var start = prevCycleDueDateBefore(c, until);
+    var end = addDays(until, -1);
+    if (c.startDate && c.startDate > start && c.startDate <= end) start = c.startDate;
+    function eligible(p) {
+      return p && p.status === 'paid' && p.billingType !== 'one_time' &&
+        paymentKindFromId(p.id).kind === 'base' &&
+        (!p.clientId || String(p.clientId) === String(c.id));
+    }
+    function covers(p) {
+      var window = CL && CL.recordedCoverage(p);
+      return window && start && end &&
+        CL.isoFromLocalDate(window.start) <= start && CL.isoFromLocalDate(window.end) >= end;
+    }
+    if (eligible(cycleRow)) {
+      if (!cycleRow.coverageStart && !cycleRow.coverageEnd) return cycleRow;
+      if (covers(cycleRow)) return cycleRow;
+    }
+    for (var i = 0; i < state.payments.length; i++) {
+      var p = state.payments[i];
+      if (eligible(p) && String(p.clientId) === String(c.id) && covers(p)) return p;
+    }
+    return null;
+  }
+
   // The due date of the CYCLE a payment settles right now: the stored
   // nextBillingDate when it is already due (past/today), else the current
   // month's base due date (blank/legacy anchor fallback). This is the SAME
@@ -2770,9 +2840,11 @@
       rm.onclick = function () {
         if (!confirm('להסיר את רשומת הגבייה של ' + (nameDisplay || 'מטופל שנמחק') + '?')) return;
         rm.disabled = true;
-        state.payments = state.payments.filter(function (p) { return p.id !== payment.id; });
         removePayment(payment.id)
-          .then(function () { toast('הוסר'); renderBilling(); })
+          .then(function () {
+            state.payments = state.payments.filter(function (p) { return p.id !== payment.id; });
+            toast('הוסר'); renderBilling();
+          })
           .catch(function (e) { toast('שגיאה: ' + e.message, true); rm.disabled = false; });
       };
       row.appendChild(rm);
@@ -4902,8 +4974,25 @@
       // nextBillingDate anchor the renewal banner counts to, so the chip and
       // the banner can never disagree again.
       var pkg = packagePaidState(c, today());
+      // A future anchor is a schedule, not a payment receipt. In particular a
+      // client-first save can advance it before its payment succeeds. Preserve
+      // the cycle calculation, but make missing source evidence explicit.
+      var cycleRow = pkg.paid
+        ? paymentForClientOn(c, prevCycleDueDateBefore(c, pkg.until) || pkg.until)
+        : null;
+      var cycleId = cycleRow && cycleRow.id;
+      if (pkg.paid) cycleRow = confirmedPackagePayment(c, pkg.until, cycleRow);
+      var needsPaymentCheck = pkg.paid && !cycleRow;
+      // A custom multi-cycle payment can live under another month. Show its
+      // confirmation, but edit it in billing: the legacy quick-toggle chooses
+      // its own row and must not silently undo a different payment.
+      var customPaidCycle = cycleRow && cycleRow.id !== cycleId;
       var untilDM = pkg.until ? pkg.until.slice(8, 10) + '/' + pkg.until.slice(5, 7) : '';
-      if (state.role === 'editor') {
+      if (needsPaymentCheck) {
+        paidChipHtml = '<span class="chip chip-payment-review" role="status" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. יש לבדוק בגבייה לפני פעולה נוספת.">נדרש אימות תשלום</span>';
+      } else if (customPaidCycle) {
+        paidChipHtml = '<span class="chip chip-paid" title="מאושר לפי תקופת הכיסוי הרשומה; לתיקון התשלום יש לפתוח גבייה">שולם עד ' + untilDM + '</span>';
+      } else if (state.role === 'editor') {
         paidChipHtml = pkg.paid
           ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="החבילה הנוכחית שולמה; גבייה הבאה ' + displayDate(pkg.until) + '">שולם עד ' + untilDM + ' ✓</button>'
           : '<button type="button" class="chip chip-unpaid month-pay-btn" data-action="mark-month-paid" title="סמן את החבילה כשולמה — יזיז את גבייה הבאה למחזור הבא">לא שולם ✓</button>';
@@ -4916,8 +5005,7 @@
       // cycle one month before the advanced anchor (that row's due date is the
       // pre-advance anchor). Falls back to the client's own stamped paymentDate.
       var cyclePaidOn = '';
-      if (pkg.paid) {
-        var cycleRow = paymentForClientOn(c, prevCycleDueDateBefore(c, pkg.until) || pkg.until);
+      if (pkg.paid && !needsPaymentCheck) {
         cyclePaidOn = (cycleRow.status === 'paid' && cycleRow.paymentDate) || c.paymentDate || '';
       }
       paidOnRow = cyclePaidOn
@@ -6003,6 +6091,7 @@
     // החלף (switch user) = logout -> PIN -> name picker.
     on('#switchUserBtn', 'click', logout);
     on('#conflictBannerClose', 'click', hideConflictBanner);
+    on('#financialSaveWarningClose', 'click', function () { $('#financialSaveWarning').hidden = true; });
 
     $$('.tab').forEach(function (t) { t.addEventListener('click', function () { setView(t.dataset.view); }); });
     on('#refreshBtn', 'click', function () { loadAll().then(function () { toast('רועננו'); }).catch(function () {}); });
@@ -6190,8 +6279,7 @@
         created: today()
       };
       state.charges.push(charge);
-      // If marked paid, create the charge's payment row up front (same row
-      // chargeStatusFor reads), so it shows שולם immediately — no extra click.
+      // Build the intended row now, but show paid only after source confirmation.
       var paidRow = null;
       if (chargePaid) {
         var pid = paymentId(client, today(), 'extra', charge.id);
@@ -6202,21 +6290,30 @@
           paymentDate: today(), method: '', notes: '',
           bundleSize: 0, sessionsUsed: 0
         };
-        state.payments.push(paidRow);
       }
       render();
+      var chargeSaved = false;
       persistCharge(charge)
         .then(function () {
-          if (paidRow) return persistPayment(paidRow).catch(function () {
-            toast('הטיפול נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
-          });
+          chargeSaved = true;
+          return paidRow ? persistPayment(paidRow) : null;
         })
-        .then(function () { toast('הטיפול נוסף'); closeAddChargeModal(); })
-        .catch(function (err) {
-          state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
-          if (paidRow) state.payments = state.payments.filter(function (p) { return p.id !== paidRow.id; });
+        .then(function () {
+          if (paidRow) rememberConfirmedPayment(paidRow);
           render();
-          toast('שגיאה: ' + err.message, true);
+          toast('הטיפול נוסף'); closeAddChargeModal();
+        })
+        .catch(function (err) {
+          if (chargeSaved) {
+            // The charge exists. Close creation so another click cannot add it
+            // again; verify the uncertain payment in billing before retrying.
+            closeAddChargeModal();
+            showFinancialSaveWarning('החיוב נשמר', client.name);
+          } else {
+            state.charges = state.charges.filter(function (c) { return c.id !== charge.id; });
+            toast('לא התקבל אישור לשמירת החיוב. יש לרענן ולבדוק לפני ניסיון נוסף: ' + err.message, true);
+          }
+          render();
         })
         .finally(function () { submit.disabled = false; });
     });
@@ -6247,10 +6344,9 @@
       var pkgChanged = packageSessionsChanged(c, pkg);
       submit.disabled = true;
 
-      // ORDERING IS DELIBERATE: persist the client default FIRST, payment
-      // SECOND. A half-applied clear-and-rewrite of clients/leads is the worse
-      // failure mode; the payment row is idempotent (deterministic id) and
-      // safely re-clickable, so it is the safer step to leave for retry.
+      // Client first, then payment. A refused client update must stop here.
+      // Durable period/operation recovery is still OP-02b's next stage;
+      // this handler must not claim a blind re-click is safe.
       var prev = {
         pricePerSession: c.pricePerSession, paymentDate: c.paymentDate,
         nextBillingDate: c.nextBillingDate, sessionsPerWeek: c.sessionsPerWeek,
@@ -6269,7 +6365,7 @@
         c.sessionsUnit = pkg.units;
         c.packageChangeDate = paidDate;
       }
-      persist()
+      persistClientChange(c)
         .then(function () {
           // Single paid-date path: same builder as the edit-modal propagation.
           var payment = basePaymentPaidOn(c, renewalDate, amount, paidDate, notes);
@@ -6284,10 +6380,10 @@
               render();
             })
             .catch(function (err) {
-              // The client default change is legitimately saved — do NOT roll
-              // it back. The payment can be retried via גבייה or by clicking
-              // the button again (same deterministic id, no duplicate).
-              toast('הסכום עודכן אך רישום התשלום נכשל, נסה שוב: ' + err.message, true);
+              // Keep the confirmed client change. Close this submission and
+              // require reconciliation; a new renewal can target another month.
+              closeRenewModal();
+              showFinancialSaveWarning('פרטי החידוש נשמרו', c.name);
               render();
             });
         })
@@ -6404,32 +6500,30 @@
             method: '', notes: '',
             bundleSize: 0, sessionsUsed: 0
           };
-          var dIdx = state.payments.findIndex(function (p) { return p.id === directIntakePayment.id; });
-          if (dIdx >= 0) state.payments[dIdx] = directIntakePayment;
-          else state.payments.push(directIntakePayment);
         }
-        // Optimistic: show the new patient + close the modal before the network;
-        // on failure remove the just-added client (and intake payment) and toast.
+        // Keep the client visible while saving; paid remains source-confirmed.
         closeDirectClientModal();
         render();
-        submit.disabled = false;
-        persist()
+        var clientSaved = false;
+        persistClientChange(client)
           .then(function () {
-            // Save the payment row through its own path (persist() saves only
-            // leads+clients). Non-fatal — client is already saved.
-            if (directIntakePayment) {
-              return persistPayment(directIntakePayment).catch(function () {
-                toast('המטופל נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
-              });
-            }
+            clientSaved = true;
+            return directIntakePayment ? persistPayment(directIntakePayment) : null;
           })
-          .then(function () { toast('המטופל נוסף'); })
+          .then(function () {
+            if (directIntakePayment) rememberConfirmedPayment(directIntakePayment);
+            render(); toast('המטופל נוסף');
+          })
           .catch(function (err) {
-            state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            if (directIntakePayment) state.payments = state.payments.filter(function (p) { return p.id !== directIntakePayment.id; });
+            if (clientSaved) {
+              showFinancialSaveWarning('המטופל נשמר', client.name);
+            } else {
+              state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
+              toast('שמירה נכשלה: ' + err.message, true);
+            }
             render();
-            toast('שמירה נכשלה: ' + err.message, true);
-          });
+          })
+          .finally(function () { submit.disabled = false; });
       } catch (e2) { toast('שגיאה: ' + e2.message, true); submit.disabled = false; }
     });
 
@@ -6582,41 +6676,35 @@
           method: '', notes: '',
           bundleSize: 0, sessionsUsed: 0
         };
-        var exIdx = state.payments.findIndex(function (p) { return p.id === intakePayment.id; });
-        if (exIdx >= 0) state.payments[exIdx] = intakePayment;
-        else state.payments.push(intakePayment);
         intakePaymentToPersist = intakePayment;
       }
-      // Lead has converted to a client. The lead record has no further meaning,
-      // so remove it from state — persist() (clear-and-rewrite) drops it from the
-      // sheet, and loadAll's cleanupConvertedLeads keeps it gone. Snapshot the
-      // index so an optimistic-activate failure can restore it.
       var leadIdx = state.leads.findIndex(function (x) { return x.id === lead.id; });
       state.leads = state.leads.filter(function (x) { return x.id !== lead.id; });
-      // Optimistic: navigate to the clients view + close the modal before the
-      // network; on failure remove the new client (+ intake payment), restore the
-      // lead, re-render.
       closeActivateModal();
       setView('clients');
-      submit.disabled = false;
-      persist()
+      var clientSaved = false;
+      persistClientChange(client)
         .then(function () {
-          // Save the intake payment row through its own path (persist() doesn't
-          // cover payments). Non-fatal if it fails — the client is already saved.
-          if (intakePaymentToPersist) {
-            return persistPayment(intakePaymentToPersist).catch(function () {
-              toast('המטופל נוסף, אך סימון התשלום לא נשמר — סמנ/י ידנית', true);
-            });
-          }
+          clientSaved = true;
+          return intakePaymentToPersist ? persistPayment(intakePaymentToPersist) : null;
         })
-        .then(function () { toast('המטופל נוסף'); })
+        .then(function () {
+          if (intakePaymentToPersist) rememberConfirmedPayment(intakePaymentToPersist);
+          render(); toast('המטופל נוסף');
+        })
         .catch(function (err) {
-          state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-          if (intakePaymentToPersist) state.payments = state.payments.filter(function (p) { return p.id !== intakePaymentToPersist.id; });
-          if (leadIdx >= 0) state.leads.splice(leadIdx, 0, lead);
+          if (clientSaved) {
+            showFinancialSaveWarning('המטופל נשמר', client.name);
+          } else {
+            state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
+            if (leadIdx >= 0 && !state.leads.some(function (x) { return x.id === lead.id; })) {
+              state.leads.splice(leadIdx, 0, lead);
+            }
+            toast('שמירה נכשלה: ' + err.message, true);
+          }
           render();
-          toast('שמירה נכשלה: ' + err.message, true);
-        });
+        })
+        .finally(function () { submit.disabled = false; });
     });
 
     $('#exitForm').addEventListener('submit', function (e) {
@@ -6829,38 +6917,38 @@
         cycleDueISO = cyclePaymentDueDate(client, today());
         client.nextBillingDate = nextCycleDueDateAfter(client, cycleDueISO);
       }
-      // Optimistic base-payment propagation: apply to state.payments NOW so the
-      // card chip reflects it immediately; snapshot for rollback on failure.
+      // Build the replacement but retain the existing confirmed payment until
+      // the source acknowledges the new paid date.
       var basePay = null;
-      var payPrev = null;   // { index, value } — value null means the row was newly pushed
       if (propagatePaid) {
         basePay = basePaymentPaidOn(client, cycleDueISO, clientAmountDue(client) || 0, client.paymentDate, '');
         var pi = state.payments.findIndex(function (p) { return p.id === basePay.id; });
         var existing = pi >= 0 ? state.payments[pi] : null;
         // Keep any existing notes/method when re-stamping the paid date.
         if (existing) { basePay.notes = existing.notes || ''; basePay.method = existing.method || ''; }
-        payPrev = { index: pi, value: existing };
-        if (pi >= 0) state.payments[pi] = basePay; else state.payments.push(basePay);
       }
-      // Optimistic UI: reflect the change and close the modal BEFORE awaiting the
-      // network, so the ~5s save is not felt. Persist in the background; on
-      // failure roll back client + payment and surface an error toast. Mirrors
-      // the setCurrentMonthPaid optimistic pattern.
       closeEditClientModal();
       render();
-      submit.disabled = false;
-      persist()
-        .then(function () { return propagatePaid ? persistPayment(basePay) : null; })
-        .then(function () { toast('נשמר'); })
+      var clientSaved = false;
+      persistClientChange(client)
+        .then(function () {
+          clientSaved = true;
+          return propagatePaid ? persistPayment(basePay) : null;
+        })
+        .then(function () {
+          if (basePay) rememberConfirmedPayment(basePay);
+          render(); toast('נשמר');
+        })
         .catch(function (err) {
-          Object.assign(client, prev);
-          if (propagatePaid && payPrev) {
-            if (payPrev.value) state.payments[payPrev.index] = payPrev.value;
-            else state.payments = state.payments.filter(function (p) { return p !== basePay; });
+          if (clientSaved) {
+            showFinancialSaveWarning('פרטי המטופל נשמרו', client.name);
+          } else {
+            Object.assign(client, prev);
+            toast('שמירה נכשלה: ' + err.message, true);
           }
           render();
-          toast('שמירה נכשלה: ' + err.message, true);
-        });
+        })
+        .finally(function () { submit.disabled = false; });
     });
 
     var settingsForm = $('#settingsForm');

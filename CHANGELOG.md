@@ -5,7 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Financial lock refusal (OP-02a candidate)
+### Financial save confirmation (OP-02b1 candidate)
+- Stop dependent payments on a refused client update; require explicit source
+  acknowledgement. Preserve confirmed client/charge steps after payment errors.
+- Remove premature paid rows and trailing success messages from multi-step
+  saves; show a Hebrew partial-save warning and verify payment evidence before
+  displaying a paid-up card. Keep orphan rows until deletion is confirmed.
+- SW v8 → v9. No billing calculation, source, schema or dependency change.
+  Durable renewal/cross-device recovery remains OP-02b2; see
+  `CHANGELOG-financial-save-confirmation.md` and `docs/financial-recovery-design.md`.
+
+### Financial lock refusal (OP-02a released 2026-10-18)
 - Refuse payment/charge saves before Sheets access when the script lock is
   unavailable. Keep the released source authentication and deployment gate.
 - Add 64 real-router/handler cases, including auth plus contention; 196 focused

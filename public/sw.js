@@ -36,8 +36,10 @@
  *   new index.html script tag, and CSS. CACHE bumped so an installed app cannot
  *   serve the old shell, whose index.html never loads phone-issue.js, alongside
  *   the new app.js that renders the «חסר טלפון» / «טלפון לא תקין» chip.
+ * - v9 (2026-10-18): confirmed financial saves, partial-save warning and
+ *   payment verification state. Keep the warning markup and app.js together.
  */
-var CACHE = 'ezone-outpatient-v8';
+var CACHE = 'ezone-outpatient-v9';
 var SHELL = [
   './',
   './index.html',

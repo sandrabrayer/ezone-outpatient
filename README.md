@@ -106,14 +106,18 @@ fallback. GET writes are disabled. Source readiness and the Node-first deploy
 sequence are documented in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
 This does not create individual role permissions or add Ortal to this app.
 
-## Financial write integrity (OP-02a candidate)
+## Financial write integrity (OP-02)
 
 Payment and charge upserts now refuse an unavailable script lock with `busy`
 before Sheets access. Source auth remains required; retry uses the existing
-row id. This is not a transaction across client/charge/payment saves. Renewal
-retry, partial paid-state and client-conflict recovery remain open in OP-02b.
-See [the findings and next acceptance gates](docs/financial-write-integrity.md).
-Separate approval is required before release.
+row id. Released in #117 at Node `72c80686`, source @96. This is not a
+transaction across client/charge/payment saves.
+
+The current OP-02b1 candidate corrects dependent refusal and financial save
+confirmation in the UI. Durable renewal recovery remains OP-02b2. See
+[scope and release checks](CHANGELOG-financial-save-confirmation.md) and
+[the next recovery boundary](docs/financial-recovery-design.md).
+Separate approval is required before releasing a new candidate.
 
 ## Local development
 

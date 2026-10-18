@@ -1,24 +1,22 @@
 # Outpatient local update — 2026-10-18
 
-OP-01 #115 and release-order fix #116 are released. Current production branch
-and independently checked `/api/version`: `941cd8b62f9d7d31aee7fe3dc33c29305473eb83`.
-The last completed source release is @95; #116's Node-first explicit dispatch
+OP-01 #115, release-order fix #116 and OP-02a #117 are released. Current production branch
+and independently checked `/api/version`: `72c80686afa0dfe2218c6c6a2c6d680ab7ae59dc`.
+The last completed source release is @96; #116's Node-first explicit dispatch
 was verified without disabling Railway checks. Keep credentials, source URL,
 authentication and the deployment gate unchanged. `DEPLOY.md` is current;
 the shared historical snapshot below does not override this local procedure.
 
-OP-02a is now integrated on that released tree in
-`codex/op02-locks-auth-20261018`, superseding the preserved queued branch
-`codex/op02-financial-locks-20261016` at `ccd0488`. Only two production lines
-change. 64 financial tests and 196 combined financial/auth tests pass; full
-local suite 1,343 pass, 0 fail, 9 browser skips. Exact-head CI/Claude review and
-Sandra's separate release approval are required. Nothing from OP-02 is live.
+OP-02b1 is the current isolated candidate: explicit financial acknowledgement,
+refused prerequisite stops payment, confirmed first steps survive later payment
+failure, no false success/paid row, and orphan deletion waits for confirmation.
+A future billing date without a matching paid cycle row shows a verification
+state, not a paid chip. SW v8 → v9; no source/schema/calculation changes.
 
-OP-02b remains next: renewal retry drift, retained unconfirmed paid state and
-payment attempted after a refused client update were reproduced synthetically.
-Durable identity/recovery, intake/activation and orphan-deletion paths remain
-open. See `docs/financial-write-integrity.md`. Full cross-app/staff workflows,
-OP-03 scheduled backup/financial restore evidence and performance are still open.
+OP-02b2 remains open: durable original cycle/operation identity, ambiguous write
+reconciliation, cross-device retry and interference with other financial writers.
+See `docs/financial-recovery-design.md`. Full cross-app/staff workflows, OP-03
+scheduled backup/financial restore evidence and performance remain open.
 CRM #114 and other drafts are unchanged. OP-06 still includes the legacy
 `recordTreatmentGiven` sender without a matching route; do not invent a receiver.
 
