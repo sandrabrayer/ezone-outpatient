@@ -28,6 +28,17 @@ consumer configuration or authenticated end-to-end access. Those are separate
 release checks. See the full inventory, manual click paths, acceptance and
 rollback constraints in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
 
+## OP-02a lock-refusal candidate (2026-10-18)
+
+Based on released #116: Node `941cd8b6`, existing source @95. Only two source
+lines change; existing credentials, URL, source binding, headers and release
+gate remain. Obtain separate PR approval after exact-head CI and review.
+Complete both Node and explicit Apps Script phases below; source changes are
+not live merely because Node deployed. Use synthetic tests for contention,
+then authenticated/denied read acceptance in production; no dummy financial
+writes. See `CHANGELOG-financial-write-locks.md` for the tested scope and
+rollback constraints. UI partial-save/renewal recovery remains OP-02b.
+
 ## Historical data-integrity release notes (#113; now deployed)
 
 Sandra's explicit production approval and green candidate CI are required.

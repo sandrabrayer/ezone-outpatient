@@ -97,7 +97,7 @@ calculatedAmount, amount, overrideReason, reason, approvedBy, decidedDate,
 payoutDate, status, paidDate, method, notes, basis, createdAt, createdBy,
 updatedAt, updatedBy`
 
-## Source authentication (OP-01 candidate)
+## Source authentication (OP-01 released)
 
 All source HTTP actions are now explicitly authorized before any source access.
 Internal app actions require a dedicated server-held credential; cross-app
@@ -105,6 +105,15 @@ consumers keep their narrower keys. Missing configuration is never an anonymous
 fallback. GET writes are disabled. Source readiness and the Node-first deploy
 sequence are documented in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
 This does not create individual role permissions or add Ortal to this app.
+
+## Financial write integrity (OP-02a candidate)
+
+Payment and charge upserts now refuse an unavailable script lock with `busy`
+before Sheets access. Source auth remains required; retry uses the existing
+row id. This is not a transaction across client/charge/payment saves. Renewal
+retry, partial paid-state and client-conflict recovery remain open in OP-02b.
+See [the findings and next acceptance gates](docs/financial-write-integrity.md).
+Separate approval is required before release.
 
 ## Local development
 
@@ -130,8 +139,9 @@ npm test        # Node's built-in runner (node --test) — no external test deps
 The suite (`test/**`) runs entirely offline: it **never calls the live Google
 Apps Script backends or any other live app**. Server-route tests stub
 `global.fetch` before requiring `server.js`; Apps Script (`apps-script/Code.gs`)
-logic is mirrored in-file (it can't be `require`d in Node) with a "keep in sync"
-note. No real secrets appear in any test — dummy values only.
+logic is mirrored in some older tests; source-auth/financial-integrity tests
+execute the real source in a VM with fake Google services. No real secrets appear
+in any test — dummy values only.
 
 Coverage highlights: billing rules (`billing-status`, `charges`, `debt-status`),
 renewal/credit alerts (`vered-alerts`), the shared-secret `getWinbackSource`
@@ -142,7 +152,7 @@ in a vm sandbox) and fail-closed config (`server-routes`, `server-fail-closed`,
 `session-fail-closed`).
 
 CI (`.github/workflows/test.yml`) runs `npm ci && npm test` on every pull
-request and every push to `main`.
+request and every push to `claude/youthful-volta-laarnk`.
 
 **Line endings.** `.gitattributes` pins `* text=auto eol=lf`, so the working
 tree is LF on every OS. This matters because many tests read a source file
