@@ -1,3 +1,21 @@
+# Current status — 2026-10-18
+
+OP-02a/PR117 is released at Node `72c80686afa0dfe2218c6c6a2c6d680ab7ae59dc`,
+existing source @96. The older candidate record below is historical.
+
+OP-02b1 is now a separate candidate for explicit acknowledgement, dependent
+conflict refusal, truthful partial-save UI and orphan deletion confirmation.
+See `CHANGELOG-financial-save-confirmation.md`. The diagnostic's add-charge
+optimistic paid row is now absent and payment attempts after a client refusal
+are zero. Its reopened-renewal retry still changes October to November: **that
+remaining failure is intentional evidence, not a passing acceptance test**.
+
+Immediate return: `docs/financial-recovery-design.md` (OP-02b2), durable operation
+identity and safe recovery across refresh/device, with all original financial
+business calculations preserved. OP-02 as a whole remains open.
+
+---
+
 # OP-02 — Outpatient financial write integrity
 
 Owner: Codex (single implementation owner). Refreshed 2026-10-18 against the

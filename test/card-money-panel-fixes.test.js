@@ -165,7 +165,7 @@ test('#3 the edit submit saves through persistCharge on the SAME charge (no new 
   // rollback snapshot + render (optimistic pattern)
   assert.match(handler[0], /Object\.assign\(charge, prev\)/);
   // persistCharge is the saveCharge upsert-by-id path (no duplicate row)
-  assert.match(APP, /async function persistCharge\(charge\)\s*\{\s*await apiPostAction\('saveCharge'/);
+  assert.match(APP, /async function persistCharge\(charge\)\s*\{\s*var saved = await apiPostAction\('saveCharge'/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

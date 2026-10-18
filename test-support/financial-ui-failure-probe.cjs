@@ -54,6 +54,7 @@ function setup(fields) {
   vm.createContext(ctx);
   for (const name of ['toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth',
     'monthKey', 'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate',
+    'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning',
     'clampedCycleIso', 'nextCycleDueDate', 'nextCycleDueDateAfter', 'currentMonthBaseDueDate']) {
     vm.runInContext(named(name), ctx);
   }
@@ -112,6 +113,6 @@ async function submit(f, formName) {
       refusalBannerShown: !!conflict.output.conflictShown,
       paymentAttemptsAfterRefusal: conflict.output.attemptedPayments.length
     },
-    limits: 'Synthetic handler execution; not a browser or production-data check. These UI issues are not fixed by OP-02a.'
+    limits: 'Synthetic handler execution; not a browser or production-data check. OP-02b1 fixes false confirmations and dependent conflict writes; durable renewal recovery remains open.'
   }, null, 2) + '\n');
 })().catch((error) => { process.stderr.write(error.stack + '\n'); process.exitCode = 1; });

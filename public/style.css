@@ -1188,3 +1188,6 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   vertical-align: middle;
 }
 .rev-chip-soft { opacity: 0.75; font-style: italic; }
+
+/* A future billing date without a confirmed cycle payment needs review. */
+.chip-payment-review { background: #fff3cd; color: #664d03; border: 1px solid #e8cb75; }
