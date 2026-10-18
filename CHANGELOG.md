@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Package catalog + pricing requests (OP-PKG, draft)
+- New Vered-only tab «תמחור חבילות» (calculator, requests with badge, catalog
+  with versioned edits). Quotation only: integer agorot, inclusive VAT (18 % is
+  an assumption), immutable quote snapshots, `priced` ≠ paid, attach stores a
+  reference only. No charge/payment/credit/TherapistRates/payout change.
+- Real Vered-only authorization: server-verified `CATALOG_ADMIN_PIN` (rate
+  limited, fail-closed) → 15-minute scoped HttpOnly cookie; Node rebuilds every
+  private call from an allowlist with a session-derived actor and a body-bound
+  HMAC assertion that Apps Script verifies. `/api/sheets` refuses package/admin
+  actions and authority fields.
+- Manager boundary for the therapists app: `PACKAGE_CATALOG_SECRET` (price-free
+  reads) and `PACKAGE_REQUEST_SECRET` (submissions) with explicit allowlisted
+  responses; idempotent UUID + payload-hash requests. Therapists side = contract
+  only (`docs/package-therapists-contract.md`) — **not built**.
+- ירדן retired: removed from picker/assignedTo, old session cookies refused,
+  UI copy neutral («צוות מסלול המשך»). `APP_PIN`/`SESSION_SECRET` rotation is the
+  manual step. Backup/restore now covers two new sheets (manifest 9 or 11 rows).
+- SW v11 → v12 (collides with #121 — second merge re-bumps). Docs: corrected
+  the outdated «auto-deploy» description to the explicit dispatch phase.
+  Needs the Apps Script release phase. See `CHANGELOG-package-catalog.md`.
+
 ### Planned exit date (`plannedExitDate`)
 - `getTreatmentPlans` gains one optional key, `plannedExitDate`: the planned
   discharge date (`'yyyy-MM-dd'`) of an ACTIVE client, `''` when none, invalid

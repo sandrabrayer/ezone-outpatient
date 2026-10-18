@@ -166,7 +166,7 @@ test('B: SESSION_USERS equals the index.html assignedTo options (nothing invente
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
   assert.deepEqual(SESSION_USERS, options);
-  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל', 'ירדן']);
+  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל']); // ירדן retired (test/retire-user-yarden.test.js)
 });
 
 test('B: verify-pin sets an HttpOnly SameSite=Lax 7-day cookie; Secure only behind HTTPS', async () => {
@@ -719,6 +719,8 @@ test('F: no Railway route serves another app — the only open routes are /healt
   const api = routes.filter((r) => r.path.indexOf('/api/') === 0);
   const open = api.filter((r) => !r.gated).map((r) => r.path).sort();
   assert.deepEqual(open, ['/api/debug/cache', '/api/debug/cache/clear', '/api/debug/env', '/api/debug/last-load', '/api/debug/routes', '/api/logout', '/api/verify-pin',
+    // clearing the Vered-only cookie needs no credential (same as /api/logout); login/status/rpc ARE session-gated
+    '/api/catalog-admin/logout',
     // public deploy check: returns only { commit, builtAt } (lib/version.js, test/api-version.test.js)
     '/api/version'].sort());
   // the debug routes are gated by the router-level app.use('/api/debug', requireSession)

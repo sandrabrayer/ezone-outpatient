@@ -75,13 +75,28 @@ credentials or live data are used, and this is not a real-Google staging run.
 ## Google Sheet setup
 
 1. Create a new Google Sheet named **E-ZONE Outpatient**.
-2. `Extensions → Apps Script`. Replace `Code.gs` with the contents of
-   [`apps-script/Code.gs`](apps-script/Code.gs).
-3. `Deploy → New deployment → Web app`
-   - **Execute as:** Me
-   - **Who has access:** Anyone with the link
-4. Copy the deployed `/exec` URL. Tabs `Leads` and `Clients` are created
-   automatically with correct headers on first call.
+2. Bind the Apps Script project to it (`.clasp.json`) and publish
+   [`apps-script/Code.gs`](apps-script/Code.gs) **only through the explicit
+   release workflow** (*Actions → Deploy Apps Script*, dispatched with the
+   approved merge SHA as `expected_commit` after the matching Node build is
+   live; there is no push trigger). **Never paste `Code.gs` into the editor and
+   never create a new deployment** — the existing deployment gets a new version
+   and the `/exec` URL stays fixed. See [`DEPLOY.md`](DEPLOY.md).
+3. The deployment is a Web app: **Execute as:** Me, **Who has access:** Anyone
+   (the server-to-server secrets, not the URL, are the access control).
+4. Tabs `Leads` and `Clients` are created automatically with correct headers on
+   first call.
+
+## Package catalog and pricing requests (draft)
+
+A Vered-only quotation tool («תמחור חבילות») plus a price-free request flow for
+the house managers in the therapists app. It never creates charges or payments.
+Setup, secrets, the PDF mapping, open questions and the therapists contract:
+[`docs/package-catalog.md`](docs/package-catalog.md),
+[`docs/package-therapists-contract.md`](docs/package-therapists-contract.md).
+Required variables (values never in git): `CATALOG_ADMIN_PIN`,
+`CATALOG_ADMIN_ASSERTION_SECRET` (Railway) and the Script properties
+`CATALOG_ADMIN_ASSERTION_SECRET`, `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`.
 
 ### Sheet schema (created automatically)
 

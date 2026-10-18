@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createSessionToken, verifySessionToken, readSessionUser } = require('./lib/session');
-const { SESSION_USERS } = require('./lib/users');
+const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
+const catalogAdmin = require('./lib/catalog-admin');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -23,6 +24,15 @@ const SESSION_SECRET = process.env.SESSION_SECRET || '';
 if (!SESSION_SECRET) {
   console.error('[config] SESSION_SECRET is not set — /api/verify-pin will return 500 and the data routes (/api/sheets, /api/continuation-roster, /api/me, /api/debug/*) will return 401 until it is configured (fail-closed).');
 }
+/* Vered-only package catalog (quotes / pricing requests). TWO extra secrets, set
+ * on Railway by the operator — never in code, never logged:
+ *   CATALOG_ADMIN_PIN                — the PIN only Vered knows (6–12 chars, != APP_PIN)
+ *   CATALOG_ADMIN_ASSERTION_SECRET   — >=32 chars, shared with the Apps Script property
+ *                                      of the same name, distinct from every other key.
+ * FAIL-CLOSED: if either is missing/invalid every /api/catalog-admin route that
+ * needs it answers 503 and nothing price-related is reachable. */
+const CATALOG_ADMIN_PIN = process.env.CATALOG_ADMIN_PIN || '';
+const CATALOG_ADMIN_ASSERTION_SECRET = process.env.CATALOG_ADMIN_ASSERTION_SECRET || '';
 const SESSION_COOKIE = 'ezone_session';
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // 604800 seconds (7 days), matches the token TTL
 // Continuation-track roster proxy: the currently-admitted patient roster is owned
@@ -84,7 +94,12 @@ function parseSessionCookie(cookieHeader) {
 function sessionAuthStatus(cookieHeader, secret) {
   if (typeof secret !== 'string' || secret.length === 0) return 'not_configured';
   const token = parseSessionCookie(cookieHeader);
-  if (token && verifySessionToken(token, secret)) return 'ok';
+  if (token && verifySessionToken(token, secret)) {
+    // A name removed from the user list must not keep working on an old
+    // 7-day cookie: retired users are refused, forcing a fresh login.
+    if (RETIRED_SESSION_USERS.indexOf(readSessionUser(token, secret)) >= 0) return 'unauthorized';
+    return 'ok';
+  }
   return 'unauthorized';
 }
 
@@ -260,6 +275,9 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   const action = (req.query && req.query.action) || 'getData';
   // A GET must never mutate data, including the obsolete saveAll shortcut.
   if (action === 'saveAll') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+  // Package catalog / pricing actions have their own Vered-only route and the
+  // manager feeds never go through the browser: refuse them here.
+  if (catalogAdmin.isPackageAction(action)) return res.status(403).json({ ok: false, error: 'forbidden_action' });
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
 
   // Serve from cache when possible: only for the bulk read, and only when
@@ -328,6 +346,17 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     // legacy default (back when the client couldn't pick an action) so
     // requests without an explicit action keep working.
     const body = Object.assign({ action: 'saveAll' }, req.body || {});
+    // Package catalog / pricing: dedicated Vered-only route only. Authority
+    // fields (actor, role, assertion, requester) are server-owned — a browser
+    // that sends one is rejected, never silently trusted.
+    if (catalogAdmin.isPackageAction(body.action)) {
+      return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
+    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin']) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
+        return res.status(400).json({ ok: false, error: 'forbidden_field' });
+      }
+    }
     if (body.action === 'saveAll') {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
       body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
@@ -439,6 +468,85 @@ app.post('/api/verify-pin', (req, res) => {
 
   entry.count += 1;
   return res.status(401).json({ ok: false, error: 'Incorrect PIN.' });
+});
+
+/* ---- Vered-only package catalog (/api/catalog-admin/*) ---------------------
+ * Every route needs the normal session AND, except login/logout/status, a valid
+ * short-lived admin cookie minted by a correct CATALOG_ADMIN_PIN. The admin
+ * cookie is scoped (cannot verify as a session), HttpOnly, SameSite=Strict and
+ * Path-limited to this prefix. Authority never comes from the picked display
+ * name or from anything the browser stores. */
+const catalogAdminLimiter = catalogAdmin.createLimiter();
+
+function catalogAdminConfig() {
+  return catalogAdmin.adminConfigStatus({
+    SESSION_SECRET, APP_PIN, OUTPATIENT_PROXY_SECRET,
+    CATALOG_ADMIN_PIN, CATALOG_ADMIN_ASSERTION_SECRET
+  });
+}
+
+function hasAdminCookie(req) {
+  return catalogAdmin.verifyAdminToken(parseCookieValue(req.headers.cookie, catalogAdmin.ADMIN_COOKIE), SESSION_SECRET);
+}
+
+function requireCatalogAdmin(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  if (!hasAdminCookie(req)) return res.status(401).json({ ok: false, error: 'admin_required' });
+  return next();
+}
+
+app.get('/api/catalog-admin/status', requireSession, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const configured = catalogAdminConfig().ok;
+  res.status(200).json({ ok: true, configured, admin: configured && hasAdminCookie(req) });
+});
+
+app.post('/api/catalog-admin/login', requireSession, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  const ip = getClientIp(req);
+  if (!catalogAdminLimiter.attempt(ip)) return res.status(429).json({ ok: false, error: 'too_many_attempts' });
+  if (!catalogAdmin.verifyAdminPin(req.body && req.body.pin, CATALOG_ADMIN_PIN)) {
+    return res.status(401).json({ ok: false, error: 'incorrect_pin' });
+  }
+  catalogAdminLimiter.reset(ip);
+  res.set('Set-Cookie', catalogAdmin.buildAdminCookie(catalogAdmin.createAdminToken(SESSION_SECRET), requestIsHttps(req)));
+  return res.status(200).json({ ok: true });
+});
+
+/* Open like /api/logout: clearing a credential never needs one. */
+app.post('/api/catalog-admin/logout', (req, res) => {
+  res.set('Set-Cookie', catalogAdmin.buildClearedAdminCookie(requestIsHttps(req)));
+  res.status(200).json({ ok: true });
+});
+
+/* The ONLY gateway to the private catalog actions. The upstream body is rebuilt
+ * from a per-op allowlist (never the raw browser body), the actor comes from
+ * the signed session, and Apps Script gets a short-lived HMAC assertion bound
+ * to this exact body. */
+app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (req, res) => {
+  if (!requireSheetsUrl(res)) return;
+  const op = req.body && req.body.op;
+  const built = catalogAdmin.buildAdminUpstream(op, req.body, sessionUserFromRequest(req));
+  if (built.error) return res.status(400).json({ ok: false, error: built.error });
+  try {
+    const upstream = Object.assign({ action: built.action }, built.body, {
+      proxySecret: OUTPATIENT_PROXY_SECRET,
+      adminAssertion: catalogAdmin.signAssertion(built.action, built.body, CATALOG_ADMIN_ASSERTION_SECRET)
+    });
+    const r = await fetch(SHEETS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(upstream)
+    });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('upstream_unavailable'); }
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
 });
 
 /* GET /api/me — the display name embedded in this session's signed cookie

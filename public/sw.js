@@ -43,8 +43,13 @@
  *   so an installed app never pairs the old shell with the new app.js.
  * - v11 (2026-10-18): source-owned renewal recovery, original-cycle resume
  *   and explicit review. Live v10 was verified after #119 before this bump.
+ * - v12 (2026-10-18): package catalog / pricing tab — new package-pricing.js
+ *   module, a new תמחור חבילות tab + section in index.html, and CSS. Bumped so
+ *   an installed app never pairs the old shell with the new app.js. NOTE: PR
+ *   #121 also claims v12; whichever merges second must re-bump from the LIVE
+ *   version (CLAUDE.md rule 5). The service worker still never caches /api/.
  */
-var CACHE = 'ezone-outpatient-v11';
+var CACHE = 'ezone-outpatient-v12';
 var SHELL = [
   './',
   './index.html',

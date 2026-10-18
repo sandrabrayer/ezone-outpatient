@@ -272,7 +272,7 @@ for(const renewal of ['client_done','apply_lost','reserve_lost']) {
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveRenewal').length,1);
     const opId=fx.sb.rows('FinancialOps')[0].id;
     assert.equal(fx.sb.rows('FinancialOps')[0].cycleDate,'2026-10-01');
-    const second=await fx.login('ירדן');await openRenew(second);
+    const second=await fx.login('יעל');await openRenew(second);
     assert.match(await second.locator('#renewRecoveryText').textContent(),/650/);
     assert.equal(await second.isHidden('#renewForm'),true);
     if(renewal!=='apply_lost')await second.click('#renewResume');
