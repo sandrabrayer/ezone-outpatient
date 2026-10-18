@@ -271,3 +271,33 @@ test('restore preflight requires a journal when the restore target has the activ
   assert.throws(()=>h.ctx._integrityValidateRestoreSet(h.backup,day,true),/Restore journal required/);
   assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,8);
 });
+
+for (const crash of ['charge_done','payment_written']) test('mixed-kind manifest restore resumes extra '+crash+' without duplicate effects',()=>{
+  const renewal=require('../test-support/renewal-journal-fixture.cjs');
+  const extra=require('../test-support/extra-charge-journal-fixture.cjs');
+  const {sandbox}=require('../test-support/apps-script-sandbox');
+  const r=renewal.fixture();r.reserve();r.apply();r.ack();
+  const f=extra.fixture({monthly:true});f.sb.seed('FinancialOps',r.sb.ctx.FINANCIAL_OP_HEADERS,r.sb.rows('FinancialOps'));
+  f.reserve();
+  if(crash==='charge_done')extra.failWrite(f.sb,'FinancialOps','payment_writing','before');
+  else extra.failWrite(f.sb,'Payments',null,'after');
+  assert.equal(f.apply().ok,false);
+  const h=harness(Object.fromEntries(Object.entries(f.sb.sheets).map(([name,sh])=>[name,sh.grid])));
+  h.props.FINANCIAL_OPS_CREATED='1';h.ctx.nightlyIntegrityJob();
+  const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  const restored=sandbox();
+  for(const {source,grid} of h.ctx._integrityValidateRestoreSet(h.backup,day,true)){
+    restored.seed(source,grid[0],grid.slice(1).map(row=>Object.fromEntries(grid[0].map((key,i)=>[key,row[i]]))));
+  }
+  restored.props.FINANCIAL_OPS_CREATED='1';
+  const state=restored.post({action:'getExtraChargeState',clientId:f.request.clientId});
+  assert.equal(state.operation.id,f.request.opId);assert.equal(state.operation.kind,'extra_charge');
+  for(let n=0;n<2;n++)assert.equal(restored.post({action:'applyExtraCharge',opId:f.request.opId}).operation.state,'done');
+  assert.equal(restored.rows('ClientCharges').length,1);assert.equal(restored.rows('Payments').length,1);
+  assert.equal(restored.rows('Payments')[0].paymentDate,'2026-10-31');
+  assert.equal(restored.rows('ClientCharges')[0].treatmentType,'פרטני CBT');
+  assert.equal(restored.rows('ClientCharges')[0].frequencyPerWeek,2);
+  assert.equal(restored.rows('Clients')[0].nextBillingDate,extra.client.nextBillingDate);
+  assert.equal(restored.rows('FinancialOps')[0].state,'acknowledged');assert.equal(restored.rows('FinancialOps').length,2);
+  assert.deepEqual(h.locks(),[false,false]);
+});

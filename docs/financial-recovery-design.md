@@ -1,11 +1,16 @@
 # OP-02b2 — durable financial recovery (program design)
 
-Current renewal-only implementation candidate was rebased onto merged PR #119
-`6bdac37f` / live SW v10; see [renewal protocol](renewal-journal.md). Other flows
-remain design work. Original design reviewed on `72c80686` / source @96. Codex owns implementation;
-Claude provides bounded read-only review. OP-02b1 corrects acknowledgement and
-partial-save UI only. This file retains the complete program boundary; the renewal-only candidate
-does not establish safe retry for every flow.
+Renewal recovery was released in PR120: Node 535dc659, source @97, SW v11.
+The current candidate is additional-charge creation, optionally with initial
+payment; see [extra-charge protocol](extra-charge-journal.md). Intake, activation,
+edit-paid and later monthly/toggle flows remain open. Codex owns implementation;
+Claude supplies bounded independent review. OP-02b1 corrected acknowledgement
+and partial-save UI, without establishing durable recovery for every flow.
+
+The full application program includes structure, workflows, logic, missing
+information/features, security, integrity, backup, performance and controls.
+Keep unresolved items and return points; a narrow financial release does not
+close the application audit or justify skipping to another app.
 
 ## Required protocol
 

@@ -43,8 +43,10 @@
  *   so an installed app never pairs the old shell with the new app.js.
  * - v11 (2026-10-18): source-owned renewal recovery, original-cycle resume
  *   and explicit review. Live v10 was verified after #119 before this bump.
+ * - v12 (2026-10-18): durable additional-charge creation and recovery UI.
+ *   Live v11 was verified before this bump; new markup and app.js stay paired.
  */
-var CACHE = 'ezone-outpatient-v11';
+var CACHE = 'ezone-outpatient-v12';
 var SHELL = [
   './',
   './index.html',
