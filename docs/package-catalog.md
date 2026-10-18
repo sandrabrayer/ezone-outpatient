@@ -145,7 +145,7 @@ Railway → project → **ezone-outpatient** service → **Variables**:
 
 | Variable | Rule |
 | --- | --- |
-| `CATALOG_ADMIN_PIN` | Vered's pricing PIN, 6–12 chars, **different from `APP_PIN`** |
+| `CATALOG_ADMIN_PIN` | Vered's pricing PIN, 8–32 chars, **different from `APP_PIN`** |
 | `CATALOG_ADMIN_ASSERTION_SECRET` | ≥ 32 random chars, distinct from every other secret |
 | `APP_PIN`, `SESSION_SECRET` | rotate once to revoke Yarden's knowledge/cookies |
 

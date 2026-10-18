@@ -29,7 +29,7 @@
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
   var REQUESTER = { oren: 'אורן', shahar: 'שחר' };
   var ERRORS = {
-    incorrect_pin: 'קוד שגוי', too_many_attempts: 'יותר מדי ניסיונות — נסי שוב מאוחר יותר',
+    incorrect_pin: 'קוד שגוי', named_session_required: 'יש להיכנס עם שם משתמש (לא כניסה אנונימית) כדי לגשת לתמחור', too_many_attempts: 'יותר מדי ניסיונות — נסי שוב מאוחר יותר',
     catalog_admin_not_configured: 'התמחור עדיין לא הוגדר בשרת', admin_required: 'נדרשת כניסה מחדש',
     revision_conflict: 'הבקשה עודכנה — נטענה מחדש', version_conflict: 'השורה עודכנה — נטענה מחדש',
     already_priced: 'הבקשה כבר תומחרה', selection_required: 'יש לבחור מחיר חודשי לפני אישור',
@@ -145,7 +145,7 @@
         var r = await call('/api/catalog-admin/login', 'POST', { pin: pin.value });
         pin.value = '';
         if (r.ok) { S.phase = 'admin'; await loadAll(); draw(); return; }
-        msg.textContent = errorText(r.error);
+        msg.textContent = errorText(r.error) + (r.error === 'too_many_attempts' && r.retryAfterSec ? ' (בעוד כ-' + Math.max(1, Math.ceil(r.retryAfterSec / 60)) + ' דקות)' : '');
       } catch (e) { msg.textContent = errorText(e.message); }
       go.disabled = false;
     }

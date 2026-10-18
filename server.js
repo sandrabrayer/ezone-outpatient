@@ -26,7 +26,7 @@ if (!SESSION_SECRET) {
 }
 /* Vered-only package catalog (quotes / pricing requests). TWO extra secrets, set
  * on Railway by the operator — never in code, never logged:
- *   CATALOG_ADMIN_PIN                — the PIN only Vered knows (6–12 chars, != APP_PIN)
+ *   CATALOG_ADMIN_PIN                — the PIN only Vered knows (8–32 chars, != APP_PIN)
  *   CATALOG_ADMIN_ASSERTION_SECRET   — >=32 chars, shared with the Apps Script property
  *                                      of the same name, distinct from every other key.
  * FAIL-CLOSED: if either is missing/invalid every /api/catalog-admin route that
@@ -476,7 +476,8 @@ app.post('/api/verify-pin', (req, res) => {
  * cookie is scoped (cannot verify as a session), HttpOnly, SameSite=Strict and
  * Path-limited to this prefix. Authority never comes from the picked display
  * name or from anything the browser stores. */
-const catalogAdminLimiter = catalogAdmin.createLimiter();
+const catalogAdminLimiter = catalogAdmin.createFailureLimiter();
+const catalogAdminSessions = catalogAdmin.createAdminSessions();
 
 function catalogAdminConfig() {
   return catalogAdmin.adminConfigStatus({
@@ -485,13 +486,23 @@ function catalogAdminConfig() {
   });
 }
 
+function adminBinding(req) { return catalogAdmin.sessionBinding(parseSessionCookie(req.headers.cookie)); }
+function adminSid(req) { return catalogAdmin.readAdminSid(parseCookieValue(req.headers.cookie, catalogAdmin.ADMIN_COOKIE), SESSION_SECRET); }
+
+/* The admin privilege exists only while ALL hold: a valid, NAMED, non-retired base
+ * session; a valid admin cookie; and a live server-side record bound to THAT base
+ * session and THAT user. Anything else (other session, other user, logged out,
+ * restarted, expired) is "not admin". */
 function hasAdminCookie(req) {
-  return catalogAdmin.verifyAdminToken(parseCookieValue(req.headers.cookie, catalogAdmin.ADMIN_COOKIE), SESSION_SECRET);
+  const user = sessionUserFromRequest(req);
+  if (!user || RETIRED_SESSION_USERS.indexOf(user) >= 0) return false;
+  return catalogAdminSessions.valid(adminSid(req), adminBinding(req), user);
 }
 
 function requireCatalogAdmin(req, res, next) {
   res.set('Cache-Control', 'no-store');
   if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  if (!sessionUserFromRequest(req)) return res.status(403).json({ ok: false, error: 'named_session_required' });
   if (!hasAdminCookie(req)) return res.status(401).json({ ok: false, error: 'admin_required' });
   return next();
 }
@@ -505,18 +516,38 @@ app.get('/api/catalog-admin/status', requireSession, (req, res) => {
 app.post('/api/catalog-admin/login', requireSession, (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  // Every pricing action is attributable: an unnamed (legacy) session cannot enter.
+  const user = sessionUserFromRequest(req);
+  if (!user) return res.status(403).json({ ok: false, error: 'named_session_required' });
+  const binding = adminBinding(req);
   const ip = getClientIp(req);
-  if (!catalogAdminLimiter.attempt(ip)) return res.status(429).json({ ok: false, error: 'too_many_attempts' });
+  const gate = catalogAdminLimiter.check(binding, ip);
+  if (!gate.allowed) {
+    res.set('Retry-After', String(gate.retryAfterSec));
+    if (gate.scope === 'global') console.warn('[catalog-admin] global failed-PIN cap reached; logins paused for up to ' + gate.retryAfterSec + 's');
+    return res.status(429).json({ ok: false, error: 'too_many_attempts', retryAfterSec: gate.retryAfterSec });
+  }
   if (!catalogAdmin.verifyAdminPin(req.body && req.body.pin, CATALOG_ADMIN_PIN)) {
+    catalogAdminLimiter.fail(binding, ip);
     return res.status(401).json({ ok: false, error: 'incorrect_pin' });
   }
-  catalogAdminLimiter.reset(ip);
-  res.set('Set-Cookie', catalogAdmin.buildAdminCookie(catalogAdmin.createAdminToken(SESSION_SECRET), requestIsHttps(req)));
+  catalogAdminLimiter.success(binding);
+  const sid = catalogAdminSessions.create(binding, user);
+  if (!sid) return res.status(500).json({ ok: false, error: 'catalog_admin_unavailable' });
+  res.set('Set-Cookie', catalogAdmin.buildAdminCookie(catalogAdmin.createAdminToken(SESSION_SECRET, sid), requestIsHttps(req)));
   return res.status(200).json({ ok: true });
 });
 
-/* Open like /api/logout: clearing a credential never needs one. */
+/* Open like /api/logout (clearing a credential never needs one) — but it now ALSO
+ * revokes the privilege SERVER-SIDE: the admin session record for the presented
+ * cookie and every record bound to the presented base session are deleted, so a
+ * copied cookie stops working immediately instead of living out its 15 minutes. */
+function revokeAdminFor(req) {
+  catalogAdminSessions.revoke(adminSid(req));
+  catalogAdminSessions.revokeByBinding(adminBinding(req));
+}
 app.post('/api/catalog-admin/logout', (req, res) => {
+  revokeAdminFor(req);
   res.set('Set-Cookie', catalogAdmin.buildClearedAdminCookie(requestIsHttps(req)));
   res.status(200).json({ ok: true });
 });
@@ -572,7 +603,8 @@ app.get('/api/users', requireSession, (req, res) => {
  * (fire-and-forget) before showing the PIN screen, so a shared device does
  * not keep a live 7-day cookie after logout. */
 app.post('/api/logout', (req, res) => {
-  res.set('Set-Cookie', buildClearedSessionCookie(requestIsHttps(req)));
+  revokeAdminFor(req); // the pricing privilege ends with the session, server-side
+  res.set('Set-Cookie', [buildClearedSessionCookie(requestIsHttps(req)), catalogAdmin.buildClearedAdminCookie(requestIsHttps(req))]);
   res.status(200).json({ ok: true });
 });
 
