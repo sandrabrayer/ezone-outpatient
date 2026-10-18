@@ -252,3 +252,18 @@ test('browser: legacy paid row still confirms its cycle; no date or amount rewri
   assert.equal(fx.sb.rows('Payments')[0].id, 'pay::fixture-client::2026-10');
   assert.deepEqual(fx.errors, []);
 });
+
+test('browser: recorded two-cycle prepayment stays paid without invoking a wrong-month quick toggle', skipOpt, async (t) => {
+  const fx = await fixture(t); if (!fx) return;
+  fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [{ ...fx.client, nextBillingDate: '2026-11-01' }]);
+  fx.sb.seed('Payments', fx.sb.ctx.PAYMENTS_HEADERS, [{ id: 'pay::fixture-client::base::2026-09', clientId: 'fixture-client',
+    clientName: fx.client.name, billingType: 'monthly', dueDate: '2026-09-01', amountDue: 1000, amountPaid: 1000,
+    status: 'paid', paymentDate: '2026-09-01', coverageStart: '2026-09-01', coverageEnd: '2026-10-31' }]);
+  const page = await fx.login('ורד');
+  await clientCard(page).locator('.chip-paid').waitFor();
+  assert.equal(await clientCard(page).locator('.chip-payment-review').count(), 0);
+  assert.equal(await clientCard(page).locator('.month-pay-btn').count(), 0, 'custom row is edited in billing, not a guessed cycle toggle');
+  assert.match(await clientCard(page).locator('.chip-paid').textContent(), /01\/11/);
+  assert.equal(fx.captured.filter((r) => ['saveAll', 'savePayment'].includes(r.payload.action)).length, 0);
+  assert.deepEqual(fx.errors, []);
+});

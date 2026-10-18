@@ -149,3 +149,51 @@ test('prerequisite waits for stale/conflict reload before a following payment ca
     release(); await pending; assert.equal(finished, true);
   }
 });
+
+const CL = require('../public/credits-ledger');
+function coverageFixture() {
+  const { named } = require('../test-support/financial-ui-fixture.cjs');
+  const f = fixture(); f.ctx.CL = CL;
+  for (const n of ['addDays', 'prevCycleDueDateBefore', 'paymentKindFromId', 'confirmedPackagePayment']) vm.runInContext(named(n), f.ctx);
+  return f;
+}
+for (const day of [29, 30, 31]) {
+  test(`paid-cycle evidence preserves day ${day} through February clamping`, () => {
+    const f = coverageFixture();
+    f.client.billingDay = day; f.client.startDate = '2025-12-01';
+    const p = { id: 'pay::fixture-client::base::2026-01', clientId: f.client.id, status: 'paid',
+      dueDate: '2026-01-' + day, coverageStart: '2026-01-' + day, coverageEnd: '2026-02-27' };
+    assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-02-28', p), p);
+  });
+}
+test('a prepaid two-cycle recorded period confirms the anchor even under an earlier month id', () => {
+  const f = coverageFixture();
+  const p = { id: 'pay::fixture-client::base::2026-09', clientId: f.client.id, status: 'paid',
+    coverageStart: '2026-09-01', coverageEnd: '2026-10-31' };
+  f.ctx.state.payments.push(p);
+  assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-11-01', null), p);
+  assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-12-01', null), null, 'no invented third cycle');
+});
+test('an anchor moved without payment evidence needs verification, not a fabricated debt or write', () => {
+  const f = coverageFixture();
+  f.ctx.state.payments.push({ id: 'pay::fixture-client::base::2026-09', clientId: f.client.id, status: 'paid' });
+  assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-11-01', null), null);
+  assert.equal(f.out.writes.length, 0);
+});
+test('recorded custom coverage must cover the relevant period; other clients and extras cannot confirm a package', () => {
+  const f = coverageFixture();
+  const base = { id: 'pay::fixture-client::base::2026-10', clientId: f.client.id, status: 'paid',
+    coverageStart: '2026-10-01', coverageEnd: '2026-10-30' };
+  for (const p of [base, { ...base, clientId: 'other', coverageEnd: '2026-10-31' },
+    { ...base, id: 'pay::fixture-client::chg-extra::2026-10', coverageEnd: '2026-10-31' },
+    { ...base, status: 'partial', coverageEnd: '2026-10-31' }]) {
+    f.ctx.state.payments = [p];
+    assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-11-01', p), null);
+  }
+});
+test('intake partway through the first cycle honors explicit coverage from the start date', () => {
+  const f = coverageFixture(); f.client.startDate = '2026-10-18';
+  const p = { id: 'pay::fixture-client::base::2026-10', clientId: f.client.id, status: 'paid',
+    coverageStart: '2026-10-18', coverageEnd: '2026-10-31' };
+  assert.equal(f.ctx.confirmedPackagePayment(f.client, '2026-11-01', p), p);
+});

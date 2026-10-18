@@ -2351,6 +2351,35 @@
     return { paid: paid, until: paid ? until : '' };
   }
 
+  // Payment evidence for the card's existing billing anchor. Recorded coverage
+  // takes precedence over a month-key assumption (e.g. two months prepaid).
+  // Blank legacy periods retain the exact cycle-id lookup; an unrelated old
+  // payment does not prove a manually advanced anchor was paid.
+  function confirmedPackagePayment(c, until, cycleRow) {
+    var start = prevCycleDueDateBefore(c, until);
+    var end = addDays(until, -1);
+    if (c.startDate && c.startDate > start && c.startDate <= end) start = c.startDate;
+    function eligible(p) {
+      return p && p.status === 'paid' && p.billingType !== 'one_time' &&
+        paymentKindFromId(p.id).kind === 'base' &&
+        (!p.clientId || String(p.clientId) === String(c.id));
+    }
+    function covers(p) {
+      var window = CL && CL.recordedCoverage(p);
+      return window && start && end &&
+        CL.isoFromLocalDate(window.start) <= start && CL.isoFromLocalDate(window.end) >= end;
+    }
+    if (eligible(cycleRow)) {
+      if (!cycleRow.coverageStart && !cycleRow.coverageEnd) return cycleRow;
+      if (covers(cycleRow)) return cycleRow;
+    }
+    for (var i = 0; i < state.payments.length; i++) {
+      var p = state.payments[i];
+      if (eligible(p) && String(p.clientId) === String(c.id) && covers(p)) return p;
+    }
+    return null;
+  }
+
   // The due date of the CYCLE a payment settles right now: the stored
   // nextBillingDate when it is already due (past/today), else the current
   // month's base due date (blank/legacy anchor fallback). This is the SAME
@@ -4951,10 +4980,18 @@
       var cycleRow = pkg.paid
         ? paymentForClientOn(c, prevCycleDueDateBefore(c, pkg.until) || pkg.until)
         : null;
-      var needsPaymentCheck = pkg.paid && (!cycleRow || cycleRow.status !== 'paid');
+      var cycleId = cycleRow && cycleRow.id;
+      if (pkg.paid) cycleRow = confirmedPackagePayment(c, pkg.until, cycleRow);
+      var needsPaymentCheck = pkg.paid && !cycleRow;
+      // A custom multi-cycle payment can live under another month. Show its
+      // confirmation, but edit it in billing: the legacy quick-toggle chooses
+      // its own row and must not silently undo a different payment.
+      var customPaidCycle = cycleRow && cycleRow.id !== cycleId;
       var untilDM = pkg.until ? pkg.until.slice(8, 10) + '/' + pkg.until.slice(5, 7) : '';
       if (needsPaymentCheck) {
         paidChipHtml = '<span class="chip chip-payment-review" role="status" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. יש לבדוק בגבייה לפני פעולה נוספת.">נדרש אימות תשלום</span>';
+      } else if (customPaidCycle) {
+        paidChipHtml = '<span class="chip chip-paid" title="מאושר לפי תקופת הכיסוי הרשומה; לתיקון התשלום יש לפתוח גבייה">שולם עד ' + untilDM + '</span>';
       } else if (state.role === 'editor') {
         paidChipHtml = pkg.paid
           ? '<button type="button" class="chip chip-paid month-pay-btn" data-action="mark-month-unpaid" title="החבילה הנוכחית שולמה; גבייה הבאה ' + displayDate(pkg.until) + '">שולם עד ' + untilDM + ' ✓</button>'

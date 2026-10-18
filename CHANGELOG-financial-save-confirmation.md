@@ -19,15 +19,20 @@ removed its local row even when the source rejected the deletion.
   wait for a conflict/staleness reload so it cannot erase their later result.
 - Additional charge, direct intake, lead activation and paid-date editing keep
   the existing confirmed payment until a new payment receives `ok:true`.
-  Malformed success responses cannot count as acknowledgement. Confirmed first
+  Malformed success responses cannot count as acknowledgement. This stricter
+  savePayment guard also applies to existing month/charge toggles; their normal
+  source responses already contain ok:true. Their recovery logic is unchanged. Confirmed first
   steps survive second-step failure. Buttons stay disabled through completion.
 - A persistent on-screen Hebrew warning distinguishes saved client/charge from
   an uncertain payment. No trailing success toast; no automatic retry. Creating
   the same charge or renewing again is not recommended as recovery.
 - A future billing date alone no longer produces a paid chip: if the preceding
-  cycle has no confirmed paid row (new or legacy id), the card says
+  cycle has no confirmed paid row (new/legacy id or valid recorded coverage
+  spanning the period), the card says
   `נדרש אימות תשלום`, with no paid date or paid/unpaid toggle for that state.
-  Existing billing calculations, amounts, dates and source rows are unchanged.
+  Custom multi-cycle coverage uses a read-only paid chip; corrections remain in
+  billing so the legacy quick-toggle cannot target a different month. Existing
+  billing calculations, amounts, dates and source rows are unchanged.
   This can reveal pre-existing legacy discrepancies; it does not repair them.
 - Orphan-payment removal changes local state only after acknowledgement.
 - Service worker v8 (independently read from production 2026-10-18) → v9.
