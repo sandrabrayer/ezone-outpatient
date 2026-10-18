@@ -68,6 +68,9 @@ async function fixture(t, options = {}) {
           result = { ok: false, error: 'fixture_response_lost' }; faults.renewal = '';
         }
         if (payload.action === 'savePayment' && faults.payment === 'lost') result = { ok: false, error: 'fixture_response_lost' };
+        if (payload.action === 'applyExtraCharge' && faults.extra === 'apply_and_read_lost') {
+          result = { ok:false,error:'fixture_response_lost' }; faults.extra='source_unavailable';
+        }
         if ((payload.action === 'reserveExtraCharge' && faults.extra === 'reserve_lost') ||
             (payload.action === 'applyExtraCharge' && faults.extra === 'apply_lost')) {
           result = { ok: false, error: 'fixture_response_lost' }; faults.extra = '';
@@ -180,7 +183,7 @@ for(const extra of ['charge_done','apply_lost','reserve_lost']) {
     await first.locator('#extraRecovery:not([hidden])').waitFor();
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveExtraCharge').length,1);
     const id=fx.sb.rows('FinancialOps')[0].id;fx.sb.ctx._todayISODate=()=> '2026-11-01';
-    const second=await fx.login('ירדן');await openExtra(second);
+    const second=await fx.login('שירן');await openExtra(second);
     assert.equal(await second.isHidden('#addChargeForm'),true);
     assert.match(await second.textContent('#extraRecoveryText'),/500/);
     if(extra!=='apply_lost')await second.click('#extraResume');
@@ -366,7 +369,7 @@ for(const renewal of ['client_done','apply_lost','reserve_lost']) {
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveRenewal').length,1);
     const opId=fx.sb.rows('FinancialOps')[0].id;
     assert.equal(fx.sb.rows('FinancialOps')[0].cycleDate,'2026-10-01');
-    const second=await fx.login('ירדן');await openRenew(second);
+    const second=await fx.login('שירן');await openRenew(second);
     assert.match(await second.locator('#renewRecoveryText').textContent(),/650/);
     assert.equal(await second.isHidden('#renewForm'),true);
     if(renewal!=='apply_lost')await second.click('#renewResume');
@@ -433,5 +436,28 @@ test('browser: prepared request may be cancelled without any client or payment e
   await page.click('#renewCancelIntent');await page.waitForSelector('#renewModal',{state:'hidden'});
   assert.equal(fx.sb.rows('FinancialOps')[0].state,'cancelled');
   assert.equal(fx.sb.rows('Clients')[0].nextBillingDate,'2026-10-01');assert.equal(fx.sb.rows('Payments').length,0);
+  assert.deepEqual(fx.errors,[]);
+});
+
+test('browser: failed extra readback disables stale recovery actions until a successful reopen',skipOpt,async t=>{
+  const fx=await fixture(t,{extra:'reserve_lost'});if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page);await submitExtra(page);
+  fx.faults.extra='apply_and_read_lost';await page.click('#extraResume');
+  await page.locator('#extraRecoveryText').getByText('לא ניתן לאמת את החיוב הנוסף.',{exact:false}).waitFor();
+  for(const id of ['extraResume','extraCancelIntent','extraReviewResolve'])assert.equal(await page.isDisabled('#'+id),true);
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'done');assert.equal(fx.sb.rows('Payments').length,1);
+  fx.faults.extra='';await page.locator('#extraRecovery [data-close]').click();await openExtra(page);
+  await page.locator('#extraResume').getByText('אישור וסגירה',{exact:true}).waitFor();await page.click('#extraResume');
+  await page.waitForSelector('#addChargeModal',{state:'hidden'});assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
+  assert.equal(fx.sb.rows('ClientCharges').length,1);assert.equal(fx.sb.rows('Payments').length,1);assert.deepEqual(fx.errors,[]);
+});
+test('browser: midnight before first extra reservation refreshes the displayed day before a new submit',skipOpt,async t=>{
+  const fx=await fixture(t);if(!fx)return;const page=await fx.login('ורד');await openExtra(page);await fillExtra(page,{monthly:true});
+  fx.sb.ctx._todayISODate=()=> '2026-11-01';
+  const response=page.waitForResponse(r=>r.request().method()==='POST'&&r.request().postDataJSON()?.action==='reserveExtraCharge');
+  await page.click('#addChargeSubmit');await response;
+  await page.locator('#addChargeClientName').getByText('01/11/2026',{exact:false}).waitFor();
+  await page.waitForFunction(()=>!document.querySelector('#addChargeSubmit').disabled);
+  assert.equal(fx.sb.rows('FinancialOps').length,0);await submitExtra(page);
+  assert.equal(fx.sb.rows('Payments')[0].paymentDate,'2026-11-01');assert.match(fx.sb.rows('Payments')[0].id,/::2026-11$/);
   assert.deepEqual(fx.errors,[]);
 });

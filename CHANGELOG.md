@@ -14,6 +14,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   backup restore. SW v11 → v12. Separate approval before ordered release.
 - Source @97 cannot read extra history, even terminal: forward fix required.
   See `CHANGELOG-extra-charge-journal.md` and `docs/extra-charge-journal.md`.
+- Review hardening: freeze v1 history validation, pin the source recording day
+  and existing coverage rules, and block stale recovery controls on failed reads.
+  Cross-device fixtures use a current staff member for compatibility with #122.
 
 ### Planned exit date (`plannedExitDate`)
 - `getTreatmentPlans` gains one optional key, `plannedExitDate`: the planned

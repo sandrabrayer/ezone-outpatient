@@ -4170,7 +4170,7 @@ function _finJournal() {
           before.values.some(function (v) { return typeof v !== 'string'; }) ||
           ['client_writing', 'client_done'].indexOf(op.state) >= 0 ||
           (!intent.payment && op.state === 'payment_writing') ||
-          (_finActive(op) && _extraIntentError(intent, original))) throw new Error('financial_journal_corrupt');
+          (_finActive(op) && _extraIntentV1Error(intent, original))) throw new Error('financial_journal_corrupt');
     } else {
     if (intent.kind || ['charge_writing', 'charge_done'].indexOf(op.state) >= 0) throw new Error('financial_journal_corrupt');
     if (intent.snapshot !== op.before || JSON.stringify(_finIntent(intent)) !== op.intent ||
@@ -4498,6 +4498,12 @@ function _extraIntent(payload, stored) {
   return intent;
 }
 function _extraIntentError(intent, client) {
+  // New-reservation policy may evolve; stored v1 intent keeps its own validator.
+  return _extraIntentV1Error(intent, client);
+}
+function _extraIntentV1Error(intent, client) {
+  // Frozen v1 contract. Future treatment lists/limits require a new version or
+  // a reservation-only policy, not retroactive changes to pending v1 history.
   var ch = intent.charge, p = intent.payment, day = intent.cycleDate;
   var types = ['פרטני', 'פרטני CBT', 'פרטני EMDR', 'קבוצה', 'טיפול משפחתי', 'ליווי יומי בקהילה', 'מעקב פסיכיאטרי'];
   function date(v) { return !!v && _coverageDateISO(v) === v; }
@@ -4513,13 +4519,20 @@ function _extraIntentError(intent, client) {
       (ch.treatmentType && types.indexOf(ch.treatmentType) < 0)) return 'invalid_extra_charge';
   // Preserve existing semantics: creation's optional paid record belongs to the
   // recording day/month, even if the charge start date is earlier or later.
+  var coverageEnd = '';
+  if (p) {
+    var end = new Date(_finAddMonth(day) + 'T00:00:00Z');
+    end.setUTCDate(end.getUTCDate() - 1);
+    coverageEnd = end.toISOString().slice(0, 10);
+  }
   if (p && (p.id !== 'pay::' + intent.clientId + '::chg-' + ch.id + '::' +
       (ch.billingType === 'one_time' ? 'once' : day.slice(0, 7)) ||
       p.clientId !== intent.clientId || p.clientName !== String(client.name || '') ||
       p.billingType !== 'extra' || p.dueDate !== day || p.paymentDate !== day ||
       p.amountDue !== ch.amount || p.amountPaid !== ch.amount || p.status !== 'paid' ||
       (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
-      _coveragePeriodError(p.coverageStart, p.coverageEnd))) return 'invalid_extra_payment';
+      _coveragePeriodError(p.coverageStart, p.coverageEnd) ||
+      p.coverageStart !== day || p.coverageEnd !== coverageEnd)) return 'invalid_extra_payment';
   return '';
 }
 function _extraRows(name, headers, id) {
@@ -4585,6 +4598,9 @@ function _reserveExtraCharge(payload) {
   try {
     var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
     if (same.length) return same[0].intent === canonical ? { ok: true, operation: _finSummary(same[0]) } : { ok: false, error: 'operation_payload_mismatch' };
+    // Only first reservation uses today's source day. Existing intent above
+    // remains replayable on its original day/month indefinitely.
+    if (intent.cycleDate !== _todayISODate()) return { ok: false, error: 'extra_recording_day_changed' };
     _finGuard([intent.clientId]);
     var c = _finClient(intent.clientId).client;
     if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'extra_snapshot_changed' };
@@ -4649,7 +4665,8 @@ function _finishExtraCharge(payload, cancel, manual) {
     if (op.state !== (manual ? 'review' : cancel ? 'prepared' : 'done')) return { ok: false, error: 'extra_state_not_ready' };
     var view = _extraReadback(op);
     if (manual) {
-      if (payload.reviewToken !== view.token || view.token.length > 35000) return { ok: false, error: 'review_source_changed' };
+      if (view.token.length > 35000) return { ok: false, error: 'review_observation_too_large' };
+      if (payload.reviewToken !== view.token) return { ok: false, error: 'review_source_changed' };
       _finWrite(journal, op, terminal, user, JSON.stringify({ reason: reason, acceptedState: JSON.parse(view.token) }));
     } else if (!_extraObservationMatches(op, view, !cancel)) {
       _finWrite(journal, op, 'review', user, 'extra_source_changed_before_' + terminal);

@@ -181,3 +181,40 @@ test('source changes just before cancel/ack are discovered rather than hidden by
     assert.equal(f.call(action).operation.state,'review');assert.equal(f.discover().operation.state,'review');
   }
 });
+
+test('a new recording day must match source today; existing reservation retains its original day',()=>{
+  const f=fixture();f.sb.ctx._todayISODate=()=> '2026-11-01';
+  assert.equal(f.reserve().error,'extra_recording_day_changed');assert.equal(f.sb.rows('FinancialOps').length,0);
+  const g=fixture();g.reserve();g.sb.ctx._todayISODate=()=> '2027-01-01';
+  assert.equal(g.reserve().operation.state,'prepared');assert.equal(g.apply().operation.state,'done');
+  assert.equal(g.sb.rows('Payments')[0].paymentDate,'2026-10-31');
+});
+test('v1 initial payment coverage is pinned to actual old UI behavior, not arbitrary valid periods',()=>{
+  for(const [start,end] of [['',''],['2026-10-31','2026-11-30'],['2026-10-01','2026-10-31']]){
+    const f=fixture();f.request.payment.coverageStart=start;f.request.payment.coverageEnd=end;
+    assert.equal(f.reserve().error,'invalid_extra_payment');assert.equal(f.sb.rows('FinancialOps').length,0);
+  }
+});
+test('future new-reservation policy does not invalidate active v1 intent or unrelated writers',()=>{
+  const f=fixture();f.reserve();f.sb.ctx._extraIntentError=()=> 'future_business_policy';
+  assert.equal(f.discover().operation.state,'prepared');assert.equal(f.apply().operation.state,'done');
+  assert.equal(f.sb.post({action:'saveCharge',charge:{...f.request.charge,id:'other-charge',clientId:'another-client'}}).ok,true);
+  assert.equal(f.ack().operation.state,'acknowledged');
+  f.request.opId='next-extra-fixture-operation';assert.equal(f.reserve().error,'future_business_policy');
+});
+test('oversized manual observation reports its real limit without closing or repairing records',()=>{
+  const f=fixture();f.reserve();f.apply();f.sb.sheets.ClientCharges.grid[1][f.sb.ctx.CHARGES_HEADERS.indexOf('notes')]='x'.repeat(36000);
+  assert.equal(f.ack().operation.state,'review');const view=f.discover().operation.review;assert.ok(view.token.length>35000);
+  assert.equal(f.call('resolveExtraChargeReview',{reason:'reviewed full source records',acceptCurrent:true,reviewToken:view.token}).error,'review_observation_too_large');
+  assert.equal(f.sb.rows('FinancialOps')[0].state,'review');assert.equal(f.sb.rows('Payments').length,1);
+});
+for(const amount of ['500.00','5e2']) test('noncanonical amount '+amount+' is refused at the boundary',()=>{
+  const f=fixture();f.request.charge.amount=amount;
+  assert.equal(f.reserve().error,'invalid_extra_charge');assert.equal(f.sb.rows('FinancialOps').length,0);
+});
+for(const recordingDay of ['2026-01-31','2024-02-29','2026-12-31']) for(const monthly of [false,true]) {
+  test('source v1 coverage agrees with executed browser helper on '+recordingDay+' monthly='+monthly,()=>{
+    const f=fixture({recordingDay,monthly});assert.equal(f.reserve().operation.state,'prepared');assert.equal(f.apply().operation.state,'done');
+    const p=f.sb.rows('Payments')[0];assert.equal(p.coverageStart,f.request.payment.coverageStart);assert.equal(p.coverageEnd,f.request.payment.coverageEnd);
+  });
+}

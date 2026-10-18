@@ -5585,8 +5585,19 @@
   var extraSourceState = null;
   var extraLoadToken = 0;
   function extraErrorMessage(err) {
-    if (String(err && err.message).indexOf('renewal_pending') >= 0) return 'יש חידוש פתוח למטופל. יש לחזור אל חידוש ותשלום ולהשלים את הבדיקה לפני הוספת טיפול.';
+    var message = String(err && err.message);
+    if (message.indexOf('renewal_pending') >= 0) return 'יש חידוש פתוח למטופל. יש לחזור אל חידוש ותשלום ולהשלים את הבדיקה לפני הוספת טיפול.';
+    if (message.indexOf('extra_recording_day_changed') >= 0) return 'מועד הרישום התחלף מאז פתיחת החלון. יש לבדוק את התאריך המעודכן לפני שמירה חוזרת.';
+    if (message.indexOf('review_observation_too_large') >= 0) return 'נמצאו רשומות רבות מדי לסגירת הבדיקה בחלון זה. יש לפנות לאחראית לבירור הרשומות; הבקשה נשארת פתוחה.';
+    if (message.indexOf('extra_review_changed') >= 0) return 'מצב הבדיקה השתנה. יש לבדוק את המצב המעודכן לפני המשך.';
     return 'לא ניתן לאמת את החיוב הנוסף. יש לפתוח שוב את החלון ולבדוק מה נשמר לפני הוספת חיוב נוסף.';
+  }
+  function blockExtraRecovery(err) {
+    extraSourceState = null;
+    extraFormEnabled(false);
+    $('#addChargeClientName').textContent = extraErrorMessage(err);
+    $('#extraRecoveryText').textContent = extraErrorMessage(err);
+    ['extraResume','extraCancelIntent','extraReviewResolve'].forEach(function (id) { $('#'+id).disabled = true; });
   }
   function extraFormEnabled(enabled) {
     $('#addChargeForm').querySelectorAll('input,textarea,select').forEach(function (el) { el.disabled = !enabled; });
@@ -5610,6 +5621,8 @@
     $('#extraResume').disabled = ['review','reviewed','acknowledged','cancelled'].indexOf(op.state) >= 0;
     $('#extraCancelIntent').hidden = op.state !== 'prepared';
     $('#extraReviewResolve').hidden = op.state !== 'review';
+    $('#extraCancelIntent').disabled = false;
+    $('#extraReviewResolve').disabled = false;
   }
   async function refreshExtraState(cid, token) {
     var data = await apiPostAction('getExtraChargeState', { clientId: cid });
@@ -5691,7 +5704,7 @@
       toast(extraErrorMessage(err), true);
       if (token === extraLoadToken) {
         extraSourceState = null;
-        try { await refreshExtraState(cid, token); } catch (_) { /* closed until a successful source read */ }
+        try { await refreshExtraState(cid, token); } catch (readError) { if (token === extraLoadToken) blockExtraRecovery(readError); }
       }
     }
   }
@@ -5705,7 +5718,8 @@
       var payload = { opId: op.id }, action = mode === 'cancel' ? 'cancelExtraCharge' : op.state === 'done' ? 'acknowledgeExtraCharge' : 'applyExtraCharge';
       if (mode === 'review') {
         var fresh = await apiPostAction('getExtraChargeState', { clientId: cid });
-        if (token !== extraLoadToken || !fresh.operation || fresh.operation.id !== op.id || !fresh.operation.review) return;
+        if (token !== extraLoadToken) return;
+        if (!fresh.operation || fresh.operation.id !== op.id || !fresh.operation.review) throw new Error('extra_review_changed');
         var view = fresh.operation.review;
         if (!confirm('נמצאו ' + view.chargeCount + ' רשומות חיוב ו־' + view.paymentCount + ' רשומות תשלום. יש לבדוק את הגבייה בפועל. סגירת הבירור מתעדת את הבדיקה בלבד ואינה מתקנת נתונים או מאשרת תשלום. להמשיך?')) return;
         var reason = prompt('מה נבדק ומה נשאר לתיקון? לפחות 10 תווים:');
@@ -5723,9 +5737,10 @@
       await loadAll();
     } catch (err) {
       toast(extraErrorMessage(err), true);
-      if (token === extraLoadToken) { try { await refreshExtraState(cid, token); } catch (_) {} }
+      if (token === extraLoadToken) {
+        try { await refreshExtraState(cid, token); } catch (readError) { if (token === extraLoadToken) blockExtraRecovery(readError); }
+      }
     } finally {
-      $('#extraCancelIntent').disabled = false; $('#extraReviewResolve').disabled = false;
       if (token === extraLoadToken && extraSourceState && extraSourceState.operation) showExtraOperation(extraSourceState.operation);
     }
   }

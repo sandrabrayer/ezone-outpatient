@@ -28,6 +28,15 @@ for bounded review where available, with one implementation owner and exact
 review/test evidence. Recommend new chat/model at a completed milestone with a
 handoff rather than losing context during unfinished financial work.
 
+Parallel work allocation (Sandra, 2026-10-18): Codex continues financial-safety
+draft #121; Claude owns package catalog/pricing draft #122 and its therapists
+integration. Both are candidates, not releases. #122 was observed at 821a82f5;
+its confidentiality and cross-app completion gaps remain open. Preserve both
+branches. See docs/extra-charge-journal.md for SW, backup and fixture integration
+requirements. After this bounded financial step return to the remaining OP-02b2
+flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
+and broader ten-app review remain in the program.
+
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 
 - `getTreatmentPlans` gains one optional key: `plannedExitDate`. It is the

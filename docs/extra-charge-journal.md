@@ -43,6 +43,9 @@ The UI remains Hebrew/RTL and uses literal text for user-entered descriptions.
 This is reconciliation under the shared script lock, not an atomic transaction
 across Sheets writes. Manual spreadsheet writers can bypass the lock; divergence
 requires review. Wrong/missing/corrupt journal data fails closed for guarded writers.
+Active v1 intent uses a frozen versioned contract validator, separate from new-
+reservation policy, so future policy changes do not invalidate pending history.
+Keep v1 validation stable when introducing v2; unknown versions fail closed.
 Terminal history keeps structural validation but skips future business-policy
 revalidation. Keep the journal and its FINANCIAL_OPS_CREATED marker.
 
@@ -50,8 +53,10 @@ revalidation. Keep the journal and its FINANCIAL_OPS_CREATED marker.
 
 - One-time charge payment id ends `::once`; monthly ends in the **recording**
   month, not the charge start month. `dueDate`, `paymentDate` and charge `created`
-  freeze the source-provided recording day. Replaying after midnight/month-end
-  never recomputes them. Backdated/future charge dates remain accepted.
+  freeze the source-provided recording day. First reservation requires the current
+  source day: an overnight stale modal must refresh the displayed day and the
+  editor submits again. Once reserved, replay after midnight/month-end never
+  recomputes it. Backdated/future charge dates remain accepted.
 - Optional initial payment is `billingType: extra`, amountDue/amountPaid equal to
   the charge amount, status paid, bundleSize/sessionsUsed numeric zero. An unpaid
   creation has no payment intent/id/row.
@@ -59,7 +64,8 @@ revalidation. Keep the journal and its FINANCIAL_OPS_CREATED marker.
   for **both** kinds, so both get a month from dueDate (clamped next month minus
   one day). Despite old comments saying one-off periods stay blank, that helper
   only recognizes billingType one_time. We preserve executed behavior and test
-  it through the real browser; do not silently change recognition/credit rules.
+  it through the real browser; the source pins that exact derived period too,
+  refusing arbitrary or blank coverage. Do not change recognition/credit rules.
 - A future monthly charge paid now still records in the current month even if
   it precedes the first due period. These period/coverage inconsistencies are
   explicit OP-05 logic/control follow-ups, not silently fixed here.
@@ -103,11 +109,47 @@ multi-step legacy flow in the absence of a reservation.
 
 ## Review and remaining program
 
+### Parallel package work (#122)
+
+Sandra assigned package catalog/pricing to Claude and extra-charge safety to
+Codex on 2026-10-18. #122 is a separate draft, last observed at 821a82f54093d2a7aea4d9095f7b93980f899962;
+its therapists integration and confidentiality fixes remain Claude's work.
+Neither draft is release approval, and this branch includes no #122 code.
+
+Both candidates are based on 535dc659 and currently propose SW v12. Serialize
+releases; the second candidate must integrate the first approved merge and bump
+above the then-live cache version. Reconcile shared Code.gs/app.js/index.html,
+backup capture/restore manifest families, tests and documentation explicitly.
+Cross-device acceptance here uses Shiran instead of retired Yarden so that the
+new fixtures do not create an avoidable dependency on the old login picker.
+This is preparation only: a combined-tree acceptance run is still required after
+the merge order is chosen. Do not treat separately green CI as integration proof.
+
+### Independent review
+
 Claude design review: PR120 comment 6248656014, run 39118579758, base 535dc659.
 It was static; the workflow ended in error after publishing, with no executed
 tests. Its mixed-kind, rollback, collision and field-persistence findings informed
 this candidate. The coverage claim was checked against the actual helper/browser
-and corrected above. A review of the exact implementation is still required.
+and corrected above.
+
+Claude reviewed implementation b5cad10e in PR121 comment 6248814501 / run
+39119818752 SUCCESS: static only; test execution denied and CI not independently
+read by Claude. No P0/P1. Codex addressed the concrete P2/P3 findings with frozen
+v1 versus new-reservation validation, source-current-day first reservation,
+exact legacy coverage, explicit oversized-review error, and disabled stale UI
+actions after failed readback. Regression tests include strict amount formatting,
+rollover, coverage across leap/short months and future-policy compatibility.
+Unknown actions remain denied in existing source-auth-boundary tests.
+
+A review observation above 35,000 characters cannot be stored safely in the audit
+cell and remains open with a specific operator message. This is an explicit
+manual escalation, not a request to delete history; large-record audit handling
+remains OP-04. Native confirmation/prompt dialogs remain as in renewal; replacing
+them with an accessible styled flow is part of the broader UI/workflow audit.
+The Hebrew guide states that closure does not create a payment. Journal-wide
+corruption still fails closed by design; removing active validation would mask
+corrupted intent. Scalability/repair remain OP-04. Exact final-delta review required.
 
 Whole-journal scan cost, archive/corruption repair and application latency remain
 OP-04. Review follow-up queues (including missing initial payment after closing

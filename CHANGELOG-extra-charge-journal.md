@@ -20,3 +20,9 @@ Source @97 rejects extra journal history even when terminal: use a forward fix
 that retains both kinds; never erase history for rollback. Separate production
 approval is required. Other financial flows and all wider app audit axes remain
 open in the canonical program.
+
+Independent static review found no P0/P1. Follow-up hardening separates frozen v1
+history validation from future reservation policy, requires source-today for first
+reservation while preserving old intent replay, pins actual default coverage,
+and disables stale UI actions after failed readback. Oversized observations keep
+review open with an explicit error. See protocol review notes and tests.
