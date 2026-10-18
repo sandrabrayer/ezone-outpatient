@@ -264,3 +264,10 @@ test('interleaved backup replacement is detected before retention can remove old
   assert.ok(h.backup.getSheetByName('outpatient-2000-01-01'));
   assert.ok(h.logs.some(l=>l.includes('Restore snapshot mismatch')));
 });
+
+test('restore preflight requires a journal when the restore target has the activation marker', () => {
+  const h=harness();h.ctx.nightlyIntegrityJob();
+  const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  assert.throws(()=>h.ctx._integrityValidateRestoreSet(h.backup,day,true),/Restore journal required/);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,8);
+});

@@ -13,7 +13,10 @@ an eight-dataset backup set with manifest. See `docs/renewal-journal.md`.
 Separate approval is required for a new release. This is not all of OP-02b2:
 extra charges/intake/activation/edit-paid/monthly toggles still need durable
 recovery. OP-03 real scheduled backup/restore evidence, OP-04 performance and
-OP-05 financial evidence/control work remain open. No real data repair here.
+OP-05 financial evidence/control work remain open, specifically a durable
+follow-up queue for closed reviews with missing original-cycle payments and
+review access for deleted clients. OP-04 includes whole-journal guard scan cost
+and a safe history archive/repair plan. No real data repair here.
 
 CRM Outpatient #114 / Dashboard #220 and other drafts are unchanged. OP-06 still
 includes the legacy `recordTreatmentGiven` sender without a matching route;

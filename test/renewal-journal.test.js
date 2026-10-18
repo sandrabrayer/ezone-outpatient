@@ -271,3 +271,24 @@ test('manual corruption repair respects the original payment-id owner even with 
   assert.throws(()=>f.sb.ctx.applyCorruptedRowRepairsNow(),/financial_operation_pending/);
   assert.equal(f.sb.rows('Payments')[0].notes,old);assert.equal(f.sb.isLocked(),false);
 });
+
+test('premature acknowledgement leaves every recoverable stage intact and safe to resume', () => {
+  for(const stage of ['prepared','client_done','payment_writing']){
+    const f=fixture();f.reserve();
+    if(stage==='client_done'){failWrite(f.sb,'FinancialOps','payment_writing','before');f.apply();}
+    if(stage==='payment_writing'){failWrite(f.sb,'Payments',null,'after');f.apply();}
+    assert.equal(f.discover().operation.state,stage);
+    assert.equal(f.ack().error,'renewal_not_complete');
+    assert.equal(f.discover().operation.state,stage);
+    assert.equal(f.apply().operation.state,'done');assert.equal(f.sb.rows('Payments').length,1);
+    assert.equal(f.ack().operation.state,'acknowledged');
+  }
+});
+test('terminal history is not revalidated under future billing policies, while active intents remain fail-closed', () => {
+  const f=fixture();f.reserve();f.apply();f.ack();
+  f.sb.ctx._finIntentError=()=> 'future_policy_changed';
+  assert.equal(f.discover().ok,true);assert.equal(f.apply().operation.state,'acknowledged');
+  assert.equal(f.sb.post({action:'savePayment',payment:{...f.request.payment,notes:'legitimate later edit'}}).ok,true);
+  const g=fixture();g.reserve();g.sb.ctx._finIntentError=()=> 'future_policy_changed';
+  assert.equal(g.apply().ok,false);assert.equal(g.sb.rows('Payments').length,0);
+});

@@ -31,3 +31,10 @@ Live Node/SW v10 verified; candidate SW v11. Last source evidence is @96;
 recheck the separate #119 source release before proceeding. No production merge/deploy is authorized by this document. Read
 `docs/renewal-journal.md` and `DEPLOY.md` for Node-first release, source dispatch,
 old-tab limits, journal-preserving rollback and the remaining OP-02b2 flows.
+
+
+Independent static review of the first candidate found no P0/P1. Follow-up fixes
+refuse premature acknowledgement without changing the recoverable state, avoid
+reapplying future billing policies to terminal history, and check the journal
+activation requirement during restore preflight. Missing-payment follow-up and
+journal scaling are explicit open controls, not implied complete.

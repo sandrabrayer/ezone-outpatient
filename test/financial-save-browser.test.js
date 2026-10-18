@@ -308,6 +308,8 @@ test('browser: ambiguous missing payment requires manual review; explicit closur
   assert.equal(fx.sb.rows('FinancialOps')[0].state,'reviewed');
   assert.equal(fx.sb.rows('FinancialOps')[0].updatedBy,'ורד');
   assert.equal(JSON.stringify(fx.sb.rows('Clients')),clientBefore);assert.equal(fx.sb.rows('Payments').length,0);
+  await clientCard(page).locator('.chip-payment-review').waitFor();
+  assert.equal(await clientCard(page).locator('.chip-paid').count(),0);
   assert.deepEqual(fx.errors,[]);
 });
 test('browser: source protocol unavailable keeps renewal disabled with no legacy write fallback',skipOpt,async t=>{

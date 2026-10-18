@@ -4154,7 +4154,7 @@ function _finJournal() {
     var original = {};
     before.headers.forEach(function (h, c) { original[h] = before.values[c]; });
     if (intent.snapshot !== op.before || JSON.stringify(_finIntent(intent)) !== op.intent ||
-        _finIntentError(intent, original, true) || before.values.some(function (v) { return typeof v !== 'string'; }) ||
+        (_finActive(op) && _finIntentError(intent, original, true)) || before.values.some(function (v) { return typeof v !== 'string'; }) ||
         after.values.some(function (v, c) {
           var h = before.headers[c];
           if (typeof v !== 'string') return true;
@@ -4424,6 +4424,9 @@ function _finishRenewal(payload, cancel) {
     var terminal = cancel ? 'cancelled' : 'acknowledged';
     if (op.state === terminal) return { ok: true, operation: _finSummary(op) };
     if (!_finActive(op) || op.state === 'review') return { ok: false, error: 'renewal_requires_review' };
+    // A stale/mistyped acknowledgement must not demote safely recoverable work
+    // to review. Only an actual source divergence changes a completed state.
+    if (!cancel && op.state !== 'done') return { ok: false, error: 'renewal_not_complete' };
     var c = null;
     try { c = _finClient(op.clientId).client; } catch (_) { /* below: make the missing/duplicate client reviewable */ }
     var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
@@ -5058,7 +5061,7 @@ function _integrityFingerprint(grid) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(typed), Utilities.Charset.UTF_8)
     .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
 }
-function _integrityValidateRestoreSet(backupSs, day) {
+function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
   if (!sh) throw new Error('Restore manifest missing');
@@ -5081,6 +5084,8 @@ function _integrityValidateRestoreSet(backupSs, day) {
     if (!data) throw new Error('Restore snapshot missing: ' + source);
     var grid = data.getDataRange().getValues();
     if (_integrityFingerprint(grid) !== row[4]) throw new Error('Restore snapshot mismatch: ' + source);
+    if (source === 'FinancialOps' && requireJournal && (String(row[3]) === '1' ||
+        JSON.stringify(grid[0]) !== JSON.stringify(FINANCIAL_OP_HEADERS))) throw new Error('Restore journal required');
     return { source: source, absent: String(row[3]) === '1', grid: grid };
   });
 }
@@ -5329,7 +5334,7 @@ function nightlyIntegrityJob() {
           entry.absent ? '1' : '0', _integrityFingerprint(entry.grid)]);
       });
       _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
-      _integrityValidateRestoreSet(backupSs, day);
+      _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
       // Retention runs only after every data snapshot and the manifest verify.
       var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
       if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));

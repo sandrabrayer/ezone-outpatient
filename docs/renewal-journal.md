@@ -37,7 +37,10 @@ cancellation, recheck the source; divergence becomes discoverable review.
 `FINANCIAL_OPS_CREATED` is internal metadata set by the handler before the first
 intent. No manual configuration is needed. Once set, a missing journal fails
 closed. Wrong headers, duplicate ids/active clients, invalid states or mismatched
-intent/preimage/postimage also fail closed. Snapshots retain their ordered column names; later append-only client columns
+intent/preimage/postimage also fail closed. Terminal history is structurally
+validated but is not re-evaluated against future billing/date policies. Active
+intents remain semantically validated; policy changes need explicit compatibility
+tests before release. Snapshots retain their ordered column names; later append-only client columns
 are preserved when an older intent resumes. Reordered/removed columns refuse.
 Keep terminal journal rows; there is no automatic pruning/migration. Manual sheet editors do not take application
 locks; diverging edits require review and are not overwritten by replay.
@@ -68,7 +71,10 @@ a reason (10–1000 characters), and an exact fresh source observation. It recor
 the reason, observation, user and timestamp as `reviewed`; it **does not repair
 financial data or claim payment success**. The editor must verify actual billing
 and document remaining corrections. Existing billing tools can then correct the
-record. This is not an automatic refund, rollback, or missing-payment generator.
+record. The existing card payment-verification warning remains when a future
+billing date has no matching payment evidence (browser-tested). A dedicated
+follow-up queue for reviewed/missing payments, old periods and deleted clients
+is still OP-05; closing review does not mean that control is complete. This is not an automatic refund, rollback, or missing-payment generator.
 
 ## Backups and isolated restore
 
@@ -77,7 +83,9 @@ Clients, Leads, both removal archives, Payments, ClientCharges, Credits and
 FinancialOps. It then releases the lock and writes values-only, type-checked
 snapshots to the existing backup workbook. A ninth, SHA-256 manifest is published
 last. `_integrityValidateRestoreSet` is read-only: all eight named families and
-typed hashes must match before an isolated drill may use the set. Missing,
+typed hashes must match before an isolated drill may use the set. Supply
+`requireJournal=true` when the target has the activation marker; an absent
+journal then refuses preflight. Missing,
 mixed-generation or tampered snapshots refuse. Never restore one financial
 sheet separately. Preserve `FINANCIAL_OPS_CREATED` with any journal restore.
 
@@ -89,7 +97,10 @@ OP-03 still owns that live operational evidence. No manual job/trigger/mail was
 run in this work. Existing 30-day retention is extended only to the exact new
 families; unrelated and recovery/staging tabs remain untouched. Capacity grows
 from four to eight datasets plus a small manifest per day; measure runtime,
-cell/storage use and retention in OP-03/OP-04. No new paid service is provisioned.
+cell/storage use and retention in OP-03/OP-04. Journal scans currently read
+terminal history on each guard; benchmark total-size growth and repeated guard
+calls before widening rollout. Corrupt terminal structure still fails closed
+across guarded writers; provide an audited repair/archive plan in OP-04. No new paid service is provisioned.
 
 ## Release and rollback
 
@@ -124,3 +135,16 @@ payment propagation and monthly/toggle flows remain OP-02b2. Production backup
 execution and real isolated restore remain OP-03. Measured performance remains
 OP-04; bank/document evidence and wider controls remain OP-05. OP-06 still needs
 legacy/cross-app usage and delivery checks. No other app audit is closed here.
+
+
+## Independent review on the first candidate
+
+Claude reviewed `cd90cb80`, comment 6248235535 / run 39115390738. The report was
+published, then the workflow ended in error; test commands were denied. It is
+static input, not a green test gate. No P0/P1 found. Codex added executable
+regressions/fixes for premature acknowledgement and future-policy validation of
+terminal history, plus the restore marker requirement. A browser assertion pins
+the existing warning after closing an unresolved payment review. Journal scaling
+and a dedicated closed-review follow-up queue remain explicit OP-04/OP-05 work.
+The manifest detects accidental corruption/mixing, not malicious workbook edits;
+keep private backup permissions. Exact-candidate delta review remains required.
