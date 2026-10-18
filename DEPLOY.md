@@ -171,6 +171,7 @@ carry blank cells.
 
 | Sheet | Appended | Notes |
 | --- | --- | --- |
+| `Clients` (+ `Clients-removed`) | `plannedExitDate` | Planned discharge date (`CHANGELOG-planned-exit-date.md`). Position 37, after `updatedBy`. `_saveAll` keeps only a real `'yyyy-MM-dd'` (else blank) and carries the sheet value when a payload omits the key. Blank is legal and is not backfilled. Needs the Apps Script release phase. |
 | `Payments` | `coverageStart`, `coverageEnd` | תקופת כיסוי (`CHANGELOG-payment-coverage-period.md`). Plain `'YYYY-MM-DD'` **text** — `_ensurePaymentsSheet` forces the `@` format on both columns, and `_upsertPayment` forces the target row's two cells before writing, so a date-typed cell can never drift −1 day and move revenue between months. **Blank is legal and is not backfilled**: a blank pair reads as the previously inferred cycle. |
 
 **Nothing is migrated and nothing is rewritten.** If the Apps Script deploy has

@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Planned exit date (`plannedExitDate`)
+- `getTreatmentPlans` gains one optional key, `plannedExitDate`: the planned
+  discharge date (`'yyyy-MM-dd'`) of an ACTIVE client, `''` when none, invalid
+  or not active. Every existing key is unchanged.
+- No planned-discharge field existed (`exitDate` is the actual discharge), so
+  Clients gets an append-only column `plannedExitDate` (position 37; mirrored at
+  the end of `Clients-removed`). Set or cleared via a new «תאריך סיום מתוכנן»
+  date input in the edit-client modal; shown on the card as «סיום מתוכנן».
+- `_saveAll` validates the value (real calendar date or blank) and keeps the
+  sheet value when a payload omits the key (a pre-column tab). SW v9 → v10.
+  Needs the Apps Script release phase. See `CHANGELOG-planned-exit-date.md`.
+
 ### Financial save confirmation (OP-02b1 candidate)
 - Stop dependent payments on a refused client update; require explicit source
   acknowledgement. Preserve confirmed client/charge steps after payment errors.

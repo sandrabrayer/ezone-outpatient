@@ -395,18 +395,20 @@ test('E: plans key set = the previous projection + phoneIssue ONLY; no billing k
   const rows = plain(ctx._getTreatmentPlans()).clients;
   const previous = ['sourceApp', 'clientId', 'name', 'phone', 'serviceType', 'sessions',
     'status', 'startDate', 'exitDate', 'renewalDate'];
-  assert.deepEqual(Object.keys(rows[0]).sort(), previous.concat('phoneIssue').sort());
+  // + plannedExitDate (planned-exit-date PR, date only — test/planned-exit-date.test.js)
+  assert.deepEqual(Object.keys(rows[0]).sort(), previous.concat('phoneIssue', 'plannedExitDate').sort());
   for (const k of Object.keys(rows[0])) assert.doesNotMatch(k, /pay|amount|price|charge|billing|credit/i);
   assert.doesNotMatch(JSON.stringify(rows),
     /payerName|payerPhone|paymentLink|pricePerSession|bundlePrice|paymentStatus|creditsOwed|amountDue|amountPaid|0544444444/);
 });
 
-test('E: CLIENTS_HEADERS is untouched — no column added for this', () => {
+test('E: CLIENTS_HEADERS has no phoneIssue column — it is derived, never stored', () => {
   const m = GS.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m);
   assert.doesNotMatch(m[1], /phoneIssue/);
   const { ctx } = sandbox([]);
-  assert.equal(ctx.CLIENTS_HEADERS.length, 36, 'still the 36 frozen columns');
+  // 37 = the 36 frozen columns + plannedExitDate (a later, separate append).
+  assert.equal(ctx.CLIENTS_HEADERS.length, 37, 'the 36 frozen columns + plannedExitDate');
   assert.ok(!ctx.CLIENTS_HEADERS.includes('phoneIssue'));
 });
 

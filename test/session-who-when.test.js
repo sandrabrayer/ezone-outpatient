@@ -403,9 +403,13 @@ function baseLeads(ctx) {
 test('C: CLIENTS_HEADERS, LEADS_HEADERS and both tombstone mirrors END with updatedAt, updatedBy (append-only)', () => {
   const { ctx } = makeSandbox();
   for (const name of ['CLIENTS_HEADERS', 'LEADS_HEADERS', 'CLIENTS_REMOVED_HEADERS', 'REMOVED_LEADS_HEADERS']) {
-    assert.deepEqual(headersOf(ctx, name).slice(-2), ['updatedAt', 'updatedBy'], name);
+    // Clients + its tombstone later appended plannedExitDate after the stamps.
+    const H = headersOf(ctx, name);
+    const tail = /^CLIENTS/.test(name) ? H.slice(-3, -1) : H.slice(-2);
+    assert.deepEqual(tail, ['updatedAt', 'updatedBy'], name);
   }
-  assert.equal(ctx.CLIENTS_HEADERS.length, 36);
+  assert.equal(ctx.CLIENTS_HEADERS.length, 37);
+  assert.equal(ctx.CLIENTS_HEADERS[36], 'plannedExitDate');
   assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides', 'everything before the stamps unchanged');
   assert.equal(ctx.LEADS_HEADERS[ctx.LEADS_HEADERS.length - 3], 'assignedTo');
   assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides']);

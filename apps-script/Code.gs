@@ -124,7 +124,17 @@ var CLIENTS_HEADERS = [
   //     Clients writer stamps its row via _stampClientRow. Text-forced (like the
   //     phone columns) so the ISO stamp is never Date-coerced. Old rows read back
   //     blank until first edited. PR 2 uses updatedAt for stale-save refusal.
-  'updatedAt', 'updatedBy'
+  'updatedAt', 'updatedBy',
+  //   plannedExitDate (תאריך סיום מתוכנן): APPEND-ONLY, physically unwritten on
+  //     the live sheet so it lands at the very END (position 37) with no
+  //     migration. The PLANNED discharge date ('yyyy-MM-dd' or blank) set from
+  //     the edit-client modal — distinct from exitDate, which is the ACTUAL
+  //     discharge date stamped by the exit modal. _saveAll validates it
+  //     (_isoDateOrBlank) and carries the on-sheet value for a payload that
+  //     omits the key (a tab still running a pre-column app.js), so an old
+  //     client can never blank it. getTreatmentPlans projects it for ACTIVE
+  //     clients only. Old rows read back blank.
+  'plannedExitDate'
 ];
 
 /* Meta columns of the Clients sheet — identity, who/when audit, and the two
@@ -185,7 +195,10 @@ var CLIENTS_REMOVED_HEADERS = [
   // restoredAt) per this sheet's own positional rule. A tombstone carries the
   // row's last-edit stamps; an explicit ✕ delete overwrites them with now +
   // the deleting user so the recovery copy answers "who deleted this, when".
-  'updatedAt', 'updatedBy'
+  'updatedAt', 'updatedBy',
+  // APPEND-ONLY mirror of the Clients planned-discharge date (plannedExitDate)
+  // so a tombstoned row keeps it and restoreRemovedClient copies it back.
+  'plannedExitDate'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -1315,6 +1328,13 @@ function _saveAll(payload) {
         ? existingOverrides[cid]
         : (clients[i].paymentAmountOverrides == null ? '' : clients[i].paymentAmountOverrides);
       var existingRow = cid && _hasOwn(existingById, cid) ? existingById[cid] : null;
+      // plannedExitDate: a payload WITHOUT the key comes from a tab running a
+      // pre-column app.js — carry the sheet's value so it is never blanked
+      // (and never reads as an edit). A sent value is validated: anything but
+      // a real 'yyyy-MM-dd' calendar date is stored blank.
+      clients[i].plannedExitDate = (clients[i] && _hasOwn(clients[i], 'plannedExitDate'))
+        ? _isoDateOrBlank(clients[i].plannedExitDate)
+        : (existingRow ? _isoDateOrBlank(existingRow.plannedExitDate) : '');
       var conflictCols = _staleConflictCols(_clientDiffCols, clients[i], existingRow);
       if (conflictCols) {
         conflicts.push(_conflictEntry('client', clients[i], existingRow, conflictCols, user));
@@ -2664,7 +2684,8 @@ function _getDebtStatus() {
  * see _crossAppPhone), phoneIssue ('' | 'missing' | 'invalid': why phone is
  * blank, so the consumer can explain a patient it cannot key instead of
  * dropping them silently), serviceType, sessions (sessionsPerWeek), status,
- * startDate, exitDate, renewalDate (date only). NO billing/payer data.
+ * startDate, exitDate, renewalDate (date only), plannedExitDate (planned
+ * discharge 'yyyy-MM-dd' of an ACTIVE client, '' otherwise). NO billing/payer data.
  *
  * Auth: required shared secret 'TREATMENT_PLANS_SECRET', same model as
  * getWinbackSource / getDebtStatus.
@@ -2701,6 +2722,25 @@ function _renewalDueDate(cl) {
   var anchor = cl.packageChangeDate || cl.paymentDate || cl.startDate || '';
   if (!anchor) return '';
   return _addMonthIso(anchor);
+}
+
+/* Strict 'yyyy-MM-dd' validator for plannedExitDate: returns the value when it
+ * is a real calendar date in that exact shape, else ''. Never guesses — a
+ * malformed or impossible date (2026-02-30) is dropped, not coerced. */
+function _isoDateOrBlank(v) {
+  var s = v == null ? '' : String(v).trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return '';
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  var dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return '';
+  return s;
+}
+
+/* Active per the dashboard's own default: a blank status reads as פעיל
+ * (normalizeClientFromSheet in public/app.js). */
+function _isActiveClientStatus(status) {
+  return (status == null || String(status).trim() === '' ? 'פעיל' : String(status).trim()) === 'פעיל';
 }
 
 function _getTreatmentPlans() {
@@ -2740,7 +2780,12 @@ function _getTreatmentPlans() {
       // (packageChangeDate → paymentDate → startDate) + 1 month. Mirrors
       // nextRenewalDueDate in public/app.js / public/charges-logic.js — keep in sync.
       // Date only ('yyyy-MM-dd' or ''); no billing/payment data crosses here.
-      renewalDate: _renewalDueDate(cl)
+      renewalDate: _renewalDueDate(cl),
+      // Planned discharge date ('yyyy-MM-dd') of an ACTIVE client, from the
+      // append-only plannedExitDate column; '' when none, when the stored
+      // value is not a valid date, or when the client is not active
+      // (discharged clients carry their actual exitDate instead).
+      plannedExitDate: _isActiveClientStatus(cl.status) ? _isoDateOrBlank(cl.plannedExitDate) : ''
     });
   }
   return { ok: true, clients: out };

@@ -605,7 +605,10 @@
       // server compares for stale-save conflict refusal. Client-sent stamps
       // are never written as-is.
       updatedAt: row.updatedAt || '',
-      updatedBy: row.updatedBy || ''
+      updatedBy: row.updatedBy || '',
+      // תאריך סיום מתוכנן: PLANNED discharge date ('yyyy-MM-dd' or ''), set from
+      // the edit modal. Distinct from exitDate (the ACTUAL discharge date).
+      plannedExitDate: fmtDate(row.plannedExitDate)
     };
   }
 
@@ -705,7 +708,11 @@
       // stamps for unchanged ones — but it COMPARES the echoed updatedAt with
       // the sheet's: a changed row whose echo is stale is refused (conflict).
       updatedAt: c.updatedAt || '',
-      updatedBy: c.updatedBy || ''
+      updatedBy: c.updatedBy || '',
+      // Always sent (blank when none) so a cleared date is a real edit; the
+      // server validates it and only carries the sheet value when the key is
+      // absent (a pre-column tab).
+      plannedExitDate: c.plannedExitDate || ''
     };
   }
 
@@ -4960,6 +4967,10 @@
     var hooRow = hooLabelClient
       ? '<div class="cc-line"><span class="cc-k">בית מוצא</span><span class="cc-v">' + escapeHtml(hooLabelClient) + '</span></div>'
       : '';
+    // תאריך סיום מתוכנן (planned discharge) — shown only when set.
+    var plannedExitRow = c.plannedExitDate
+      ? '<div class="cc-line"><span class="cc-k">סיום מתוכנן</span><span class="cc-v">' + escapeHtml(displayDate(c.plannedExitDate)) + '</span></div>'
+      : '';
 
     // Monthly base-payment status for the CURRENT month. Driven by the same
     // per-month payment row the גבייה tab uses (paymentForClientOn) so both
@@ -5080,6 +5091,7 @@
         planRows +
         creditRow +
         hooRow +
+        plannedExitRow +
       '</div>';
 
     // Renewal status banner (overdue / due soon)
@@ -5550,6 +5562,7 @@
     form.monthlyAmount.value = client.pricePerSession || '';
     if (form.house_of_origin) form.house_of_origin.value = client.house_of_origin || '';
     if (form.notes) form.notes.value = client.notes || '';
+    if (form.plannedExitDate) form.plannedExitDate.value = client.plannedExitDate || '';
     // Treatment plan: service types + sessions per week per treatment
     var ecGroup = $('[data-group="serviceType"]', form);
     var ecHost = $('[data-host="editClientSessions"]', form);
@@ -6865,7 +6878,8 @@
         serviceType: client.serviceType, sessionsPerWeek: client.sessionsPerWeek,
         sessionsUnit: client.sessionsUnit,
         nextBillingDate: client.nextBillingDate,
-        house_of_origin: client.house_of_origin, notes: client.notes
+        house_of_origin: client.house_of_origin, notes: client.notes,
+        plannedExitDate: client.plannedExitDate
       };
       var newName = (fd.get('name') || '').trim();
       if (newName) client.name = newName;
@@ -6887,6 +6901,12 @@
       if (fd.has('house_of_origin')) client.house_of_origin = (fd.get('house_of_origin') || '').trim();
       // notes: allow setting OR clearing.
       if (fd.has('notes')) client.notes = (fd.get('notes') || '').trim();
+      // תאריך סיום מתוכנן: allow setting OR clearing. Only a well-formed
+      // 'yyyy-MM-dd' is kept (the server re-validates).
+      if (fd.has('plannedExitDate')) {
+        var ped = String(fd.get('plannedExitDate') || '').trim();
+        client.plannedExitDate = /^\d{4}-\d{2}-\d{2}$/.test(ped) ? ped : '';
+      }
       // Treatment plan: service types + sessions per week
       var ecGroup2 = $('[data-group="serviceType"]', e.target);
       var ecHost2 = $('[data-host="editClientSessions"]', e.target);

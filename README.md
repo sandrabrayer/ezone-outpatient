@@ -243,7 +243,7 @@ checkout ever drifts back.
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
-  status, startDate, exitDate, renewalDate }] }`
+  status, startDate, exitDate, renewalDate, plannedExitDate }] }`
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the
   canonical patient phone and the cross-app join key: the first value of the
   `phone` column, then `treatmentContactPhone`, that normalizes (separators
@@ -256,7 +256,10 @@ checkout ever drifts back.
   `CHANGELOG-treatment-plans-phone-issue.md`. `sessions` is `sessionsPerWeek`;
   `renewalDate` is the package-end/renewal date (the SAME value the גבייה הבאה
   chip shows: stored `nextBillingDate`, else anchor + 1 month; `'yyyy-MM-dd'`
-  or `''`), date only. A minimal,
+  or `''`), date only. `plannedExitDate` is the planned discharge date
+  (`'yyyy-MM-dd'`) of an ACTIVE client — set in the edit-client modal
+  («תאריך סיום מתוכנן», append-only Clients column) — and `''` when none,
+  invalid or not active (see `CHANGELOG-planned-exit-date.md`). A minimal,
   read-only projection — no `payerName`/`payerPhone`/`paymentLink`/prices/
   bundles. Auth mirrors the above: required `TREATMENT_PLANS_SECRET` Script
   Property (separate from `DEBT_STATUS_SECRET` so the two rotate
