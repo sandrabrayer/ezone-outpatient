@@ -213,8 +213,8 @@ The task asks not to claim "no amounts reach managers" while these exist:
 `claude/youthful-volta-laarnk` at `2d4950f`** (2026-10-18 18:11 UTC) while this draft was open.
 This branch now contains that base (merge commit, no force-push; #121's branch untouched).
 
-* **Service worker:** #121 took `ezone-outpatient-v12`; this feature is re-bumped to
-  **`ezone-outpatient-v13`**. The live value could not be read from the build sandbox:
+* **Service worker:** #121 took `ezone-outpatient-v12` and the price-constants PR #123 takes v13 (it merges first);
+  this feature is re-bumped to **`ezone-outpatient-v14`**. The live value could not be read from the build sandbox:
   before release, check what production serves and keep the bump monotonic (CLAUDE.md rule 5).
 * **Backups:** both sets are combined — the nightly set is 10 sheets
   (`Clients, Leads, לידים שהוסרו, Clients-removed, Payments, ClientCharges, Credits, FinancialOps,
@@ -242,4 +242,4 @@ Per merge, outpatient:
 existing deployment's new version. 4. Time 3 requests to the production URL.
 Then (Sandra) set the configuration above and run the one-time import; only after that can the
 therapists side (#105) be released and tested end to end. Before the first outpatient release also
-confirm the **live** SW version (`ezone-outpatient-v13` must be above it).
+confirm the **live** SW version (`ezone-outpatient-v14` must be above it).

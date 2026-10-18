@@ -55,6 +55,6 @@ implementation are listed in `docs/package-catalog.md`.
   no longer depends on it for pricing.
 - **Lock-out risk removed.** Failure-only, per-base-session limiter (5), high per-IP cap (30), global cap (60);
   correct PINs are never counted; `Retry-After` reported. `CATALOG_ADMIN_PIN` is now 8–32 characters.
-- **#121 merged first** (`2d4950f`): this branch now includes it (merge commit). SW re-bumped **v12 → v13**;
+- **#121 merged first** (`2d4950f`): this branch now includes it (merge commit). SW re-bumped **v12 → v14** (v13 is taken by #123, which merges first);
   backups combined (10-sheet set, legacy 8/9-row manifests still restore); #121's tests use שירן.
 - Release order and per-repo deployment mechanics documented in `docs/package-catalog.md`.

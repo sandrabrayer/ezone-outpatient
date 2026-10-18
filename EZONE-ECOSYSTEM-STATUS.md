@@ -41,7 +41,7 @@ and broader ten-app review remain in the program.
 
 Isolated draft (branch `claude/package-catalog-quotes`, separate from the PR #121
 financial-safety work, which MERGED first as #121 `2d4950f`; this branch includes it
-and is re-bumped to SW **v13** — confirm the LIVE version before release). Design, PDF→catalog mapping, ambiguities, configuration and
+and is re-bumped to SW **v14** (v13 is #123's) — confirm the LIVE version before release). Design, PDF→catalog mapping, ambiguities, configuration and
 release steps: `docs/package-catalog.md`. Therapists contract:
 `docs/package-therapists-contract.md` — **the therapists side is NOT built; the
 feature is not complete end to end.**
