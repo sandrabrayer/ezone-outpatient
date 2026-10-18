@@ -104,7 +104,7 @@ clasp (Outpatient: on explicit dispatch, see the correction above). No more hand
 and was verified green across all six apps on 22/07/2026 (ezone-therapists
 already ran this exact setup — it was the template the six were matched to).
 
-- **Automatic via GitHub Actions** — `.github/workflows/deploy-apps-script.yml`,
+- **GitHub Actions + clasp (Outpatient: explicit dispatch, not automatic)** — `.github/workflows/deploy-apps-script.yml`,
   clasp pinned to `@google/clasp@3.3.0`, hardened workflow: it fails loudly and
   early (before touching the live deployment) if a secret is missing or
   `CLASPRC_JSON` isn't valid JSON, and it requires clasp's `Deployed …@<version>`
@@ -438,9 +438,10 @@ check against pre-June-17 branches.
 
 ## Known pitfalls (hard-won, extended July 4)
 
-- **[OBSOLETE for routine deploys — Apps Script now deploys automatically via
-  clasp CI; see "Apps Script deployment" above. Kept as history / emergency
-  fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
+- **[OBSOLETE for routine deploys — Apps Script is published through the clasp
+  workflow (Outpatient: explicit `workflow_dispatch` with `expected_commit`, no
+  push trigger); see "Apps Script deployment" above. Never paste Code.gs by hand.
+  Kept as history / emergency fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
   Save → deploy a NEW VERSION of the EXISTING deployment. Wrong choices seen this
   week: new deployment (URL changes, consumers break) and access flipped off
   "Anyone" (consumers get Google's HTML page → "Non-JSON from Apps Script").
