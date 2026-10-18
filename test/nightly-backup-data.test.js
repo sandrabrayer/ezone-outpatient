@@ -6,10 +6,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const code = fs.readFileSync(path.join(__dirname, '../apps-script/Code.gs'), 'utf8');
 const copy = rows => rows.map(row => row.map(v => v instanceof Date ? new Date(v) : v));
 
-function harness() {
+function harness(sourceGrids) {
   const events = [], props = {}, logs = [], faults = {};
   let uuid = 0, scriptHeld = false, userHeld = false;
   function book(id) {
@@ -67,23 +68,27 @@ function harness() {
     }, LockService: {
       getScriptLock: () => ({ tryLock: () => faults.captureLock ? false : (scriptHeld = true), releaseLock: () => { scriptHeld = false; } }),
       getUserLock: () => ({ tryLock: () => faults.writerLock ? false : (userHeld = true), releaseLock: () => { userHeld = false; } })
-    }, Utilities: { getUuid: () => String(++uuid), formatDate: d => d.toISOString().slice(0,10) },
+    }, Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+      computeDigest: (algorithm, value) => Array.from(crypto.createHash(algorithm).update(value).digest()), getUuid: () => String(++uuid), formatDate: d => d.toISOString().slice(0,10) },
     Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
     Logger: { log: (...args) => logs.push(args.join(' ')) },
     MailApp: { sendEmail() { throw Error('No live mail in tests'); } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k,v) => { props[k] = v; } }) }
   };
   vm.createContext(ctx); vm.runInContext(code, ctx);
-  live.insertSheet('Clients', [['id','name','phone'], ['client-a','מטופל בדיקה','0500000001']]);
-  live.insertSheet('Leads', [['id','name','phone'], ['lead-a','פניית בדיקה','0500000002']]);
-  live.insertSheet('לידים שהוסרו', [['id','name'], ['removed-a','פנייה שהוסרה']]);
-  live.insertSheet('Clients-removed', [['id','name'], ['old-client','מטופל שהוסר']]);
+  const grids=sourceGrids || {
+    Clients:[['id','name','phone'], ['client-a','מטופל בדיקה','0500000001']],
+    Leads:[['id','name','phone'], ['lead-a','פניית בדיקה','0500000002']],
+    'לידים שהוסרו':[['id','name'], ['removed-a','פנייה שהוסרה']],
+    'Clients-removed':[['id','name'], ['old-client','מטופל שהוסר']]
+  };
+  Object.entries(grids).forEach(([name,rows])=>live.insertSheet(name,rows));
   props.INTEGRITY_BACKUP_SSID = 'backup';
   faults.forbidLiveWrites = true;
   return { ctx, live, backup, events, props, faults, logs, locks: () => [scriptHeld,userHeld] };
 }
 
-test('nightly job backs up all four datasets, retains unrelated tabs, never writes live data', () => {
+test('nightly job preserves existing client/lead datasets and unrelated tabs, never writes live data', () => {
   const h = harness();
   const original = h.live.getSheets().map(s => s.getDataRange().getValues());
   h.backup.insertSheet('dashboard-2000-01-01', [['keep']]);
@@ -146,7 +151,7 @@ test('absent optional archives are represented as empty header-only snapshots wi
   const h = harness();
   const source = { getSheetByName: n => n.includes('removed') || n === 'לידים שהוסרו' ? null : h.live.getSheetByName(n) };
   const captured = h.ctx._integrityCaptureData(source);
-  assert.equal(captured.length, 4);
+  assert.equal(captured.length, 8);
   for (const item of captured.slice(2)) { assert.equal(item.absent,true); assert.equal(item.grid.length,1); assert.equal(item.grid[0][0],'id'); }
   assert.deepEqual(h.locks(), [false,false]);
 });
@@ -181,12 +186,12 @@ test('misconfigured live workbook as backup is rejected before any write', () =>
   assert.ok(h.logs.some(l => l.includes('Backup destination is the live spreadsheet')));
 });
 
-test('retention matches only four exact daily families, never staging remnants or other apps', () => {
+test('retention matches the eight exact data families and their manifest, never staging remnants or other apps', () => {
   const h = harness();
-  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-']) {
+  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-', 'payments-', 'charges-', 'credits-', 'financial-ops-', 'manifest-']) {
     assert.equal(h.ctx._integrityIsExpiredSnapshot('outpatient-'+family+'2026-01-01','outpatient-2026-10-09',30),true);
   }
-  for (const name of ['outpatient-pending-2026-01-01','outpatient-previous-2026-01-01','outpatient-payments-2026-01-01','dashboard-2026-01-01','outpatient-leads-2026-1-1','manual']) {
+  for (const name of ['outpatient-pending-2026-01-01','outpatient-previous-2026-01-01','outpatient-payments-manual-2026-01-01','dashboard-2026-01-01','outpatient-leads-2026-1-1','manual']) {
     assert.equal(h.ctx._integrityIsExpiredSnapshot(name,'outpatient-2026-10-09',30),false);
   }
 });
@@ -197,4 +202,72 @@ test('missing Clients sheet never seeds a false zero sentinel', () => {
   h.ctx.nightlyIntegrityJob();
   assert.equal(h.props.INTEGRITY_LAST_COUNT,'12');
   assert.ok(h.logs.some(l => l.includes('Missing Clients sheet')));
+});
+
+
+test('financial snapshots and manifest verify as one set; mixed generation is refused', () => {
+  const h = harness();
+  h.ctx.nightlyIntegrityJob();
+  const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  const result = h.ctx._integrityValidateRestoreSet(h.backup, day);
+  assert.deepEqual(Array.from(result, r => r.source), ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments','ClientCharges','Credits','FinancialOps']);
+  const changed = h.backup.getSheetByName('outpatient-payments-' + day);
+  changed.getRange(1,1,2,1).setValues([['id'],['different-generation']]);
+  assert.throws(() => h.ctx._integrityValidateRestoreSet(h.backup, day), /snapshot mismatch/);
+});
+test('journal deletion after activation blocks backup capture instead of inventing an empty journal', () => {
+  const h = harness(); h.props.FINANCIAL_OPS_CREATED = '1';
+  assert.throws(() => h.ctx._integrityCaptureData(h.live), /Missing backup source: FinancialOps/);
+});
+
+for (const crash of ['client_done','payment_written']) test('isolated manifest-checked restore resumes '+crash+' without another billing cycle', () => {
+  const {fixture,failWrite}=require('../test-support/renewal-journal-fixture.cjs');
+  const {sandbox}=require('../test-support/apps-script-sandbox');
+  const f=fixture();f.reserve();
+  if(crash==='client_done')failWrite(f.sb,'FinancialOps','payment_writing','before');
+  else failWrite(f.sb,'Payments',null,'after');
+  assert.equal(f.apply().ok,false);
+  const grids=Object.fromEntries(Object.entries(f.sb.sheets).map(([name,sh])=>[name,sh.grid]));
+  const h=harness(grids);h.props.FINANCIAL_OPS_CREATED='1';
+  h.ctx.nightlyIntegrityJob();
+  const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  const captured=h.ctx._integrityValidateRestoreSet(h.backup,day);
+  const restored=sandbox();
+  for(const item of captured){
+    const grid=item.grid;
+    restored.seed(item.source,grid[0],grid.slice(1).map(row=>Object.fromEntries(grid[0].map((key,i)=>[key,row[i]]))));
+  }
+  restored.props.FINANCIAL_OPS_CREATED='1';
+  const discover=restored.post({action:'getRenewalState',clientId:f.request.clientId});
+  assert.equal(discover.operation.id,f.request.opId);
+  assert.equal(discover.operation.cycleDate,'2026-02-28');
+  assert.equal(restored.post({action:'applyRenewal',opId:f.request.opId}).operation.state,'done');
+  assert.equal(restored.rows('Payments').length,1);
+  assert.equal(restored.rows('Clients')[0].nextBillingDate,'2026-03-31');
+  assert.equal(restored.rows('Payments')[0].amountPaid,600);
+  assert.equal(restored.post({action:'applyRenewal',opId:f.request.opId}).operation.state,'done');
+  assert.deepEqual(h.locks(),[false,false]);
+});
+
+test('interleaved backup replacement is detected before retention can remove older recovery sets', () => {
+  const h=harness();h.backup.insertSheet('outpatient-2000-01-01',[['id'],['keep-until-coherent-new-set']]);
+  const write=h.ctx._integrityWriteSnapshot;
+  h.ctx._integrityWriteSnapshot=(ss,name,...args)=>{
+    const result=write(ss,name,...args);
+    if(name.startsWith('outpatient-manifest-')){
+      const day=name.slice('outpatient-manifest-'.length);
+      ss.getSheetByName('outpatient-payments-'+day).getRange(1,1,2,1).setValues([['id'],['other-capture']]);
+    }
+    return result;
+  };
+  h.ctx.nightlyIntegrityJob();
+  assert.ok(h.backup.getSheetByName('outpatient-2000-01-01'));
+  assert.ok(h.logs.some(l=>l.includes('Restore snapshot mismatch')));
+});
+
+test('restore preflight requires a journal when the restore target has the activation marker', () => {
+  const h=harness();h.ctx.nightlyIntegrityJob();
+  const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  assert.throws(()=>h.ctx._integrityValidateRestoreSet(h.backup,day,true),/Restore journal required/);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,8);
 });

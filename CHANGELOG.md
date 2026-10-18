@@ -17,7 +17,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   sheet value when a payload omits the key (a pre-column tab). SW v9 → v10.
   Needs the Apps Script release phase. See `CHANGELOG-planned-exit-date.md`.
 
-### Financial save confirmation (OP-02b1 candidate)
+### Recoverable renewal (OP-02b2-a candidate)
+- Keep original cycle/amount and immutable source intent before renewal effects;
+  reconcile exact evidence after interrupted writes, including another device.
+- Guard cooperating financial/client writers; ambiguous data needs explicit,
+  audited review. Terminal operations never replay financial effects.
+- Extend nightly capture to eight datasets plus a verified manifest and add
+  synthetic isolated restore/recovery tests. No live restore/trigger run.
+- SW v10 → v11. Source and Node need ordered release after separate approval.
+  Other durable financial flows remain open. See `CHANGELOG-renewal-journal.md`.
+
+### Financial save confirmation (OP-02b1 released #118, 2026-10-18)
 - Stop dependent payments on a refused client update; require explicit source
   acknowledgement. Preserve confirmed client/charge steps after payment errors.
 - Remove premature paid rows and trailing success messages from multi-step

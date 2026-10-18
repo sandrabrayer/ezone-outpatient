@@ -31,7 +31,7 @@ helpers also accepted requests when their Script Property was missing. These
 were verified first in code/synthetic tests. The later release checks above
 probed only rejected dummy actions at the live `/exec`.
 
-The fix authenticates all 16 GET and 46 POST method/action pairs before any
+The released OP-01 fix authenticated 16 GET and 46 POST method/action pairs before any
 business handler or Sheets operation. Unknown/unclassified actions are denied.
 Internal operations use `OUTPATIENT_PROXY_SECRET`, carried as `proxySecret`;
 consumers retain their narrower `secret` and existing property names. No key
@@ -57,6 +57,7 @@ This inventory is a code contract, not proof every feature is used in production
 | GET | `getData`, `getPayments`, `getCharges`, `getSettings`, `getExtraSessionRequests`, `getStopFlags`, `getMyStopAlerts`, `getSessionLog`, `getContinuation`, `getCredits`, `getRemovedClients` |
 | POST reads | `getData`, `getPayments`, `getCharges`, `getSettings`, `getStopFlags`, `getMyStopAlerts`, `getSessionLog`, `getContinuation`, `getCredits`, `getRemovedClients` |
 | POST writes | `saveAll`, `approveExtraSession`, `correctSessionOutcome`, `markForwarded`, `createStopAlert`, `resumeTreatmentAlert`, `saveContinuation`, `mergeClients`, `restoreRemovedClient`, `saveSettings`, `savePayment`, `updatePayment`, `saveCredit`, `savePaymentAmountOverride`, `repairStaleNextBilling`, `saveCharge`, `updateCharge`, `removeCharge`, `removePayment`, `removeChargesForClient`, `removePaymentsForClient`, `removeLead` |
+| POST renewal candidate | `getRenewalState` (read), `reserveRenewal`, `applyRenewal`, `acknowledgeRenewal`, `cancelRenewal`, `resolveRenewalReview`; all use the same proxy key, GET refused |
 | POST dual path | `resolveStopFlag` by id uses the proxy key; by phone uses the existing `STOP_FLAG_SECRET` body field |
 
 ## Consumer inventory and compatibility

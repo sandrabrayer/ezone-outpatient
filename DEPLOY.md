@@ -28,13 +28,26 @@ consumer configuration or authenticated end-to-end access. Those are separate
 release checks. See the full inventory, manual click paths, acceptance and
 rollback constraints in [docs/source-auth-boundary.md](docs/source-auth-boundary.md).
 
-## OP-02b1 confirmation candidate (2026-10-18)
+## OP-02b2-a renewal candidate (2026-10-18)
 
-Baseline #117 is released: Node `72c80686`, source @96. This candidate changes
+Base #119 merged during development: Node `6bdac37f`, SW v10 independently
+verified; its planned-exit feature is retained. Last source evidence is @96;
+recheck #119 source release before the next deployment. This candidate
+changes source and frontend, adds FinancialOps, extends the existing backup set
+and bumps SW to v11 (live v10 checked). No secret/setting changes.
+The new UI refuses renewal until the matching source protocol is deployed.
+After separate Sandra approval: merge, verify exact Node SHA/health, then
+explicitly dispatch Apps Script for that full SHA. Verify source release and
+refresh old tabs. Do not run test payments in production.
+**Do not roll source back to @96 while intents are active:** it has no journal
+guards. Keep journal data/marker and prefer a forward fix. Read the complete
+[release, backup and rollback contract](docs/renewal-journal.md) before release.
+
+## OP-02b1 confirmation release (2026-10-18)
+
+Released in #118 as `fae46116`; Node/SW v9 verified, source stayed @96. It changed
 frontend/tests/docs only; source code, keys and deployment gate are unchanged.
-After exact-head CI/review and separate Sandra approval: merge, verify the exact
-Node SHA and health, served SW v9 and three homepage timings. No Apps Script
-dispatch is required for this candidate; source stays @96. Do not create dummy
+No Apps Script dispatch was required for this frontend release. Do not create dummy
 financial rows in production. Rollback must use a cache version above the then
 live version. See `CHANGELOG-financial-save-confirmation.md`.
 

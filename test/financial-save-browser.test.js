@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { sandbox } = require('../test-support/apps-script-sandbox');
+const { failWrite } = require('../test-support/renewal-journal-fixture.cjs');
 
 function loadChromium() {
   try { return require('playwright').chromium; } catch (_) {}
@@ -35,7 +36,9 @@ async function fixture(t, options = {}) {
     nextBillingDate: '2026-10-01', paymentDate: '2026-09-01',
     updatedAt: '2026-10-01T00:00:00.000Z' };
   const sb = sandbox([{ ...A, stage: 'תוכנית טיפול' }], [client]);
-  const faults = { payment: options.payment || '', remove: false };
+  const faults = { payment: options.payment || '', remove: false, renewal: options.renewal || '' };
+  if (faults.renewal === 'client_done') failWrite(sb, 'FinancialOps', 'payment_writing', 'before');
+  if (faults.renewal === 'ambiguous') failWrite(sb, 'FinancialOps', 'payment_writing', 'after');
   const captured = [], errors = [];
   const oldFetch = global.fetch;
   const keys = ['APP_PIN', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
@@ -51,10 +54,15 @@ async function fixture(t, options = {}) {
     let result;
     if (options.method === 'POST') {
       const payload = JSON.parse(options.body);
-      if (payload.action === 'savePayment' && faults.payment === 'reject') result = { ok: false, error: 'busy' };
+      if (payload.action === 'getRenewalState' && faults.renewal === 'source_unavailable') result = { ok: false, error: 'unknown_action' };
+      else if (payload.action === 'savePayment' && faults.payment === 'reject') result = { ok: false, error: 'busy' };
       else if (payload.action === 'removePayment' && faults.remove) result = { ok: false, error: 'busy' };
       else {
         result = JSON.parse(sb.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify(payload) } }).getContent());
+        if ((payload.action === 'reserveRenewal' && faults.renewal === 'reserve_lost') ||
+            (payload.action === 'applyRenewal' && faults.renewal === 'apply_lost')) {
+          result = { ok: false, error: 'fixture_response_lost' }; faults.renewal = '';
+        }
         if (payload.action === 'savePayment' && faults.payment === 'lost') result = { ok: false, error: 'fixture_response_lost' };
       }
       captured.push({ payload, result });
@@ -176,7 +184,7 @@ for (const flow of ['direct', 'activate']) {
     assert.deepEqual(fx.errors, []);
   });
 }
-for (const flow of ['renew', 'edit']) {
+for (const flow of ['edit']) {
   test(`browser: ${flow} stops after a real stale-client refusal; no payment attempt`, skipOpt, async (t) => {
     const fx = await fixture(t); if (!fx) return;
     const page = await fx.login('ורד');
@@ -205,7 +213,11 @@ test('browser: successful renewal retains amount, backdated paid date and billin
   await page.fill('#renewForm [name="renewAmount"]', '650');
   await page.fill('#renewForm [name="renewDate"]', '2026-10-16');
   await page.click('#renewSubmit');
+  await page.getByRole('button', {name:'אישור וסגירה',exact:true}).waitFor();
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'done');
+  await page.click('#renewResume');
   await page.waitForSelector('#renewModal', { state: 'hidden' });
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
   await clientCard(page).locator('.chip-paid').waitFor();
   const p = fx.sb.rows('Payments')[0];
   assert.equal(p.id, 'pay::fixture-client::base::2026-10');
@@ -215,30 +227,6 @@ test('browser: successful renewal retains amount, backdated paid date and billin
   assert.equal(await page.isHidden('#financialSaveWarning'), true);
   assert.deepEqual(fx.errors, []);
 });
-for (const payment of ['reject', 'lost']) {
-  test(`browser: renewal ${payment} retains client, closes submission, requires confirmation until source readback`, skipOpt, async (t) => {
-    const fx = await fixture(t, { payment }); if (!fx) return;
-    const page = await fx.login('ורד');
-    await clientCard(page).getByRole('button', { name: 'חידוש ותשלום', exact: true }).click();
-    await page.fill('#renewForm [name="renewAmount"]', '650');
-    await submitPayment(page, '#renewSubmit');
-    await checkWarning(page);
-    assert.equal(await page.isHidden('#renewModal'), true);
-    await clientCard(page).locator('.chip-payment-review').waitFor();
-    assert.equal(fx.sb.rows('Clients')[0].nextBillingDate, '2026-11-01');
-    assert.equal(fx.sb.rows('Payments').length, payment === 'lost' ? 1 : 0);
-    if (process.env.EZONE_FINANCIAL_SCREENSHOT && payment === 'reject') {
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.screenshot({ path: process.env.EZONE_FINANCIAL_SCREENSHOT.replace('.png', '-mobile.png'), fullPage: true });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    }
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.click('.tab[data-view="clients"]');
-    await clientCard(page).locator(payment === 'lost' ? '.chip-paid' : '.chip-payment-review').waitFor();
-    assert.equal(fx.captured.filter((r) => r.payload.action === 'savePayment').length, 1);
-    assert.deepEqual(fx.errors, []);
-  });
-}
 test('browser: legacy paid row still confirms its cycle; no date or amount rewrite', skipOpt, async (t) => {
   const fx = await fixture(t); if (!fx) return;
   fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [{ ...fx.client, nextBillingDate: '2026-11-01' }]);
@@ -266,4 +254,90 @@ test('browser: recorded two-cycle prepayment stays paid without invoking a wrong
   assert.match(await clientCard(page).locator('.chip-paid').textContent(), /01\/11/);
   assert.equal(fx.captured.filter((r) => ['saveAll', 'savePayment'].includes(r.payload.action)).length, 0);
   assert.deepEqual(fx.errors, []);
+});
+
+async function openRenew(page) {
+  await clientCard(page).getByRole('button',{name:'חידוש ותשלום',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#renewSubmit').disabled || !document.querySelector('#renewRecovery').hidden);
+}
+for(const renewal of ['client_done','apply_lost','reserve_lost']) {
+  test('browser: '+renewal+' rediscovers the original renewal from another device and never bills the next cycle', skipOpt, async t=>{
+    const fx=await fixture(t,{renewal});if(!fx)return;
+    const first=await fx.login('ורד');await openRenew(first);
+    await first.fill('#renewForm [name="renewAmount"]','650');
+    await first.fill('#renewForm [name="renewDate"]','2026-10-16');
+    // Two submit events in one turn must still reserve once.
+    await first.evaluate(()=>{const f=document.querySelector('#renewForm');f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
+    await first.locator('#renewRecovery:not([hidden])').waitFor().catch(async e=>{t.diagnostic(JSON.stringify({calls:fx.captured.map(r=>[r.payload.action,r.result.error,r.result.operation?.state]),ui:await first.locator('#renewClientName').textContent(),errors:fx.errors}));throw e;});
+    assert.equal(fx.captured.filter(r=>r.payload.action==='reserveRenewal').length,1);
+    const opId=fx.sb.rows('FinancialOps')[0].id;
+    assert.equal(fx.sb.rows('FinancialOps')[0].cycleDate,'2026-10-01');
+    const second=await fx.login('ירדן');await openRenew(second);
+    assert.match(await second.locator('#renewRecoveryText').textContent(),/650/);
+    assert.equal(await second.isHidden('#renewForm'),true);
+    if(renewal!=='apply_lost')await second.click('#renewResume');
+    await second.getByRole('button',{name:'אישור וסגירה',exact:true}).waitFor();
+    assert.equal(fx.sb.rows('FinancialOps').length,1);
+    assert.equal(fx.sb.rows('FinancialOps')[0].id,opId);
+    assert.equal(fx.sb.rows('Payments').length,1);
+    assert.equal(fx.sb.rows('Payments')[0].paymentDate,'2026-10-16');
+    assert.equal(fx.sb.rows('Clients')[0].nextBillingDate,'2026-11-01');
+    if(process.env.EZONE_FINANCIAL_SCREENSHOT && renewal==='client_done'){
+      await second.screenshot({path:process.env.EZONE_FINANCIAL_SCREENSHOT,fullPage:true});
+      await second.setViewportSize({width:390,height:844});
+      await second.screenshot({path:process.env.EZONE_FINANCIAL_SCREENSHOT.replace('.png','-mobile.png'),fullPage:true});
+      assert.equal(await second.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    }
+    await second.click('#renewResume');await second.waitForSelector('#renewModal',{state:'hidden'});
+    assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
+    assert.equal(fx.captured.filter(r=>r.payload.action==='savePayment').length,0);
+    assert.deepEqual(fx.errors,[]);
+  });
+}
+test('browser: ambiguous missing payment requires manual review; explicit closure records signed user and no financial write',skipOpt,async t=>{
+  const fx=await fixture(t,{renewal:'ambiguous'});if(!fx)return;
+  const page=await fx.login('ורד');await openRenew(page);await page.click('#renewSubmit');
+  await page.locator('#renewRecovery:not([hidden])').waitFor();
+  await page.click('#renewResume');await page.locator('#renewReviewResolve:not([hidden])').waitFor();
+  assert.equal(await page.isDisabled('#renewResume'),true);
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'review');
+  assert.equal(fx.sb.rows('Payments').length,0);
+  const clientBefore=JSON.stringify(fx.sb.rows('Clients'));
+  page.on('dialog',dialog=>dialog.type()==='prompt'?dialog.accept('נבדק: התשלום חסר ונדרש תיקון בגבייה'):dialog.accept());
+  await page.click('#renewReviewResolve');await page.waitForSelector('#renewModal',{state:'hidden'});
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'reviewed');
+  assert.equal(fx.sb.rows('FinancialOps')[0].updatedBy,'ורד');
+  assert.equal(JSON.stringify(fx.sb.rows('Clients')),clientBefore);assert.equal(fx.sb.rows('Payments').length,0);
+  await clientCard(page).locator('.chip-payment-review').waitFor();
+  assert.equal(await clientCard(page).locator('.chip-paid').count(),0);
+  assert.deepEqual(fx.errors,[]);
+});
+test('browser: source protocol unavailable keeps renewal disabled with no legacy write fallback',skipOpt,async t=>{
+  const fx=await fixture(t,{renewal:'source_unavailable'});if(!fx)return;
+  const page=await fx.login('ורד');await clientCard(page).getByRole('button',{name:'חידוש ותשלום',exact:true}).click();
+  await page.getByText('לא ניתן לאמת את מצב החידוש.',{exact:false}).waitFor();
+  assert.equal(await page.isDisabled('#renewSubmit'),true);
+  assert.equal(await page.isHidden('#renewMarkPaid'),true);
+  assert.equal(fx.captured.filter(r=>['saveAll','savePayment','reserveRenewal'].includes(r.payload.action)).length,0);
+  assert.deepEqual(fx.errors,[]);
+});
+test('browser: stale source after opening refuses reservation and never attempts a payment',skipOpt,async t=>{
+  const fx=await fixture(t);if(!fx)return;const page=await fx.login('ורד');await openRenew(page);
+  const current=fx.sb.rows('Clients')[0];assert.equal(fx.sb.save(fx.sb.rows('Leads'),[{...current,notes:'other writer'}]).ok,true);
+  await page.fill('#renewForm [name="renewAmount"]','650');
+  const response=page.waitForResponse(r=>r.url().endsWith('/api/sheets')&&r.request().method()==='POST'&&r.request().postDataJSON().action==='reserveRenewal');
+  await page.click('#renewSubmit');await response;
+  await page.waitForFunction(()=>!document.querySelector('#renewSubmit').disabled);
+  assert.equal(fx.sb.rows('FinancialOps').length,0);assert.equal(fx.sb.rows('Payments').length,0);
+  assert.equal(fx.sb.rows('Clients')[0].nextBillingDate,'2026-10-01');
+  assert.equal(fx.captured.filter(r=>['applyRenewal','savePayment'].includes(r.payload.action)).length,0);
+  assert.deepEqual(fx.errors,[]);
+});
+test('browser: prepared request may be cancelled without any client or payment effect',skipOpt,async t=>{
+  const fx=await fixture(t,{renewal:'reserve_lost'});if(!fx)return;const page=await fx.login('ורד');await openRenew(page);
+  await page.click('#renewSubmit');await page.locator('#renewCancelIntent:not([hidden])').waitFor();
+  await page.click('#renewCancelIntent');await page.waitForSelector('#renewModal',{state:'hidden'});
+  assert.equal(fx.sb.rows('FinancialOps')[0].state,'cancelled');
+  assert.equal(fx.sb.rows('Clients')[0].nextBillingDate,'2026-10-01');assert.equal(fx.sb.rows('Payments').length,0);
+  assert.deepEqual(fx.errors,[]);
 });

@@ -1,24 +1,28 @@
 # Outpatient local update — 2026-10-18
 
-OP-01 #115, release-order fix #116 and OP-02a #117 are released. Current production branch
-and independently checked `/api/version`: `72c80686afa0dfe2218c6c6a2c6d680ab7ae59dc`.
-The last completed source release is @96; #116's Node-first explicit dispatch
-was verified without disabling Railway checks. Keep credentials, source URL,
-authentication and the deployment gate unchanged. `DEPLOY.md` is current;
-the shared historical snapshot below does not override this local procedure.
+OP-01 #115, release-order fix #116, OP-02a #117 and OP-02b1 #118 are released.
+#119 merged during this work; production branch / verified Node is now
+`6bdac37f3d788a2d48df680da2ce25746f17b824`, SW v10. Last independently verified
+source is @96; #119 source deployment needs a separate evidence check. #118 corrected dependent financial acknowledgement
+and partial-save/paid-state UI. Keep credentials and the Node-first explicit
+source dispatch gate. Historical notes below do not override `DEPLOY.md`.
 
-OP-02b1 is the current isolated candidate: explicit financial acknowledgement,
-refused prerequisite stops payment, confirmed first steps survive later payment
-failure, no false success/paid row, and orphan deletion waits for confirmation.
-A future billing date without a matching paid cycle row shows a verification
-state, not a paid chip. SW v8 → v9; no source/schema/calculation changes.
+Current isolated work: OP-02b2-a renewal-only journal, immutable original cycle,
+exact-evidence reconciliation, cross-device discovery, interference guards and
+an eight-dataset backup set with manifest. See `docs/renewal-journal.md`.
+Separate approval is required for a new release. This is not all of OP-02b2:
+extra charges/intake/activation/edit-paid/monthly toggles still need durable
+recovery. OP-03 real scheduled backup/restore evidence, OP-04 performance and
+OP-05 financial evidence/control work remain open, specifically a durable
+follow-up queue for closed reviews with missing original-cycle payments and
+review access for deleted clients. OP-04 includes whole-journal guard scan cost
+and a safe history archive/repair plan. No real data repair here.
 
-OP-02b2 remains open: durable original cycle/operation identity, ambiguous write
-reconciliation, cross-device retry and interference with other financial writers.
-See `docs/financial-recovery-design.md`. Full cross-app/staff workflows, OP-03
-scheduled backup/financial restore evidence and performance remain open.
-CRM #114 and other drafts are unchanged. OP-06 still includes the legacy
-`recordTreatmentGiven` sender without a matching route; do not invent a receiver.
+CRM Outpatient #114 / Dashboard #220 and other drafts are unchanged. OP-06 still
+includes the legacy `recordTreatmentGiven` sender without a matching route;
+do not invent a receiver. Keep the ten-app order: Outpatient → Therapists →
+Staffing → Coordinators → Dashboard → Managers → Logistics → Kitchen → Hadrachot
+→ Helpdesk. Security, integrity, backup, speed and business logic stay in scope.
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 

@@ -1,9 +1,11 @@
-# OP-02b2 — durable financial recovery (design, not implemented)
+# OP-02b2 — durable financial recovery (program design)
 
-Base reviewed: production `72c80686` / source @96. Codex owns implementation;
+Current renewal-only implementation candidate was rebased onto merged PR #119
+`6bdac37f` / live SW v10; see [renewal protocol](renewal-journal.md). Other flows
+remain design work. Original design reviewed on `72c80686` / source @96. Codex owns implementation;
 Claude provides bounded read-only review. OP-02b1 corrects acknowledgement and
-partial-save UI only. This file is the next implementation boundary, not a
-claim that a journal or safe retry exists.
+partial-save UI only. This file retains the complete program boundary; the renewal-only candidate
+does not establish safe retry for every flow.
 
 ## Required protocol
 
@@ -73,5 +75,4 @@ Claude's read-only design report:
 https://github.com/sandrabrayer/ezone-outpatient/pull/117#issuecomment-6246754117
 Run 39105431108 ended in error after publishing the report. Claude ran no tests;
 it is static input, not a successful validation gate. Codex verified the actual
-handlers and corrected the stamp uncertainty above. Re-request exact-candidate
-review on OP-02b1's own PR. No production journal or data repair was performed.
+handlers and corrected the stamp uncertainty above. Exact-candidate review is required on the renewal candidate PR. No production journal or data repair was performed.

@@ -113,8 +113,11 @@ before Sheets access. Source auth remains required; retry uses the existing
 row id. Released in #117 at Node `72c80686`, source @96. This is not a
 transaction across client/charge/payment saves.
 
-The current OP-02b1 candidate corrects dependent refusal and financial save
-confirmation in the UI. Durable renewal recovery remains OP-02b2. See
+OP-02b1 was released in #118 at Node `fae46116`, SW v9, source still @96.
+It corrects dependent refusal and financial save confirmation. The current
+OP-02b2-a candidate adds source-owned renewal intent, cross-device reconciliation
+and coherent financial backups; other financial flows remain open. See
+[renewal protocol and release limits](docs/renewal-journal.md),
 [scope and release checks](CHANGELOG-financial-save-confirmation.md) and
 [the next recovery boundary](docs/financial-recovery-design.md).
 Separate approval is required before releasing a new candidate.
