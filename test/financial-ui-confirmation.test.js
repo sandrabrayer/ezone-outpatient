@@ -7,8 +7,7 @@ const flows = [
   { name: 'addChargeForm', first: 'charge', fields: { description: 'טיפול בדיקה', amount: '500', chargeDate: '2026-10-18', billingType: 'one_time', chargePaid: 'on' } },
   { name: 'directForm', first: 'client', fields: { name: 'חדש', phone: '0500000003', monthlyAmount: '500', startDate: '2026-10-01', paymentStatus: 'paid', paymentDate: '2026-10-16' } },
   { name: 'activateForm', first: 'client', fields: { pricePerSession: '500', startDate: '2026-10-01', paymentStatus: 'paid', paymentDate: '2026-10-16' } },
-  { name: 'editForm', first: 'client', fields: { name: 'שינוי שם', phone: '0500000001', monthlyAmount: '650', paymentStatus: 'paid', paymentDate: '2026-10-16' } },
-  { name: 'renewForm', first: 'client', fields: { renewAmount: '650', renewDate: '2026-10-16' } }
+  { name: 'editForm', first: 'client', fields: { name: 'שינוי שם', phone: '0500000001', monthlyAmount: '650', paymentStatus: 'paid', paymentDate: '2026-10-16' } }
 ];
 for (const flow of flows) {
   test(`${flow.name}: an in-flight payment is not presented as confirmed; double submit is blocked`, async () => {
@@ -52,8 +51,7 @@ for (const flow of flows) {
       if (flow.first === 'charge') assert.equal(f.ctx.state.charges.length, 1);
       if (flow.name === 'directForm' || flow.name === 'activateForm') assert.equal(f.ctx.state.clients.length, 2);
       if (flow.name === 'activateForm') assert.equal(f.ctx.state.leads.length, 0);
-      if (flow.name === 'editForm' || flow.name === 'renewForm') assert.equal(f.client.pricePerSession, 650, 'confirmed client amount is retained');
-      if (flow.name === 'renewForm') assert.equal(f.client.nextBillingDate, '2026-11-01');
+      if (flow.name === 'editForm') assert.equal(f.client.pricePerSession, 650, 'confirmed client amount is retained');
     });
   }
   test(`${flow.name}: rejected prerequisite never attempts payment and rolls back only unconfirmed local changes`, async () => {

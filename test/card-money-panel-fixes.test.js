@@ -156,7 +156,7 @@ test('#3 each charge row carries an editor ✏️ edit action wired to openEditC
 });
 
 test('#3 the edit submit saves through persistCharge on the SAME charge (no new id)', () => {
-  const handler = APP.match(/editChargeForm'\);[\s\S]*?editChargeForm\.addEventListener\('submit'[\s\S]*?\n    \}\);/);
+  const handler = APP.match(/editChargeForm\.addEventListener\('submit'[\s\S]*?\n    \}\);/);
   assert.ok(handler, 'editChargeForm submit handler not found');
   // finds the existing charge by id, never mints a new uid()
   assert.match(handler[0], /state\.charges\.find\(function \(c\) \{ return c\.id === editChargeIds\.chargeId; \}\)/);

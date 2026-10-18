@@ -119,7 +119,7 @@ test('app.js: nextBillingDate is never written as addDays(x, 30) anymore', () =>
 test('app.js: renew / intake / activate / agreement / derive all use the cycle rule', () => {
   assert.match(fnSource('deriveNextBillingDates'), /nextCycleDueDateAfter\(c, latest\)/);
   // renew submit anchors on the billed month (renewalDate), never paidDate
-  assert.match(APP, /c\.nextBillingDate = nextCycleDueDateAfter\(c, renewalDate\)/);
+  assert.match(APP, /nextBillingDate: nextCycleDueDateAfter\(c, renewSourceState\.cycleDate\)/);
   // direct intake + activate anchor on the startDate cycle
   const intakeUses = APP.match(/nextCycleDueDateAfter\(\{ billingDay: [^}]*startDate: startDate \}, startDate\)/g) || [];
   assert.ok(intakeUses.length >= 2, 'intake and activate must both use the cycle rule');

@@ -5727,30 +5727,171 @@
   // package change (new frequency + packageChangeDate re-anchor). One save =
   // renewal + any package change. Service TYPES stay in the עריכה modal.
   var renewClientId = null;
-  function openRenewModal(client) {
-    renewClientId = client.id;
+  var renewSourceState = null;
+  var renewLoadToken = 0;
+  function renewalErrorMessage(err) {
+    var message = String(err && err.message || '');
+    if (message.indexOf('renewal_payment_exists') >= 0) return 'כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.';
+    if (message.indexOf('renewal_snapshot_changed') >= 0 || message.indexOf('renewal_period_changed') >= 0) return 'פרטי המטופל השתנו. יש לפתוח את החידוש מחדש ולבדוק את החודש והסכום.';
+    return 'לא ניתן לאמת את מצב החידוש. יש לפתוח שוב את החלון כדי לבדוק מה נשמר; אין ליצור חידוש נוסף בינתיים.';
+  }
+  function showRenewalOperation(op) {
+    renewSourceState = { operation: op };
     var form = $('#renewForm');
-    if (!form) return;
-    form.reset();
-    // Always show the billed month. Prefer the anchored renewal date (the same
-    // value the גבייה הבאה chip shows); fall back to the current-month base due
-    // date so a client with NO stored anchor still shows a concrete month and can
-    // renew (Bug B: this used to hard-fail with "לא ניתן לחשב תאריך חידוש").
-    var renewalDate = nextRenewalDueDate(client) || currentMonthBaseDueDate(client);
-    $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') +
-      (renewalDate ? ' — ' + monthLabel(renewalDate) : '');
+    form.hidden = true;
+    $('#renewClientName').textContent = 'חידוש לחודש ' + monthLabel(op.cycleDate);
+    form.querySelectorAll('input, textarea, select').forEach(function (el) { el.disabled = true; });
+    $('#renewSubmit').hidden = true;
+    $('#renewMarkPaid').hidden = true;
+    $('#renewRecovery').hidden = false;
+    var summary = 'חידוש לחודש ' + monthLabel(op.cycleDate) + ' — ' + money(op.payment.amountPaid) + '. ';
+    if (op.state === 'done') summary += 'החידוש והתשלום נשמרו. יש לאשר את ההשלמה כדי לסגור את הפעולה.';
+    else if (['acknowledged', 'cancelled', 'reviewed'].indexOf(op.state) >= 0) summary += 'הפעולה כבר נסגרה. ניתן לסגור את החלון; לא בוצע חידוש נוסף.';
+    else if (op.state === 'review') summary += 'התוצאה דורשת בדיקה ידנית מול הגבייה. אין לחדש שוב או לשנות את החיוב עד להשלמת הבדיקה.';
+    else summary += 'נשמרה בקשת חידוש שטרם אושרה כהושלמה. המשך מתייחס לאותו חודש ולא ייצור חידוש לחודש הבא.';
+    $('#renewRecoveryText').textContent = summary;
+    $('#renewResume').textContent = op.state === 'done' ? 'אישור וסגירה' : 'בדיקה והמשך החידוש המקורי';
+    $('#renewResume').disabled = op.state === 'review' || op.state === 'cancelled' || op.state === 'acknowledged' || op.state === 'reviewed';
+    $('#renewCancelIntent').hidden = op.state !== 'prepared';
+    $('#renewReviewResolve').hidden = op.state !== 'review';
+  }
+  async function refreshRenewalState(clientId, token) {
+    var data = await apiPostAction('getRenewalState', { clientId: clientId });
+    if (!data || data.ok !== true || data.protocol !== 1) throw new Error('renewal_protocol_unavailable');
+    if (token !== renewLoadToken || renewClientId !== clientId) return;
+    if (data.operation) { showRenewalOperation(data.operation); return; }
+    if (!data.client || !data.snapshot || !data.cycleDate) throw new Error('renewal_state_missing');
+    renewSourceState = data;
+    var client = normalizeClientFromSheet(data.client), form = $('#renewForm');
+    form.hidden = false;
+    var clientIndex = state.clients.findIndex(function (c) { return String(c.id) === String(clientId); });
+    if (clientIndex >= 0) state.clients[clientIndex] = client;
+    form.querySelectorAll('input, textarea, select').forEach(function (el) { el.disabled = false; });
+    $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') + ' — ' + monthLabel(data.cycleDate);
     form.renewAmount.value = client.pricePerSession || '';
-    if (form.renewDate) form.renewDate.value = today();
-    // Prefill the package/plan frequency from the current plan (former שינוי חבילה
-    // host). Left unchanged → renew only; changed → save also updates the package.
+    form.renewDate.value = today();
     var host = $('[data-host="renewSessions"]', form);
     if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
+    $('#renewRecovery').hidden = true;
+    $('#renewSubmit').hidden = false;
+    $('#renewSubmit').disabled = false;
+    $('#renewMarkPaid').hidden = false;
+    $('#renewMarkPaid').disabled = false;
+  }
+  async function openRenewModal(client) {
+    renewClientId = client.id;
+    renewSourceState = null;
+    var token = ++renewLoadToken, form = $('#renewForm');
+    if (!form) return;
+    form.reset();
+    form.hidden = false;
+    form.querySelectorAll('input, textarea, select').forEach(function (el) { el.disabled = true; });
+    $('#renewSubmit').hidden = false;
+    $('#renewSubmit').disabled = true;
+    $('#renewMarkPaid').hidden = true;
+    $('#renewRecovery').hidden = true;
+    $('#renewClientName').textContent = 'בודק את מצב החידוש עבור ' + (client.name || '') + '…';
     $('#renewModal').hidden = false;
+    try { await refreshRenewalState(client.id, token); }
+    catch (err) {
+      if (token === renewLoadToken) $('#renewClientName').textContent = renewalErrorMessage(err);
+    }
   }
   function closeRenewModal() {
     var m = $('#renewModal');
     if (m) m.hidden = true;
     renewClientId = null;
+    renewSourceState = null;
+    renewLoadToken++;
+  }
+  async function submitDurableRenewal(form) {
+    var submit = $('#renewSubmit');
+    if (submit.disabled || !renewClientId || !renewSourceState || renewSourceState.operation) return;
+    var cid = renewClientId, token = renewLoadToken;
+    var c = normalizeClientFromSheet(renewSourceState.client);
+    var fd = new FormData(form), amount = toNum(fd.get('renewAmount'));
+    if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
+    var paidDate = fd.get('renewDate') || today(), notes = (fd.get('renewNotes') || '').trim();
+    var pkg = readPackageSessionsFromForm(c, form), changed = packageSessionsChanged(c, pkg);
+    var patch = { pricePerSession: amount, paymentDate: paidDate,
+      nextBillingDate: nextCycleDueDateAfter(c, renewSourceState.cycleDate) };
+    if (changed) {
+      c.sessionsPerWeek = pkg.sessions; c.sessionsUnit = pkg.units;
+      patch.sessionsPerWeek = clientForSheet(c).sessionsPerWeek;
+      patch.packageChangeDate = paidDate;
+    }
+    var request = { opId: 'renew-' + uid(), clientId: cid, snapshot: renewSourceState.snapshot,
+      cycleDate: renewSourceState.cycleDate, patch: patch,
+      payment: paymentForSheet(basePaymentPaidOn(c, renewSourceState.cycleDate, amount, paidDate, notes)) };
+    submit.disabled = true;
+    $('#renewMarkPaid').disabled = true;
+    form.querySelectorAll('input, textarea, select').forEach(function (el) { el.disabled = true; });
+    try {
+      var reserved = await apiPostAction('reserveRenewal', request);
+      if (!reserved || reserved.ok !== true || !reserved.operation) throw new Error('renewal_not_reserved');
+      var result = await apiPostAction('applyRenewal', { opId: reserved.operation.id });
+      if (!result || result.ok !== true || !result.operation) throw new Error('renewal_not_confirmed');
+      if (token === renewLoadToken) showRenewalOperation(result.operation);
+      await loadAll();
+    } catch (err) {
+      toast(renewalErrorMessage(err), true);
+      if (token === renewLoadToken) {
+        renewSourceState = null;
+        try { await refreshRenewalState(cid, token); } catch (_) { /* stays disabled until a fresh source read */ }
+      }
+    } finally {
+      if (token === renewLoadToken && renewSourceState && !renewSourceState.operation) submit.disabled = false;
+    }
+  }
+  async function resolveRenewalReview() {
+    var op = renewSourceState && renewSourceState.operation;
+    if (!op || op.state !== 'review' || $('#renewReviewResolve').disabled) return;
+    var token = renewLoadToken, cid = renewClientId, btn = $('#renewReviewResolve');
+    btn.disabled = true;
+    try {
+      var current = await apiPostAction('getRenewalState', { clientId: cid });
+      if (token !== renewLoadToken || !current.operation || !current.operation.review) return;
+      var view = current.operation.review;
+      var text = 'חודש מקורי: ' + monthLabel(op.cycleDate) + '. סכום מבוקש: ' + money(op.payment.amountPaid) +
+        '. מועד הגבייה הרשום כעת: ' + (view.nextBillingDate ? displayDate(view.nextBillingDate) : 'חסר') +
+        '. רשומות תשלום שנמצאו: ' + view.paymentCount + '.\n';
+      view.payments.forEach(function (p) { text += 'תשלום: ' + money(p.amountPaid) + ' (' + (PAYMENT_STATUSES.find(function (s) { return s.id === normalizePaymentStatus(p.status); }) || {}).he + ')\n'; });
+      if (!confirm(text + 'סגירת הבירור לא תיצור תשלום ולא תתקן את הנתונים. יש לבדוק את הגבייה ולתעד מה נשאר לתיקון. האם השלמת את הבדיקה?')) return;
+      var reason = prompt('תוצאת הבדיקה ומה נשאר לתיקון (לפחות 10 תווים):');
+      if (!reason || reason.trim().length < 10) return;
+      var result = await apiPostAction('resolveRenewalReview', { opId: op.id, reviewToken: view.token,
+        reason: reason.trim(), acceptCurrent: true });
+      if (!result || result.ok !== true || !result.operation || result.operation.state !== 'reviewed') throw new Error('review_not_saved');
+      if (token === renewLoadToken) { closeRenewModal(); toast('הבדיקה תועדה. נתוני הכרטיס והתשלומים לא שונו.'); }
+      await loadAll();
+    } catch (err) { toast(renewalErrorMessage(err), true); }
+    finally { btn.disabled = false; }
+  }
+  async function continueRenewal(cancel) {
+    if (!renewSourceState || !renewSourceState.operation) return;
+    var op = renewSourceState.operation, token = renewLoadToken, cid = renewClientId;
+    var resume = $('#renewResume'), cancelBtn = $('#renewCancelIntent');
+    if (resume.disabled || cancelBtn.disabled) return;
+    resume.disabled = true; cancelBtn.disabled = true;
+    try {
+      var action = cancel ? 'cancelRenewal' : op.state === 'done' ? 'acknowledgeRenewal' : 'applyRenewal';
+      var data = await apiPostAction(action, { opId: op.id });
+      if (!data || data.ok !== true || !data.operation) throw new Error('renewal_not_confirmed');
+      if (token !== renewLoadToken) return;
+      if (data.operation.state === 'acknowledged' || data.operation.state === 'cancelled') {
+        closeRenewModal();
+        toast(data.operation.state === 'acknowledged' ? 'החידוש והתשלום אושרו' : 'בקשת החידוש בוטלה לפני שינוי הנתונים');
+      } else showRenewalOperation(data.operation);
+      await loadAll();
+    } catch (err) {
+      toast(renewalErrorMessage(err), true);
+      if (token === renewLoadToken) { try { await refreshRenewalState(cid, token); } catch (_) {} }
+    } finally {
+      cancelBtn.disabled = false;
+      if (token === renewLoadToken && renewSourceState && renewSourceState.operation) {
+        resume.disabled = ['review', 'reviewed', 'acknowledged', 'cancelled'].indexOf(renewSourceState.operation.state) >= 0;
+      }
+    }
   }
 
   // --- Shared package-change core (single implementation) ----------------
@@ -6334,81 +6475,11 @@
     var renewForm = $('#renewForm');
     if (renewForm) renewForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      var submit = $('#renewSubmit');
-      if (submit.disabled) return;
-      if (!renewClientId) return;
-      var c = state.clients.find(function (x) { return x.id === renewClientId; });
-      if (!c) { toast('מטופל לא נמצא', true); return; }
-      // Billed month: prefer the anchored renewal date (same value the גבייה הבאה
-      // chip / renewal banner show); fall back to the current-month base due date
-      // so a client with NO stored anchor still renews (Bug B — was a hard fail).
-      var renewalDate = nextRenewalDueDate(c) || currentMonthBaseDueDate(c);
-      if (!renewalDate) { toast('לא ניתן לחשב תאריך חידוש', true); return; }
-      var fd = new FormData(e.target);
-      var amount = toNum(fd.get('renewAmount'));
-      if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
-      // Editable paid date (default today, backdatable) + free-text notes.
-      var paidDate = fd.get('renewDate') || today();
-      var notes = (fd.get('renewNotes') || '').trim();
-      // Optional package change folded in: read the per-service frequency host and
-      // apply it only if it actually differs from the stored plan. Reuses the
-      // shared package helpers so there is ONE change-package implementation.
-      var pkg = readPackageSessionsFromForm(c, e.target);
-      var pkgChanged = packageSessionsChanged(c, pkg);
-      submit.disabled = true;
-
-      // Client first, then payment. A refused client update must stop here.
-      // Durable period/operation recovery is still OP-02b's next stage;
-      // this handler must not claim a blind re-click is safe.
-      var prev = {
-        pricePerSession: c.pricePerSession, paymentDate: c.paymentDate,
-        nextBillingDate: c.nextBillingDate, sessionsPerWeek: c.sessionsPerWeek,
-        sessionsUnit: c.sessionsUnit, packageChangeDate: c.packageChangeDate
-      };
-      c.pricePerSession = amount;
-      c.paymentDate = paidDate;
-      // Advance to the cycle AFTER the month being billed — anchored on the DUE
-      // date (renewalDate), never the paid date, so the billing day doesn't
-      // drift (paying the 04/09 cycle on 30/08 advances to 04/10, not 29/09).
-      c.nextBillingDate = nextCycleDueDateAfter(c, renewalDate);
-      if (pkgChanged) {
-        // Same fields the former שינוי חבילה flow wrote: new weekly frequency and
-        // the packageChangeDate re-anchor (stamped to the payment date).
-        c.sessionsPerWeek = pkg.sessions;
-        c.sessionsUnit = pkg.units;
-        c.packageChangeDate = paidDate;
-      }
-      persistClientChange(c)
-        .then(function () {
-          // Single paid-date path: same builder as the edit-modal propagation.
-          var payment = basePaymentPaidOn(c, renewalDate, amount, paidDate, notes);
-          return persistPayment(payment)
-            .then(function () {
-              // Upsert by id so גבייה reflects it without a reload.
-              var idx = state.payments.findIndex(function (p) { return p.id === payment.id; });
-              if (idx >= 0) state.payments[idx] = payment;
-              else state.payments.push(payment);
-              toast(pkgChanged ? 'חודש שולם מראש והחבילה עודכנה' : 'חודש שולם מראש');
-              closeRenewModal();
-              render();
-            })
-            .catch(function (err) {
-              // Keep the confirmed client change. Close this submission and
-              // require reconciliation; a new renewal can target another month.
-              closeRenewModal();
-              showFinancialSaveWarning('פרטי החידוש נשמרו', c.name);
-              render();
-            });
-        })
-        .catch(function (err) {
-          // Client persist failed: roll back the in-memory change and abort
-          // (do not write the payment).
-          Object.assign(c, prev);
-          toast('שגיאה: ' + err.message, true);
-          render();
-        })
-        .finally(function () { submit.disabled = false; });
+      submitDurableRenewal(e.target);
     });
+    $('#renewReviewResolve').addEventListener('click', resolveRenewalReview);
+    $('#renewResume').addEventListener('click', function () { continueRenewal(false); });
+    $('#renewCancelIntent').addEventListener('click', function () { continueRenewal(true); });
 
     // "שולם" quick action inside the חידוש ותשלום modal: mark the CURRENT month
     // paid via the EXACT existing setCurrentMonthPaid path (optimistic + rollback).

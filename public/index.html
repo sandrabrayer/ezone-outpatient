@@ -853,6 +853,13 @@
         <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
           <span id="renewClientName"></span>
         </div>
+        <div id="renewRecovery" class="renew-recovery" role="status" hidden>
+          <p id="renewRecoveryText"></p>
+          <button type="button" class="btn btn-primary" id="renewResume">בדיקה והמשך החידוש המקורי</button>
+          <button type="button" class="btn btn-ghost" id="renewReviewResolve" hidden>סיום בדיקה ידנית ללא שינוי נתונים</button>
+          <button type="button" class="btn btn-ghost" id="renewCancelIntent" hidden>ביטול בקשה שטרם בוצעה</button>
+          <button type="button" class="btn btn-ghost" data-close>סגירה</button>
+        </div>
         <form id="renewForm" class="form-grid">
           <label class="wide">סכום חודשי (₪)<input name="renewAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">תאריך תשלום<input name="renewDate" type="date" /></label>
@@ -860,10 +867,10 @@
 
           <!-- Package change folded in (was the standalone שינוי חבילה modal). Editing
                the weekly frequency turns this save into a package change too:
-               it updates the plan and re-anchors גבייה הבאה to the payment date.
+               it updates the plan; גבייה הבאה remains anchored to the billed cycle.
                Leaving it unchanged renews only. -->
           <div class="wide form-section-title">שינוי חבילה (אופציונלי)</div>
-          <div class="wide renew-pkg-hint">עדכון תדירות המפגשים יעדכן את החבילה ויאפס את מועד הגבייה לפי תאריך התשלום.</div>
+          <div class="wide renew-pkg-hint">עדכון תדירות המפגשים יעדכן את החבילה. מועד הגבייה הבא יישאר לפי מחזור החיוב של החודש שנבחר.</div>
           <div class="wide sessions-host" data-host="renewSessions"></div>
 
           <div class="form-actions edit-only">

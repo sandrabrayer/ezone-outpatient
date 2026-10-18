@@ -170,11 +170,10 @@ test('Bug B: the stored anchor still wins when present (fallback only kicks in w
   assert.equal(billedMonthDate({ paymentDate: '2026-06-01' }, TODAY), '2026-07-01');
 });
 
-test('Bug B guard: renew handler + modal use the currentMonthBaseDueDate fallback (no bare hard-fail)', () => {
-  // Both the modal opener and the submit handler resolve the month with the
-  // fallback; the old `nextRenewalDueDate(c)` without a fallback is gone.
-  const uses = APP.match(/nextRenewalDueDate\([a-z]+\) \|\| currentMonthBaseDueDate\([a-z]+\)/g) || [];
-  assert.ok(uses.length >= 2, 'expected the fallback in openRenewModal and the submit handler, found ' + uses.length);
+test('Bug B guard: renewal discovers the source-owned period, including no-anchor fallback', () => {
+  assert.match(APP, /apiPostAction\('getRenewalState'/);
+  assert.match(APP, /cycleDate: renewSourceState\.cycleDate/);
+  // Executed no-anchor and clamp parity cases are in renewal-journal.test.js.
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,5 +211,5 @@ test('C2: renewal + package change is ONE implementation (reused helpers, not a 
   assert.match(APP, /function readPackageSessionsFromForm/);
   assert.match(APP, /function packageSessionsChanged/);
   // The submit handler stamps packageChangeDate only when the plan changed.
-  assert.match(APP, /if \(pkgChanged\) \{[\s\S]{0,260}c\.packageChangeDate = paidDate;/);
+  assert.match(APP, /if \(changed\) \{[\s\S]{0,260}patch\.packageChangeDate = paidDate;/);
 });

@@ -41,8 +41,10 @@
  * - v10 (2026-10-18): planned discharge date (תאריך סיום מתוכנן) — new date
  *   input in the edit-client modal (index.html) read/saved by app.js. Bumped
  *   so an installed app never pairs the old shell with the new app.js.
+ * - v11 (2026-10-18): source-owned renewal recovery, original-cycle resume
+ *   and explicit review. Live v10 was verified after #119 before this bump.
  */
-var CACHE = 'ezone-outpatient-v10';
+var CACHE = 'ezone-outpatient-v11';
 var SHELL = [
   './',
   './index.html',

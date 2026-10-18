@@ -1191,3 +1191,8 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 
 /* A future billing date without a confirmed cycle payment needs review. */
 .chip-payment-review { background: #fff3cd; color: #664d03; border: 1px solid #e8cb75; }
+
+/* Source-owned renewal recovery: readable RTL status and wrapping controls. */
+.renew-recovery { padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.renew-recovery p { line-height: 1.7; margin-top: 0; }
+.renew-recovery .btn { max-width: 100%; white-space: normal; margin: 4px 0 4px 8px; }

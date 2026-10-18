@@ -719,6 +719,7 @@ function _readAll(sh, headers) {
 }
 
 function _writeAll(sh, headers, rows) {
+  _finGuardRewrite(sh, headers, rows || []);
   var lastRow = sh.getLastRow();
   if (lastRow > 1) {
     sh.getRange(2, 1, lastRow - 1, headers.length).clearContent();
@@ -1075,6 +1076,7 @@ function _therapistPay(therapistName, treatmentType) {
 // Stamps the row's updatedAt/updatedBy (who/when) alongside the balance —
 // `user` is '' for the cross-app recordSessionOutcome receiver.
 function _writeCreditsOwed(clientsSh, clientId, balance, user) {
+  _finGuard([clientId]);
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var creditCol = CLIENTS_HEADERS.indexOf('creditsOwed') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -1109,6 +1111,7 @@ function _parseAmountOverrides(v) {
  * and writes it back. amount === null/'' deletes the key (revert to computed).
  * Fail-soft: no-hit (client deleted mid-flight) changes nothing and returns false. */
 function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount, user) {
+  _finGuard([clientId]);
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var ovCol = CLIENTS_HEADERS.indexOf('paymentAmountOverrides') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -1318,6 +1321,8 @@ function _saveAll(payload) {
     // rewrite; the creditsOwed / paymentAmountOverrides preserve-by-id blocks
     // above/below are untouched.
     var conflicts = [];
+    var reservedClients = Object.create(null);
+    _finJournal().ops.filter(_finActive).forEach(function (op) { reservedClients[op.clientId] = true; });
     for (var i = 0; i < clients.length; i++) {
       _deriveClientServiceType(clients[i]);
       var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
@@ -1335,6 +1340,18 @@ function _saveAll(payload) {
       clients[i].plannedExitDate = (clients[i] && _hasOwn(clients[i], 'plannedExitDate'))
         ? _isoDateOrBlank(clients[i].plannedExitDate)
         : (existingRow ? _isoDateOrBlank(existingRow.plannedExitDate) : '');
+      if (reservedClients[cid] && existingRow) {
+        var pendingChanges = _clientDiffCols(clients[i], existingRow);
+        if (pendingChanges.length) {
+          var pendingConflict = _conflictEntry('client', clients[i], existingRow, pendingChanges, user);
+          pendingConflict.reason = 'financial_operation_pending';
+          conflicts.push(pendingConflict);
+        }
+        // Full browser snapshots include unrelated clients. Keep a reserved row
+        // exactly as stored, including legacy blanks; let other rows proceed.
+        clients[i] = existingRow;
+        continue;
+      }
       var conflictCols = _staleConflictCols(_clientDiffCols, clients[i], existingRow);
       if (conflictCols) {
         conflicts.push(_conflictEntry('client', clients[i], existingRow, conflictCols, user));
@@ -1387,6 +1404,7 @@ function _saveAll(payload) {
         else preservedRows.push(existing[d]);
       }
     }
+    _finGuardRewrite(clientsSh, CLIENTS_HEADERS, clients.concat(preservedRows));
     var tombstoned = _appendClientTombstones(explicitDropRows, explicitSet, null, user);
     // Preserved-log dedupe: a tab that stays stale re-sends the same short
     // list on every save. Skip the log row when the NEWEST tombstone for the
@@ -1545,6 +1563,7 @@ function _restoreRemovedClient(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, error: 'busy' };
   try {
+    _finGuard([id]);
     var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var clients = _readAll(clientsSh, CLIENTS_HEADERS);
     for (var c = 0; c < clients.length; c++) {
@@ -2003,6 +2022,7 @@ function _upsertPayment(payment) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    _finGuard([payment.clientId, _finPaymentOwner(payment.id)]);
     var sh = _ensurePaymentsSheet();
     var idIdx = PAYMENTS_HEADERS.indexOf('id');
     var lastRow = sh.getLastRow();
@@ -2014,6 +2034,7 @@ function _upsertPayment(payment) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(payment.id)) {
+          _finGuard([sh.getRange(i + 2, PAYMENTS_HEADERS.indexOf('clientId') + 1).getValue()]);
           _forcePaymentTextCells(sh, i + 2);
           sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
           return { ok: true, payment: payment, updated: true };
@@ -2180,6 +2201,7 @@ function _planStaleNextBillingRepair(clients, payments, todayIso) {
  * sheet. Locates the row by scanning the id column (the _writeCreditsOwed
  * pattern). Fail-soft: no-hit (client deleted mid-flight) changes nothing. */
 function _writeNextBillingDate(clientsSh, clientId, isoDate, user) {
+  _finGuard([clientId]);
   var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
   var nbdCol = CLIENTS_HEADERS.indexOf('nextBillingDate') + 1;
   var lastRow = clientsSh.getLastRow();
@@ -2271,6 +2293,7 @@ function _upsertCharge(charge) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    _finGuard([charge.clientId]);
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var idIdx = CHARGES_HEADERS.indexOf('id');
     var lastRow = sh.getLastRow();
@@ -2282,6 +2305,7 @@ function _upsertCharge(charge) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(charge.id)) {
+          _finGuard([sh.getRange(i + 2, CHARGES_HEADERS.indexOf('clientId') + 1).getValue()]);
           sh.getRange(i + 2, 1, 1, CHARGES_HEADERS.length).setValues([row]);
           return { ok: true, charge: charge, updated: true };
         }
@@ -2306,6 +2330,7 @@ function _removeCharge(chargeId) {
     var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(chargeId)) {
+        _finGuard([sh.getRange(i + 2, CHARGES_HEADERS.indexOf('clientId') + 1).getValue()]);
         sh.deleteRow(i + 2);
         return { ok: true, removed: true, id: chargeId };
       }
@@ -2327,6 +2352,7 @@ function _removeChargesForClient(clientId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _finGuard([cid]);
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
@@ -2362,6 +2388,7 @@ function _removePaymentsForClient(clientId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _finGuard([cid]);
     var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, removed: 0, clientId: cid };
@@ -2388,6 +2415,7 @@ function _removePayment(paymentId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    _finGuard([_finPaymentOwner(paymentId)]);
     var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -2395,6 +2423,7 @@ function _removePayment(paymentId) {
     var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(paymentId)) {
+        _finGuard([sh.getRange(i + 2, PAYMENTS_HEADERS.indexOf('clientId') + 1).getValue()]);
         sh.deleteRow(i + 2);
         return { ok: true, removed: true, id: paymentId };
       }
@@ -3464,6 +3493,9 @@ function _deactivateClient(payload) {
     var payerIdx   = CLIENTS_HEADERS.indexOf('payerPhone');
     var statusIdx  = CLIENTS_HEADERS.indexOf('status');
     var rows = sh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
+    _finGuard(rows.filter(function (r) { return _recoverPhone(r[phoneIdx]) === phone ||
+      _recoverPhone(r[contactIdx]) === phone || _recoverPhone(r[payerIdx]) === phone;
+    }).map(function (r) { return r[0]; }));
     var deactivated = 0;
     for (var i = 0; i < rows.length; i++) {
       if (_recoverPhone(rows[i][phoneIdx]) !== phone &&
@@ -3925,6 +3957,7 @@ function _mergeClients(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    _finGuard([survivorId].concat(dupIds));
     var clientsSh  = _ensureSheet('Clients', CLIENTS_HEADERS);
     var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var chargesSh  = _ensureSheet('ClientCharges', CHARGES_HEADERS);
@@ -4067,6 +4100,347 @@ function _saveContinuation(payload) {
  * Unknown actions/methods and missing configuration fail closed. See
  * docs/source-auth-boundary.md for the inventory and coordinated rollout.
  */
+/* OP-02b2: source-owned renewal intent. All helpers below run under the same
+ * script lock as cooperating writers. This is reconciliation, not a Sheets
+ * transaction. A write that might have happened is never blindly replayed. */
+var FINANCIAL_OP_HEADERS = ['id', 'clientId', 'cycleDate', 'paymentId', 'intent',
+  'state', 'before', 'after', 'createdAt', 'updatedAt', 'updatedBy', 'resolution'];
+var FINANCIAL_OP_STATES = ['prepared', 'client_writing', 'client_done',
+  'payment_writing', 'done', 'acknowledged', 'cancelled', 'review', 'reviewed'];
+
+function _finRow(row, headers) {
+  return headers.map(function (h) {
+    var v = row && row[h];
+    if (v instanceof Date) return _asISODate(v);
+    return v == null ? '' : String(v);
+  });
+}
+function _finSnapshot(row, headers) {
+  headers = headers || CLIENTS_HEADERS;
+  return JSON.stringify({ headers: headers, values: _finRow(row, headers) });
+}
+function _finActive(op) { return op.state !== 'acknowledged' && op.state !== 'cancelled' && op.state !== 'reviewed'; }
+function _finJournal() {
+  var sh = _ss().getSheetByName('FinancialOps');
+  if (!sh) {
+    if (PropertiesService.getScriptProperties().getProperty('FINANCIAL_OPS_CREATED')) {
+      throw new Error('financial_journal_missing');
+    }
+    return { sheet: null, ops: [] };
+  }
+  var grid = sh.getDataRange().getValues();
+  if (JSON.stringify(grid[0]) !== JSON.stringify(FINANCIAL_OP_HEADERS)) throw new Error('financial_journal_headers');
+  var seen = {}, active = {}, ops = [];
+  for (var i = 1; i < grid.length; i++) {
+    var cells = grid[i];
+    if (cells.every(function (v) { return v === '' || v == null; })) continue;
+    var op = {};
+    FINANCIAL_OP_HEADERS.forEach(function (h, c) { op[h] = String(cells[c] == null ? '' : cells[c]); });
+    var intent, before, after;
+    try { intent = JSON.parse(op.intent); before = JSON.parse(op.before); after = JSON.parse(op.after); }
+    catch (_) { throw new Error('financial_journal_corrupt'); }
+    if (!op.id || !op.clientId || seen[op.id] || FINANCIAL_OP_STATES.indexOf(op.state) < 0 ||
+        !before || !after || !Array.isArray(before.headers) || !Array.isArray(before.values) ||
+        !Array.isArray(after.values) || !before.headers.length || before.headers.length > CLIENTS_HEADERS.length ||
+        JSON.stringify(before.headers) !== JSON.stringify(CLIENTS_HEADERS.slice(0, before.headers.length)) ||
+        JSON.stringify(after.headers) !== JSON.stringify(before.headers) || before.values.length !== before.headers.length ||
+        after.values.length !== before.values.length || before.values[0] !== op.clientId || after.values[0] !== op.clientId ||
+        !intent || intent.clientId !== op.clientId || intent.opId !== op.id ||
+        intent.cycleDate !== op.cycleDate || !intent.payment || intent.payment.id !== op.paymentId) {
+      throw new Error('financial_journal_corrupt');
+    }
+    // A partially edited journal must not become a new authority for a payment.
+    // Bind the immutable preimage/patch/postimage, even for legacy empty stamps.
+    var original = {};
+    before.headers.forEach(function (h, c) { original[h] = before.values[c]; });
+    if (intent.snapshot !== op.before || JSON.stringify(_finIntent(intent)) !== op.intent ||
+        _finIntentError(intent, original, true) || before.values.some(function (v) { return typeof v !== 'string'; }) ||
+        after.values.some(function (v, c) {
+          var h = before.headers[c];
+          if (typeof v !== 'string') return true;
+          if (h === 'updatedAt') return !/^\d{4}-\d{2}-\d{2}T/.test(v) || isNaN(Date.parse(v));
+          if (h === 'updatedBy') return false;
+          return v !== (_hasOwn(intent.patch, h) ? intent.patch[h] : before.values[c]);
+        })) throw new Error('financial_journal_corrupt');
+    if (_finActive(op) && active[op.clientId]) throw new Error('financial_journal_duplicate_active');
+    seen[op.id] = true;
+    if (_finActive(op)) active[op.clientId] = true;
+    op.row = i + 1;
+    ops.push(op);
+  }
+  return { sheet: sh, ops: ops };
+}
+function _finGuard(clientIds) {
+  var wanted = (clientIds || []).filter(function (v) { return v != null && v !== ''; }).map(String);
+  var ops = _finJournal().ops;
+  for (var i = 0; i < ops.length; i++) {
+    if (_finActive(ops[i]) && wanted.indexOf(ops[i].clientId) >= 0) throw new Error('financial_operation_pending');
+  }
+}
+function _finPaymentOwner(id) {
+  var m = /^pay::(.+?)::/.exec(String(id || ''));
+  return m ? m[1] : '';
+}
+function _finGuardRewrite(sh, headers, rows) {
+  var name = sh.getName();
+  if (['Clients', 'Payments', 'ClientCharges'].indexOf(name) < 0) return;
+  var ops = _finJournal().ops.filter(_finActive);
+  if (!ops.length) return;
+  var old = _readAll(sh, headers);
+  ops.forEach(function (op) {
+    function belongs(r) { return name === 'Clients' ? String(r.id) === op.clientId :
+      String(r.clientId) === op.clientId || (name === 'Payments' && _finPaymentOwner(r.id) === op.clientId); }
+    var before = old.filter(belongs).map(function (r) { return JSON.stringify(_finRow(r, headers)); }).sort();
+    var after = rows.filter(belongs).map(function (r) { return JSON.stringify(_finRow(r, headers)); }).sort();
+    if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('financial_operation_pending');
+  });
+}
+function _finClient(id) {
+  var sh = _ss().getSheetByName('Clients');
+  if (!sh) throw new Error('client_not_found');
+  var values = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, CLIENTS_HEADERS.length).getValues() : [];
+  var hits = [];
+  values.forEach(function (r, i) {
+    if (String(r[0]) === String(id)) {
+      var obj = {}; CLIENTS_HEADERS.forEach(function (h, c) { obj[h] = r[c] == null ? '' : r[c]; });
+      hits.push({ sheet: sh, row: i + 2, client: obj });
+    }
+  });
+  if (hits.length !== 1) throw new Error(hits.length ? 'duplicate_client' : 'client_not_found');
+  return hits[0];
+}
+function _finPayments(paymentId, clientId, cycle) {
+  var sh = _ss().getSheetByName('Payments');
+  if (!sh) return [];
+  return _readAll(sh, PAYMENTS_HEADERS).filter(function (p) {
+    return String(p.id) === paymentId || String(p.id) === 'pay::' + clientId + '::' + cycle.slice(0, 7);
+  });
+}
+function _finSummary(op) {
+  var intent = JSON.parse(op.intent);
+  return { id: op.id, clientId: op.clientId, cycleDate: op.cycleDate,
+    state: op.state, payment: intent.payment, resolution: op.resolution,
+    updatedAt: op.updatedAt, updatedBy: op.updatedBy };
+}
+function _finWrite(journal, op, state, user, resolution) {
+  op.state = state; op.updatedAt = new Date().toISOString(); op.updatedBy = String(user || '');
+  if (resolution !== undefined) op.resolution = resolution;
+  journal.sheet.getRange(op.row, 1, 1, FINANCIAL_OP_HEADERS.length).setNumberFormat('@')
+    .setValues([_finRow(op, FINANCIAL_OP_HEADERS)]);
+}
+function _finAddMonth(date) {
+  var p = String(date).split('-').map(Number), m = p[1] + 1, y = p[0];
+  if (m > 12) { m = 1; y++; }
+  return _clampDayIso(y, m, p[2]);
+}
+function _finDue(c) {
+  if (c.nextBillingDate) return _asISODate(c.nextBillingDate);
+  var anchor = c.packageChangeDate || c.paymentDate || c.startDate;
+  if (anchor) return _finAddMonth(_asISODate(anchor));
+  var t = _todayISODate(), bd = Number(c.billingDay) || Number(String(c.startDate || '').slice(8, 10));
+  return bd ? _clampDayIso(Number(t.slice(0, 4)), Number(t.slice(5, 7)), bd) : t;
+}
+function _finNext(c, due) {
+  var p = due.split('-').map(Number), m = p[1] + 1, y = p[0];
+  if (m > 12) { m = 1; y++; }
+  return _nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || _finAddMonth(due);
+}
+function _finIntent(payload) {
+  var p = payload.payment || {}, patch = payload.patch || {}, out = {};
+  var fields = ['pricePerSession', 'paymentDate', 'nextBillingDate', 'sessionsPerWeek', 'packageChangeDate'];
+  fields.forEach(function (k) { if (_hasOwn(patch, k)) out[k] = String(patch[k] == null ? '' : patch[k]); });
+  if (Object.keys(patch).some(function (k) { return fields.indexOf(k) < 0; })) throw new Error('invalid_renewal_patch');
+  var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
+  var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
+    snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  if (!/^[A-Za-z0-9_-]{12,120}$/.test(intent.opId) || !intent.clientId ||
+      !intent.snapshot || JSON.stringify(intent).length > 40000) throw new Error('invalid_renewal_intent');
+  return intent;
+}
+function _finIntentError(intent, c, stored) {
+  var p = intent.payment, patch = intent.patch;
+  if (!intent.cycleDate || _coverageDateISO(intent.cycleDate) !== intent.cycleDate ||
+      (!stored && intent.cycleDate !== _finDue(c)) || patch.nextBillingDate !== _finNext(c, intent.cycleDate)) return 'renewal_period_changed';
+  if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
+      p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
+      Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||
+      p.id !== 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7) ||
+      p.clientId !== intent.clientId || p.dueDate !== intent.cycleDate || p.status !== 'paid' ||
+      p.billingType !== 'monthly' || p.amountDue !== patch.pricePerSession || p.amountPaid !== patch.pricePerSession ||
+      (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
+      _coveragePeriodError(p.coverageStart, p.coverageEnd)) return 'invalid_renewal_payment';
+  if (_hasOwn(patch, 'sessionsPerWeek') !== _hasOwn(patch, 'packageChangeDate')) return 'invalid_renewal_package';
+  if (_hasOwn(patch, 'sessionsPerWeek')) {
+    var sessions, services = String(c.serviceType || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    try { sessions = JSON.parse(patch.sessionsPerWeek); } catch (_) { return 'invalid_renewal_package'; }
+    if (!sessions || Array.isArray(sessions) || typeof sessions !== 'object' || patch.packageChangeDate !== patch.paymentDate ||
+        Object.keys(sessions).some(function (k) {
+          if (k === '_units') return !sessions[k] || typeof sessions[k] !== 'object' || Array.isArray(sessions[k]) ||
+            Object.keys(sessions[k]).some(function (s) { return services.indexOf(s) < 0 || ['שבוע', 'חודש'].indexOf(sessions[k][s]) < 0; });
+          return services.indexOf(k) < 0 || typeof sessions[k] !== 'number' || !isFinite(sessions[k]) || sessions[k] < 0 || Math.floor(sessions[k]) !== sessions[k];
+        })) return 'invalid_renewal_package';
+  }
+  return '';
+}
+function _getRenewalState(payload) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var id = String(payload.clientId || ''), journal = _finJournal();
+    var active = journal.ops.filter(function (op) { return op.clientId === id && _finActive(op); });
+    // Even if the client was manually deleted, its pending intent is discoverable.
+    if (active.length) {
+      var summary = _finSummary(active[0]);
+      if (active[0].state === 'review') summary.review = _finReviewReadback(active[0]);
+      return { ok: true, protocol: 1, operation: summary };
+    }
+    var c = _finClient(id).client;
+    return { ok: true, protocol: 1, client: c, snapshot: _finSnapshot(c), cycleDate: _finDue(c) };
+  } finally { lock.releaseLock(); }
+}
+function _reserveRenewal(payload) {
+  var intent = _finIntent(payload), canonical = JSON.stringify(intent), user = _requestUser(payload);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
+    if (same.length) {
+      if (same[0].intent !== canonical) return { ok: false, error: 'operation_payload_mismatch' };
+      return { ok: true, operation: _finSummary(same[0]) };
+    }
+    _finGuard([intent.clientId]);
+    var c = _finClient(intent.clientId).client, p = intent.payment, patch = intent.patch;
+    if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'renewal_snapshot_changed' };
+    var invalid = _finIntentError(intent, c);
+    if (invalid) return { ok: false, error: invalid };
+    if (_finPayments(p.id, intent.clientId, intent.cycleDate).length) return { ok: false, error: 'renewal_payment_exists' };
+    var after = Object.assign({}, c, patch);
+    _stampRow(after, user);
+    var now = new Date().toISOString();
+    var op = { id: intent.opId, clientId: intent.clientId, cycleDate: intent.cycleDate,
+      paymentId: p.id, intent: canonical, state: 'prepared', before: _finSnapshot(c), after: _finSnapshot(after),
+      createdAt: now, updatedAt: now, updatedBy: user, resolution: '' };
+    if (!journal.sheet) journal.sheet = _ensureSheet('FinancialOps', FINANCIAL_OP_HEADERS);
+    PropertiesService.getScriptProperties().setProperty('FINANCIAL_OPS_CREATED', '1');
+    op.row = journal.sheet.getLastRow() + 1;
+    _finWrite(journal, op, 'prepared', user);
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+function _applyRenewal(payload) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
+    if (!op) return { ok: false, error: 'operation_not_found' };
+    if (op.state === 'acknowledged' || op.state === 'cancelled' || op.state === 'reviewed' || op.state === 'review') return { ok: true, operation: _finSummary(op) };
+    var user = _requestUser(payload), c;
+    function review(why) { _finWrite(journal, op, 'review', user, why); return { ok: true, operation: _finSummary(op) }; }
+    try { c = _finClient(op.clientId); } catch (_) { return review('client_missing_or_duplicate'); }
+    var storedHeaders = JSON.parse(op.before).headers;
+    var current = _finSnapshot(c.client, storedHeaders), p = JSON.parse(op.intent).payment;
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    if (op.state === 'prepared') {
+      if (current !== op.before || payments.length) return review('source_changed_before_apply');
+      _finWrite(journal, op, 'client_writing', user);
+      // One row, fixed expected stamp, no whole-sheet rewrite. Text-forced first.
+      var beforeCells = JSON.parse(op.before).values, afterCells = JSON.parse(op.after).values;
+      var clientValues = CLIENTS_HEADERS.map(function (h, i) {
+        // A later append-only schema release must not invalidate this intent or
+        // erase a new column. Its fields were not part of this renewal's patch.
+        if (i >= storedHeaders.length || beforeCells[i] === afterCells[i]) return c.client[h] == null ? '' : c.client[h];
+        if (h === 'pricePerSession') return Number(afterCells[i]);
+        c.sheet.getRange(c.row, i + 1).setNumberFormat('@');
+        return afterCells[i];
+      });
+      c.sheet.getRange(c.row, 1, 1, CLIENTS_HEADERS.length).setValues([clientValues]);
+      _bumpDataVersion();
+      current = _finSnapshot(_finClient(op.clientId).client, storedHeaders);
+      if (current !== op.after) return review('client_write_mismatch');
+      _finWrite(journal, op, 'client_done', user);
+    } else if (op.state === 'client_writing') {
+      if (current !== op.after) return review('client_write_uncertain');
+      _bumpDataVersion();
+      _finWrite(journal, op, 'client_done', user);
+    }
+    if (current !== op.after) return review('client_changed_after_apply');
+    if (op.state === 'client_done') {
+      if (payments.length) return review('payment_appeared_before_apply');
+      _finWrite(journal, op, 'payment_writing', user);
+      var sh = _ensurePaymentsSheet(), row = sh.getLastRow() + 1;
+      var numericPayment = ['amountDue', 'amountPaid', 'bundleSize', 'sessionsUsed'];
+      var paymentValues = PAYMENTS_HEADERS.map(function (h, i) {
+        if (numericPayment.indexOf(h) >= 0) return p[h] === '' ? '' : Number(p[h]);
+        sh.getRange(row, i + 1).setNumberFormat('@');
+        return p[h];
+      });
+      sh.getRange(row, 1, 1, PAYMENTS_HEADERS.length).setValues([paymentValues]);
+      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    }
+    if (payments.length !== 1 || JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(p, PAYMENTS_HEADERS))) {
+      return review('payment_write_uncertain_or_changed');
+    }
+    if (op.state !== 'done') _finWrite(journal, op, 'done', user);
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+// Manual review closes the reservation ONLY. It never fills missing payment
+// data, rolls back a client or claims success. The signed-in editor must review
+// a fresh readback and supply a reason; the exact observed state is retained.
+function _finReviewReadback(op) {
+  var client = null, clientError = '';
+  try { client = _finClient(op.clientId).client; } catch (err) { clientError = String(err); }
+  var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+  var token = JSON.stringify({ client: client ? _finSnapshot(client) : null, clientError: clientError,
+    payments: payments.map(function (p) { return _finRow(p, PAYMENTS_HEADERS); }) });
+  return { token: token, clientExists: !!client, nextBillingDate: client ? _asISODate(client.nextBillingDate) : '',
+    paymentCount: payments.length, payments: payments.map(function (p) {
+      return { id: p.id, status: p.status, amountPaid: p.amountPaid, paymentDate: p.paymentDate };
+    }) };
+}
+function _resolveRenewalReview(payload) {
+  var user = _requestUser(payload), reason = String(payload.reason || '').trim();
+  if (!user || reason.length < 10 || reason.length > 1000 || payload.acceptCurrent !== true) return { ok: false, error: 'manual_review_required' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
+    if (!op) return { ok: false, error: 'operation_not_found' };
+    if (op.state === 'reviewed') return { ok: true, operation: _finSummary(op) };
+    if (op.state !== 'review') return { ok: false, error: 'operation_not_in_review' };
+    var readback = _finReviewReadback(op);
+    if (payload.reviewToken !== readback.token || readback.token.length > 35000) return { ok: false, error: 'review_source_changed' };
+    _finWrite(journal, op, 'reviewed', user, JSON.stringify({ reason: reason, acceptedState: JSON.parse(readback.token) }));
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+
+function _finishRenewal(payload, cancel) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
+    if (!op) return { ok: false, error: 'operation_not_found' };
+    var terminal = cancel ? 'cancelled' : 'acknowledged';
+    if (op.state === terminal) return { ok: true, operation: _finSummary(op) };
+    if (!_finActive(op) || op.state === 'review') return { ok: false, error: 'renewal_requires_review' };
+    var c = null;
+    try { c = _finClient(op.clientId).client; } catch (_) { /* below: make the missing/duplicate client reviewable */ }
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var expected = cancel ? op.before : op.after;
+    if (cancel && op.state !== 'prepared') return { ok: false, error: 'renewal_requires_review' };
+    if ((cancel ? op.state !== 'prepared' || payments.length : op.state !== 'done' || payments.length !== 1 ||
+        JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(JSON.parse(op.intent).payment, PAYMENTS_HEADERS))) ||
+        !c || _finSnapshot(c, JSON.parse(op.before).headers) !== expected) {
+      _finWrite(journal, op, 'review', _requestUser(payload), 'source_changed_before_' + terminal);
+      return { ok: true, operation: _finSummary(op) };
+    }
+    _finWrite(journal, op, terminal, _requestUser(payload), cancel ? 'cancelled_before_effects' : 'completion_seen');
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+
+
 var SOURCE_GET_AUTH = {
   getData: 'OUTPATIENT_PROXY_SECRET',
   getPayments: 'OUTPATIENT_PROXY_SECRET',
@@ -4086,6 +4460,12 @@ var SOURCE_GET_AUTH = {
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET'
 };
 var SOURCE_POST_AUTH = {
+  resolveRenewalReview: 'OUTPATIENT_PROXY_SECRET',
+  cancelRenewal: 'OUTPATIENT_PROXY_SECRET',
+  acknowledgeRenewal: 'OUTPATIENT_PROXY_SECRET',
+  applyRenewal: 'OUTPATIENT_PROXY_SECRET',
+  reserveRenewal: 'OUTPATIENT_PROXY_SECRET',
+  getRenewalState: 'OUTPATIENT_PROXY_SECRET',
   saveAll: 'OUTPATIENT_PROXY_SECRET',
   getData: 'OUTPATIENT_PROXY_SECRET',
   getPayments: 'OUTPATIENT_PROXY_SECRET',
@@ -4235,6 +4615,12 @@ function doPost(e) {
     if (!_sourceAuthOk(action, 'POST', e && e.parameter, payload)) {
       return _json({ ok: false, error: 'unauthorized' });
     }
+    if (action === 'resolveRenewalReview') return _json(_resolveRenewalReview(payload));
+    if (action === 'getRenewalState') return _json(_getRenewalState(payload));
+    if (action === 'reserveRenewal') return _json(_reserveRenewal(payload));
+    if (action === 'applyRenewal') return _json(_applyRenewal(payload));
+    if (action === 'acknowledgeRenewal') return _json(_finishRenewal(payload, false));
+    if (action === 'cancelRenewal') return _json(_finishRenewal(payload, true));
     if (action === 'saveAll') {
       return _json(_saveAll({
         leads:   Array.isArray(payload.leads)   ? payload.leads   : [],
@@ -4488,10 +4874,11 @@ function doPost(e) {
  *      Clients row or a tombstone (orphaned payments were how the original
  *      incident surfaced).
  *   3. Daily snapshots — a short locked capture of Clients, Leads and both
- *      removal archives, then verified values-only copies in EZONE-Backups.
+ *      removal archives plus Payments, ClientCharges, Credits and FinancialOps,
+ *      then verified values-only copies in EZONE-Backups.
  *      Clients retain 'outpatient-YYYY-MM-DD'; added datasets have explicit
  *      prefixes. Backup writes do not hold the app's script lock. Retention
- *      runs only after all four snapshots pass typed-value readback.
+ *      runs only after all eight snapshots and their manifest pass readback.
  *
  * Alerting: ONE email per run, ONLY when something is wrong (no daily noise),
  * to the ALERT_EMAIL Script Property. Fail-open: no property / send failure
@@ -4515,7 +4902,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -4625,7 +5012,7 @@ function _integrityLookupNames(snapshotSheet, ids) {
   return names;
 }
 
-/* Capture a coherent lead/client/archive set under the SAME script lock as
+/* Capture a coherent lead/client/archive/financial set under the SAME lock as
  * saves, then release it BEFORE any backup write. Missing live sheets or a
  * failed read abort the set. Archives need not exist before the first removal;
  * record that explicitly instead of creating/relabeling a live sheet. */
@@ -4637,7 +5024,12 @@ function _integrityCaptureData(sourceSs) {
       { source: 'Clients', prefix: '', required: true },
       { source: 'Leads', prefix: 'leads-', required: true },
       { source: 'לידים שהוסרו', prefix: 'leads-removed-', headers: REMOVED_LEADS_HEADERS },
-      { source: 'Clients-removed', prefix: 'clients-removed-', headers: CLIENTS_REMOVED_HEADERS }
+      { source: 'Clients-removed', prefix: 'clients-removed-', headers: CLIENTS_REMOVED_HEADERS },
+      { source: 'Payments', prefix: 'payments-', headers: PAYMENTS_HEADERS },
+      { source: 'ClientCharges', prefix: 'charges-', headers: CHARGES_HEADERS },
+      { source: 'Credits', prefix: 'credits-', headers: CREDIT_COLUMNS },
+      { source: 'FinancialOps', prefix: 'financial-ops-', headers: FINANCIAL_OP_HEADERS,
+        required: !!PropertiesService.getScriptProperties().getProperty('FINANCIAL_OPS_CREATED') }
     ];
     return specs.map(function (spec) {
       var sh = sourceSs.getSheetByName(spec.source);
@@ -4656,6 +5048,43 @@ function _integrityCaptureData(sourceSs) {
 /* Values-only snapshots preserve scalar types and Date instants. All strings
  * are written literally (including =... and leading apostrophes); readback
  * must match before a previous snapshot can be replaced. */
+// Read-only restore preflight: reject mixed generations, missing families and
+// corrupt snapshots. Returns captured data for an ISOLATED restore drill only;
+// it never writes to the production workbook.
+function _integrityFingerprint(grid) {
+  var typed = grid.map(function (r) { return r.map(function (v) {
+    return v instanceof Date ? ['date', v.toISOString()] : [typeof v, v];
+  }); });
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(typed), Utilities.Charset.UTF_8)
+    .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+function _integrityValidateRestoreSet(backupSs, day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
+  var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
+  if (!sh) throw new Error('Restore manifest missing');
+  var rows = sh.getDataRange().getValues();
+  var prefixes = { Clients: '', Leads: 'leads-', 'לידים שהוסרו': 'leads-removed-',
+    'Clients-removed': 'clients-removed-', Payments: 'payments-', ClientCharges: 'charges-',
+    Credits: 'credits-', FinancialOps: 'financial-ops-' };
+  if (JSON.stringify(rows[0]) !== JSON.stringify(['id', 'source', 'snapshot', 'absent', 'sha256']) || rows.length !== 9) {
+    throw new Error('Invalid restore manifest');
+  }
+  var seen = {};
+  return rows.slice(1).map(function (row) {
+    var source = String(row[1]);
+    if (!_hasOwn(prefixes, source) || seen[source] || row[0] !== source ||
+        row[2] !== INTEGRITY_SNAPSHOT_PREFIX + prefixes[source] + day || ['0', '1'].indexOf(String(row[3])) < 0) {
+      throw new Error('Invalid restore manifest entry');
+    }
+    seen[source] = true;
+    var data = backupSs.getSheetByName(String(row[2]));
+    if (!data) throw new Error('Restore snapshot missing: ' + source);
+    var grid = data.getDataRange().getValues();
+    if (_integrityFingerprint(grid) !== row[4]) throw new Error('Restore snapshot mismatch: ' + source);
+    return { source: source, absent: String(row[3]) === '1', grid: grid };
+  });
+}
+
 function _integrityVerifyGrid(expected, actual) {
   if (expected.length !== actual.length) throw new Error('Backup row count mismatch');
   for (var r = 0; r < expected.length; r++) {
@@ -4892,7 +5321,16 @@ function nightlyIntegrityJob() {
         Logger.log('nightlyIntegrityJob: backup verified (%s; sourceAbsent=%s; rows=%s)',
           item.source, String(item.absent), String(item.grid.length - 1));
       }
-      // Retention runs only after ALL four snapshots verify successfully.
+      // Publish the manifest last. An interrupted same-day replacement leaves
+      // mismatching hashes and cannot be mistaken for a coherent restore set.
+      var manifest = [['id', 'source', 'snapshot', 'absent', 'sha256']];
+      captured.forEach(function (entry) {
+        manifest.push([entry.source, entry.source, INTEGRITY_SNAPSHOT_PREFIX + entry.prefix + day,
+          entry.absent ? '1' : '0', _integrityFingerprint(entry.grid)]);
+      });
+      _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
+      _integrityValidateRestoreSet(backupSs, day);
+      // Retention runs only after every data snapshot and the manifest verify.
       var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
       if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
     }
@@ -5769,6 +6207,12 @@ function applyCorruptedRowRepairsNow() {
       // skips — the plan row number is a hint, never an authority.
       if (current !== String(p.oldValue) || !_hasCorruption(current)) {
         return skip(p, 'cell no longer holds the expected corrupted value (row drift or already repaired)');
+      }
+      if (target.sheet === 'Clients') _finGuard([sh.getRange(rowNum, 1).getValue()]);
+      if (target.sheet === 'Payments' || target.sheet === 'ClientCharges') {
+        var ownerCol = target.headers.indexOf('clientId');
+        if (ownerCol >= 0) _finGuard([sh.getRange(rowNum, ownerCol + 1).getValue(),
+          target.sheet === 'Payments' ? _finPaymentOwner(sh.getRange(rowNum, 1).getValue()) : '']);
       }
       cell.setValue(newValue); // SINGLE-CELL write — never _writeAll
       // who/when: a Clients cell repair is a row write — stamp WHEN (no
