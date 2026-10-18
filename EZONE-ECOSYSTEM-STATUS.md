@@ -20,6 +20,15 @@ scheduled backup/financial restore evidence and performance remain open.
 CRM #114 and other drafts are unchanged. OP-06 still includes the legacy
 `recordTreatmentGiven` sender without a matching route; do not invent a receiver.
 
+## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
+
+- `getTreatmentPlans` gains one optional key: `plannedExitDate`. It is the
+  planned discharge date (`'yyyy-MM-dd'`) of an ACTIVE client, and `''` when
+  there is none, the value is invalid, or the client is not active. No existing
+  key changed. It comes from a new append-only Clients column (position 37) set
+  in the edit-client modal. `exitDate` is still the actual discharge date.
+  Details: `CHANGELOG-planned-exit-date.md`.
+
 # E-ZONE Ecosystem Status — updated September 10, 2026
 
 Add this file to the knowledge of EVERY E-Zone app Project (all eight), replacing

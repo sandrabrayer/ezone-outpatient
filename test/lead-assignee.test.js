@@ -64,9 +64,9 @@ test('assignedTo is last on the leads arrays; on CLIENTS it trails the payment t
   // assignedTo is a volta-only column (physically unwritten on the live sheet) that
   // appended after the payment tail. The later paymentAmountOverrides column appended
   // after it, so assignedTo now sits second-from-last on CLIENTS.
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 3], 'paymentAmountOverrides');
-  assert.deepEqual(CLIENTS_H.slice(-6),
-    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy']);
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 4], 'paymentAmountOverrides');
+  assert.deepEqual(CLIENTS_H.slice(-7),
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate']);
 });
 
 test('lead assignedTo round-trips positionally without misaligning earlier columns', () => {

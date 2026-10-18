@@ -38,8 +38,11 @@
  *   the new app.js that renders the «חסר טלפון» / «טלפון לא תקין» chip.
  * - v9 (2026-10-18): confirmed financial saves, partial-save warning and
  *   payment verification state. Keep the warning markup and app.js together.
+ * - v10 (2026-10-18): planned discharge date (תאריך סיום מתוכנן) — new date
+ *   input in the edit-client modal (index.html) read/saved by app.js. Bumped
+ *   so an installed app never pairs the old shell with the new app.js.
  */
-var CACHE = 'ezone-outpatient-v9';
+var CACHE = 'ezone-outpatient-v10';
 var SHELL = [
   './',
   './index.html',

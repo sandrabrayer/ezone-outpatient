@@ -45,6 +45,16 @@ function renewalDueDate(cl) {
   return addMonthIso(anchor);
 }
 
+// Mirror of _isoDateOrBlank in apps-script/Code.gs — a real 'yyyy-MM-dd'
+// calendar date, else ''. Never guesses.
+function isoDateOrBlank(v) {
+  const s = v == null ? '' : String(v).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return '';
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return (d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]) ? s : '';
+}
+
 // Pure projection mirror of _getTreatmentPlans for unit coverage. The cross-app
 // phone is the canonical patient phone (PhoneIssue.crossAppPhone = Code.gs
 // _crossAppPhone): `phone`, then `treatmentContactPhone`, first canonical wins.
@@ -60,7 +70,12 @@ function projectPlans(clients) {
     startDate: cl.startDate || '', exitDate: cl.exitDate || '',
     // Renewal/package-end date (date ONLY — the value of nextBillingDate may
     // feed it, but the key itself is never projected, nor any payment rows).
-    renewalDate: renewalDueDate(cl)
+    renewalDate: renewalDueDate(cl),
+    // Planned discharge date of an ACTIVE client (blank status reads as פעיל);
+    // '' when none, invalid, or not active. Mirror of the Code.gs projection —
+    // test/planned-exit-date.test.js runs the REAL Code.gs.
+    plannedExitDate: (cl.status == null || String(cl.status).trim() === '' ? 'פעיל' : String(cl.status).trim()) === 'פעיל'
+      ? isoDateOrBlank(cl.plannedExitDate) : ''
   }));
 }
 
@@ -92,7 +107,7 @@ test('treatment plans: rows without an id are skipped; blanks default to empty s
   assert.deepEqual(rows[0], {
     sourceApp: 'ezone-outpatient', clientId: 'c1', name: 'דנה',
     phone: '', phoneIssue: 'missing', serviceType: '', sessions: '', status: '',
-    startDate: '', exitDate: '', renewalDate: ''
+    startDate: '', exitDate: '', renewalDate: '', plannedExitDate: ''
   });
 });
 
@@ -248,7 +263,8 @@ test('contract guard: key set is exactly the previous projection + renewalDate +
   const expectedKeys = [
     'sourceApp', 'clientId', 'name', 'phone', 'serviceType', 'sessions',
     'status', 'startDate', 'exitDate', 'renewalDate',
-    'phoneIssue' // '' | 'missing' | 'invalid' — why phone is blank (2026-09-28)
+    'phoneIssue', // '' | 'missing' | 'invalid' — why phone is blank (2026-09-28)
+    'plannedExitDate' // planned discharge 'yyyy-MM-dd' of an ACTIVE client, else ''
   ];
   assert.deepEqual(Object.keys(rows[0]).sort(), expectedKeys.slice().sort());
   // No key smells of money: nextBillingDate itself is NOT projected — only its

@@ -151,7 +151,7 @@ test('parse tolerates blank / malformed JSON -> {}', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 test('CLIENTS_HEADERS appends paymentAmountOverrides after the volta-only columns (who/when stamps trail it)', () => {
   const H = gsHeaders('CLIENTS_HEADERS');
-  assert.deepEqual(H.slice(-3), ['paymentAmountOverrides', 'updatedAt', 'updatedBy']);
+  assert.deepEqual(H.slice(-4), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate']);
 });
 test('_writePaymentAmountOverride derives columns via CLIENTS_HEADERS.indexOf (never a literal)', () => {
   const m = GS.match(/function _writePaymentAmountOverride[\s\S]*?\n}/);
