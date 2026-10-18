@@ -44,3 +44,17 @@ ending/alert-copy tests. Full suite: see PR description.
 Business questions, configuration, confidentiality findings (`treatment-map.js`,
 `therapist-pay.js`, therapists `amountOwed`), PR #121 overlap and the therapists
 implementation are listed in `docs/package-catalog.md`.
+
+
+## Review follow-ups (2026-10-18) — authorization and integration
+- **Session-bound pricing privilege.** The admin cookie now points at an in-memory server-side session bound to
+  the exact base session and named user; `/api/catalog-admin/logout` and `/api/logout` revoke it immediately
+  (a copied cookie dies at once); re-login replaces it; restart fails closed.
+- **Unnamed / retired-name sessions** cannot enter pricing (`403 named_session_required`); verified end to end
+  through `/api/verify-pin`. Rotating `APP_PIN`/`SESSION_SECRET` remains required to revoke knowledge, but the code
+  no longer depends on it for pricing.
+- **Lock-out risk removed.** Failure-only, per-base-session limiter (5), high per-IP cap (30), global cap (60);
+  correct PINs are never counted; `Retry-After` reported. `CATALOG_ADMIN_PIN` is now 8–32 characters.
+- **#121 merged first** (`2d4950f`): this branch now includes it (merge commit). SW re-bumped **v12 → v13**;
+  backups combined (10-sheet set, legacy 8/9-row manifests still restore); #121's tests use שירן.
+- Release order and per-repo deployment mechanics documented in `docs/package-catalog.md`.

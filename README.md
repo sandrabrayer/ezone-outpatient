@@ -129,13 +129,15 @@ row id. Released in #117 at Node `72c80686`, source @96. This is not a
 transaction across client/charge/payment saves.
 
 OP-02b1 was released in #118 at Node `fae46116`, SW v9, source still @96.
-It corrects dependent refusal and financial save confirmation. The current
-OP-02b2-a candidate adds source-owned renewal intent, cross-device reconciliation
-and coherent financial backups; other financial flows remain open. See
-[renewal protocol and release limits](docs/renewal-journal.md),
-[scope and release checks](CHANGELOG-financial-save-confirmation.md) and
-[the next recovery boundary](docs/financial-recovery-design.md).
-Separate approval is required before releasing a new candidate.
+It corrects dependent refusal and financial save confirmation. Renewal recovery
+was released in #120 at Node 535dc659, source @97, SW v11. The current candidate
+extends shared durable recovery to additional-charge creation/initial payment
+and persists treatment type/frequency already entered in the UI. See the
+[extra-charge protocol and rollback limits](docs/extra-charge-journal.md),
+[renewal protocol](docs/renewal-journal.md) and
+[complete recovery program](docs/financial-recovery-design.md).
+Other financial flows and the wider structure/logic/features/security/speed/control
+audit remain open. Separate approval is required for every new release.
 
 ## Local development
 

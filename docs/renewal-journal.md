@@ -1,10 +1,11 @@
-# OP-02b2-a — recoverable renewal (candidate)
+# OP-02b2-a — recoverable renewal (released #120)
 
-Base refreshed after PR #119 merged: `6bdac37f3d788a2d48df680da2ce25746f17b824`,
-Node/SW v10 verified. Last independently verified source is @96; recheck #119
-source release evidence before the next release. Codex is the only implementation owner. This
-candidate covers **renewal with optional package-frequency change only**.
-It does not release itself or complete OP-02b2 for all financial flows.
+Released in PR120 on 2026-10-18: merge/Node 535dc659, Apps Script @97 via
+run 39117376211, SW v11. Codex owns implementation. This protocol covers renewal
+with optional package-frequency change. The subsequent extra-charge candidate
+adds kind dispatch to the same journal, preserves untagged renewal history and
+rejects cross-kind endpoint use. See [extra-charge contract](extra-charge-journal.md)
+for current release/rollback constraints; it does not complete all financial flows.
 
 ## Contract and interruption behavior
 
@@ -102,7 +103,7 @@ terminal history on each guard; benchmark total-size growth and repeated guard
 calls before widening rollout. Corrupt terminal structure still fails closed
 across guarded writers; provide an audited repair/archive plan in OP-04. No new paid service is provisioned.
 
-## Release and rollback
+## Original PR120 release and rollback (historical; superseded for mixed-kind history)
 
 1. Recheck the production base and other open PRs. #119 merged during this
    work and its planned-exit field was retained by rebasing and resolving the
@@ -130,7 +131,7 @@ production financial rows as a code rollback.
 
 ## Remaining program work
 
-Durable identities/recovery for extra charges, intake, activation, edit-modal
+Additional-charge recovery is now a separate candidate. Durable recovery for intake, activation, edit-modal
 payment propagation and monthly/toggle flows remain OP-02b2. Production backup
 execution and real isolated restore remain OP-03. Measured performance remains
 OP-04; bank/document evidence and wider controls remain OP-05. OP-06 still needs

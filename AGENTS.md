@@ -11,6 +11,15 @@ Claude work in this repository, alongside the repo facts in `CLAUDE.md`.
 - Use one implementation owner per task/branch. Before work, check current open
   PRs and the deployed branch. Use another tool where its existing context or
   capabilities help; do not let two agents edit the same task concurrently.
+- Use Claude where available for bounded independent review and useful prior
+  context. Keep one implementation owner; record the exact reviewed commit and
+  distinguish static review from executed tests. Report access limitations
+  rather than silently claiming Claude participated.
+- Keep the full ten-app program in view: structure and workflow, business
+  logic, missing information/features, security, save/recovery integrity,
+  backup/restore, performance and controls. Complete one bounded step at a time;
+  record unresolved items and the exact return point in the canonical plan.
+  A completed financial fix does not close the whole application audit.
 - Progress through authorized work without pausing for routine questions.
   Sandra wants to be called only for indispensable access, a business decision
   or the separate production approval. Report actual progress; do not imply

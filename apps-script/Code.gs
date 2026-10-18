@@ -352,7 +352,9 @@ var CHARGES_HEADERS = [
   'chargeDate',
   'billingDay',
   'active',
-  'notes', 'created'
+  'notes', 'created',
+  // Append-only: these fields already exist in the add/edit treatment forms.
+  'treatmentType', 'frequencyPerWeek'
 ];
 
 /* Removed leads sheet: soft-deleted leads moved out of Leads.
@@ -2306,6 +2308,12 @@ function _upsertCharge(charge) {
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(charge.id)) {
           _finGuard([sh.getRange(i + 2, CHARGES_HEADERS.indexOf('clientId') + 1).getValue()]);
+          // Older tabs do not send the appended treatment fields. Omission
+          // preserves them; an explicit blank still clears a field normally.
+          ['treatmentType', 'frequencyPerWeek'].forEach(function (h) {
+            var col = CHARGES_HEADERS.indexOf(h);
+            if (!_hasOwn(charge, h)) row[col] = sh.getRange(i + 2, col + 1).getValue();
+          });
           sh.getRange(i + 2, 1, 1, CHARGES_HEADERS.length).setValues([row]);
           return { ok: true, charge: charge, updated: true };
         }
@@ -4106,7 +4114,8 @@ function _saveContinuation(payload) {
 var FINANCIAL_OP_HEADERS = ['id', 'clientId', 'cycleDate', 'paymentId', 'intent',
   'state', 'before', 'after', 'createdAt', 'updatedAt', 'updatedBy', 'resolution'];
 var FINANCIAL_OP_STATES = ['prepared', 'client_writing', 'client_done',
-  'payment_writing', 'done', 'acknowledged', 'cancelled', 'review', 'reviewed'];
+  'payment_writing', 'done', 'acknowledged', 'cancelled', 'review', 'reviewed',
+  'charge_writing', 'charge_done'];
 
 function _finRow(row, headers) {
   return headers.map(function (h) {
@@ -4146,13 +4155,24 @@ function _finJournal() {
         JSON.stringify(after.headers) !== JSON.stringify(before.headers) || before.values.length !== before.headers.length ||
         after.values.length !== before.values.length || before.values[0] !== op.clientId || after.values[0] !== op.clientId ||
         !intent || intent.clientId !== op.clientId || intent.opId !== op.id ||
-        intent.cycleDate !== op.cycleDate || !intent.payment || intent.payment.id !== op.paymentId) {
+        intent.cycleDate !== op.cycleDate ||
+        (intent.kind === 'extra_charge' ? (intent.payment ? intent.payment.id : '') !== op.paymentId :
+          !intent.payment || intent.payment.id !== op.paymentId)) {
       throw new Error('financial_journal_corrupt');
     }
     // A partially edited journal must not become a new authority for a payment.
     // Bind the immutable preimage/patch/postimage, even for legacy empty stamps.
     var original = {};
     before.headers.forEach(function (h, c) { original[h] = before.values[c]; });
+    if (intent.kind === 'extra_charge') {
+      if (intent.snapshot !== op.before || op.after !== op.before ||
+          JSON.stringify(_extraIntent(intent, true)) !== op.intent ||
+          before.values.some(function (v) { return typeof v !== 'string'; }) ||
+          ['client_writing', 'client_done'].indexOf(op.state) >= 0 ||
+          (!intent.payment && op.state === 'payment_writing') ||
+          (_finActive(op) && _extraIntentV1Error(intent, original))) throw new Error('financial_journal_corrupt');
+    } else {
+    if (intent.kind || ['charge_writing', 'charge_done'].indexOf(op.state) >= 0) throw new Error('financial_journal_corrupt');
     if (intent.snapshot !== op.before || JSON.stringify(_finIntent(intent)) !== op.intent ||
         (_finActive(op) && _finIntentError(intent, original, true)) || before.values.some(function (v) { return typeof v !== 'string'; }) ||
         after.values.some(function (v, c) {
@@ -4162,6 +4182,7 @@ function _finJournal() {
           if (h === 'updatedBy') return false;
           return v !== (_hasOwn(intent.patch, h) ? intent.patch[h] : before.values[c]);
         })) throw new Error('financial_journal_corrupt');
+    }
     if (_finActive(op) && active[op.clientId]) throw new Error('financial_journal_duplicate_active');
     seen[op.id] = true;
     if (_finActive(op)) active[op.clientId] = true;
@@ -4219,6 +4240,7 @@ function _finPayments(paymentId, clientId, cycle) {
 function _finSummary(op) {
   var intent = JSON.parse(op.intent);
   return { id: op.id, clientId: op.clientId, cycleDate: op.cycleDate,
+    kind: intent.kind || 'renewal', charge: intent.charge || null,
     state: op.state, payment: intent.payment, resolution: op.resolution,
     updatedAt: op.updatedAt, updatedBy: op.updatedBy };
 }
@@ -4290,6 +4312,7 @@ function _getRenewalState(payload) {
     var active = journal.ops.filter(function (op) { return op.clientId === id && _finActive(op); });
     // Even if the client was manually deleted, its pending intent is discoverable.
     if (active.length) {
+      if (JSON.parse(active[0].intent).kind) return { ok: false, error: 'extra_charge_pending' };
       var summary = _finSummary(active[0]);
       if (active[0].state === 'review') summary.review = _finReviewReadback(active[0]);
       return { ok: true, protocol: 1, operation: summary };
@@ -4333,6 +4356,7 @@ function _applyRenewal(payload) {
   try {
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
+    if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
     if (op.state === 'acknowledged' || op.state === 'cancelled' || op.state === 'reviewed' || op.state === 'review') return { ok: true, operation: _finSummary(op) };
     var user = _requestUser(payload), c;
     function review(why) { _finWrite(journal, op, 'review', user, why); return { ok: true, operation: _finSummary(op) }; }
@@ -4388,6 +4412,7 @@ function _applyRenewal(payload) {
 // data, rolls back a client or claims success. The signed-in editor must review
 // a fresh readback and supply a reason; the exact observed state is retained.
 function _finReviewReadback(op) {
+  if (JSON.parse(op.intent).kind === 'extra_charge') return _extraReadback(op);
   var client = null, clientError = '';
   try { client = _finClient(op.clientId).client; } catch (err) { clientError = String(err); }
   var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
@@ -4406,6 +4431,7 @@ function _resolveRenewalReview(payload) {
   try {
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
+    if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
     if (op.state === 'reviewed') return { ok: true, operation: _finSummary(op) };
     if (op.state !== 'review') return { ok: false, error: 'operation_not_in_review' };
     var readback = _finReviewReadback(op);
@@ -4421,6 +4447,7 @@ function _finishRenewal(payload, cancel) {
   try {
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
+    if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
     var terminal = cancel ? 'cancelled' : 'acknowledged';
     if (op.state === terminal) return { ok: true, operation: _finSummary(op) };
     if (!_finActive(op) || op.state === 'review') return { ok: false, error: 'renewal_requires_review' };
@@ -5148,6 +5175,210 @@ function _pkgIsPackageAction(action) {
 }
 
 
+// Additional-charge creation uses the same client reservation and backup set.
+// The client stays unchanged. The two create-only effects have separate markers.
+function _extraIntent(payload, stored) {
+  var ch = payload.charge || {}, p = payload.payment;
+  var chargeHeaders = stored ? payload.chargeHeaders : CHARGES_HEADERS.slice();
+  var paymentHeaders = stored ? payload.paymentHeaders : PAYMENTS_HEADERS.slice();
+  function prefix(headers, current) {
+    return Array.isArray(headers) && headers.length > 0 && headers.length <= current.length &&
+      JSON.stringify(headers) === JSON.stringify(current.slice(0, headers.length));
+  }
+  if (!prefix(chargeHeaders, CHARGES_HEADERS) || !prefix(paymentHeaders, PAYMENTS_HEADERS)) throw new Error('extra_schema_invalid');
+  var charge = {}, payment = null;
+  chargeHeaders.forEach(function (h) { charge[h] = String(ch[h] == null ? '' : ch[h]); });
+  if (p != null) {
+    payment = {};
+    paymentHeaders.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
+  }
+  var intent = { kind: 'extra_charge', version: 1, opId: String(payload.opId || ''),
+    clientId: String(payload.clientId || ''), snapshot: String(payload.snapshot || ''),
+    cycleDate: String(payload.cycleDate || ''), chargeHeaders: chargeHeaders,
+    paymentHeaders: paymentHeaders, charge: charge, payment: payment };
+  if ((stored && (payload.kind !== intent.kind || payload.version !== 1)) ||
+      !/^[A-Za-z0-9_-]{12,120}$/.test(intent.opId) || !intent.clientId ||
+      !intent.snapshot || JSON.stringify(intent).length > 40000) throw new Error('invalid_extra_intent');
+  return intent;
+}
+function _extraIntentError(intent, client) {
+  // New-reservation policy may evolve; stored v1 intent keeps its own validator.
+  return _extraIntentV1Error(intent, client);
+}
+function _extraIntentV1Error(intent, client) {
+  // Frozen v1 contract. Future treatment lists/limits require a new version or
+  // a reservation-only policy, not retroactive changes to pending v1 history.
+  var ch = intent.charge, p = intent.payment, day = intent.cycleDate;
+  var types = ['פרטני', 'פרטני CBT', 'פרטני EMDR', 'קבוצה', 'טיפול משפחתי', 'ליווי יומי בקהילה', 'מעקב פסיכיאטרי'];
+  function date(v) { return !!v && _coverageDateISO(v) === v; }
+  function positive(v) { return isFinite(Number(v)) && Number(v) > 0 && String(Number(v)) === v; }
+  function integer(v, max) { return positive(v) && Math.floor(Number(v)) === Number(v) && Number(v) <= max; }
+  if (!date(day) || !/^[A-Za-z0-9_-]{6,120}$/.test(ch.id) || ch.clientId !== intent.clientId ||
+      !ch.description.trim() || ch.description.length > 2000 || ch.notes.length > 10000 ||
+      !positive(ch.amount) || ['one_time', 'monthly'].indexOf(ch.billingType) < 0 ||
+      !date(ch.chargeDate) || ch.created !== day || ch.active !== 'true' ||
+      (ch.billingDay !== '' && !integer(ch.billingDay, 31)) ||
+      (ch.frequencyPerWeek && !integer(ch.frequencyPerWeek, 14)) ||
+      (ch.billingType === 'one_time' && (ch.billingDay !== '' || ch.frequencyPerWeek)) ||
+      (ch.treatmentType && types.indexOf(ch.treatmentType) < 0)) return 'invalid_extra_charge';
+  // Preserve existing semantics: creation's optional paid record belongs to the
+  // recording day/month, even if the charge start date is earlier or later.
+  var coverageEnd = '';
+  if (p) {
+    var end = new Date(_finAddMonth(day) + 'T00:00:00Z');
+    end.setUTCDate(end.getUTCDate() - 1);
+    coverageEnd = end.toISOString().slice(0, 10);
+  }
+  if (p && (p.id !== 'pay::' + intent.clientId + '::chg-' + ch.id + '::' +
+      (ch.billingType === 'one_time' ? 'once' : day.slice(0, 7)) ||
+      p.clientId !== intent.clientId || p.clientName !== String(client.name || '') ||
+      p.billingType !== 'extra' || p.dueDate !== day || p.paymentDate !== day ||
+      p.amountDue !== ch.amount || p.amountPaid !== ch.amount || p.status !== 'paid' ||
+      (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
+      _coveragePeriodError(p.coverageStart, p.coverageEnd) ||
+      p.coverageStart !== day || p.coverageEnd !== coverageEnd)) return 'invalid_extra_payment';
+  return '';
+}
+function _extraRows(name, headers, id) {
+  var sh = _ss().getSheetByName(name);
+  return sh ? _readAll(sh, headers).filter(function (r) { return String(r.id) === id; }) : [];
+}
+function _extraReadback(op) {
+  var intent = JSON.parse(op.intent), client = null, clientError = '';
+  try { client = _finClient(op.clientId).client; } catch (err) { clientError = String(err); }
+  var charges = _extraRows('ClientCharges', CHARGES_HEADERS, intent.charge.id);
+  // Observe all payments for this new charge, including a foreign-month row or
+  // a row with an incorrect owner, so manual interference cannot be ignored.
+  var sh = _ss().getSheetByName('Payments');
+  var chargePart = '::chg-' + intent.charge.id + '::';
+  var payments = sh ? _readAll(sh, PAYMENTS_HEADERS).filter(function (p) {
+    return String(p.id).indexOf(chargePart) >= 0 || (op.paymentId && String(p.id) === op.paymentId);
+  }) : [];
+  var token = JSON.stringify({ client: client ? _finSnapshot(client) : null, clientError: clientError,
+    charges: charges.map(function (c) { return _finRow(c, CHARGES_HEADERS); }),
+    payments: payments.map(function (p) { return _finRow(p, PAYMENTS_HEADERS); }) });
+  return { token: token, clientExists: !!client, chargeCount: charges.length, paymentCount: payments.length,
+    client: client, charges: charges, payments: payments };
+}
+function _extraSame(actual, expected, headers) {
+  return actual.length === 1 && JSON.stringify(_finRow(actual[0], headers)) === JSON.stringify(_finRow(expected, headers));
+}
+function _extraObservationMatches(op, view, complete) {
+  var i = JSON.parse(op.intent);
+  if (!view.client || _finSnapshot(view.client, JSON.parse(op.before).headers) !== op.before) return false;
+  return complete ? _extraSame(view.charges, i.charge, i.chargeHeaders) &&
+    (i.payment ? _extraSame(view.payments, i.payment, i.paymentHeaders) : !view.payments.length) :
+    !view.charges.length && !view.payments.length;
+}
+function _extraAppend(name, headers, obj, numeric) {
+  var sh = _ensureSheet(name, headers), row = sh.getLastRow() + 1;
+  var values = headers.map(function (h, n) {
+    var v = obj[h] == null ? '' : obj[h];
+    if (numeric.indexOf(h) >= 0) return v === '' ? '' : Number(v);
+    sh.getRange(row, n + 1).setNumberFormat('@');
+    return v;
+  });
+  sh.getRange(row, 1, 1, headers.length).setValues([values]);
+}
+function _getExtraChargeState(payload) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var id = String(payload.clientId || ''), active = _finJournal().ops.filter(function (op) { return op.clientId === id && _finActive(op); });
+    if (active.length) {
+      if (JSON.parse(active[0].intent).kind !== 'extra_charge') return { ok: false, error: 'renewal_pending' };
+      var summary = _finSummary(active[0]);
+      if (active[0].state === 'review') summary.review = _finReviewReadback(active[0]);
+      return { ok: true, protocol: 1, operation: summary };
+    }
+    var c = _finClient(id).client;
+    return { ok: true, protocol: 1, client: c, snapshot: _finSnapshot(c), cycleDate: _todayISODate() };
+  } finally { lock.releaseLock(); }
+}
+function _reserveExtraCharge(payload) {
+  var intent = _extraIntent(payload), canonical = JSON.stringify(intent), user = _requestUser(payload);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
+    if (same.length) return same[0].intent === canonical ? { ok: true, operation: _finSummary(same[0]) } : { ok: false, error: 'operation_payload_mismatch' };
+    // Only first reservation uses today's source day. Existing intent above
+    // remains replayable on its original day/month indefinitely.
+    if (intent.cycleDate !== _todayISODate()) return { ok: false, error: 'extra_recording_day_changed' };
+    _finGuard([intent.clientId]);
+    var c = _finClient(intent.clientId).client;
+    if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'extra_snapshot_changed' };
+    var invalid = _extraIntentError(intent, c);
+    if (invalid) return { ok: false, error: invalid };
+    var now = new Date().toISOString();
+    var op = { id: intent.opId, clientId: intent.clientId, cycleDate: intent.cycleDate,
+      paymentId: intent.payment ? intent.payment.id : '', intent: canonical, state: 'prepared',
+      before: intent.snapshot, after: intent.snapshot, createdAt: now, updatedAt: now, updatedBy: user, resolution: '' };
+    if (!_extraObservationMatches(op, _extraReadback(op), false)) return { ok: false, error: 'extra_effect_exists' };
+    if (!journal.sheet) journal.sheet = _ensureSheet('FinancialOps', FINANCIAL_OP_HEADERS);
+    PropertiesService.getScriptProperties().setProperty('FINANCIAL_OPS_CREATED', '1');
+    op.row = journal.sheet.getLastRow() + 1;
+    _finWrite(journal, op, 'prepared', user);
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+function _applyExtraCharge(payload) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
+    if (!op) return { ok: false, error: 'operation_not_found' };
+    var i = JSON.parse(op.intent), user = _requestUser(payload);
+    if (i.kind !== 'extra_charge') return { ok: false, error: 'operation_kind_mismatch' };
+    if (!_finActive(op) || op.state === 'review') return { ok: true, operation: _finSummary(op) };
+    function review(why) { _finWrite(journal, op, 'review', user, why); return { ok: true, operation: _finSummary(op) }; }
+    var view = _extraReadback(op);
+    if (!view.client || _finSnapshot(view.client, JSON.parse(op.before).headers) !== op.before) return review('extra_client_changed');
+    if (op.state === 'prepared') {
+      if (!_extraObservationMatches(op, view, false)) return review('extra_effect_appeared');
+      _finWrite(journal, op, 'charge_writing', user);
+      _extraAppend('ClientCharges', CHARGES_HEADERS, i.charge, ['amount', 'billingDay', 'frequencyPerWeek']);
+      view = _extraReadback(op);
+    }
+    if (!_extraSame(view.charges, i.charge, i.chargeHeaders)) return review('extra_charge_write_uncertain_or_changed');
+    if (op.state === 'charge_writing') _finWrite(journal, op, 'charge_done', user);
+    if (op.state === 'charge_done') {
+      if (view.payments.length) return review('extra_payment_appeared');
+      if (i.payment) {
+        _finWrite(journal, op, 'payment_writing', user);
+        _extraAppend('Payments', PAYMENTS_HEADERS, i.payment, ['amountDue', 'amountPaid', 'bundleSize', 'sessionsUsed']);
+        view = _extraReadback(op);
+      }
+    }
+    if (!_extraObservationMatches(op, view, true)) return review('extra_payment_write_uncertain_or_changed');
+    if (op.state !== 'done') _finWrite(journal, op, 'done', user);
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+function _finishExtraCharge(payload, cancel, manual) {
+  var user = _requestUser(payload), reason = String(payload.reason || '').trim();
+  if (manual && (!user || reason.length < 10 || reason.length > 1000 || payload.acceptCurrent !== true)) return { ok: false, error: 'manual_review_required' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
+    if (!op) return { ok: false, error: 'operation_not_found' };
+    if (JSON.parse(op.intent).kind !== 'extra_charge') return { ok: false, error: 'operation_kind_mismatch' };
+    var terminal = manual ? 'reviewed' : cancel ? 'cancelled' : 'acknowledged';
+    if (op.state === terminal) return { ok: true, operation: _finSummary(op) };
+    if (op.state !== (manual ? 'review' : cancel ? 'prepared' : 'done')) return { ok: false, error: 'extra_state_not_ready' };
+    var view = _extraReadback(op);
+    if (manual) {
+      if (view.token.length > 35000) return { ok: false, error: 'review_observation_too_large' };
+      if (payload.reviewToken !== view.token) return { ok: false, error: 'review_source_changed' };
+      _finWrite(journal, op, terminal, user, JSON.stringify({ reason: reason, acceptedState: JSON.parse(view.token) }));
+    } else if (!_extraObservationMatches(op, view, !cancel)) {
+      _finWrite(journal, op, 'review', user, 'extra_source_changed_before_' + terminal);
+    } else _finWrite(journal, op, terminal, user, cancel ? 'cancelled_before_effects' : 'completion_seen');
+    return { ok: true, operation: _finSummary(op) };
+  } finally { lock.releaseLock(); }
+}
+
 var SOURCE_GET_AUTH = {
   getData: 'OUTPATIENT_PROXY_SECRET',
   getPayments: 'OUTPATIENT_PROXY_SECRET',
@@ -5170,6 +5401,12 @@ var SOURCE_GET_AUTH = {
   getPackageRequestStatus: 'PACKAGE_CATALOG_SECRET'
 };
 var SOURCE_POST_AUTH = {
+  getExtraChargeState: 'OUTPATIENT_PROXY_SECRET',
+  reserveExtraCharge: 'OUTPATIENT_PROXY_SECRET',
+  applyExtraCharge: 'OUTPATIENT_PROXY_SECRET',
+  acknowledgeExtraCharge: 'OUTPATIENT_PROXY_SECRET',
+  cancelExtraCharge: 'OUTPATIENT_PROXY_SECRET',
+  resolveExtraChargeReview: 'OUTPATIENT_PROXY_SECRET',
   resolveRenewalReview: 'OUTPATIENT_PROXY_SECRET',
   cancelRenewal: 'OUTPATIENT_PROXY_SECRET',
   acknowledgeRenewal: 'OUTPATIENT_PROXY_SECRET',
@@ -5346,6 +5583,12 @@ function doPost(e) {
     if (!_sourceAuthOk(action, 'POST', e && e.parameter, payload)) {
       return _json({ ok: false, error: 'unauthorized' });
     }
+    if (action === 'getExtraChargeState') return _json(_getExtraChargeState(payload));
+    if (action === 'reserveExtraCharge') return _json(_reserveExtraCharge(payload));
+    if (action === 'applyExtraCharge') return _json(_applyExtraCharge(payload));
+    if (action === 'acknowledgeExtraCharge') return _json(_finishExtraCharge(payload, false, false));
+    if (action === 'cancelExtraCharge') return _json(_finishExtraCharge(payload, true, false));
+    if (action === 'resolveExtraChargeReview') return _json(_finishExtraCharge(payload, false, true));
     if (action === 'resolveRenewalReview') return _json(_resolveRenewalReview(payload));
     if (action === 'getRenewalState') return _json(_getRenewalState(payload));
     if (action === 'reserveRenewal') return _json(_reserveRenewal(payload));

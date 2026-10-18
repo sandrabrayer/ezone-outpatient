@@ -26,6 +26,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   the outdated «auto-deploy» description to the explicit dispatch phase.
   Needs the Apps Script release phase. See `CHANGELOG-package-catalog.md`.
 
+### Recoverable additional-charge creation (OP-02b2-b candidate)
+- Source-owned immutable charge/optional payment intent, exact readback and
+  cross-device recovery; shared renewal guards and audited review on uncertainty.
+- Persist treatment type and weekly frequency already entered in the UI through
+  append-only ClientCharges columns; old-tab omissions preserve saved values.
+- Preserve existing payment dates/ids/coverage; test interruption and mixed-kind
+  backup restore. SW v11 → v12. Separate approval before ordered release.
+- Source @97 cannot read extra history, even terminal: forward fix required.
+  See `CHANGELOG-extra-charge-journal.md` and `docs/extra-charge-journal.md`.
+- Review hardening: freeze v1 history validation, pin the source recording day
+  and existing coverage rules, and block stale recovery controls on failed reads.
+  Cross-device fixtures use a current staff member for compatibility with #122.
+
 ### Planned exit date (`plannedExitDate`)
 - `getTreatmentPlans` gains one optional key, `plannedExitDate`: the planned
   discharge date (`'yyyy-MM-dd'`) of an ACTIVE client, `''` when none, invalid
@@ -38,7 +51,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   sheet value when a payload omits the key (a pre-column tab). SW v9 → v10.
   Needs the Apps Script release phase. See `CHANGELOG-planned-exit-date.md`.
 
-### Recoverable renewal (OP-02b2-a candidate)
+### Recoverable renewal (OP-02b2-a released #120, 2026-10-18)
 - Keep original cycle/amount and immutable source intent before renewal effects;
   reconcile exact evidence after interrupted writes, including another device.
 - Guard cooperating financial/client writers; ambiguous data needs explicit,

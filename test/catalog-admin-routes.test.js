@@ -159,6 +159,20 @@ test('unnamed / retired sessions cannot log in to pricing; the PIN is not even e
   assert.equal(rr.headers['set-cookie'], undefined);
 });
 
+test('end to end: signing in with the shared PIN and a RETIRED name (or no name) yields a session that pricing refuses', async () => {
+  for (const user of ['ירדן', undefined, 'שם שלא קיים']) {
+    const v = await request('POST', '/api/verify-pin', { pin: APP_PIN, ...(user ? { user } : {}) }, freshIp());
+    assert.equal(v.status, 200);
+    const cookie = v.headers['set-cookie'][0].split(';')[0];
+    const me = await request('GET', '/api/me', null, { Cookie: cookie });
+    assert.equal(me.json.user, '', 'the retired / unknown name is never embedded');
+    const l = await request('POST', '/api/catalog-admin/login', { pin: ADMIN_PIN }, { Cookie: cookie, ...freshIp() });
+    assert.equal(l.status, 403); assert.equal(l.json.error, 'named_session_required');
+    assert.equal(l.headers['set-cookie'], undefined);
+    assert.equal((await request('POST', '/api/catalog-admin/rpc', { op: 'catalog' }, { Cookie: cookie })).status, 403);
+  }
+});
+
 test('cookie scope + binding: an admin cookie works ONLY with the session it was minted for', async () => {
   const mine = await adminFor('ורד');
   const myAdminCookie = mine.split('; ')[1];

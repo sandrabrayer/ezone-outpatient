@@ -136,8 +136,27 @@ for her name **and any still-valid cookie carrying her name is refused (401)**;
 UI copy is neutral; historical `updatedBy` text is never rewritten.
 
 Not closable by code: anyone who still **knows the shared `APP_PIN`** can sign in
-without a name (the user-less fallback). To fully revoke, **rotate `APP_PIN` and
-`SESSION_SECRET`** (see below; this logs everyone out once).
+without a name (the user-less fallback) and reach the ordinary app. What code now
+guarantees: **an unnamed or retired-name session can never enter pricing** (the pricing
+login and every pricing call answer `403 named_session_required`, with the PIN not even
+evaluated). To fully revoke, **rotate `APP_PIN` and `SESSION_SECRET`** (see below; this
+logs everyone out once) — rotation complements, and does not replace, these code checks.
+
+## Pricing authorization model (what the code enforces)
+
+* `CATALOG_ADMIN_PIN` is verified **on the server** and mints a 15-minute HttpOnly,
+  SameSite=Strict, Path-scoped cookie that carries only a random id. The id points at an
+  **in-memory server-side admin session** bound to the **exact base session cookie** and the
+  **named user** it was minted for. A copied admin cookie is useless with any other session or user.
+* **Revocation is server-side:** `/api/catalog-admin/logout` and `/api/logout` delete the record
+  (and every record of that base session) immediately; a new login replaces the previous one;
+  a server restart forgets all records (fail closed — re-enter the PIN); absolute 15-minute expiry.
+* **Lock-out safety:** only *wrong* PINs count. Primary cap is **per base session** (5 / 15 min),
+  per-IP is high (30, the office shares an address), global is 60. A colleague's wrong guesses in
+  another session never block Vered; a correct PIN is never counted and resets her session counter.
+  A block reports `Retry-After`. The only thing that can pause everyone is 60 wrong PINs in 15
+  minutes (logged); it ends by itself, and a Railway restart clears it. PIN length is 8–32.
+* Apps Script still verifies the body-bound HMAC assertion (the second, independent check).
 
 ## Configuration required (values are never in code or git)
 
@@ -188,33 +207,39 @@ The task asks not to claim "no amounts reach managers" while these exist:
 3. This draft's own confidentiality is enforced by construction (separate
    secrets, allowlisted builders, tests), not by deleting known price fields.
 
-## Overlap with PR #121 (extra-charge journal, draft, not touched)
+## Integration with PR #121 (extra-charge journal) — RESOLVED in this branch
 
-#121 (`codex/op02-extra-charge-journal-20261018`, head `b5cad10`) changes 20 files.
-Shared with this change: `apps-script/Code.gs`, `public/app.js`, `public/index.html`,
-`public/sw.js`, `CHANGELOG.md`, `DEPLOY.md`, `README.md`, `EZONE-ECOSYSTEM-STATUS.md`,
-`docs/USER-GUIDE.he.md`, `docs/source-auth-boundary.md`,
-`test/financial-save-browser.test.js`, `test/nightly-backup-data.test.js`.
+#121 (`codex/op02-extra-charge-journal-20261018`) was **merged into
+`claude/youthful-volta-laarnk` at `2d4950f`** (2026-10-18 18:11 UTC) while this draft was open.
+This branch now contains that base (merge commit, no force-push; #121's branch untouched).
 
-Risks for the second PR to merge:
+* **Service worker:** #121 took `ezone-outpatient-v12`; this feature is re-bumped to
+  **`ezone-outpatient-v13`**. The live value could not be read from the build sandbox:
+  before release, check what production serves and keep the bump monotonic (CLAUDE.md rule 5).
+* **Backups:** both sets are combined — the nightly set is 10 sheets
+  (`Clients, Leads, לידים שהוסרו, Clients-removed, Payments, ClientCharges, Credits, FinancialOps,
+  PackageCatalog, PackageRequests`); legacy 8- and 9-row manifests still restore; #121's mixed-kind
+  manifest restore test passes unchanged on the combined set.
+* **Yarden:** #121's browser tests now sign in as **שירן** (not the retired ירדן); no test in the
+  merged tree relies on her name.
+* **Behaviour:** no dependency — this feature touches no charge/payment/renewal path.
 
-* **Service-worker version collision** — both set `ezone-outpatient-v12`. The
-  second merge must re-bump from the **live** version.
-* **Backup** — both extend `_integrityCaptureData`/restore tests; the manifest
-  row-count and `length` assertions (`8 → 10` here) must be recombined.
-* **`financial-save-browser.test.js`** — #121's new tests log in as `ירדן`; she is
-  retired here (user-less fallback), so use another current name.
-* Textual conflicts in `Code.gs` (adjacent top-level additions), `app.js`/`index.html`
-  (tab list, script tags), changelog/docs.
-No behavioural dependency: this feature touches no charge/payment/renewal path.
+## Release order and per-repo mechanics (later approval — NOT executed)
 
-## Release (later approval — not executed)
+Order (Sandra, 2026-10-18): **#121** (already merged, `2d4950f`) → the two **confidentiality
+fixes** → **#122** (this) → **ezone-therapists#105** last, after integration and a shared test pass.
+Nothing below is approved or run yet; each merge/deploy needs its own explicit approval.
 
-1. Sandra approves this PR → merge on `claude/youthful-volta-laarnk`.
-2. Poll `/api/version` until `commit` = the merge SHA; check `/healthz`.
-3. `apps-script/**` changed → dispatch **Deploy Apps Script** (Actions → Run
-   workflow, branch `claude/youthful-volta-laarnk`) with `expected_commit` = the
-   full merge SHA. It republishes the **existing** deployment. Never paste `Code.gs`,
-   never create a new deployment. There is **no push trigger**.
-4. Set the configuration above, run the one-time import, then implement and test
-   the therapists side.
+| | Outpatient (`ezone-outpatient`, deployed branch `claude/youthful-volta-laarnk`) | Therapists (`ezone-therapists`, deployed branch `claude/inspiring-tesla-jipobw`) |
+|---|---|---|
+| Node/Railway | auto-deploys on merge; poll `/api/version` until `commit` = merge SHA, check `/healthz` | same, on its own URL |
+| Apps Script | **manual second phase:** dispatch *Deploy Apps Script* on the deployed branch with `expected_commit` = the approved full merge SHA (no push trigger) | **automatic on push** when `apps-script/**`, `.clasp.json`, the workflow, `scripts/check-apps-script.js` or `server/apps-script-fetch.js` change (a manual dispatch exists only as fallback). #105 and the amounts PR change none of these |
+| Never | paste `Code.gs`, create a new deployment | same |
+
+Per merge, outpatient:
+1. Sandra approves → merge. 2. Poll `/api/version` + `/healthz`. 3. If `apps-script/**` changed
+(#122 does), dispatch *Deploy Apps Script* with `expected_commit` = the merge SHA and wait for the
+existing deployment's new version. 4. Time 3 requests to the production URL.
+Then (Sandra) set the configuration above and run the one-time import; only after that can the
+therapists side (#105) be released and tested end to end. Before the first outpatient release also
+confirm the **live** SW version (`ezone-outpatient-v13` must be above it).

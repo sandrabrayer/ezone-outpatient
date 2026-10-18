@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { fixture, settled, source, copy } = require('../test-support/financial-ui-fixture.cjs');
 const flows = [
-  { name: 'addChargeForm', first: 'charge', fields: { description: 'טיפול בדיקה', amount: '500', chargeDate: '2026-10-18', billingType: 'one_time', chargePaid: 'on' } },
   { name: 'directForm', first: 'client', fields: { name: 'חדש', phone: '0500000003', monthlyAmount: '500', startDate: '2026-10-01', paymentStatus: 'paid', paymentDate: '2026-10-16' } },
   { name: 'activateForm', first: 'client', fields: { pricePerSession: '500', startDate: '2026-10-01', paymentStatus: 'paid', paymentDate: '2026-10-16' } },
   { name: 'editForm', first: 'client', fields: { name: 'שינוי שם', phone: '0500000001', monthlyAmount: '650', paymentStatus: 'paid', paymentDate: '2026-10-16' } }
