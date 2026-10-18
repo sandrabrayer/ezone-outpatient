@@ -178,10 +178,13 @@ The task asks not to claim "no amounts reach managers" while these exist:
    separate PR: serve them behind `requireSession` (or compute server-side).
 2. **`amountOwed` browser payload (therapists app).** `debtStatus` rows carry
    `amountOwed`, which the therapists browser stores and renders
-   (`public/app.js` ~L793, 2716–3628) for every signed-in therapist. Managers
-   would therefore see patient debt amounts. Recommended: strip `amountOwed` in
-   therapists `server.js` for non-coordinator sessions and render the debt chip
-   without an amount.
+   (`public/app.js` ~L793, 2716–3628) for every signed-in session.
+   **Managers (Oren/Shahar) are coordinators and DO receive debt amounts today**
+   (the debt gate needs them), so stripping for "non-coordinators" would not help
+   them. Removing amounts is a **release blocker** (Sandra, 2026-10-18): a separate
+   PR that leaves billing math and the debt block/approval path alone (scope in the
+   therapists repo, `docs/amount-owed-removal-scope.md`). Documentation does not
+   complete it; do not claim "no amounts reach managers" until it ships.
 3. This draft's own confidentiality is enforced by construction (separate
    secrets, allowlisted builders, tests), not by deleting known price fields.
 

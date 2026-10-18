@@ -28,7 +28,7 @@ Add a `house_manager` capability next to the coordinator/therapist roles in
 
 ```
 HOUSE_MANAGER_REQUESTER = { 'אורן': 'oren', 'שחר': 'shahar' }   // server-side constant
-requesterKey = HOUSE_MANAGER_REQUESTER[session.name]            // undefined => 403
+requesterKey = Roles.coordinatorKey(session.coordinator)          // '' => 403 (keys live next to COORDINATOR_NAMES)
 ```
 (Use the exact display names as they appear in the therapists roster.) A
 coordinator who is not Oren/Shahar does **not** get it unless Sandra decides so.
@@ -122,17 +122,29 @@ status: `pending`→ממתין לתמחור · `priced`→תומחר. All UI RTL
 ## 6. `amountOwed` and other price paths in the therapists app (required dependency)
 
 The therapists browser currently receives `debtStatus.amountOwed` and renders it
-(`public/app.js` ~L793, 2716, 2722, 2795, 2828, 2841, 2977, 3628). Until a
-non-coordinator session receives **no amount**, do **not** claim "managers never see
-amounts". Required (a separate, reviewed change from this feature; billing math
-untouched): in `server.js`, strip `amountOwed` (and any nested money) from every
-payload for sessions that are not coordinators; render the debt chip as
-«חוב פתוח» without a number for them.
+(`public/app.js` ~L793, 2716, 2722, 2795, 2828, 2841, 2977, 3628).
+
+**RELEASE BLOCKER (Sandra, 2026-10-18):** amounts must not reach the managers'
+browsers; the debt gate keeps deciding by `debtStatus` and the block + approval path
+must be preserved. This is NOT done by documentation; it needs a separate therapists PR
+(scope: therapists repo `docs/amount-owed-removal-scope.md`) and a separate outpatient
+PR for the public price constants. Do not release the feature to managers before both.
+
+**Correction (2026-10-18):** Oren and Shahar ARE the coordinators
+(`Roles.COORDINATOR_NAMES`), and the debt gate legitimately shows coordinators
+the amount. Stripping `amountOwed` for "non-coordinators" would therefore NOT
+protect the managers — they are coordinators. So the managers **do** currently
+receive debt amounts, and nobody may claim "managers never see amounts" until a
+separate decision is made. Removing amounts for the coordinator role is now
+**required** (see the blocker above) as a **separate reviewed PR** that renders the debt chip as «חוב פתוח»
+without a number and does not touch billing math. The package feature itself
+adds no amount (allowlisted, tested).
 
 ## 7. Therapists tests to add
 
 1. Role: ordinary therapist and unauthenticated → every new route `403/401`; Oren
-   and Shahar → allowed; a coordinator not in the map → `403`.
+   and Shahar → allowed; a coordinator without a requester key (e.g. a former
+   one) → `403`.
 2. `requesterKey` always from the session; a body/query `requesterKey` → `400`.
 3. Distinct secrets: catalog route uses only the catalog secret, submission only
    the request secret; missing/short/equal → `503` and **no upstream call**.
@@ -145,7 +157,8 @@ payload for sessions that are not coordinators; render the debt chip as
    missing config → `available:false`, no number in code (`grep` test).
 7. Browser assets/caches: no catalog price, `*Agorot`, secret name in `public/**`
    or the service-worker cache list; the service worker never caches `/api/`.
-8. `amountOwed` absent from non-coordinator payloads.
+8. (Only if Sandra decides to remove debt amounts for coordinators, in a separate PR.)
+   `amountOwed` absent from coordinator payloads.
 
 ## 8. Order of rollout
 
