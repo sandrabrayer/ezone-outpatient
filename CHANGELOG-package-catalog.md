@@ -50,11 +50,19 @@ implementation are listed in `docs/package-catalog.md`.
 - **Session-bound pricing privilege.** The admin cookie now points at an in-memory server-side session bound to
   the exact base session and named user; `/api/catalog-admin/logout` and `/api/logout` revoke it immediately
   (a copied cookie dies at once); re-login replaces it; restart fails closed.
-- **Unnamed / retired-name sessions** cannot enter pricing (`403 named_session_required`); verified end to end
-  through `/api/verify-pin`. Rotating `APP_PIN`/`SESSION_SECRET` remains required to revoke knowledge, but the code
-  no longer depends on it for pricing.
-- **Lock-out risk removed.** Failure-only, per-base-session limiter (5), high per-IP cap (30), global cap (60);
-  correct PINs are never counted; `Retry-After` reported. `CATALOG_ADMIN_PIN` is now 8–32 characters.
+- **Two-step, fail-closed sign-in (review round 3).** `{pin}` mints only a 10-minute NAME-LESS session that reaches
+  `/api/users` + `/api/me` and nothing else (`401 name_required` everywhere, including ordinary reads/writes);
+  `{pin, user}` mints the 7-day named session; unknown / retired names are refused (`403 user_not_allowed`, no cookie).
+  Old name-less cookies and cookies of retired/unknown names no longer reach any data route. Rotating
+  `APP_PIN`/`SESSION_SECRET` remains required to revoke knowledge; the code no longer depends on it.
+- **Unique login identity + re-login revocation.** Tokens carry a random login id (`lib/session.js`); any successful
+  login revokes the catalog privilege of the session cookie it presented and clears the admin cookie. Replay tests
+  keep the old base+admin pair and prove it is `admin:false` afterwards, including two same-name logins in one second.
+  Pre-change cookies (no login id) cannot enter pricing (`fresh_login_required`) — one re-login.
+- **Lock-out: reduced, NOT eliminated.** Failure-only limiter (session 5 / IP 30 / global 60 per 15 min). The earlier
+  wording "others cannot lock Vered out" was wrong: 30 wrong attempts from her office IP or 60 globally still block a
+  fresh session for ≤ 15 min (`429` + `Retry-After`; restart clears). Documented as a residual risk in
+  `docs/package-catalog.md`; brute-force protection is unchanged. `CATALOG_ADMIN_PIN` is 8–32 characters.
 - **#121 merged first** (`2d4950f`): this branch now includes it (merge commit). SW re-bumped **v12 → v14** (v13 is taken by #123, which merges first);
   backups combined (10-sheet set, legacy 8/9-row manifests still restore); #121's tests use שירן.
 - Release order and per-repo deployment mechanics documented in `docs/package-catalog.md`.

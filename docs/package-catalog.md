@@ -131,16 +131,20 @@ them, so they are separate keys and the existing billing constants are untouched
 ## Yarden (ירדן) — what code does and what stays manual
 
 Code: removed from the login picker and the `assignedTo` dropdown; added to
-`RETIRED_SESSION_USERS`, so `/api/verify-pin` falls back to a user-less session
-for her name **and any still-valid cookie carrying her name is refused (401)**;
-UI copy is neutral; historical `updatedBy` text is never rewritten.
+`RETIRED_SESSION_USERS`. **Sign-in is now two-step and fail-closed:**
 
-Not closable by code: anyone who still **knows the shared `APP_PIN`** can sign in
-without a name (the user-less fallback) and reach the ordinary app. What code now
-guarantees: **an unnamed or retired-name session can never enter pricing** (the pricing
-login and every pricing call answer `403 named_session_required`, with the PIN not even
-evaluated). To fully revoke, **rotate `APP_PIN` and `SESSION_SECRET`** (see below; this
-logs everyone out once) — rotation complements, and does not replace, these code checks.
+1. `POST /api/verify-pin {pin}` mints only a **name-less PIN-stage session** (10 minutes, unique login id).
+   It can reach **nothing but** `GET /api/users` and `GET /api/me` (the name picker). Every other route —
+   reads, writes, debug, pricing — answers `401 name_required`.
+2. The picker re-posts `{pin, user}`; only an allow-listed name receives the 7-day **named** session.
+   An unknown / free-text / **retired** name is **refused (`403 user_not_allowed`, no cookie)** — it never
+   degrades to a session. A still-valid old cookie carrying a retired or unknown name is refused (`401`).
+   Old name-less cookies (the former "user-less fallback") no longer reach data routes.
+
+Not closable by code: anyone who still **knows the shared `APP_PIN`** can complete step 1 and then pick
+any *current* name. Name-attribution is therefore not authentication of a person; to fully revoke a leaver's
+knowledge, **rotate `APP_PIN` and `SESSION_SECRET`** (see below; this logs everyone out once) —
+rotation complements, and does not replace, these code checks.
 
 ## Pricing authorization model (what the code enforces)
 
@@ -149,13 +153,22 @@ logs everyone out once) — rotation complements, and does not replace, these co
   **in-memory server-side admin session** bound to the **exact base session cookie** and the
   **named user** it was minted for. A copied admin cookie is useless with any other session or user.
 * **Revocation is server-side:** `/api/catalog-admin/logout` and `/api/logout` delete the record
-  (and every record of that base session) immediately; a new login replaces the previous one;
-  a server restart forgets all records (fail closed — re-enter the PIN); absolute 15-minute expiry.
-* **Lock-out safety:** only *wrong* PINs count. Primary cap is **per base session** (5 / 15 min),
-  per-IP is high (30, the office shares an address), global is 60. A colleague's wrong guesses in
-  another session never block Vered; a correct PIN is never counted and resets her session counter.
-  A block reports `Retry-After`. The only thing that can pause everyone is 60 wrong PINs in 15
-  minutes (logged); it ends by itself, and a Railway restart clears it. PIN length is 8–32.
+  (and every record of that base session) immediately; **every successful `/api/verify-pin` login
+  (re-login or account switch) also revokes the privilege of the session whose cookie it presented and
+  clears the admin cookie**; a server restart forgets all records (fail closed — re-enter the PIN);
+  absolute 15-minute expiry.
+* **Unique login identity:** every session token carries a random 128-bit login id inside the signed
+  payload, so two logins of the same name in the same second never share a token (and thus never share
+  the admin binding). Cookies minted before this change (no login id) still serve ordinary routes until
+  they expire, but cannot enter pricing (`403 fresh_login_required`) — sign in again once.
+* **Lock-out — residual risk (honest statement):** only *wrong* PINs count, a correct PIN is never counted,
+  and the per-session cap (5 / 15 min) is the primary control. **But the per-IP cap (30) and the global
+  cap (60) are shared:** 30 wrong admin-PIN attempts from the office address, or 60 anywhere, DO block
+  Vered's fresh session for up to 15 minutes (the limiter runs before her PIN is evaluated, which is what
+  keeps the cap meaningful against guessing). A block returns `429` + `Retry-After` and is logged.
+  Recovery: wait out `Retry-After` (≤ 15 min), or restart the service (clears the in-memory counters).
+  Not relaxed on purpose: letting a correct PIN bypass the shared caps would remove their value against
+  a holder of the shared `APP_PIN` who rotates sessions. PIN length is 8–32.
 * Apps Script still verifies the body-bound HMAC assertion (the second, independent check).
 
 ## Configuration required (values are never in code or git)

@@ -65,11 +65,11 @@ test('A: ירדן is retired — not in SESSION_USERS, not in the picker, not in
   assert.deepEqual(r.json.users, SESSION_USERS);
 });
 
-test('B: a login that names ירדן gets a USER-LESS session, never her name', async () => {
+test('B: a login that names ירדן is REFUSED (403, no cookie) — never a session, named or not', async () => {
   const r = await request('POST', '/api/verify-pin', { pin: PIN, user: YARDEN });
-  assert.equal(r.status, 200);
-  const tok = (r.headers['set-cookie'][0].split(';')[0]).split('=')[1];
-  assert.equal(readSessionUser(tok, SECRET), '');
+  assert.equal(r.status, 403);
+  assert.deepEqual(r.json, { ok: false, error: 'user_not_allowed' });
+  assert.equal((r.headers['set-cookie'] || []).length, 0);
 });
 
 test('C: an OLD cookie that carries ירדן is refused by every session-gated route; the other names still work', async () => {

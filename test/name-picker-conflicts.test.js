@@ -105,57 +105,67 @@ const maxAgeOf = (res) => Number(((setCookies(res)[0] || '').match(/Max-Age=(\d+
 
 /* ================= A. server: picker re-issue ================= */
 
-test('A: picker re-issue — a second /api/verify-pin {pin, user} re-issues ONE cookie with the same 7-day TTL and the name inside; /api/me returns it', async () => {
+test('A: two-step login — {pin} mints a short name-less PIN-stage session; {pin, user} mints the 7-day NAMED session with the name and a unique login id; /api/me returns it', async () => {
   await waitForListen();
-  // 1. the PIN form: user-less login
+  // 1. the PIN form: a NAME-LESS, short-lived session that may only reach the picker
   const first = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN });
   assert.equal(first.status, 200);
-  assert.equal(maxAgeOf(first), DEFAULT_TTL_SECONDS);
-  assert.equal(tokenOf(first).split('.').length, 2, 'user-less legacy token');
+  assert.deepEqual(first.json, { ok: true, stage: 'name_required' });
+  assert.equal(maxAgeOf(first), 600, 'PIN-stage session lives 10 minutes, not 7 days');
+  assert.equal(tokenOf(first).split('.').length, 4, 'unique-login token (placeholder user)');
   const me0 = await request('GET', '/api/me', null, { Cookie: cookieOf(first) });
   assert.deepEqual(me0.json, { ok: true, user: '' });
+  const data0 = await request('GET', '/api/sheets?action=getSettings', null, { Cookie: cookieOf(first) });
+  assert.equal(data0.status, 401);
+  assert.equal(data0.json.error, 'name_required', 'ordinary routes refuse the name-less session');
 
   // 2. the picker: same PIN + the chosen name, sent WITH the first cookie
   const before = Math.floor(Date.now() / 1000);
   const second = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: 'ורד' }, { Cookie: cookieOf(first) });
   assert.equal(second.status, 200);
-  assert.deepEqual(second.json, { ok: true });
-  assert.equal(setCookies(second).length, 1, 'exactly one Set-Cookie — re-issued, not a second cookie');
-  assert.equal(maxAgeOf(second), DEFAULT_TTL_SECONDS, 'TTL unchanged by the re-issue');
-  const token = tokenOf(second);
-  assert.equal(token.split('.').length, 3, 'user-bearing token');
+  assert.deepEqual(second.json, { ok: true, stage: 'named' });
+  const sc = setCookies(second);
+  assert.equal(sc.length, 2, 'the session cookie + the cleared catalog-admin cookie');
+  const sessionCookie = sc.find((c) => c.startsWith('ezone_session='));
+  assert.ok(sessionCookie);
+  assert.equal(Number((sessionCookie.match(/Max-Age=(\d+)/) || [])[1]), DEFAULT_TTL_SECONDS);
+  const token = sessionCookie.split(';')[0].split('=')[1];
+  assert.equal(token.split('.').length, 4, 'user-bearing token with a unique login id');
   const expiry = Number(token.split('.')[0]);
-  assert.ok(expiry >= before + DEFAULT_TTL_SECONDS && expiry <= before + DEFAULT_TTL_SECONDS + 5, 'expiry = now + 7 days, never extended beyond');
-  assert.match(setCookies(second)[0], /HttpOnly/);
-  assert.match(setCookies(second)[0], /SameSite=Lax/);
-  const me = await request('GET', '/api/me', null, { Cookie: cookieOf(second) });
+  assert.ok(expiry >= before + DEFAULT_TTL_SECONDS && expiry <= before + DEFAULT_TTL_SECONDS + 5);
+  assert.match(sessionCookie, /HttpOnly/);
+  assert.match(sessionCookie, /SameSite=Lax/);
+  const me = await request('GET', '/api/me', null, { Cookie: 'ezone_session=' + token });
   assert.deepEqual(me.json, { ok: true, user: 'ורד' });
-  // the old user-less cookie is still a valid session (it just has no name)
-  const meOld = await request('GET', '/api/me', null, { Cookie: cookieOf(first) });
-  assert.deepEqual(meOld.json, { ok: true, user: '' });
 });
 
-test('A: the user is accepted ONLY from SESSION_USERS — every listed name round-trips, anything else stays user-less; a wrong PIN with a user mints nothing', async () => {
+test('A: the user is accepted ONLY from SESSION_USERS — listed names round-trip; unknown / retired / free-text names are REFUSED (403, no cookie); a wrong PIN with a user mints nothing', async () => {
   await waitForListen();
   for (const name of SESSION_USERS) {
     const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: name });
     assert.equal(res.status, 200);
-    const me = await request('GET', '/api/me', null, { Cookie: cookieOf(res) });
+    const ck = setCookies(res).find((c) => c.startsWith('ezone_session=')).split(';')[0];
+    const me = await request('GET', '/api/me', null, { Cookie: ck });
     assert.deepEqual(me.json, { ok: true, user: name });
   }
-  for (const bad of ['HACKER', 'ורד<script>', 'ורדx', '', ' ', 42, null, { name: 'ורד' }]) {
+  for (const bad of ['HACKER', 'ורד<script>', 'ורדx', 'ירדן']) {
     const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: bad });
+    assert.equal(res.status, 403, JSON.stringify(bad));
+    assert.deepEqual(res.json, { ok: false, error: 'user_not_allowed' });
+    assert.equal(setCookies(res).length, 0, 'no cookie for ' + JSON.stringify(bad));
+  }
+  // empty / non-string `user` is simply "no name yet": the PIN-stage session, never a named one
+  for (const empty of ['', ' ', 42, null, { name: 'ורד' }]) {
+    const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: empty });
     assert.equal(res.status, 200);
-    assert.equal(tokenOf(res).split('.').length, 2, 'legacy token for ' + JSON.stringify(bad));
-    const me = await request('GET', '/api/me', null, { Cookie: cookieOf(res) });
-    assert.deepEqual(me.json, { ok: true, user: '' });
+    assert.equal(res.json.stage, 'name_required');
   }
   const wrong = await request('POST', '/api/verify-pin', { pin: '000000', user: 'ורד' });
   assert.equal(wrong.status, 401);
   assert.equal(setCookies(wrong).length, 0, 'no cookie on a wrong PIN, whatever the user');
 });
 
-test('A: GET /api/users serves SESSION_USERS (the picker list) and is session-gated; the route table has no new open route', async () => {
+test('A: GET /api/users serves SESSION_USERS to the PIN stage and is session-gated; the route table has no new open route', async () => {
   await waitForListen();
   const noCookie = await request('GET', '/api/users');
   assert.equal(noCookie.status, 401);
@@ -167,10 +177,9 @@ test('A: GET /api/users serves SESSION_USERS (the picker list) and is session-ga
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.json, { ok: true, users: SESSION_USERS });
   assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל'], 'the three current names, nothing invented (ירדן is retired)');
-  // gated in the router (the F test in session-who-when pins the open set)
   const route = server._router.stack.find((m) => m.route && m.route.path === '/api/users');
   assert.ok(route, '/api/users mounted');
-  assert.ok(route.route.stack.some((l) => l.handle === server.requireSession), '/api/users behind requireSession');
+  assert.ok(route.route.stack.some((l) => l.handle === server.requireLoginStage), '/api/users behind the login-stage gate');
 });
 
 /* ================= Code.gs sandbox harness ================= */

@@ -208,7 +208,10 @@ checkout ever drifts back.
 - `POST /api/verify-pin` with `{ pin, user? }` → `{ ok: true }` + the
   `ezone_session` cookie on match (`user` is stored in the cookie only if it
   is one of `lib/users.js` `SESSION_USERS`), `401` on mismatch, `429` after 10
-  attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset
+  attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset.
+  **Two-step:** `{pin}` → `{ ok, stage: 'name_required' }` and a 10-minute name-less session that only reaches
+  `/api/users` + `/api/me`; `{pin, user}` with an allow-listed name → `{ ok, stage: 'named' }` and the 7-day session;
+  an unknown / retired name → `403 user_not_allowed`, no cookie. Every other route requires a named session.
 - `GET /api/me` → `{ ok, user }` — the name in this session's cookie (`''`
   for a user-less cookie). Session-gated. The client reads it after the PIN:
   an empty `user` opens the **name picker** (one button per name, no free
@@ -217,7 +220,7 @@ checkout ever drifts back.
   `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
 - `GET /api/users` → `{ ok, users }` — the picker's list (`lib/users.js`
   `SESSION_USERS`, the only names `/api/verify-pin` accepts). Session-gated.
-  **The users are ורד, שירן, יעל, ירדן** — one flat allow-list of names,
+  **The users are ורד, שירן, יעל** (ירדן is retired and refused) — one flat allow-list of names,
   **not** a role table: every name on it has exactly the same permissions,
   and editor vs. viewer is decided by which PIN button was used, never by
   which name was picked. The same list is pinned by test to the leads

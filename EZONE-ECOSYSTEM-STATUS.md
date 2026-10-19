@@ -47,7 +47,7 @@ release steps: `docs/package-catalog.md`. Therapists contract:
 feature is not complete end to end.**
 
 - Vered-only pricing tab «תמחור חבילות»: a separate server-verified
-  `CATALOG_ADMIN_PIN` → 15-minute scoped HttpOnly cookie pointing at a server-side admin session bound to the base session + named user (revoked on logout); unnamed/retired sessions refused; Apps Script re-verifies a
+  `CATALOG_ADMIN_PIN` → 15-minute scoped HttpOnly cookie pointing at a server-side admin session bound to the base session + named user (revoked on logout AND on any re-login / account switch, unique per-login id); sign-in is two-step — a name-less PIN-stage session reaches only the name picker, every ordinary route needs an allow-listed named session, retired/unknown names get 403 (shared per-IP/global failure caps can still pause Vered's PIN entry ≤ 15 min — documented); Apps Script re-verifies a
   body-bound HMAC assertion. Display name / `sessionStorage` never grant it.
 - Managers (Oren/Shahar, therapists app) get price-free catalog/status through two
   distinct secrets (`PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`).

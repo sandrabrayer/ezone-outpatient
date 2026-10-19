@@ -6196,7 +6196,7 @@
     if (err) err.hidden = true;
     box.textContent = '';
     apiUsers().then(function (users) {
-      if (!users.length) { enterEditor(); return; } // nothing to pick — user-less session, as before
+      if (!users.length) { showPin(); return; } // nothing to pick: a name-less session reaches no data, so start over
       users.forEach(function (name) {
         var b = document.createElement('button');
         b.type = 'button';
@@ -6225,9 +6225,9 @@
         box.appendChild(b);
       });
     }).catch(function (e) {
-      // 401 already flipped to the PIN screen; any other failure must not
-      // lock anyone out — continue user-less (today's behaviour).
-      if (!(e && e.message === 'unauthorized')) enterEditor();
+      // 401 already flipped to the PIN screen. A name-less session cannot reach data (server
+      // refuses it), so any other failure also returns to the PIN screen to retry.
+      if (!(e && e.message === 'unauthorized')) showPin();
     });
   }
 

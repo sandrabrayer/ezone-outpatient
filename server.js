@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { checkPin } = require('./lib/pin');
-const { createSessionToken, verifySessionToken, readSessionUser } = require('./lib/session');
+const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const { sourceAuthConfigured } = require('./lib/source-auth');
@@ -35,6 +35,7 @@ const CATALOG_ADMIN_PIN = process.env.CATALOG_ADMIN_PIN || '';
 const CATALOG_ADMIN_ASSERTION_SECRET = process.env.CATALOG_ADMIN_ASSERTION_SECRET || '';
 const SESSION_COOKIE = 'ezone_session';
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // 604800 seconds (7 days), matches the token TTL
+const PREAUTH_MAX_AGE = 10 * 60;          // the name-less PIN-stage session only lives long enough to pick a name
 // Continuation-track roster proxy: the currently-admitted patient roster is owned
 // by the E-Zone DASHBOARD Apps Script (action=getAdmittedRoster) and served
 // behind a fail-closed shared secret. We proxy it server-side so the browser
@@ -91,13 +92,20 @@ function parseSessionCookie(cookieHeader) {
  *   'not_configured' → SESSION_SECRET unset (fail-closed → 401)
  *   'ok'             → a valid, unexpired, correctly-signed cookie is present
  *   'unauthorized'   → missing / malformed / tampered / expired cookie (→ 401) */
-function sessionAuthStatus(cookieHeader, secret) {
+function sessionAuthStatus(cookieHeader, secret, opts) {
   if (typeof secret !== 'string' || secret.length === 0) return 'not_configured';
   const token = parseSessionCookie(cookieHeader);
   if (token && verifySessionToken(token, secret)) {
+    const user = readSessionUser(token, secret);
+    if (!user) {
+      // PIN stage of the two-step login: a valid cookie with NO name. It may reach ONLY the
+      // name-selection routes (opts.allowUnnamed); every ordinary data/write route refuses it.
+      return opts && opts.allowUnnamed ? 'ok' : 'name_required';
+    }
     // A name removed from the user list must not keep working on an old
-    // 7-day cookie: retired users are refused, forcing a fresh login.
-    if (RETIRED_SESSION_USERS.indexOf(readSessionUser(token, secret)) >= 0) return 'unauthorized';
+    // 7-day cookie: retired users are refused, forcing a fresh login. A name that is
+    // not (or no longer) on the allow-list is refused the same way.
+    if (RETIRED_SESSION_USERS.indexOf(user) >= 0 || SESSION_USERS.indexOf(user) < 0) return 'unauthorized';
     return 'ok';
   }
   return 'unauthorized';
@@ -138,16 +146,23 @@ function sessionUserFromRequest(req) {
  * unset SESSION_SECRET and a missing/invalid cookie BOTH yield 401 (the
  * client's one 401 handler sends the user back to the PIN screen either
  * way; the operator sees the boot-time log line). */
-function requireSession(req, res, next) {
-  const status = sessionAuthStatus(req.headers.cookie, SESSION_SECRET);
-  if (status !== 'ok') {
-    return res.status(401).json({
-      ok: false,
-      error: status === 'not_configured' ? 'session_not_configured' : 'unauthorized'
-    });
-  }
-  return next();
+function sessionGate(opts) {
+  return function (req, res, next) {
+    const status = sessionAuthStatus(req.headers.cookie, SESSION_SECRET, opts);
+    if (status !== 'ok') {
+      return res.status(401).json({
+        ok: false,
+        error: status === 'not_configured' ? 'session_not_configured' : (status === 'name_required' ? 'name_required' : 'unauthorized')
+      });
+    }
+    return next();
+  };
 }
+/* Every ordinary route: a valid cookie that carries an ALLOW-LISTED, non-retired name. */
+const requireSession = sessionGate();
+/* ONLY the name-selection step of the two-step login (GET /api/me, GET /api/users): a valid
+ * cookie, named or not. */
+const requireLoginStage = sessionGate({ allowUnnamed: true });
 
 /* Whether the ORIGINAL client request reached us over HTTPS. Railway terminates
  * TLS and forwards x-forwarded-proto=https; plain-HTTP localhost dev has neither,
@@ -160,13 +175,13 @@ function requestIsHttps(req) {
 /* Build the Set-Cookie value for a freshly-minted session token. SameSite=Lax
  * (per the outpatient brief): the cookie rides same-site fetches and
  * top-level navigations, never cross-site POSTs. */
-function buildSessionCookie(token, isHttps) {
+function buildSessionCookie(token, isHttps, maxAge) {
   const parts = [
     `${SESSION_COOKIE}=${token}`,
     'HttpOnly',
     'SameSite=Lax',
     'Path=/',
-    `Max-Age=${SESSION_MAX_AGE}`
+    `Max-Age=${maxAge || SESSION_MAX_AGE}`
   ];
   if (isHttps) parts.push('Secure');
   return parts.join('; ');
@@ -453,17 +468,26 @@ app.post('/api/verify-pin', (req, res) => {
       console.error('[verify-pin] correct PIN but SESSION_SECRET is not set — cannot mint a session cookie (fail-closed). Set SESSION_SECRET on the Railway service and redeploy.');
       return res.status(500).json({ ok: false, error: 'session_not_configured' });
     }
-    // Optional `user` (who/when stamping): a display name the login may
-    // attach — accepted ONLY from the fixed SESSION_USERS list (the leads
-    // assignedTo names); anything else falls back to the legacy user-less
-    // token. It rides INSIDE the signed token so it cannot be changed
-    // without breaking the HMAC. The name picker re-posts {pin, user} right
-    // after a user-less login: the cookie is simply re-issued with the same
-    // 7-day TTL (SESSION_MAX_AGE) — never extended, never a second cookie.
-    const user = validateSessionUser(req.body && req.body.user);
-    const token = createSessionToken(SESSION_SECRET, undefined, undefined, user);
-    res.set('Set-Cookie', buildSessionCookie(token, requestIsHttps(req)));
-    return res.status(200).json({ ok: true });
+    // TWO-STEP login. Step 1 {pin}: a correct PIN mints only a short-lived, NAME-LESS session
+    // (PREAUTH_MAX_AGE) that can reach nothing but the name picker (GET /api/users, GET /api/me).
+    // Step 2 {pin, user}: the picker re-posts the PIN with an allow-listed name and receives the
+    // real 7-day NAMED session. A `user` that is not on the allow-list (unknown, free text, or a
+    // RETIRED name) is refused — it never silently degrades to a session. Every login gets a
+    // fresh unique id (lib/session.js jti) and revokes the catalog-admin privilege of the session
+    // that presented its cookie (account switch / re-login), server-side.
+    const rawUser = req.body && req.body.user;
+    const wantsUser = typeof rawUser === 'string' && rawUser.trim() !== '';
+    const user = wantsUser ? validateSessionUser(rawUser) : '';
+    if (wantsUser && !user) {
+      return res.status(403).json({ ok: false, error: 'user_not_allowed' });
+    }
+    revokeAdminFor(req);
+    const token = createLoginToken(SESSION_SECRET, user ? undefined : PREAUTH_MAX_AGE, user);
+    res.set('Set-Cookie', [
+      buildSessionCookie(token, requestIsHttps(req), user ? SESSION_MAX_AGE : PREAUTH_MAX_AGE),
+      catalogAdmin.buildClearedAdminCookie(requestIsHttps(req))
+    ]);
+    return res.status(200).json({ ok: true, stage: user ? 'named' : 'name_required' });
   }
 
   entry.count += 1;
@@ -493,9 +517,13 @@ function adminSid(req) { return catalogAdmin.readAdminSid(parseCookieValue(req.h
  * session; a valid admin cookie; and a live server-side record bound to THAT base
  * session and THAT user. Anything else (other session, other user, logged out,
  * restarted, expired) is "not admin". */
+function sessionJtiFromRequest(req) {
+  return SESSION_SECRET ? readSessionJti(parseSessionCookie(req.headers.cookie), SESSION_SECRET) : '';
+}
 function hasAdminCookie(req) {
   const user = sessionUserFromRequest(req);
-  if (!user || RETIRED_SESSION_USERS.indexOf(user) >= 0) return false;
+  if (!user || RETIRED_SESSION_USERS.indexOf(user) >= 0 || SESSION_USERS.indexOf(user) < 0) return false;
+  if (!sessionJtiFromRequest(req)) return false;   // needs a unique login id (older cookies must sign in again)
   return catalogAdminSessions.valid(adminSid(req), adminBinding(req), user);
 }
 
@@ -519,6 +547,7 @@ app.post('/api/catalog-admin/login', requireSession, (req, res) => {
   // Every pricing action is attributable: an unnamed (legacy) session cannot enter.
   const user = sessionUserFromRequest(req);
   if (!user) return res.status(403).json({ ok: false, error: 'named_session_required' });
+  if (!sessionJtiFromRequest(req)) return res.status(403).json({ ok: false, error: 'fresh_login_required' });
   const binding = adminBinding(req);
   const ip = getClientIp(req);
   const gate = catalogAdminLimiter.check(binding, ip);
@@ -585,7 +614,7 @@ app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (r
  * user-less cookie answers { user: '' } and everything keeps working. The
  * frontend reads it after the PIN (empty -> name picker) and at load (header
  * "מחובר/ת כ: <name>"). */
-app.get('/api/me', requireSession, (req, res) => {
+app.get('/api/me', requireLoginStage, (req, res) => {
   res.status(200).json({ ok: true, user: sessionUserFromRequest(req) });
 });
 
@@ -594,7 +623,7 @@ app.get('/api/me', requireSession, (req, res) => {
  * `user` from), so the client never carries a duplicate that could drift.
  * Session-gated: the picker only appears after a correct PIN minted the
  * cookie, and the names are staff, not public. Read-only, no input. */
-app.get('/api/users', requireSession, (req, res) => {
+app.get('/api/users', requireLoginStage, (req, res) => {
   res.status(200).json({ ok: true, users: SESSION_USERS.slice() });
 });
 
@@ -701,6 +730,7 @@ module.exports.sanitizeSessionUser = sanitizeSessionUser;
 module.exports.validateSessionUser = validateSessionUser;
 module.exports.sessionUserFromRequest = sessionUserFromRequest;
 module.exports.requireSession = requireSession;
+module.exports.requireLoginStage = requireLoginStage;
 module.exports.requestIsHttps = requestIsHttps;
 module.exports.buildSessionCookie = buildSessionCookie;
 module.exports.buildClearedSessionCookie = buildClearedSessionCookie;
