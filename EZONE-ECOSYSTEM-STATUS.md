@@ -56,11 +56,18 @@ feature is not complete end to end.**
   TherapistRates/payout code changed.
 - ירדן is retired: not offered, old cookies refused (`RETIRED_SESSION_USERS`);
   rotating `APP_PIN` + `SESSION_SECRET` is the manual step that revokes the shared PIN.
-- Open confidentiality findings (not fixed here): unauthenticated
-  `public/treatment-map.js` / `public/therapist-pay.js` price constants, and the
-  therapists-browser `amountOwed` payload. Do not claim "no amounts reach managers".
+- Confidentiality: the public price/pay constants are fixed by Outpatient **#123** (integrated here); the
+  therapists-browser `amountOwed` payload by Therapists **#106** (separate repo, not yet merged). Do not claim
+  "no amounts reach managers" until both are approved, merged and deployed.
 - Release order is unchanged and explicit: matching Node SHA live → dispatch
   **Deploy Apps Script** with `expected_commit` = merge SHA.
+
+## Outpatient: price / pay constants no longer public (Oct 18, 2026 — DRAFT, not released)
+
+Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
+served without any session; now session-only, `no-store`, loaded after sign-in, dropped on logout, never
+cached (SW v13). Browser + server tests. Details and limits (shared-PIN holders still see them):
+`CHANGELOG-protect-price-constants.md`. Release BEFORE the package-catalog PR; the later PR re-bumps the SW.
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 

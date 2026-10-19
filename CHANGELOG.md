@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Price and pay constants are session-only (confidentiality fix, draft)
+- `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
+  dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
+
 ### Package catalog + pricing requests (OP-PKG, draft)
 - New Vered-only tab «תמחור חבילות» (calculator, requests with badge, catalog
   with versioned edits). Quotation only: integer agorot, inclusive VAT (18 % is

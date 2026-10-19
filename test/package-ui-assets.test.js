@@ -56,7 +56,7 @@ test('app wiring: the tab renders through PackagePricing.mount; logout and 401 r
   assert.match(APP, /state\.view === 'packages'\) renderPackages\(\)/);
   assert.match(APP, /window\.PackagePricing\.mount\(\$\('#packagesRoot'\)/);
   assert.match(APP, /fetch\('\/api\/catalog-admin\/logout', \{ method: 'POST' \}\)/);
-  assert.match(APP, /function handleUnauthorized\(\) \{\n    try \{ if \(window\.PackagePricing\) window\.PackagePricing\.reset\(\)/);
+  assert.match(APP, /function handleUnauthorized\(\) \{[\s\S]{0,200}?try \{ if \(window\.PackagePricing\) window\.PackagePricing\.reset\(\)/);
   assert.ok(!/ez_pkg|packageCatalog|PackageCatalog/.test(APP));
 });
 

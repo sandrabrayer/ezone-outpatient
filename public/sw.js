@@ -45,8 +45,14 @@
  *   and explicit review. Live v10 was verified after #119 before this bump.
  * - v12 (2026-10-18): durable additional-charge creation and recovery UI.
  *   Live v11 was verified before this bump; new markup and app.js stay paired.
- * - v13 (2026-10-18): reserved by PR #123 (price / pay constants are session-only;
- *   merges before the package catalog).
+ * - v13 (2026-10-18): price / pay constants are session-only. treatment-map.js and
+ *   therapist-pay.js are no longer cached and no longer static <script> tags; bumping
+ *   the cache name also DELETES every previously cached copy of them on activate.
+ *   Check the LIVE version before releasing (CLAUDE.md rule 5).
+ *   Review follow-up: the protected-path test now DECODES the path (up to 4 levels, fail-closed on
+ *   undecodable input) before it is matched, so /%74reatment-map.js and friends are never intercepted,
+ *   cached or served from cache; responses marked no-store / private are never put in the cache; and any
+ *   already-stored alias is evicted on activate and on a 'purge-protected' message (sent at sign-out).
  * - v14 (2026-10-18): package catalog / pricing tab — new package-pricing.js
  *   module, a new תמחור חבילות tab + section in index.html, and CSS. Re-bumped
  *   v12 → v13 → v14 after #121 (v12) and #123 (v13) take their numbers; before
@@ -66,12 +72,50 @@ self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
 });
 
+// Price / pay constants must never be cached. The path is DECODED before matching so an encoded or
+// re-cased alias is classified exactly like the canonical name; anything undecodable, or that keeps
+// changing after 4 decodes, is treated as protected (fail closed).
+var PROTECTED_STEM = /(treatment-map|therapist-pay)(?![a-z0-9-])/;
+function isProtectedPath(pathname) {
+  var decoded = String(pathname || '');
+  for (var i = 0; i < 4; i++) {
+    var next;
+    try { next = decodeURIComponent(decoded); } catch (e) { return true; }
+    if (next === decoded) return PROTECTED_STEM.test(decoded.toLowerCase());
+    decoded = next;
+  }
+  return true;
+}
+// A response the server marked no-store / private must not be written to Cache Storage.
+function isUncacheable(res) {
+  var cc = (res && res.headers && res.headers.get('cache-control')) || '';
+  return /(^|[\s,])(no-store|private)(?=$|[\s,;=])/i.test(cc);
+}
+// Evict every stored entry whose URL names a protected file under ANY spelling.
+function purgeProtected() {
+  return caches.keys().then(function (names) {
+    return Promise.all(names.map(function (n) {
+      return caches.open(n).then(function (c) {
+        return c.keys().then(function (reqs) {
+          return Promise.all(reqs.filter(function (r) {
+            try { return isProtectedPath(new URL(r.url).pathname); } catch (e) { return true; }
+          }).map(function (r) { return c.delete(r); }));
+        });
+      });
+    }));
+  });
+}
+
 self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
-    }).then(function () { return self.clients.claim(); })
+    }).then(purgeProtected).then(function () { return self.clients.claim(); })
   );
+});
+
+self.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'purge-protected') e.waitUntil(purgeProtected());
 });
 
 self.addEventListener('fetch', function (e) {
@@ -79,10 +123,13 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.pathname.indexOf('/api/') === 0) return;
+  // Price / pay constants are session-only and never cached or served from cache (a cached copy would
+  // outlive the sign-in and be readable offline). Straight to the network, under every spelling.
+  if (isProtectedPath(url.pathname)) return;
 
   e.respondWith(
     fetch(req).then(function (res) {
-      if (res && res.ok && url.origin === self.location.origin) {
+      if (res && res.ok && url.origin === self.location.origin && !isUncacheable(res)) {
         var copy = res.clone();
         caches.open(CACHE).then(function (c) { c.put(req, copy); });
       }
