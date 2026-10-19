@@ -66,3 +66,7 @@ implementation are listed in `docs/package-catalog.md`.
 - **#121 merged first** (`2d4950f`): this branch now includes it (merge commit). SW re-bumped **v12 → v14** (v13 is taken by #123, which merges first);
   backups combined (10-sheet set, legacy 8/9-row manifests still restore); #121's tests use שירן.
 - Release order and per-repo deployment mechanics documented in `docs/package-catalog.md`.
+
+## Owner decisions + range tiers (2026-10-19)
+- VAT 18 % and the May-2026 prices confirmed; Solo extension keeps the same price; day-track entitlements stay unmodelled; Vered owns continuation/stop.
+- UI: range items offer מינימום / אמצע / מקסימום (`rangeTiers`); no free-text price. Server validation unchanged. Test: `test/package-ui-assets.test.js`.

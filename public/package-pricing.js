@@ -227,13 +227,27 @@
     } catch (e) { if (e.message !== 'admin_required') { S.error = errorText(e.message); say(S.error, true); draw(); } }
   }
 
+  // Range items (Solo): Vered picks one of three fixed tiers — minimum, midpoint, maximum (whole agorot, midpoint rounded down).
+  function rangeTiers(item) {
+    var lo = item && item.priceMinAgorot, hi = item && item.priceMaxAgorot;
+    if (!(lo > 0) || !(hi >= lo)) return [];
+    var mid = Math.floor((lo + hi) / 2);
+    var out = [{ id: 'min', text: 'מינימום', agorot: lo }, { id: 'mid', text: 'אמצע', agorot: mid }, { id: 'max', text: 'מקסימום', agorot: hi }];
+    return out.filter(function (t, i) { return i === 0 || t.agorot !== out[i - 1].agorot; });
+  }
+  function tierSelect(item, aria) {
+    return h('select', { 'aria-label': aria }, [h('option', { value: '', text: 'בחירת מדרגת מחיר…' })].concat(rangeTiers(item).map(function (t) {
+      return h('option', { value: String(t.agorot), text: t.text + ' · ' + formatAgorot(t.agorot) });
+    })));
+  }
+
   function pendingControls(r) {
     var box = [];
     if (r.needsSelection) {
       var item = S.catalog && S.catalog.items.filter(function (i) { return i.key === r.packageKey && i.active; })[0];
-      var sel = h('input', { type: 'text', inputmode: 'decimal', placeholder: item ? formatAgorot(item.priceMinAgorot) + ' – ' + formatAgorot(item.priceMaxAgorot) : '₪ לחודש', 'aria-label': 'מחיר חודשי' });
+      var sel = tierSelect(item, 'מדרגת מחיר חודשי');
       box.push(h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'בחירת מחיר חודשי', onclick: function () {
-        var a = parseShekels(sel.value); if (a === null) { say('סכום לא תקין', true); return; }
+        var a = parseInt(sel.value, 10); if (!(a > 0)) { say('יש לבחור מדרגת מחיר', true); return; }
         mutate('adjust', r, { selectedMonthlyAgorot: a }, 'המחיר נבחר');
       } })]));
     } else {
@@ -269,7 +283,7 @@
     if (!items.length) return h('p', { class: 'muted', text: 'הקטלוג ריק. עברי ללשונית קטלוג.' });
     var pick = h('select', { 'aria-label': 'חבילה' }, items.map(function (i) { return h('option', { value: i.key, text: label(FAMILY, i.family) + ' — ' + label(TIER, i.tier) }); }));
     var months = h('select', { 'aria-label': 'חודשים' });
-    var sel = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'מחיר חודשי ב-₪', 'aria-label': 'מחיר חודשי' });
+    var sel = h('select', { 'aria-label': 'מדרגת מחיר חודשי' });
     var out = h('div', { class: 'pkg-calc-out', 'aria-live': 'polite' });
     function cur() { return items.filter(function (i) { return i.key === pick.value; })[0]; }
     function sync() {
@@ -277,16 +291,19 @@
       while (months.firstChild) months.removeChild(months.firstChild);
       it.allowedMonths.forEach(function (m) { months.appendChild(h('option', { value: String(m), text: m + ' חודשים' })); });
       months.hidden = !it.allowedMonths.length; sel.hidden = it.unit !== 'per_month_range';
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+      sel.appendChild(h('option', { value: '', text: 'בחירת מדרגת מחיר…' }));
+      rangeTiers(it).forEach(function (t) { sel.appendChild(h('option', { value: String(t.agorot), text: t.text + ' · ' + formatAgorot(t.agorot) })); });
     }
     async function run() {
       var it = cur(), f = { packageKey: it.key };
       if (it.allowedMonths.length) f.months = parseInt(months.value, 10);
-      if (it.unit === 'per_month_range' && sel.value.trim()) { var a = parseShekels(sel.value); if (a === null) { out.textContent = 'סכום לא תקין'; return; } f.selectedMonthlyAgorot = a; }
+      if (it.unit === 'per_month_range' && sel.value) f.selectedMonthlyAgorot = parseInt(sel.value, 10);
       var res = await rpc('quote', f).catch(function (e) { return { ok: false, error: e.message }; });
       while (out.firstChild) out.removeChild(out.firstChild);
       if (!res.ok) { out.textContent = errorText(res.error); return; }
       var q = res.quote;
-      if (q.needsSelection) { out.textContent = 'זהו טווח מחירים — יש להזין מחיר חודשי (לא נבחר מחיר ברירת מחדל).'; return; }
+      if (q.needsSelection) { out.textContent = 'זהו טווח מחירים — יש לבחור מדרגת מחיר: מינימום / אמצע / מקסימום (אין מחיר ברירת מחדל).'; return; }
       if (q.monthlyAgorot !== null) out.appendChild(h('div', { text: 'מחיר חודשי: ' + formatAgorot(q.monthlyAgorot) }));
       out.appendChild(h('div', { class: 'pkg-total', text: (q.commitmentMonths ? 'סה״כ התחייבות ל-' + q.commitmentMonths + ' חודשים' : 'סה״כ') + ': ' + formatAgorot(q.grossAgorot) }));
       out.appendChild(h('div', { class: 'muted', text: 'לפני מע״מ ' + formatAgorot(q.netAgorot) + ' · מע״מ ' + formatAgorot(q.vatAgorot) + ' (מחיר כולל מע״מ ' + (q.vatRateBp / 100) + '%)' }));
@@ -352,6 +369,6 @@
   }
   function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.error = ''; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label,
+  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, REQUESTER: REQUESTER, ERRORS: ERRORS };
 });

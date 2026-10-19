@@ -89,3 +89,16 @@ test('money: agorot formatting and shekel parsing are integer-only', () => {
   assert.equal(P.parseShekels('19.99'), 1999);
   for (const bad of ['', 'abc', '-5', '1.234', '1e3', '12345678', '1..2', null]) assert.equal(P.parseShekels(bad), null, String(bad));
 });
+
+test('range items (Solo): Vered chooses min / midpoint / max from a fixed list; degenerate or invalid ranges stay safe', () => {
+  const solo = seed.find((r) => r.key === 'solo_housing');
+  assert.equal(solo.priceMinAgorot, 800000); assert.equal(solo.priceMaxAgorot, 1000000);
+  const tiers = P.rangeTiers(solo);
+  assert.deepEqual(tiers.map((t) => [t.id, t.agorot]), [['min', 800000], ['mid', 900000], ['max', 1000000]]);
+  assert.deepEqual(P.rangeTiers({ priceMinAgorot: 5, priceMaxAgorot: 6 }).map((t) => t.agorot), [5, 5, 6].filter((v, i, a) => i === 0 || v !== a[i - 1]));
+  assert.deepEqual(P.rangeTiers({ priceMinAgorot: 700, priceMaxAgorot: 700 }).map((t) => t.agorot), [700], 'min == max collapses to one tier');
+  for (const bad of [null, {}, { priceMinAgorot: 0, priceMaxAgorot: 10 }, { priceMinAgorot: 10, priceMaxAgorot: 5 }]) assert.deepEqual(P.rangeTiers(bad), []);
+  // every tier is accepted by the server-side range check (min <= price <= max) and the UI no longer takes free text for it
+  for (const t of tiers) assert.ok(t.agorot >= solo.priceMinAgorot && t.agorot <= solo.priceMaxAgorot);
+  assert.doesNotMatch(MODULE, /מחיר חודשי ב-₪/);
+});

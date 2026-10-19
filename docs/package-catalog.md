@@ -135,25 +135,31 @@ them, so they are separate keys and the existing billing constants are untouched
 
 From the PDF check and the earlier review. None changes billing; each is either "not modelled" or "assumed":
 
-1. **VAT rate — assumption, unconfirmed.** The PDF only says prices include VAT (p9). **18 % (1800 bp)** is an
-   application assumption (Israel's rate from 2025-01-01); stored per row, editable by Vered, and
-   used only to display the net/VAT split. Sandra/accounting must confirm the rate (and that the split is wanted).
-2. **Are the May 2026 prices still current?** The PDF says prices are valid at the date of issue (p9) and carries no
-   end date. Confirm nothing changed between May and release before Vered runs the initial import.
-3. **Day track:** commitment length is not stated (`allowedMonths = 1`, monthly); the weekly entitlements printed on p3
-   (individual ×2/week, psychiatrist ×2/month, supplementary ×1/week, groups ×3/week) are not modelled
-   (`sessions = 0`); whether EMDR/CBT given *inside* the day track (p9) is included in the monthly fee is not stated.
+**Decisions received from Sandra, 2026-10-19:**
+* **VAT 18 % — confirmed.** Prices include VAT; the 18 % split is correct.
+* **Prices are current** (May 2026 list stands).
+* **Range prices (Solo 8,000–10,000 ₪/month):** Vered chooses from a fixed list — minimum / midpoint (9,000 ₪) / maximum. Implemented in the UI
+  (`rangeTiers`); the server still validates min ≤ price ≤ max.
+* **Day track:** the patient's exact days cannot be fixed (the package is tailored); the package price is sufficient. Weekly entitlements stay unmodelled by decision.
+* **Solo extension:** continues at the same price.
+* **Continuation / stop:** Vered owns continuation and stopping of treatment. Shahar/Oren must know — either they initiate and update Vered, or Vered
+  informs them. No code enforces this; it is an operating agreement.
+
+Still open:
+
+1. ~~VAT rate~~ — resolved above.
+2. ~~Are the May 2026 prices current~~ — resolved above.
+3. **Day track:** whether EMDR/CBT given *inside* the day track (p9) is included in the monthly fee is not stated.
 4. **30-day credit** for converting a single EMDR/CBT session into a package (p5/p6) is **not modelled**; Vered
    uses *adjust* with a reason.
 5. **EMDR Complex** frequency (weekly vs biweekly, p5) and the **combined bundle** composition (6 CBT + 6 EMDR, p6) are
    not modelled.
-6. **Solo** extension beyond 3 months ("by clinical judgment", p8) is not modelled.
+6. ~~Solo extension~~ — resolved: same price (the 3-month commitment is still the catalog default).
 7. **Psychiatric services:** the PDF labels the 900 ₪ consult «מעקב חודשי», while billing has «מעקב פסיכיאטרי»
    at 1,100 ₪; and the 2,500 ₪ diagnosis vs billing «אינטייק» at 2,300 ₪. They are kept as distinct keys
    (see below) — confirm whether they are different services or the same service at two prices.
 8. **Eligibility** printed in the PDF («מתאים ל…», and «לבוגרי הבתים המאזנים בלבד» for טיפולי המשך) is **not enforced** by the catalog.
-9. **Who owns «מסלול המשך» and the stop/resume flows after Yarden.** Not invented: UI copy says «צוות מסלול המשך».
-   Name an owner when decided.
+9. ~~Owner of continuation/stop~~ — resolved: Vered; Oren/Shahar are informed or initiate and update her.
 10. Whether a *priced* request should later trigger a charge — deliberately **out of scope**.
 
 ## Yarden (ירדן) — what code does and what stays manual

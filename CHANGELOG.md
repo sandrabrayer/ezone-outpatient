@@ -10,6 +10,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
 
 ### Package catalog + pricing requests (OP-PKG, draft)
+- Solo (range) price is now chosen from three tiers — minimum / midpoint / maximum — instead of free text (owner decision 2026-10-19); VAT 18 % and current prices confirmed.
 - New Vered-only tab «תמחור חבילות» (calculator, requests with badge, catalog
   with versioned edits). Quotation only: integer agorot, inclusive VAT (18 % is
   an assumption), immutable quote snapshots, `priced` ≠ paid, attach stores a
