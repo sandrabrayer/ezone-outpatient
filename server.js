@@ -211,9 +211,9 @@ app.get('/index.html', (req, res) => sendIndex(res));
 /* PRICE / PAY CONSTANTS ARE NOT PUBLIC ASSETS. treatment-map.js holds the client price
  * table (incl. VAT) and therapist-pay.js the per-therapist pay rates; before this they were
  * served to anyone who could reach the site, with no PIN. They are now served ONLY to a
- * valid session, `no-store`, and the matching names are matched after URL-decoding and
- * normalisation, case-insensitively, so encoded / dotted / doubled-slash / re-cased
- * spellings cannot reach express.static below. The browser loads them after sign-in
+ * valid session, `no-store`, and the matching names are classified after URL-decoding
+ * (case-insensitively) and ONLY the exact canonical path is served; every alias is a 404, so encoded /
+ * dotted / doubled-slash / re-cased spellings neither reach express.static nor create a second cacheable URL. The browser loads them after sign-in
  * (public/app.js loadProtectedScripts) and the service worker never caches them. */
 const PROTECTED_STATIC = new Set(['treatment-map.js', 'therapist-pay.js']);
 // 'therapist-payout.js' (pure logic, no constants) shares the prefix and stays public: the stem must
@@ -234,9 +234,12 @@ function protectedStaticName(rawPath) {
   }
   const lower = decoded.toLowerCase();
   if (!PROTECTED_STEM_RE.test(lower)) return '';
-  const norm = path.posix.normalize('/' + decoded.replace(/\\/g, '/')).replace(/\/+$/, '').toLowerCase();
-  const name = norm.replace(/^\/+/, '');
-  return PROTECTED_STATIC.has(name) ? name : 'blocked';
+  // Only the ONE canonical spelling is ever served. Every alias (encoded, re-cased, dotted,
+  // doubled-slash ...) is a 404 for everyone, so no second URL for the same bytes can exist for a
+  // cache (service worker or HTTP) to remember.
+  const raw = String(rawPath || '');
+  for (const name of PROTECTED_STATIC) { if (raw === '/' + name) return name; }
+  return 'blocked';
 }
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();

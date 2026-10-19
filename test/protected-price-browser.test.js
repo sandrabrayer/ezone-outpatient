@@ -105,3 +105,65 @@ test('browser: constants are absent before sign-in, present after, dropped on lo
   assert.equal(after, 401, 'the server no longer answers once the session is gone');
   assert.deepEqual(errors, []);
 });
+
+test('browser: encoded aliases never enter Cache Storage; seeded aliases are purged at sign-out; offline serves nothing', skipOpt, async (t) => {
+  const fx = await fixture(t); if (!fx) return;
+  const context = await fx.browser.newContext();
+  await context.route('**/*', (route) => new URL(route.request().url()).origin === fx.origin ? route.continue() : route.abort());
+  const page = await context.newPage();
+  page.setDefaultTimeout(10000);
+  const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+  const cacheUrls = () => page.evaluate(async () => {
+    const out = [];
+    for (const k of await caches.keys()) { const c = await caches.open(k); for (const req of await c.keys()) out.push(req.url); }
+    return out;
+  });
+  const protectedIn = (urls) => urls.filter((u) => { let d = u; try { d = decodeURIComponent(decodeURIComponent(u)); } catch (_) {} return /(treatment-map|therapist-pay)(?![a-z0-9-])/i.test(d); });
+
+  await page.goto(fx.origin, { waitUntil: 'networkidle' });
+  await page.fill('#pinInput', '424242');
+  await page.click('#pinSubmit');
+  await page.locator('#userButtons .user-btn').getByText('ורד', { exact: true }).click();
+  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForFunction(() => typeof window.TherapistPay === 'object');
+  await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
+  await page.reload({ waitUntil: 'networkidle' });               // now controlled by the worker
+  await page.waitForFunction(() => typeof window.TherapistPay === 'object');
+
+  // 1. authenticated fetches of the canonical file and of every alias go through the worker
+  const aliases = ['/%74reatment-map.js', '/%2574herapist-pay.js', '/Treatment-Map.js', '/treatment-map.js%20'];
+  const statuses = await page.evaluate(async (list) => {
+    const out = {};
+    for (const u of ['/treatment-map.js'].concat(list)) { try { out[u] = (await fetch(u)).status; } catch (e) { out[u] = 'error'; } }
+    return out;
+  }, aliases);
+  assert.equal(statuses['/treatment-map.js'], 200);
+  for (const a of aliases) assert.notEqual(statuses[a], 200, a + ' must not be served (' + statuses[a] + ')');
+  assert.deepEqual(protectedIn(await cacheUrls()), [], 'nothing under any spelling is in Cache Storage');
+
+  // 2. a copy poisoned by an OLDER worker is evicted when the user signs out
+  await page.evaluate(async () => {
+    const c = await caches.open((await caches.keys())[0]);
+    await c.put('/%74reatment-map.js', new Response('window.POISON=1'));
+    await c.put('/treatment-map.js', new Response('window.POISON=1'));
+  });
+  assert.equal(protectedIn(await cacheUrls()).length, 2, 'the poison is really stored');
+  await page.click('#logoutBtn');
+  await page.waitForSelector('#pinScreen:not([hidden])');
+  await page.waitForFunction(async () => {
+    for (const k of await caches.keys()) { const c = await caches.open(k); for (const r of await c.keys()) if (/treatment-map|therapist-pay/i.test(decodeURIComponent(r.url))) return false; }
+    return true;
+  });
+  assert.deepEqual(protectedIn(await cacheUrls()), []);
+
+  // 3. offline and signed out: neither the canonical file nor an alias can come from any cache
+  await context.setOffline(true);
+  const offline = await page.evaluate(async (list) => {
+    const out = {};
+    for (const u of ['/treatment-map.js', '/therapist-pay.js'].concat(list)) { try { const r = await fetch(u); out[u] = 'served ' + r.status + ' ' + (await r.text()).slice(0, 20); } catch (e) { out[u] = 'network-error'; } }
+    return out;
+  }, aliases);
+  for (const [u, v] of Object.entries(offline)) assert.equal(v, 'network-error', u + ' -> ' + v);
+  await context.setOffline(false);
+  assert.deepEqual(errors, []);
+});

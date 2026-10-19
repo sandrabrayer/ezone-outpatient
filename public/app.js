@@ -464,6 +464,8 @@
   }
   function dropProtectedScripts() {
     protectedScripts = null;
+    // Belt and braces: ask the service worker to evict any stored copy under any spelling.
+    try { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'purge-protected' }); } catch (_) {}
     Array.prototype.slice.call(document.querySelectorAll('script[data-protected]')).forEach(function (el) { el.remove(); });
     PROTECTED_GLOBALS.forEach(function (g) { try { delete window[g]; } catch (_) { window[g] = undefined; } });
     var t = document.getElementById('sessionTherapist'); if (t) { t.textContent = ''; delete t.dataset.filled; }

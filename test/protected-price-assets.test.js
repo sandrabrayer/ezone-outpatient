@@ -71,8 +71,11 @@ test('WITH a session: served byte-identical, no-store, JavaScript (billing code 
     assert.match(r.headers['content-type'], /javascript/);
     assert.equal(r.body, fs.readFileSync(path.join(PUB, f), 'utf8'));
   }
-  const odd = await raw('GET', '/Treatment-Map.js', cookie);
-  assert.equal(odd.status, 200); assert.equal(odd.headers['cache-control'], 'no-store');
+  // Only the canonical spelling exists: every alias is a 404 (no second cacheable URL), even with a session.
+  for (const alias of ['/Treatment-Map.js', '/%74reatment-map.js', '/%2574reatment-map.js', '//treatment-map.js', '/a/../therapist-pay.js', '/therapist-pay.js/']) {
+    const odd = await raw('GET', alias, cookie);
+    assert.equal(odd.status, 404, alias); assert.equal(odd.headers['cache-control'], 'no-store', alias);
+  }
 });
 
 test('everything ELSE served without a session is free of the constants (scan of every public asset)', async () => {
@@ -116,7 +119,8 @@ test('service worker: never caches them, not in the shell list, cache name bumpe
   const code = sw.replace(/\/\*[\s\S]*?\*\//g, '');
   const shell = /var SHELL = \[([\s\S]*?)\];/.exec(code)[1];
   assert.ok(!/treatment-map|therapist-pay/.test(shell));
-  assert.match(code, /\(treatment-map\|therapist-pay\)\\\.js\$\/i\.test\(url\.pathname\)\) return;/);
+  assert.match(code, /if \(isProtectedPath\(url\.pathname\)\) return;/);
+  assert.match(code, /var PROTECTED_STEM = \/\(treatment-map\|therapist-pay\)\(\?!\[a-z0-9-\]\)\//);
   const v = Number(/ezone-outpatient-v(\d+)/.exec(code)[1]);
   assert.ok(v >= 13, 'bumped past the v12 that cached them: ' + v);
   assert.match(code, /keys\.filter\(function \(k\) \{ return k !== CACHE; \}\)\.map\(function \(k\) \{ return caches\.delete\(k\); \}\)/, 'old caches (with old copies) are deleted');
@@ -124,6 +128,7 @@ test('service worker: never caches them, not in the shell list, cache name bumpe
 
 test('protectedStaticName unit: normalisation, double-decoding, malformed escapes', () => {
   const n = server.protectedStaticName;
-  for (const p of ['/treatment-map.js', '//Treatment-Map.js', '/%2574reatment-map.js', '/a/../therapist-pay.js', '/therapist-pay.js/']) assert.ok(['treatment-map.js', 'therapist-pay.js'].includes(n(p)), p);
+  assert.equal(n('/treatment-map.js'), 'treatment-map.js'); assert.equal(n('/therapist-pay.js'), 'therapist-pay.js');
+  for (const p of ['//Treatment-Map.js', '/%2574reatment-map.js', '/%74reatment-map.js', '/a/../therapist-pay.js', '/therapist-pay.js/']) assert.equal(n(p), 'blocked', p + ' (alias: 404 for everyone)');
   assert.equal(n('/app.js'), ''); assert.equal(n('/therapist-payout.js'), '', 'pure logic, no constants: stays a normal static file'); assert.equal(n('/treatment-map-extra.js'), ''); assert.equal(n('/treatment-map.json'), 'blocked', 'looks like the file but is not it: never reaches static'); assert.equal(n('/treatment-map.js%20'), 'blocked'); assert.equal(n('/%E0%A4%A'), 'invalid');
 });
