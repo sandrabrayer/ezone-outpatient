@@ -5344,6 +5344,7 @@ function _integrityCaptureData(sourceSs) {
   if (!lock.tryLock(5000)) throw new Error('Backup capture lock unavailable');
   try {
     var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var specs = _integritySourceSpecs(), known = Object.create(null);
     var journalRequired = !!props.getProperty('FINANCIAL_OPS_CREATED');
     var previouslyPresent = JSON.parse(props.getProperty('INTEGRITY_REQUIRED_SOURCES') || '[]');

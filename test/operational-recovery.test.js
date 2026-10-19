@@ -252,3 +252,17 @@ test('a previously captured operational sheet cannot disappear silently and age 
   assert.ok(h.logs.some(l => l.includes('Previously captured source missing: SessionLog')));
   assert.equal(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).find(x => x.source === 'SessionLog').absent, false);
 });
+
+test('a nightly capture queued before recovery rechecks the hold after acquiring its lock', () => {
+  const h = harness();
+  const getLock = h.ctx.LockService.getScriptLock;
+  h.ctx.LockService.getScriptLock = () => {
+    const lock = getLock(), acquire = lock.tryLock;
+    lock.tryLock = () => { h.props.OUTPATIENT_RECOVERY_HOLD = '1'; return acquire(); };
+    return lock;
+  };
+  h.ctx.nightlyIntegrityJob();
+  assert.equal(h.events.some(e => e[0] === 'write' || e[0] === 'delete'), false);
+  assert.ok(h.logs.some(l => l.includes('recovery_pending')));
+  assert.deepEqual(h.locks(), [false,false]);
+});
