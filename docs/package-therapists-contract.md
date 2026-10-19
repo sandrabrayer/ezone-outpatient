@@ -1,9 +1,11 @@
-# Therapists-app integration contract (OP-PKG) — NOT IMPLEMENTED
+# Therapists-app integration contract (OP-PKG) — IMPLEMENTED in ezone-therapists #105 (draft, not released)
 
-This is the exact contract for the **ezone-therapists** repo. Nothing here is
-built or tested in that repo yet, so **the feature is not complete end to end**.
-Do the work as its own draft PR there (one PR at a time, explicit-path `git add`,
-tests + CHANGELOG + docs, `npm audit` 0 high/critical).
+This is the contract between this app (source of the catalog and requests) and the **ezone-therapists** repo. The therapists
+side is implemented in **ezone-therapists #105** (draft; routes in `server.js` + `server/packages.js`, UI in
+`public/package-request.js`; tests `test/packages-*.test.js`, `test/package-request-browser.test.js`,
+`test/package-request-recovery-browser.test.js`). **Nothing is released or enabled**: configuration, the PDF/business
+confirmations and Sandra's final approval remain (`docs/package-release-checklist.md`). Where the shipped behaviour goes beyond
+the original contract below, a **"Shipped:"** note says so.
 
 ## 0. Principles
 
@@ -75,6 +77,7 @@ invalid_package, invalid_months, stale_catalog, request_id_conflict, busy,
 package_error, package_not_configured, upstream_unavailable, forbidden_field`.
 Map anything else (timeouts, HTML, non-JSON, exceptions) to `upstream_unavailable`.
 Never echo upstream text, URLs, secrets or stack traces.
+**Shipped:** the browser-visible set also contains `role_required` (a session that is not Oren/Shahar, 403) and `invalid_body`.
 
 ### `GET /api/packages/requests` → browser
 ```json
@@ -88,6 +91,11 @@ Status is a flag only (`priced` = Vered approved; **not** paid; show no amount).
 * Generate `requestId` once when the form opens; keep it until a *confirmed*
   response. On timeout/network error **resend the same id and payload** — also
   minutes later. Apps Script returns the existing request (`duplicate:true`).
+  **Shipped:** the id is frozen together with the COMPLETE original payload (name, phone, package, months and the original
+  `catalogEpoch`) from the first send; a background catalog refresh never changes it. If the reply was lost and the request
+  list already shows the id, the confirmation is **recovered by re-sending exactly the frozen request** — Apps Script answers an
+  existing id (same payload) with the stored safe result *before* its catalog-freshness check, writes no second row, and the
+  Node server rebuilds the WhatsApp link from configuration. The recovered confirmation shows the real status.
 * Same id with a different payload → `request_id_conflict`: tell the user to
   start a new request (new id). Never reuse an id for edited data.
 * Disable the submit button while in flight; no automatic dedupe by patient/package.
@@ -119,28 +127,17 @@ tier: `basic`→בסיסי · `extended`→מורחב · `core`→Core · `stand
 `consult`→ייעוץ · `diagnosis`→אבחון · `range`→טווח מחיר.
 status: `pending`→ממתין לתמחור · `priced`→תומחר. All UI RTL.
 
-## 6. `amountOwed` and other price paths in the therapists app (required dependency)
+## 6. `amountOwed` and other price paths in the therapists app — resolved by shipped prerequisites
 
-The therapists browser currently receives `debtStatus.amountOwed` and renders it
-(`public/app.js` ~L793, 2716, 2722, 2795, 2828, 2841, 2977, 3628).
+Oren and Shahar ARE the coordinators (`Roles.COORDINATOR_NAMES`), and the debt gate used to send them `amountOwed`. This was a
+release blocker (Sandra, 2026-10-18) and is fixed by **Therapists #106** (merged `e9021a5`, SW v46): amounts are removed from
+browser payloads, the debt gate decides by `debtStatus`, the block + Ron/Sandra approval path and billing are unchanged, and the
+approval audit figure fails closed in the new-Node/old-script window. The public price constants in this app are fixed by
+**Outpatient #123** (merged `0941004`). Residual limitation: a holder of the shared Outpatient `APP_PIN` can still read those
+constants after signing in. The package feature itself adds no amount (allowlisted, tested). Do not widen the claim beyond these
+paths, and not before the live deployment is verified.
 
-**RELEASE BLOCKER (Sandra, 2026-10-18):** amounts must not reach the managers'
-browsers; the debt gate keeps deciding by `debtStatus` and the block + approval path
-must be preserved. This is NOT done by documentation; it needs a separate therapists PR
-(scope: therapists repo `docs/amount-owed-removal-scope.md`) and a separate outpatient
-PR for the public price constants. Do not release the feature to managers before both.
-
-**Correction (2026-10-18):** Oren and Shahar ARE the coordinators
-(`Roles.COORDINATOR_NAMES`), and the debt gate legitimately shows coordinators
-the amount. Stripping `amountOwed` for "non-coordinators" would therefore NOT
-protect the managers — they are coordinators. So the managers **do** currently
-receive debt amounts, and nobody may claim "managers never see amounts" until a
-separate decision is made. Removing amounts for the coordinator role is now
-**required** (see the blocker above) as a **separate reviewed PR** that renders the debt chip as «חוב פתוח»
-without a number and does not touch billing math. The package feature itself
-adds no amount (allowlisted, tested).
-
-## 7. Therapists tests to add
+## 7. Therapists tests (the original list; implemented in #105 — all items below exist)
 
 1. Role: ordinary therapist and unauthenticated → every new route `403/401`; Oren
    and Shahar → allowed; a coordinator without a requester key (e.g. a former
@@ -157,12 +154,13 @@ adds no amount (allowlisted, tested).
    missing config → `available:false`, no number in code (`grep` test).
 7. Browser assets/caches: no catalog price, `*Agorot`, secret name in `public/**`
    or the service-worker cache list; the service worker never caches `/api/`.
-8. (Only if Sandra decides to remove debt amounts for coordinators, in a separate PR.)
-   `amountOwed` absent from coordinator payloads.
+8. `amountOwed` absent from coordinator payloads — covered by #106 (`test/amounts-*.test.js`, `test/audit-bridge-old-source.test.js`).
+9. Lost reply: the frozen request survives catalog changes and tab re-entry; recovery returns the real status and the configured
+   WhatsApp button with one row (`test/package-request-recovery-browser.test.js`, real Chromium against the real server).
 
 ## 8. Order of rollout
 
-Outpatient PR merged + Node live + Apps Script dispatch (see
-`docs/package-catalog.md` → Release) → set Script properties and the
-therapists Railway variables → one-time catalog import by Vered → deploy the
-therapists PR → smoke with a test patient (no real data) → remove nothing else.
+See `docs/package-release-checklist.md` (single checklist). In short: configuration prerequisites → Outpatient #122 (matching Node SHA
+live, then the explicit *Deploy Apps Script* dispatch with `expected_commit`) → authorised one-time catalog import and review →
+Therapists #105 (Node only; it changes no Apps Script path) → smoke with approved test data. Never roll the Outpatient source back
+to @97. No step is approved yet.

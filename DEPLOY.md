@@ -109,7 +109,8 @@ all pairwise distinct and distinct from `OUTPATIENT_PROXY_SECRET`). The two
 `PACKAGE_*` secrets are also set on the **therapists** service only. Missing or
 duplicate secrets fail closed. To revoke the retired user's shared-PIN knowledge,
 rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Full
-detail: `docs/package-catalog.md`.
+detail and precise click-paths: `docs/package-release-checklist.md` (single checklist);
+background: `docs/package-catalog.md`. These are PREREQUISITES of enablement, not optional.
 
 ## Apps Script release phase (clasp in GitHub Actions)
 

@@ -98,6 +98,8 @@ the house managers in the therapists app. It never creates charges or payments.
 Setup, secrets, the PDF mapping, open questions and the therapists contract:
 [`docs/package-catalog.md`](docs/package-catalog.md),
 [`docs/package-therapists-contract.md`](docs/package-therapists-contract.md).
+**Release checklist (single source for secrets/config/alignment checks):**
+[`docs/package-release-checklist.md`](docs/package-release-checklist.md). Not released.
 Required variables (values never in git): `CATALOG_ADMIN_PIN`,
 `CATALOG_ADMIN_ASSERTION_SECRET` (Railway) and the Script properties
 `CATALOG_ADMIN_ASSERTION_SECRET`, `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`.

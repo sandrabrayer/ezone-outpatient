@@ -21,14 +21,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   actions and authority fields.
 - Manager boundary for the therapists app: `PACKAGE_CATALOG_SECRET` (price-free
   reads) and `PACKAGE_REQUEST_SECRET` (submissions) with explicit allowlisted
-  responses; idempotent UUID + payload-hash requests. Therapists side = contract
-  only (`docs/package-therapists-contract.md`) — **not built**.
+  responses; idempotent UUID + payload-hash requests. The therapists side exists as
+  ezone-therapists draft #105 (not released; contract: `docs/package-therapists-contract.md`).
 - ירדן retired: removed from picker/assignedTo, old session cookies refused,
   UI copy neutral («צוות מסלול המשך»). `APP_PIN`/`SESSION_SECRET` rotation is the
   manual step. Backup/restore now covers two new sheets (manifest 9 or 11 rows).
-- SW v11 → v12 (collides with #121 — second merge re-bumps). Docs: corrected
+- SW v11 → v14 (v12 = #121, v13 = #123, both shipped). Docs: corrected
   the outdated «auto-deploy» description to the explicit dispatch phase.
-  Needs the Apps Script release phase. See `CHANGELOG-package-catalog.md`.
+  Needs the Apps Script release phase. Single release checklist (secrets, config, alignment checks,
+  PDF verification): `docs/package-release-checklist.md`. See `CHANGELOG-package-catalog.md`.
 
 ### Recoverable additional-charge creation (OP-02b2-b candidate)
 - Source-owned immutable charge/optional payment intent, exact readback and

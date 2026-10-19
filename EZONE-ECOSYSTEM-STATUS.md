@@ -43,8 +43,9 @@ Isolated draft (branch `claude/package-catalog-quotes`, separate from the PR #12
 financial-safety work, which MERGED first as #121 `2d4950f`; this branch includes it
 and is re-bumped to SW **v14** (v13 is #123's) — confirm the LIVE version before release). Design, PDF→catalog mapping, ambiguities, configuration and
 release steps: `docs/package-catalog.md`. Therapists contract:
-`docs/package-therapists-contract.md` — **the therapists side is NOT built; the
-feature is not complete end to end.**
+`docs/package-therapists-contract.md`. The therapists side exists as ezone-therapists draft **#105**
+(not released). Single release checklist (secrets, config, alignment checks, PDF verification of all 15 rows,
+open owner decisions): `docs/package-release-checklist.md`. **No approval to release the packages yet.**
 
 - Vered-only pricing tab «תמחור חבילות»: a separate server-verified
   `CATALOG_ADMIN_PIN` → 15-minute scoped HttpOnly cookie pointing at a server-side admin session bound to the base session + named user (revoked on logout AND on any re-login / account switch, unique per-login id); sign-in is two-step — a name-less PIN-stage session reaches only the name picker, every ordinary route needs an allow-listed named session, retired/unknown names get 403 (shared per-IP/global failure caps can still pause Vered's PIN entry ≤ 15 min — documented); Apps Script re-verifies a
@@ -56,9 +57,11 @@ feature is not complete end to end.**
   TherapistRates/payout code changed.
 - ירדן is retired: not offered, old cookies refused (`RETIRED_SESSION_USERS`);
   rotating `APP_PIN` + `SESSION_SECRET` is the manual step that revokes the shared PIN.
-- Confidentiality: the public price/pay constants are fixed by Outpatient **#123** (integrated here); the
-  therapists-browser `amountOwed` payload by Therapists **#106** (separate repo, not yet merged). Do not claim
-  "no amounts reach managers" until both are approved, merged and deployed.
+- Confidentiality (shipped, reported by the reviewer; live behaviour not verified from the build sandbox): the public
+  price/pay constants are fixed by Outpatient **#123** (merge `0941004`, SW v13); the therapists-browser `amountOwed`
+  payload by Therapists **#106** (merge `e9021a5`, SW v46). Residual limitation: any holder of the shared Outpatient
+  `APP_PIN` can still read the session-only constants after sign-in; rotating `APP_PIN` + `SESSION_SECRET` is the
+  operator step. Keep the claim cautious until a live check by the operator.
 - Release order is unchanged and explicit: matching Node SHA live → dispatch
   **Deploy Apps Script** with `expected_commit` = merge SHA.
 
