@@ -2,8 +2,9 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { checkPin } = require('./lib/pin');
-const { createSessionToken, verifySessionToken, readSessionUser } = require('./lib/session');
-const { SESSION_USERS } = require('./lib/users');
+const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
+const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
+const catalogAdmin = require('./lib/catalog-admin');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -23,8 +24,18 @@ const SESSION_SECRET = process.env.SESSION_SECRET || '';
 if (!SESSION_SECRET) {
   console.error('[config] SESSION_SECRET is not set — /api/verify-pin will return 500 and the data routes (/api/sheets, /api/continuation-roster, /api/me, /api/debug/*) will return 401 until it is configured (fail-closed).');
 }
+/* Vered-only package catalog (quotes / pricing requests). TWO extra secrets, set
+ * on Railway by the operator — never in code, never logged:
+ *   CATALOG_ADMIN_PIN                — the PIN only Vered knows (8–32 chars, != APP_PIN)
+ *   CATALOG_ADMIN_ASSERTION_SECRET   — >=32 chars, shared with the Apps Script property
+ *                                      of the same name, distinct from every other key.
+ * FAIL-CLOSED: if either is missing/invalid every /api/catalog-admin route that
+ * needs it answers 503 and nothing price-related is reachable. */
+const CATALOG_ADMIN_PIN = process.env.CATALOG_ADMIN_PIN || '';
+const CATALOG_ADMIN_ASSERTION_SECRET = process.env.CATALOG_ADMIN_ASSERTION_SECRET || '';
 const SESSION_COOKIE = 'ezone_session';
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // 604800 seconds (7 days), matches the token TTL
+const PREAUTH_MAX_AGE = 10 * 60;          // the name-less PIN-stage session only lives long enough to pick a name
 // Continuation-track roster proxy: the currently-admitted patient roster is owned
 // by the E-Zone DASHBOARD Apps Script (action=getAdmittedRoster) and served
 // behind a fail-closed shared secret. We proxy it server-side so the browser
@@ -81,10 +92,22 @@ function parseSessionCookie(cookieHeader) {
  *   'not_configured' → SESSION_SECRET unset (fail-closed → 401)
  *   'ok'             → a valid, unexpired, correctly-signed cookie is present
  *   'unauthorized'   → missing / malformed / tampered / expired cookie (→ 401) */
-function sessionAuthStatus(cookieHeader, secret) {
+function sessionAuthStatus(cookieHeader, secret, opts) {
   if (typeof secret !== 'string' || secret.length === 0) return 'not_configured';
   const token = parseSessionCookie(cookieHeader);
-  if (token && verifySessionToken(token, secret)) return 'ok';
+  if (token && verifySessionToken(token, secret)) {
+    const user = readSessionUser(token, secret);
+    if (!user) {
+      // PIN stage of the two-step login: a valid cookie with NO name. It may reach ONLY the
+      // name-selection routes (opts.allowUnnamed); every ordinary data/write route refuses it.
+      return opts && opts.allowUnnamed ? 'ok' : 'name_required';
+    }
+    // A name removed from the user list must not keep working on an old
+    // 7-day cookie: retired users are refused, forcing a fresh login. A name that is
+    // not (or no longer) on the allow-list is refused the same way.
+    if (RETIRED_SESSION_USERS.indexOf(user) >= 0 || SESSION_USERS.indexOf(user) < 0) return 'unauthorized';
+    return 'ok';
+  }
   return 'unauthorized';
 }
 
@@ -123,16 +146,23 @@ function sessionUserFromRequest(req) {
  * unset SESSION_SECRET and a missing/invalid cookie BOTH yield 401 (the
  * client's one 401 handler sends the user back to the PIN screen either
  * way; the operator sees the boot-time log line). */
-function requireSession(req, res, next) {
-  const status = sessionAuthStatus(req.headers.cookie, SESSION_SECRET);
-  if (status !== 'ok') {
-    return res.status(401).json({
-      ok: false,
-      error: status === 'not_configured' ? 'session_not_configured' : 'unauthorized'
-    });
-  }
-  return next();
+function sessionGate(opts) {
+  return function (req, res, next) {
+    const status = sessionAuthStatus(req.headers.cookie, SESSION_SECRET, opts);
+    if (status !== 'ok') {
+      return res.status(401).json({
+        ok: false,
+        error: status === 'not_configured' ? 'session_not_configured' : (status === 'name_required' ? 'name_required' : 'unauthorized')
+      });
+    }
+    return next();
+  };
 }
+/* Every ordinary route: a valid cookie that carries an ALLOW-LISTED, non-retired name. */
+const requireSession = sessionGate();
+/* ONLY the name-selection step of the two-step login (GET /api/me, GET /api/users): a valid
+ * cookie, named or not. */
+const requireLoginStage = sessionGate({ allowUnnamed: true });
 
 /* Whether the ORIGINAL client request reached us over HTTPS. Railway terminates
  * TLS and forwards x-forwarded-proto=https; plain-HTTP localhost dev has neither,
@@ -145,13 +175,13 @@ function requestIsHttps(req) {
 /* Build the Set-Cookie value for a freshly-minted session token. SameSite=Lax
  * (per the outpatient brief): the cookie rides same-site fetches and
  * top-level navigations, never cross-site POSTs. */
-function buildSessionCookie(token, isHttps) {
+function buildSessionCookie(token, isHttps, maxAge) {
   const parts = [
     `${SESSION_COOKIE}=${token}`,
     'HttpOnly',
     'SameSite=Lax',
     'Path=/',
-    `Max-Age=${SESSION_MAX_AGE}`
+    `Max-Age=${maxAge || SESSION_MAX_AGE}`
   ];
   if (isHttps) parts.push('Secure');
   return parts.join('; ');
@@ -306,6 +336,9 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   const action = (req.query && req.query.action) || 'getData';
   // A GET must never mutate data, including the obsolete saveAll shortcut.
   if (action === 'saveAll') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+  // Package catalog / pricing actions have their own Vered-only route and the
+  // manager feeds never go through the browser: refuse them here.
+  if (catalogAdmin.isPackageAction(action)) return res.status(403).json({ ok: false, error: 'forbidden_action' });
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
 
   // Serve from cache when possible: only for the bulk read, and only when
@@ -374,6 +407,17 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     // legacy default (back when the client couldn't pick an action) so
     // requests without an explicit action keep working.
     const body = Object.assign({ action: 'saveAll' }, req.body || {});
+    // Package catalog / pricing: dedicated Vered-only route only. Authority
+    // fields (actor, role, assertion, requester) are server-owned — a browser
+    // that sends one is rejected, never silently trusted.
+    if (catalogAdmin.isPackageAction(body.action)) {
+      return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
+    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin']) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
+        return res.status(400).json({ ok: false, error: 'forbidden_field' });
+      }
+    }
     if (body.action === 'saveAll') {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
       body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
@@ -470,21 +514,145 @@ app.post('/api/verify-pin', (req, res) => {
       console.error('[verify-pin] correct PIN but SESSION_SECRET is not set — cannot mint a session cookie (fail-closed). Set SESSION_SECRET on the Railway service and redeploy.');
       return res.status(500).json({ ok: false, error: 'session_not_configured' });
     }
-    // Optional `user` (who/when stamping): a display name the login may
-    // attach — accepted ONLY from the fixed SESSION_USERS list (the leads
-    // assignedTo names); anything else falls back to the legacy user-less
-    // token. It rides INSIDE the signed token so it cannot be changed
-    // without breaking the HMAC. The name picker re-posts {pin, user} right
-    // after a user-less login: the cookie is simply re-issued with the same
-    // 7-day TTL (SESSION_MAX_AGE) — never extended, never a second cookie.
-    const user = validateSessionUser(req.body && req.body.user);
-    const token = createSessionToken(SESSION_SECRET, undefined, undefined, user);
-    res.set('Set-Cookie', buildSessionCookie(token, requestIsHttps(req)));
-    return res.status(200).json({ ok: true });
+    // TWO-STEP login. Step 1 {pin}: a correct PIN mints only a short-lived, NAME-LESS session
+    // (PREAUTH_MAX_AGE) that can reach nothing but the name picker (GET /api/users, GET /api/me).
+    // Step 2 {pin, user}: the picker re-posts the PIN with an allow-listed name and receives the
+    // real 7-day NAMED session. A `user` that is not on the allow-list (unknown, free text, or a
+    // RETIRED name) is refused — it never silently degrades to a session. Every login gets a
+    // fresh unique id (lib/session.js jti) and revokes the catalog-admin privilege of the session
+    // that presented its cookie (account switch / re-login), server-side.
+    const rawUser = req.body && req.body.user;
+    const wantsUser = typeof rawUser === 'string' && rawUser.trim() !== '';
+    const user = wantsUser ? validateSessionUser(rawUser) : '';
+    if (wantsUser && !user) {
+      return res.status(403).json({ ok: false, error: 'user_not_allowed' });
+    }
+    revokeAdminFor(req);
+    const token = createLoginToken(SESSION_SECRET, user ? undefined : PREAUTH_MAX_AGE, user);
+    res.set('Set-Cookie', [
+      buildSessionCookie(token, requestIsHttps(req), user ? SESSION_MAX_AGE : PREAUTH_MAX_AGE),
+      catalogAdmin.buildClearedAdminCookie(requestIsHttps(req))
+    ]);
+    return res.status(200).json({ ok: true, stage: user ? 'named' : 'name_required' });
   }
 
   entry.count += 1;
   return res.status(401).json({ ok: false, error: 'Incorrect PIN.' });
+});
+
+/* ---- Vered-only package catalog (/api/catalog-admin/*) ---------------------
+ * Every route needs the normal session AND, except login/logout/status, a valid
+ * short-lived admin cookie minted by a correct CATALOG_ADMIN_PIN. The admin
+ * cookie is scoped (cannot verify as a session), HttpOnly, SameSite=Strict and
+ * Path-limited to this prefix. Authority never comes from the picked display
+ * name or from anything the browser stores. */
+const catalogAdminLimiter = catalogAdmin.createFailureLimiter();
+const catalogAdminSessions = catalogAdmin.createAdminSessions();
+
+function catalogAdminConfig() {
+  return catalogAdmin.adminConfigStatus({
+    SESSION_SECRET, APP_PIN, OUTPATIENT_PROXY_SECRET,
+    CATALOG_ADMIN_PIN, CATALOG_ADMIN_ASSERTION_SECRET
+  });
+}
+
+function adminBinding(req) { return catalogAdmin.sessionBinding(parseSessionCookie(req.headers.cookie)); }
+function adminSid(req) { return catalogAdmin.readAdminSid(parseCookieValue(req.headers.cookie, catalogAdmin.ADMIN_COOKIE), SESSION_SECRET); }
+
+/* The admin privilege exists only while ALL hold: a valid, NAMED, non-retired base
+ * session; a valid admin cookie; and a live server-side record bound to THAT base
+ * session and THAT user. Anything else (other session, other user, logged out,
+ * restarted, expired) is "not admin". */
+function sessionJtiFromRequest(req) {
+  return SESSION_SECRET ? readSessionJti(parseSessionCookie(req.headers.cookie), SESSION_SECRET) : '';
+}
+function hasAdminCookie(req) {
+  const user = sessionUserFromRequest(req);
+  if (!user || RETIRED_SESSION_USERS.indexOf(user) >= 0 || SESSION_USERS.indexOf(user) < 0) return false;
+  if (!sessionJtiFromRequest(req)) return false;   // needs a unique login id (older cookies must sign in again)
+  return catalogAdminSessions.valid(adminSid(req), adminBinding(req), user);
+}
+
+function requireCatalogAdmin(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  if (!sessionUserFromRequest(req)) return res.status(403).json({ ok: false, error: 'named_session_required' });
+  if (!hasAdminCookie(req)) return res.status(401).json({ ok: false, error: 'admin_required' });
+  return next();
+}
+
+app.get('/api/catalog-admin/status', requireSession, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const configured = catalogAdminConfig().ok;
+  res.status(200).json({ ok: true, configured, admin: configured && hasAdminCookie(req) });
+});
+
+app.post('/api/catalog-admin/login', requireSession, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!catalogAdminConfig().ok) return res.status(503).json({ ok: false, error: 'catalog_admin_not_configured' });
+  // Every pricing action is attributable: an unnamed (legacy) session cannot enter.
+  const user = sessionUserFromRequest(req);
+  if (!user) return res.status(403).json({ ok: false, error: 'named_session_required' });
+  if (!sessionJtiFromRequest(req)) return res.status(403).json({ ok: false, error: 'fresh_login_required' });
+  const binding = adminBinding(req);
+  const ip = getClientIp(req);
+  const gate = catalogAdminLimiter.check(binding, ip);
+  if (!gate.allowed) {
+    res.set('Retry-After', String(gate.retryAfterSec));
+    if (gate.scope === 'global') console.warn('[catalog-admin] global failed-PIN cap reached; logins paused for up to ' + gate.retryAfterSec + 's');
+    return res.status(429).json({ ok: false, error: 'too_many_attempts', retryAfterSec: gate.retryAfterSec });
+  }
+  if (!catalogAdmin.verifyAdminPin(req.body && req.body.pin, CATALOG_ADMIN_PIN)) {
+    catalogAdminLimiter.fail(binding, ip);
+    return res.status(401).json({ ok: false, error: 'incorrect_pin' });
+  }
+  catalogAdminLimiter.success(binding);
+  const sid = catalogAdminSessions.create(binding, user);
+  if (!sid) return res.status(500).json({ ok: false, error: 'catalog_admin_unavailable' });
+  res.set('Set-Cookie', catalogAdmin.buildAdminCookie(catalogAdmin.createAdminToken(SESSION_SECRET, sid), requestIsHttps(req)));
+  return res.status(200).json({ ok: true });
+});
+
+/* Open like /api/logout (clearing a credential never needs one) — but it now ALSO
+ * revokes the privilege SERVER-SIDE: the admin session record for the presented
+ * cookie and every record bound to the presented base session are deleted, so a
+ * copied cookie stops working immediately instead of living out its 15 minutes. */
+function revokeAdminFor(req) {
+  catalogAdminSessions.revoke(adminSid(req));
+  catalogAdminSessions.revokeByBinding(adminBinding(req));
+}
+app.post('/api/catalog-admin/logout', (req, res) => {
+  revokeAdminFor(req);
+  res.set('Set-Cookie', catalogAdmin.buildClearedAdminCookie(requestIsHttps(req)));
+  res.status(200).json({ ok: true });
+});
+
+/* The ONLY gateway to the private catalog actions. The upstream body is rebuilt
+ * from a per-op allowlist (never the raw browser body), the actor comes from
+ * the signed session, and Apps Script gets a short-lived HMAC assertion bound
+ * to this exact body. */
+app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (req, res) => {
+  if (!requireSheetsUrl(res)) return;
+  const op = req.body && req.body.op;
+  const built = catalogAdmin.buildAdminUpstream(op, req.body, sessionUserFromRequest(req));
+  if (built.error) return res.status(400).json({ ok: false, error: built.error });
+  try {
+    const upstream = Object.assign({ action: built.action }, built.body, {
+      proxySecret: OUTPATIENT_PROXY_SECRET,
+      adminAssertion: catalogAdmin.signAssertion(built.action, built.body, CATALOG_ADMIN_ASSERTION_SECRET)
+    });
+    const r = await fetch(SHEETS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(upstream)
+    });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('upstream_unavailable'); }
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
 });
 
 /* GET /api/me — the display name embedded in this session's signed cookie
@@ -492,7 +660,7 @@ app.post('/api/verify-pin', (req, res) => {
  * user-less cookie answers { user: '' } and everything keeps working. The
  * frontend reads it after the PIN (empty -> name picker) and at load (header
  * "מחובר/ת כ: <name>"). */
-app.get('/api/me', requireSession, (req, res) => {
+app.get('/api/me', requireLoginStage, (req, res) => {
   res.status(200).json({ ok: true, user: sessionUserFromRequest(req) });
 });
 
@@ -501,7 +669,7 @@ app.get('/api/me', requireSession, (req, res) => {
  * `user` from), so the client never carries a duplicate that could drift.
  * Session-gated: the picker only appears after a correct PIN minted the
  * cookie, and the names are staff, not public. Read-only, no input. */
-app.get('/api/users', requireSession, (req, res) => {
+app.get('/api/users', requireLoginStage, (req, res) => {
   res.status(200).json({ ok: true, users: SESSION_USERS.slice() });
 });
 
@@ -510,7 +678,8 @@ app.get('/api/users', requireSession, (req, res) => {
  * (fire-and-forget) before showing the PIN screen, so a shared device does
  * not keep a live 7-day cookie after logout. */
 app.post('/api/logout', (req, res) => {
-  res.set('Set-Cookie', buildClearedSessionCookie(requestIsHttps(req)));
+  revokeAdminFor(req); // the pricing privilege ends with the session, server-side
+  res.set('Set-Cookie', [buildClearedSessionCookie(requestIsHttps(req)), catalogAdmin.buildClearedAdminCookie(requestIsHttps(req))]);
   res.status(200).json({ ok: true });
 });
 
@@ -608,6 +777,7 @@ module.exports.validateSessionUser = validateSessionUser;
 module.exports.sessionUserFromRequest = sessionUserFromRequest;
 module.exports.protectedStaticName = protectedStaticName;
 module.exports.requireSession = requireSession;
+module.exports.requireLoginStage = requireLoginStage;
 module.exports.requestIsHttps = requestIsHttps;
 module.exports.buildSessionCookie = buildSessionCookie;
 module.exports.buildClearedSessionCookie = buildClearedSessionCookie;

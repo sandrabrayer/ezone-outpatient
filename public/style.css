@@ -1196,3 +1196,19 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .renew-recovery { padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .renew-recovery p { line-height: 1.7; margin-top: 0; }
 .renew-recovery .btn { max-width: 100%; white-space: normal; margin: 4px 0 4px 8px; }
+
+/* ---- תמחור חבילות (Vered only) ---- */
+.pkg-root { display: flex; flex-direction: column; gap: 14px; }
+.pkg-gate { max-width: 420px; display: flex; flex-direction: column; gap: 10px; }
+.pkg-tabs, .pkg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pkg-list { display: flex; flex-direction: column; gap: 12px; }
+.pkg-card { display: flex; flex-direction: column; gap: 8px; }
+.pkg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pkg-price { display: flex; flex-direction: column; gap: 2px; }
+.pkg-approved, .pkg-total { font-weight: 600; color: var(--green-2); }
+.pkg-controls { display: flex; flex-direction: column; gap: 8px; }
+.pkg-msg { color: var(--red); min-height: 1.2em; }
+.pkg-log { margin: 0; padding-inline-start: 18px; }
+.pkg-root input, .pkg-root select { min-width: 0; flex: 1 1 140px; }
+.chip.warn { background: #3a2f12; color: var(--amber); border-color: #6b5a2a; }
+.pkg-root .muted { color: var(--muted); }

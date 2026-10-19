@@ -1,3 +1,7 @@
+> **Superseded (2026-10):** ירדן left. She is no longer offered and old sessions
+> carrying her name are refused — see `CHANGELOG-package-catalog.md` and
+> `test/retire-user-yarden.test.js`. History below is kept as written.
+
 # Add ירדן (Yarden) as an outpatient user
 
 **Why:** ירדן now works leads and clients alongside ורד / שירן / יעל, but she

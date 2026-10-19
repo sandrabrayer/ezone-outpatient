@@ -69,7 +69,7 @@ function request(method, path, bodyObj, extraHeaders) {
 
 // Log in with the dummy PIN and return the Cookie header the gated routes need.
 async function loginCookie() {
-  const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN });
+  const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: 'ורד' });
   assert.equal(res.status, 200);
   const setCookie = (res.headers['set-cookie'] || [])[0] || '';
   return setCookie.split(';')[0];
@@ -106,7 +106,7 @@ test('POST /api/verify-pin accepts the correct PIN (200)', async () => {
   await waitForListen();
   const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.json, { ok: true });
+  assert.deepEqual(res.json, { ok: true, stage: 'name_required' }, 'step 1 of the two-step login: a name-less PIN-stage session');
 });
 
 test('POST /api/verify-pin rejects a wrong PIN (401)', async () => {

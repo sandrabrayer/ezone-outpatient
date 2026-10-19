@@ -9,6 +9,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
 
+### Package catalog + pricing requests (OP-PKG, draft)
+- Solo (range) price is now chosen from three tiers — minimum / midpoint / maximum — instead of free text (owner decision 2026-10-19); VAT 18 % and current prices confirmed.
+- New Vered-only tab «תמחור חבילות» (calculator, requests with badge, catalog
+  with versioned edits). Quotation only: integer agorot, inclusive VAT (18 % is
+  an assumption), immutable quote snapshots, `priced` ≠ paid, attach stores a
+  reference only. No charge/payment/credit/TherapistRates/payout change.
+- Real Vered-only authorization: server-verified `CATALOG_ADMIN_PIN` (rate
+  limited, fail-closed) → 15-minute scoped HttpOnly cookie; Node rebuilds every
+  private call from an allowlist with a session-derived actor and a body-bound
+  HMAC assertion that Apps Script verifies. `/api/sheets` refuses package/admin
+  actions and authority fields.
+- Manager boundary for the therapists app: `PACKAGE_CATALOG_SECRET` (price-free
+  reads) and `PACKAGE_REQUEST_SECRET` (submissions) with explicit allowlisted
+  responses; idempotent UUID + payload-hash requests. The therapists side exists as
+  ezone-therapists draft #105 (not released; contract: `docs/package-therapists-contract.md`).
+- ירדן retired: removed from picker/assignedTo, old session cookies refused,
+  UI copy neutral («צוות מסלול המשך»). `APP_PIN`/`SESSION_SECRET` rotation is the
+  manual step. Backup/restore now covers two new sheets (manifest 9 or 11 rows).
+- SW v11 → v14 (v12 = #121, v13 = #123, both shipped). Docs: corrected
+  the outdated «auto-deploy» description to the explicit dispatch phase.
+  Needs the Apps Script release phase. Single release checklist (secrets, config, alignment checks,
+  PDF verification): `docs/package-release-checklist.md`. See `CHANGELOG-package-catalog.md`.
+
 ### Recoverable additional-charge creation (OP-02b2-b candidate)
 - Source-owned immutable charge/optional payment intent, exact readback and
   cross-device recovery; shared renewal guards and audited review on uncertainty.

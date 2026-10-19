@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -24,7 +25,8 @@ function sheet(name, initial) {
         setValue: (v) => set(r, c, v),
         setValues: (rows) => rows.forEach((row, i) => row.forEach((v, j) => set(r + i, c + j, v))),
         clearContent: () => { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) set(r + i, c + j, ''); },
-        setNumberFormat() { return this; }
+        setNumberFormat() { return this; },
+        getNumberFormats: () => Array.from({ length: nr }, () => Array.from({ length: nc }, () => '@'))
       };
     }
   };
@@ -39,7 +41,13 @@ function sandbox(leads = [], clients = []) {
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
     LockService: { getScriptLock: () => lock }, Logger: { log() {} },
     Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
-    Utilities: { formatDate: (d) => d.toISOString().slice(0, 10), getUuid: () => 'fixture-' + (++uuid) },
+    Utilities: {
+      formatDate: (d) => d.toISOString().slice(0, 10), getUuid: () => 'fixture-' + (++uuid),
+      // Real SHA-256 / HMAC-SHA256 (Apps Script returns SIGNED byte arrays).
+      DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' },
+      computeDigest: (_alg, text) => Array.from(crypto.createHash('sha256').update(String(text), 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b)),
+      computeHmacSha256Signature: (msg, key) => Array.from(crypto.createHmac('sha256', String(key)).update(String(msg), 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b))
+    },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
     ContentService: { MimeType: { JSON: 'JSON' }, createTextOutput: (text) => ({ setMimeType() { return this; }, getContent: () => text }) }
   };
@@ -52,8 +60,9 @@ function sandbox(leads = [], clients = []) {
     const grid = sheets[name]?.grid || [];
     return grid.slice(1).filter((r) => r.some((v) => v !== '')).map((r) => Object.fromEntries(grid[0].map((h, i) => [h, r[i] ?? ''])));
   }
+  function get(params) { return JSON.parse(ctx.doGet({ parameter: { ...params } }).getContent()); }
   function post(payload) { return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ proxySecret: props.OUTPATIENT_PROXY_SECRET, ...payload }) }, parameter: {} }).getContent()); }
-  return { ctx, sheets, props, seed, rows, post, lock, isLocked: () => held,
+  return { ctx, sheets, props, seed, rows, post, get, lock, isLocked: () => held,
     save: (leads, clients = [], extra = {}) => post({ action: 'saveAll', user: 'fixture-user', leads, clients, ...extra }) };
 }
 

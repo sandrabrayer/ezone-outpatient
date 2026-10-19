@@ -362,7 +362,7 @@ test('wiring: submitStopAlert CREATES a stop alert with reason — no wa-link, n
   const fn = m[0];
   assert.match(fn, /apiPostAction\('createStopAlert'/, 'must call createStopAlert');
   assert.match(fn, /reason: reason/, 'payload must include the reason');
-  assert.match(fn, /toast\('נשלחה התראת עצירה לירדן'\)/, 'success toast');
+  assert.match(fn, /toast\('נשלחה התראת עצירה לצוות מסלול המשך'\)/, 'success toast');
   // optimistic push + rollback splice on state.myStopAlerts (type 'stop')
   assert.match(fn, /state\.myStopAlerts\.push\(/, 'optimistic push');
   assert.match(fn, /state\.myStopAlerts\.splice\(/, 'rollback on failure');

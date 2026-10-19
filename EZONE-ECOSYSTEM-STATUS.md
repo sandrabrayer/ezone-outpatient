@@ -37,6 +37,34 @@ requirements. After this bounded financial step return to the remaining OP-02b2
 flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
 and broader ten-app review remain in the program.
 
+## Outpatient: package catalog + pricing requests (OP-PKG, Oct 18, 2026 — DRAFT, not released)
+
+Isolated draft (branch `claude/package-catalog-quotes`, separate from the PR #121
+financial-safety work, which MERGED first as #121 `2d4950f`; this branch includes it
+and is re-bumped to SW **v14** (v13 is #123's) — confirm the LIVE version before release). Design, PDF→catalog mapping, ambiguities, configuration and
+release steps: `docs/package-catalog.md`. Therapists contract:
+`docs/package-therapists-contract.md`. The therapists side exists as ezone-therapists draft **#105**
+(not released). Single release checklist (secrets, config, alignment checks, PDF verification of all 15 rows,
+open owner decisions): `docs/package-release-checklist.md`. **No approval to release the packages yet.**
+
+- Vered-only pricing tab «תמחור חבילות»: a separate server-verified
+  `CATALOG_ADMIN_PIN` → 15-minute scoped HttpOnly cookie pointing at a server-side admin session bound to the base session + named user (revoked on logout AND on any re-login / account switch, unique per-login id); sign-in is two-step — a name-less PIN-stage session reaches only the name picker, every ordinary route needs an allow-listed named session, retired/unknown names get 403 (shared per-IP/global failure caps can still pause Vered's PIN entry ≤ 15 min — documented); Apps Script re-verifies a
+  body-bound HMAC assertion. Display name / `sessionStorage` never grant it.
+- Managers (Oren/Shahar, therapists app) get price-free catalog/status through two
+  distinct secrets (`PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`).
+- Quotation only: money in integer agorot, versioned catalog, immutable snapshots,
+  `priced` ≠ paid, attach stores a reference only. No charge/payment/credit/
+  TherapistRates/payout code changed.
+- ירדן is retired: not offered, old cookies refused (`RETIRED_SESSION_USERS`);
+  rotating `APP_PIN` + `SESSION_SECRET` is the manual step that revokes the shared PIN.
+- Confidentiality (shipped, reported by the reviewer; live behaviour not verified from the build sandbox): the public
+  price/pay constants are fixed by Outpatient **#123** (merge `0941004`, SW v13); the therapists-browser `amountOwed`
+  payload by Therapists **#106** (merge `e9021a5`, SW v46). Residual limitation: any holder of the shared Outpatient
+  `APP_PIN` can still read the session-only constants after sign-in; rotating `APP_PIN` + `SESSION_SECRET` is the
+  operator step. Keep the claim cautious until a live check by the operator.
+- Release order is unchanged and explicit: matching Node SHA live → dispatch
+  **Deploy Apps Script** with `expected_commit` = merge SHA.
+
 ## Outpatient: price / pay constants no longer public (Oct 18, 2026 — DRAFT, not released)
 
 Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
@@ -80,14 +108,26 @@ outpatient was switched dashboard-hKjf9 → volta, orphaning a day of work). The
 clasp CI deploy workflow, by contrast, DOES store the deployed branch (its
 `branches:` list) in the repo — see "Apps Script deployment" below.
 
-## Apps Script deployment — automatic via clasp CI (rollout COMPLETE, verified 22/07/2026)
+## Apps Script deployment — clasp CI (Outpatient: EXPLICIT dispatch, no push trigger)
 
-Every E-Zone app's Apps Script backend now auto-deploys from GitHub Actions via
-clasp. No more hand-pasting `Code.gs` into the editor. The rollout is complete
+> **Correction (Oct 2026).** The sections below describe the July 2026 rollout in
+> which a push to the deployed branch triggered the deploy. **That no longer holds
+> for Outpatient:** `deploy-apps-script.yml` has **no push trigger** (it deadlocked
+> with Railway's *Wait for CI*, PR #115). After an approved merge and once
+> `GET /api/version` serves the merge SHA, the releasing agent/operator runs
+> *Actions → Deploy Apps Script → Run workflow* on `claude/youthful-volta-laarnk`
+> with `expected_commit` = the full merge SHA. Nothing is ever pasted by hand and
+> no new deployment is created. Check each other app's own workflow before
+> assuming either behaviour. See `DEPLOY.md`.
+
+(Historical, July 2026 — kept for the clasp setup details:)
+
+Every E-Zone app's Apps Script backend deploys from GitHub Actions via
+clasp (Outpatient: on explicit dispatch, see the correction above). No more hand-pasting `Code.gs` into the editor. The rollout is complete
 and was verified green across all six apps on 22/07/2026 (ezone-therapists
 already ran this exact setup — it was the template the six were matched to).
 
-- **Automatic via GitHub Actions** — `.github/workflows/deploy-apps-script.yml`,
+- **GitHub Actions + clasp (Outpatient: explicit dispatch, not automatic)** — `.github/workflows/deploy-apps-script.yml`,
   clasp pinned to `@google/clasp@3.3.0`, hardened workflow: it fails loudly and
   early (before touching the live deployment) if a secret is missing or
   `CLASPRC_JSON` isn't valid JSON, and it requires clasp's `Deployed …@<version>`
@@ -95,11 +135,11 @@ already ran this exact setup — it was the template the six were matched to).
   as a green no-op. Runners use `actions/checkout@v5` + `actions/setup-node@v5`
   (Node 24 native — clears the Node 20 deprecation warning) with the clasp
   toolchain on `node-version: '22'`.
-- **Trigger** — a push/merge to the app's **deployed branch** that touches
-  `apps-script/**` (also `.clasp.json` or the workflow file itself). A
-  `workflow_dispatch` trigger allows manual on-demand runs from the Actions tab,
-  and a `concurrency` group serializes runs so two pushes can't race the same
-  deployment.
+- **Trigger** — *historical (July 2026):* a push/merge to the deployed branch that
+  touched `apps-script/**`. **Outpatient today:** `workflow_dispatch` only, with a
+  required `expected_commit` input and a pre-credential readiness gate (see the
+  correction above). A `concurrency` group serializes runs so two dispatches can't
+  race the same deployment.
 - **Redeploys the EXISTING deployment (same `/exec` URL)** — `clasp push -f`
   uploads `apps-script/**`, then `clasp deploy -i <DEPLOYMENT_ID>` republishes
   the existing deployment as a NEW VERSION. The deployment ID is reused, so **the
@@ -421,9 +461,10 @@ check against pre-June-17 branches.
 
 ## Known pitfalls (hard-won, extended July 4)
 
-- **[OBSOLETE for routine deploys — Apps Script now deploys automatically via
-  clasp CI; see "Apps Script deployment" above. Kept as history / emergency
-  fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
+- **[OBSOLETE for routine deploys — Apps Script is published through the clasp
+  workflow (Outpatient: explicit `workflow_dispatch` with `expected_commit`, no
+  push trigger); see "Apps Script deployment" above. Never paste Code.gs by hand.
+  Kept as history / emergency fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
   Save → deploy a NEW VERSION of the EXISTING deployment. Wrong choices seen this
   week: new deployment (URL changes, consumers break) and access flipped off
   "Anyone" (consumers get Google's HTML page → "Non-JSON from Apps Script").

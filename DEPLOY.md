@@ -98,6 +98,20 @@ Two ordered release phases:
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
 
+## Package catalog configuration (OP-PKG — values are never committed)
+
+Railway → *ezone-outpatient* → **Variables** (applies to deployments started
+after saving): `CATALOG_ADMIN_PIN` (8–32 chars, ≠ `APP_PIN`) and
+`CATALOG_ADMIN_ASSERTION_SECRET` (≥ 32 chars). Apps Script → **Project
+Settings → Script properties**: `CATALOG_ADMIN_ASSERTION_SECRET` (same value as
+Railway), `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET` (each ≥ 32 chars,
+all pairwise distinct and distinct from `OUTPATIENT_PROXY_SECRET`). The two
+`PACKAGE_*` secrets are also set on the **therapists** service only. Missing or
+duplicate secrets fail closed. To revoke the retired user's shared-PIN knowledge,
+rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Full
+detail and precise click-paths: `docs/package-release-checklist.md` (single checklist);
+background: `docs/package-catalog.md`. These are PREREQUISITES of enablement, not optional.
+
 ## Apps Script release phase (clasp in GitHub Actions)
 
 **Workflow:** [`.github/workflows/deploy-apps-script.yml`](.github/workflows/deploy-apps-script.yml)
