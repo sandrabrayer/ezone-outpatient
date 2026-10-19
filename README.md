@@ -100,8 +100,7 @@ Setup, secrets, the PDF mapping, open questions and the therapists contract:
 [`docs/package-therapists-contract.md`](docs/package-therapists-contract.md).
 **Release checklist (single source for secrets/config/alignment checks):**
 [`docs/package-release-checklist.md`](docs/package-release-checklist.md). Not released.
-Required variables (values never in git): `CATALOG_ADMIN_PIN`,
-`CATALOG_ADMIN_ASSERTION_SECRET` (Railway) and the Script properties
+Required variables (values never in git): `CATALOG_ADMIN_ASSERTION_SECRET` (Railway; no second code — Vered's signed-in name opens pricing) and the Script properties
 `CATALOG_ADMIN_ASSERTION_SECRET`, `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`.
 
 ### Sheet schema (created automatically)

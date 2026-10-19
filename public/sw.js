@@ -58,8 +58,11 @@
  *   v12 → v13 → v14 after #121 (v12) and #123 (v13) take their numbers; before
  *   release re-check the LIVE version (CLAUDE.md rule 5). The service worker
  *   still never caches /api/.
+ * - v15 (2026-10-19): the pricing tab no longer asks for a second code (Vered's
+ *   signed-in name opens it); package-pricing.js changed. LIVE v14 was verified
+ *   (#122 merge 3c1d260) before this bump.
  */
-var CACHE = 'ezone-outpatient-v14';
+var CACHE = 'ezone-outpatient-v15';
 var SHELL = [
   './',
   './index.html',
