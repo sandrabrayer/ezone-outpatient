@@ -24,6 +24,7 @@ function sheet(name, initial) {
         setValue: (v) => set(r, c, v),
         setValues: (rows) => rows.forEach((row, i) => row.forEach((v, j) => set(r + i, c + j, v))),
         clearContent: () => { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) set(r + i, c + j, ''); },
+        getNumberFormats: () => Array.from({ length: nr }, () => Array(nc).fill('General')),
         setNumberFormat() { return this; }
       };
     }
@@ -36,11 +37,11 @@ function sandbox(leads = [], clients = []) {
   let held = false, uuid = 0;
   const lock = { tryLock: () => { held = true; return true; }, waitLock: () => { held = true; }, releaseLock: () => { held = false; } };
   const ctx = {
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getId: () => 'synthetic-source', getSheets: () => Object.values(sheets), getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
     LockService: { getScriptLock: () => lock }, Logger: { log() {} },
     Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
     Utilities: { formatDate: (d) => d.toISOString().slice(0, 10), getUuid: () => 'fixture-' + (++uuid) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; } }) },
     ContentService: { MimeType: { JSON: 'JSON' }, createTextOutput: (text) => ({ setMimeType() { return this; }, getContent: () => text }) }
   };
   vm.createContext(ctx);

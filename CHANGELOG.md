@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 operational recovery (draft)
+- Nightly backup now includes session/rate/configuration and operational history,
+  a complete inventory, and guarded recovery verification. Unknown tabs remain
+  explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
+
 ### Price and pay constants are session-only (confidentiality fix, draft)
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.

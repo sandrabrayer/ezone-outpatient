@@ -3,90 +3,7 @@
 // Execute the real job and backup helpers. Only GAS services are synthetic.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const crypto = require('node:crypto');
-const code = fs.readFileSync(path.join(__dirname, '../apps-script/Code.gs'), 'utf8');
-const copy = rows => rows.map(row => row.map(v => v instanceof Date ? new Date(v) : v));
-
-function harness(sourceGrids) {
-  const events = [], props = {}, logs = [], faults = {};
-  let uuid = 0, scriptHeld = false, userHeld = false;
-  function book(id) {
-    const sheets = [];
-    const ss = { getId: () => id, getSheets: () => sheets.slice(),
-      getSheetByName: name => sheets.find(s => s.getName() === name) || null,
-      insertSheet(name, initial = [['']]) {
-        if (id === 'live' && faults.forbidLiveWrites) throw Error('LIVE WRITE');
-        assert.equal(ss.getSheetByName(name), null);
-        let rows = copy(initial), formats = rows.map(r => r.map(() => 'General'));
-        let maxRows = 3, maxColumns = 3;
-        const sh = { getName: () => name, getLastRow: () => rows.length,
-          getLastColumn: () => rows[0]?.length || 1, getMaxRows: () => maxRows,
-          getMaxColumns: () => maxColumns,
-          insertRowsAfter(_, n) { maxRows += n; }, insertColumnsAfter(_, n) { maxColumns += n; },
-          setName(next) {
-            events.push(['rename', name, next]);
-            if (faults.publish && next === faults.publish && name.startsWith('outpatient-pending-')) throw Error('publish failed');
-            if (ss.getSheetByName(next)) throw Error('duplicate name');
-            name = next;
-          },
-          getDataRange: () => sh.getRange(1, 1, rows.length, rows[0].length),
-          getRange(r, c, nr = 1, nc = 1) {
-            return {
-              getValues() {
-                events.push(['read', id, name, scriptHeld]);
-                if (faults.read === name) throw Error('source read failed');
-                const values = Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => rows[r-1+i]?.[c-1+j] ?? ''));
-                if (faults.corrupt && name.startsWith('outpatient-pending-')) values[0][0] = 'corrupted';
-                return copy(values);
-              },
-              getNumberFormats: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => formats[r-1+i]?.[c-1+j] || 'General')),
-              getFormulas: () => Array.from({ length: nr }, () => Array(nc).fill(faults.formula ? '=1+1' : '')),
-              setNumberFormats(values) { formats = copy(values); },
-              setValues(values) {
-                assert.equal(id, 'backup', 'Never write live data');
-                assert.equal(scriptHeld, false, 'Backup writes must not block app saves');
-                events.push(['write', id, name]);
-                if (faults.write) throw Error('write failed');
-                rows = copy(values).map(row => row.map(v => typeof v === 'string' && v.startsWith("'") ? v.slice(1) : v));
-              }
-            };
-          }
-        };
-        sheets.push(sh); return sh;
-      },
-      deleteSheet(sh) { assert.equal(id, 'backup'); events.push(['delete', sh.getName()]); sheets.splice(sheets.indexOf(sh), 1); }
-    };
-    return ss;
-  }
-  const live = book('live'), backup = book('backup');
-  const ctx = { Date, SpreadsheetApp: {
-      getActiveSpreadsheet: () => live, openById: id => id === 'live' ? live : backup,
-      create: () => backup, flush() {}
-    }, LockService: {
-      getScriptLock: () => ({ tryLock: () => faults.captureLock ? false : (scriptHeld = true), releaseLock: () => { scriptHeld = false; } }),
-      getUserLock: () => ({ tryLock: () => faults.writerLock ? false : (userHeld = true), releaseLock: () => { userHeld = false; } })
-    }, Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
-      computeDigest: (algorithm, value) => Array.from(crypto.createHash(algorithm).update(value).digest()), getUuid: () => String(++uuid), formatDate: d => d.toISOString().slice(0,10) },
-    Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
-    Logger: { log: (...args) => logs.push(args.join(' ')) },
-    MailApp: { sendEmail() { throw Error('No live mail in tests'); } },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k,v) => { props[k] = v; } }) }
-  };
-  vm.createContext(ctx); vm.runInContext(code, ctx);
-  const grids=sourceGrids || {
-    Clients:[['id','name','phone'], ['client-a','מטופל בדיקה','0500000001']],
-    Leads:[['id','name','phone'], ['lead-a','פניית בדיקה','0500000002']],
-    'לידים שהוסרו':[['id','name'], ['removed-a','פנייה שהוסרה']],
-    'Clients-removed':[['id','name'], ['old-client','מטופל שהוסר']]
-  };
-  Object.entries(grids).forEach(([name,rows])=>live.insertSheet(name,rows));
-  props.INTEGRITY_BACKUP_SSID = 'backup';
-  faults.forbidLiveWrites = true;
-  return { ctx, live, backup, events, props, faults, logs, locks: () => [scriptHeld,userHeld] };
-}
+const { harness } = require('../test-support/backup-sandbox.cjs');
 
 test('nightly job preserves existing client/lead datasets and unrelated tabs, never writes live data', () => {
   const h = harness();
@@ -149,10 +66,10 @@ test('capture aborts on read failure or missing required sheet and always releas
 
 test('absent optional archives are represented as empty header-only snapshots without creating live sheets', () => {
   const h = harness();
-  const source = { getSheetByName: n => n.includes('removed') || n === 'לידים שהוסרו' ? null : h.live.getSheetByName(n) };
+  const source = { ...h.live, getSheets: () => h.live.getSheets().filter(sh => !sh.getName().includes('removed') && sh.getName() !== 'לידים שהוסרו'), getSheetByName: n => n.includes('removed') || n === 'לידים שהוסרו' ? null : h.live.getSheetByName(n) };
   const captured = h.ctx._integrityCaptureData(source);
-  assert.equal(captured.length, 8);
-  for (const item of captured.slice(2)) { assert.equal(item.absent,true); assert.equal(item.grid.length,1); assert.equal(item.grid[0][0],'id'); }
+  assert.equal(captured.length, 18);
+  for (const item of captured.slice(2, -1)) { assert.equal(item.absent,true); assert.equal(item.grid.length,1); assert.ok(item.grid[0].length); }
   assert.deepEqual(h.locks(), [false,false]);
 });
 
@@ -210,7 +127,7 @@ test('financial snapshots and manifest verify as one set; mixed generation is re
   h.ctx.nightlyIntegrityJob();
   const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   const result = h.ctx._integrityValidateRestoreSet(h.backup, day);
-  assert.deepEqual(Array.from(result, r => r.source), ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments','ClientCharges','Credits','FinancialOps']);
+  assert.deepEqual(Array.from(result, r => r.source), ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments','ClientCharges','Credits','FinancialOps','SessionLog','TherapistRates','Settings','StopFlags','ExtraSessionRequests','מסלול המשך','התראות עצירת טיפול','AuditLog','RepairPlan','__RecoveryMetadata']);
   const changed = h.backup.getSheetByName('outpatient-payments-' + day);
   changed.getRange(1,1,2,1).setValues([['id'],['different-generation']]);
   assert.throws(() => h.ctx._integrityValidateRestoreSet(h.backup, day), /snapshot mismatch/);
@@ -234,6 +151,7 @@ for (const crash of ['client_done','payment_written']) test('isolated manifest-c
   const captured=h.ctx._integrityValidateRestoreSet(h.backup,day);
   const restored=sandbox();
   for(const item of captured){
+    if (item.absent || item.source === '__RecoveryMetadata') continue;
     const grid=item.grid;
     restored.seed(item.source,grid[0],grid.slice(1).map(row=>Object.fromEntries(grid[0].map((key,i)=>[key,row[i]]))));
   }
@@ -269,7 +187,7 @@ test('restore preflight requires a journal when the restore target has the activ
   const h=harness();h.ctx.nightlyIntegrityJob();
   const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   assert.throws(()=>h.ctx._integrityValidateRestoreSet(h.backup,day,true),/Restore journal required/);
-  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,8);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,18);
 });
 
 for (const crash of ['charge_done','payment_written']) test('mixed-kind manifest restore resumes extra '+crash+' without duplicate effects',()=>{
@@ -286,7 +204,8 @@ for (const crash of ['charge_done','payment_written']) test('mixed-kind manifest
   h.props.FINANCIAL_OPS_CREATED='1';h.ctx.nightlyIntegrityJob();
   const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   const restored=sandbox();
-  for(const {source,grid} of h.ctx._integrityValidateRestoreSet(h.backup,day,true)){
+  for(const {source,grid,absent} of h.ctx._integrityValidateRestoreSet(h.backup,day,true)){
+    if (absent || source === '__RecoveryMetadata') continue;
     restored.seed(source,grid[0],grid.slice(1).map(row=>Object.fromEntries(grid[0].map((key,i)=>[key,row[i]]))));
   }
   restored.props.FINANCIAL_OPS_CREATED='1';

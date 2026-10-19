@@ -1,5 +1,9 @@
 # E-ZONE Outpatient Dashboard
 
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+
 Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israel.
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
 through an Apps Script Web App.

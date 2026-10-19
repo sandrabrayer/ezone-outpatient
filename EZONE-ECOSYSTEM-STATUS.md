@@ -1,43 +1,44 @@
-# Outpatient local update — 2026-10-18
+# Outpatient current handoff — 2026-10-19
 
-OP-01 #115, release-order #116, OP-02a #117, OP-02b1 #118 and renewal #120 are
-released. Production baseline: 535dc659cae2807987f68002c20ac2ddb4fcc6c4, SW v11,
-source @97 (run 39117376211). #119 planned-exit fields remain included. Keep
-credentials and the Node-first explicit source dispatch gate. Historical notes
-below do not override DEPLOY.md.
+Deployed baseline: `094100434461cf84a0fc4e96602963ab815b7b6a`, source 98,
+SW 13, branch `claude/youthful-volta-laarnk`. #121 financial journal and #123
+protected price assets are released. Therapists #106 is released at
+`e9021a5a15363d017d0733771b242001057e61bc`, source 74, SW 46. Do not push merged
+branches or repeat those releases. Source deploy is explicit dispatch AFTER
+matching Node, with expected_commit = approved full merge SHA; historical
+all-app automatic-deploy wording below does not override this repo's DEPLOY.md.
 
-Current isolated candidate: OP-02b2-b additional-charge creation with optional
-initial payment, shared FinancialOps reservation and mixed-kind recovery. It also
-persists treatmentType/frequencyPerWeek previously lost by the source. See
-`docs/extra-charge-journal.md`, especially the no-@97-rollback rule after any extra
-history. Separate production approval remains required. Intake/activation/edit-paid/
-later toggles remain OP-02b2. OP-03 real scheduled backup and Google restore
-proof, OP-04 latency/journal scans/archive/repair, OP-05 review follow-up queues,
-deleted-client review access and bank/document evidence remain open. OP-05 also
-owns initial extra payment coverage and future-start/current-month inconsistencies;
-this candidate preserves actual existing semantics.
+Codex owns isolated OP-03 issue #124 implementation, branch
+`codex/op03-operational-backup-20261019`. The prior eight-table nightly set loses
+session replay identity/payroll state and custom rates on whole-workbook recovery.
+Candidate extends the set and adds inventory, validation and recovery hold.
+See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
+real Google round-trip with nonempty journal/session data, scheduled evidence,
+independent review and separate final production approval remain open.
 
-CRM Outpatient #114 / Dashboard #220 and other drafts are unchanged. OP-06 still
-includes legacy `recordTreatmentGiven` usage and cross-app retry/delivery; do not
-invent a receiver. Keep ten-app order: Outpatient → Therapists → Staffing →
-Coordinators → Dashboard → Managers → Logistics → Kitchen → Hadrachot → Helpdesk.
-For every app assess structure/workflows, business logic, missing information and
-features, security/privacy, save/recovery, backups, speed and controls. Maintain
-return points; finishing one financial step does not complete an app. Use Claude
-for bounded review where available, with one implementation owner and exact
-review/test evidence. Recommend new chat/model at a completed milestone with a
-handoff rather than losing context during unfinished financial work.
+Claude retains ownership of package #122 / Therapists #105. #122 observed at
+`8887ed5cd613211372e42daef5f973f53c408d92`: its new commit documents Sandra's
+VAT/current-price/Solo/continuation decisions and adds min/mid/max Solo selection.
+Those owner decisions are recorded by Claude, not independently re-confirmed in
+this session. Do not ask for the same decisions again. Configuration and final
+release approval remain separate gates. Backup sections overlap: integrate the
+registry/metadata/hold explicitly, retaining both package tables and journal
+families. Do not edit Claude's branches concurrently.
 
-Parallel work allocation (Sandra, 2026-10-18): Codex continues financial-safety
-draft #121; Claude owns package catalog/pricing draft #122 and its therapists
-integration. Both are candidates, not releases. #122 was observed at 821a82f5;
-its confidentiality and cross-app completion gaps remain open. Preserve both
-branches. See docs/extra-charge-journal.md for SW, backup and fixture integration
-requirements. After this bounded financial step return to the remaining OP-02b2
-flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
-and broader ten-app review remain in the program.
+Keep FinancialOps history/marker and both operation kinds. Never roll source
+back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and
+existing negative-timezone date-helper drift stay open; OP-04 latency/journal
+scans, OP-05 queues/bank/document controls, OP-06 delivery and legacy
+recordTreatmentGiven remain. CRM Outpatient #114 / Dashboard #220 are unchanged.
 
-## Outpatient: price / pay constants no longer public (Oct 18, 2026 — DRAFT, not released)
+Ten-app order: Outpatient → Therapists → Staffing → Coordinators → Dashboard →
+Managers → Logistics → Kitchen → Hadrachot → Helpdesk. For each cover structure,
+workflow, logic, missing information/features, privacy, integrity/recovery,
+backup, speed and controls. One implementation owner; Claude review where
+available, with exact commit and executed/static evidence distinguished. No
+subscriptions, check-ins or unapproved production release.
+
+## Outpatient: price / pay constants protection (released in #123, Oct 19, 2026)
 
 Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
 served without any session; now session-only, `no-store`, loaded after sign-in, dropped on logout, never
