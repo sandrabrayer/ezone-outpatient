@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Price and pay constants are session-only (confidentiality fix, draft)
+- `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
+  dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
+
 ### Recoverable additional-charge creation (OP-02b2-b candidate)
 - Source-owned immutable charge/optional payment intent, exact readback and
   cross-device recovery; shared renewal guards and audited review on uncertainty.

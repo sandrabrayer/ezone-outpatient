@@ -38,6 +38,10 @@ secret-looking is added to it.
   `SESSION_SECRET`) that every data route requires — a missing/expired
   cookie answers 401 and the app returns to the PIN screen. A correct PIN
   grants full edit access. יציאה expires the cookie (`POST /api/logout`).
+- **Price / pay constants are session-only.** `public/treatment-map.js` and `public/therapist-pay.js` are
+  served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
+  never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
+  See `CHANGELOG-protect-price-constants.md`.
 - "המשך כצופה בלבד" hides all edit controls (read-only). It rides the same
   cookie: the data loads only if this device already has a live session.
 - The editor/viewer choice is stored in `sessionStorage` for the session
