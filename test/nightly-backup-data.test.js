@@ -68,7 +68,7 @@ test('absent optional archives are represented as empty header-only snapshots wi
   const h = harness();
   const source = { ...h.live, getSheets: () => h.live.getSheets().filter(sh => !sh.getName().includes('removed') && sh.getName() !== 'לידים שהוסרו'), getSheetByName: n => n.includes('removed') || n === 'לידים שהוסרו' ? null : h.live.getSheetByName(n) };
   const captured = h.ctx._integrityCaptureData(source);
-  assert.equal(captured.length, 18);
+  assert.equal(captured.length, 20);
   for (const item of captured.slice(2, -1)) { assert.equal(item.absent,true); assert.equal(item.grid.length,1); assert.ok(item.grid[0].length); }
   assert.deepEqual(h.locks(), [false,false]);
 });
@@ -127,10 +127,26 @@ test('financial snapshots and manifest verify as one set; mixed generation is re
   h.ctx.nightlyIntegrityJob();
   const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   const result = h.ctx._integrityValidateRestoreSet(h.backup, day);
-  assert.deepEqual(Array.from(result, r => r.source), ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments','ClientCharges','Credits','FinancialOps','SessionLog','TherapistRates','Settings','StopFlags','ExtraSessionRequests','מסלול המשך','התראות עצירת טיפול','AuditLog','RepairPlan','__RecoveryMetadata']);
+  assert.deepEqual(Array.from(result, r => r.source), ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments','ClientCharges','Credits','FinancialOps','SessionLog','TherapistRates','Settings','StopFlags','ExtraSessionRequests','מסלול המשך','התראות עצירת טיפול','AuditLog','RepairPlan','PackageCatalog','PackageRequests','__RecoveryMetadata']);
   const changed = h.backup.getSheetByName('outpatient-payments-' + day);
   changed.getRange(1,1,2,1).setValues([['id'],['different-generation']]);
   assert.throws(() => h.ctx._integrityValidateRestoreSet(h.backup, day), /snapshot mismatch/);
+});
+test('a LEGACY 8-sheet manifest (written before the package sheets) still validates for restore', () => {
+  const h = harness();
+  h.ctx.nightlyIntegrityJob();
+  const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  const old = '2001-02-03';
+  const cur = h.backup.getSheetByName('outpatient-manifest-' + day).getDataRange().getValues();
+  const legacy = [cur[0]];
+  for (const row of cur.slice(1, 9)) {
+    const snap = String(row[2]).replace(day, old);
+    h.backup.insertSheet(snap, h.backup.getSheetByName(String(row[2])).getDataRange().getValues());
+    legacy.push([row[0], row[1], snap, row[3], row[4]]);
+  }
+  h.backup.insertSheet('outpatient-manifest-' + old, legacy);
+  assert.equal(legacy.length, 9);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup, old).length, 8);
 });
 test('journal deletion after activation blocks backup capture instead of inventing an empty journal', () => {
   const h = harness(); h.props.FINANCIAL_OPS_CREATED = '1';
@@ -187,7 +203,7 @@ test('restore preflight requires a journal when the restore target has the activ
   const h=harness();h.ctx.nightlyIntegrityJob();
   const day=h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   assert.throws(()=>h.ctx._integrityValidateRestoreSet(h.backup,day,true),/Restore journal required/);
-  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,18);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup,day,false).length,20);
 });
 
 for (const crash of ['charge_done','payment_written']) test('mixed-kind manifest restore resumes extra '+crash+' without duplicate effects',()=>{

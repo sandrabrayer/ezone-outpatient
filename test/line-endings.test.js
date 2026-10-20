@@ -113,7 +113,7 @@ test('B: binary files are still auto-detected, so nothing converts their bytes',
 test('B: the \\n-anchored source reads that used to break now hold', () => {
   const cases = [
     ['apps-script/Code.gs', /^var LEADS_HEADERS = \[$/m],
-    ['server.js', /^const { SESSION_USERS } = require\('\.\/lib\/users'\);$/m],
+    ['server.js', /^const { SESSION_USERS, RETIRED_SESSION_USERS } = require\('\.\/lib\/users'\);$/m],
     ['public/index.html', /^\s+<select name="assignedTo" required>$/m],
     ['lib/users.js', /^const SESSION_USERS = \[.+\];$/m],
     ['public/sw.js', /^var CACHE = 'ezone-outpatient-v\d+';$/m]

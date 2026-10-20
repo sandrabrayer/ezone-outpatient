@@ -50,6 +50,7 @@
         <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
         <button class="tab" data-view="payouts">תשלומי מטפלים</button>
         <button class="tab" data-view="continuation">מסלול המשך</button>
+        <button class="tab" data-view="packages" id="packagesTab">תמחור חבילות</button>
       </nav>
       <div class="topbar-right">
         <span id="sessionUser" class="session-user" hidden>מחובר/ת כ: <b id="sessionUserName"></b> · <button type="button" id="switchUserBtn" class="link-btn">החלף</button></span>
@@ -320,6 +321,11 @@
         </div>
         <div id="continuationList" class="continuation-list"></div>
       </section>
+
+      <!-- תמחור חבילות — Vered only: the server verifies a separate PIN; nothing price-related is in this markup or in the script. -->
+      <section id="view-packages" class="view">
+        <div id="packagesRoot" class="pkg-root"></div>
+      </section>
     </main>
 
     <!-- Toast -->
@@ -364,7 +370,6 @@
               <option>ורד</option>
               <option>שירן</option>
               <option>יעל</option>
-              <option>ירדן</option>
             </select>
           </label>
           <label class="wide">הערות<textarea name="note" rows="2"></textarea></label>
@@ -644,11 +649,11 @@
       <div class="modal-card">
         <div class="modal-title">עצירת טיפול</div>
         <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
-          התראה לירדן (הפסקה זמנית, לא סיום טיפול) — <span id="stopAlertClientName"></span>
+          התראה לצוות מסלול המשך (הפסקה זמנית, לא סיום טיפול) — <span id="stopAlertClientName"></span>
         </div>
         <form id="stopAlertForm" class="form-grid">
           <p id="stopAlertPending" class="wide" hidden style="margin:0;color:#e0b74a;font-size:12px;">
-            כבר קיימת התראת עצירה פתוחה שטרם נקראה על ידי ירדן — שליחה תיצור התראה נוספת.
+            כבר קיימת התראת עצירה פתוחה שטרם נקראה על ידי צוות מסלול המשך — שליחה תיצור התראה נוספת.
           </p>
           <label>סיבת העצירה
             <select name="stop_reason" id="stopAlertReason" required>
@@ -658,9 +663,9 @@
               <option value="other">אחר</option>
             </select>
           </label>
-          <label class="wide">הערה לירדן (רשות)<textarea id="stopAlertNote" name="stop_note" maxlength="1000" rows="3"></textarea></label>
+          <label class="wide">הערה לצוות מסלול המשך (רשות)<textarea id="stopAlertNote" name="stop_note" maxlength="1000" rows="3"></textarea></label>
           <p id="stopAlertOtherHint" class="wide" hidden style="margin:0;color:var(--muted);font-size:12px;">
-            מומלץ לפרט את הסיבה עבור ירדן בשדה ההערה.
+            מומלץ לפרט את הסיבה עבור צוות מסלול המשך בשדה ההערה.
           </p>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
@@ -680,8 +685,8 @@
           עבור <span id="resumeTreatmentClientName"></span>
         </div>
         <p style="margin:0 0 12px;color:var(--text-soft);font-size:13px;line-height:1.5;">
-          הפעולה מבטלת את התראת העצירה אם ירדן טרם קראה אותה. אם ההתראה כבר נקראה —
-          תישלח לירדן התראת חידוש טיפול.
+          הפעולה מבטלת את התראת העצירה אם הצוות טרם קרא אותה. אם ההתראה כבר נקראה —
+          תישלח לצוות מסלול המשך התראת חידוש טיפול.
         </p>
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" data-close>ביטול</button>
@@ -987,6 +992,7 @@
       });
     }
   </script>
+  <script src="package-pricing.js?v=__BUILD__" defer></script>
   <script src="app.js?v=__BUILD__" defer></script>
 </body>
 </html>

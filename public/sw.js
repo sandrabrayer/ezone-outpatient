@@ -53,8 +53,16 @@
  *   undecodable input) before it is matched, so /%74reatment-map.js and friends are never intercepted,
  *   cached or served from cache; responses marked no-store / private are never put in the cache; and any
  *   already-stored alias is evicted on activate and on a 'purge-protected' message (sent at sign-out).
+ * - v14 (2026-10-18): package catalog / pricing tab — new package-pricing.js
+ *   module, a new תמחור חבילות tab + section in index.html, and CSS. Re-bumped
+ *   v12 → v13 → v14 after #121 (v12) and #123 (v13) take their numbers; before
+ *   release re-check the LIVE version (CLAUDE.md rule 5). The service worker
+ *   still never caches /api/.
+ * - v15 (2026-10-19): the pricing tab no longer asks for a second code (Vered's
+ *   signed-in name opens it); package-pricing.js changed. LIVE v14 was verified
+ *   (#122 merge 3c1d260) before this bump.
  */
-var CACHE = 'ezone-outpatient-v13';
+var CACHE = 'ezone-outpatient-v15';
 var SHELL = [
   './',
   './index.html',

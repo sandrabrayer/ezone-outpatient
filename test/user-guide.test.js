@@ -31,6 +31,7 @@ const REQUIRED_SECTIONS = [
   'פעולות יומיומיות',
   'הכנסות חודשיות',
   'תשלום למטפלים',
+  'תמחור חבילות (ורד בלבד)',
   'כללי עבודה חשובים (מונעים תקלות)',
   'בעיות נפוצות',
   'למי פונים',
@@ -136,4 +137,13 @@ test('11. UI wording the guide relies on still exists in public/index.html', () 
 test('12. README links to the guide', () => {
   assert.ok(readme.includes('docs/USER-GUIDE.he.md'), 'README references docs/USER-GUIDE.he.md');
   assert.match(readme, /\]\(docs\/USER-GUIDE\.he\.md\)/, 'as a Markdown link');
+});
+
+test('13. package-pricing section: Vered-only, "priced" is not "paid", the tab exists, no amounts or codes', () => {
+  const s = section('תמחור חבילות (ורד בלבד)');
+  assert.ok(s.includes('ורד בלבד') || s.includes('ורד'), 'names who may use it');
+  assert.ok(s.includes('אינו ״שולם״'), 'says approved/priced is not paid');
+  assert.ok(s.includes('אורן ושחר אינם רואים מחירים'), 'managers never see prices');
+  assert.ok(/<button class="tab[^"]*" data-view="packages"[^>]*>תמחור חבילות<\/button>/.test(indexHtml), 'tab exists in the topbar');
+  assert.doesNotMatch(s, /\d{3,}/, 'no amounts or codes in the guide');
 });

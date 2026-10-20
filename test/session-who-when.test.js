@@ -116,7 +116,7 @@ async function login(user, extraHeaders) {
   const body = user === undefined ? { pin: DUMMY_PIN } : { pin: DUMMY_PIN, user };
   const res = await request('POST', '/api/verify-pin', body, extraHeaders);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.json, { ok: true });
+  assert.equal(res.json.ok, true);
   return res;
 }
 
@@ -130,9 +130,9 @@ test('A: legacy user-less token (2-part) still validates byte-for-byte and reads
   assert.equal(DEFAULT_TTL_SECONDS, 7 * 24 * 60 * 60, 'TTL is 7 days');
 });
 
-test('A: user-bearing token (3-part) validates and returns the Hebrew name', () => {
+test('A: user-bearing token (4-part: expiry.userB64.jti.sig) validates and returns the Hebrew name', () => {
   const token = createSessionToken(SECRET, undefined, undefined, 'ורד');
-  assert.equal(token.split('.').length, 3, 'expiry.userB64.sig — inside the signed payload');
+  assert.equal(token.split('.').length, 4, 'expiry.userB64.jti.sig — all inside the signed payload');
   assert.equal(verifySessionToken(token, SECRET), true);
   assert.equal(readSessionUser(token, SECRET), 'ורד');
 });
@@ -166,20 +166,20 @@ test('B: SESSION_USERS equals the index.html assignedTo options (nothing invente
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
   assert.deepEqual(SESSION_USERS, options);
-  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל', 'ירדן']);
+  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל']); // ירדן retired (test/retire-user-yarden.test.js)
 });
 
 test('B: verify-pin sets an HttpOnly SameSite=Lax 7-day cookie; Secure only behind HTTPS', async () => {
   await waitForListen();
-  const plain = await login();
+  const plain = await login('ורד');
   const sc = setCookieOf(plain);
-  assert.match(sc, /^ezone_session=\d+\.[0-9a-f]{64}; /, 'legacy user-less token when no user is sent');
+  assert.match(sc, /^ezone_session=\d+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}\.[0-9a-f]{64}; /, 'unique-login token carrying the name');
   assert.match(sc, /HttpOnly/);
   assert.match(sc, /SameSite=Lax/);
   assert.match(sc, /Path=\//);
   assert.match(sc, /Max-Age=604800/);
   assert.doesNotMatch(sc, /Secure/, 'plain HTTP (local dev) omits Secure');
-  const https = await login(undefined, { 'x-forwarded-proto': 'https' });
+  const https = await login('ורד', { 'x-forwarded-proto': 'https' });
   assert.match(setCookieOf(https), /; Secure$/, 'Railway TLS termination -> Secure');
   assert.equal(server.requestIsHttps({ headers: { 'x-forwarded-proto': 'https' } }), true);
   assert.equal(server.requestIsHttps({ headers: {}, secure: true }), true);
@@ -197,18 +197,20 @@ test('B: wrong PIN -> 401 and no cookie; the rate limiter is unchanged', async (
   await login(); // reset this IP's counter for the sibling tests
 });
 
-test('B: user accepted ONLY from SESSION_USERS — listed name rides inside the signed cookie, anything else -> legacy token', async () => {
+test('B: user accepted ONLY from SESSION_USERS — listed name rides inside the signed cookie, anything else is refused (403, no cookie)', async () => {
   await waitForListen();
   const listed = await login('ורד');
   const tok = cookieOf(listed).split('=')[1];
-  assert.equal(tok.split('.').length, 3);
+  assert.equal(tok.split('.').length, 4);
   assert.equal(readSessionUser(tok, SECRET), 'ורד');
-  for (const bad of ['someone', 'ורד לוי', '<script>', 'admin', '']) {
-    const res = await login(bad);
-    assert.equal(cookieOf(res).split('=')[1].split('.').length, 2, 'unlisted "' + bad + '" -> user-less legacy token');
+  for (const bad of ['someone', 'ורד לוי', '<script>', 'admin']) {
+    const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: bad });
+    assert.equal(res.status, 403, 'unlisted "' + bad + '"');
+    assert.equal(setCookieOf(res), '');
   }
+  assert.equal(readSessionUser(cookieOf(await login('')).split('=')[1], SECRET), '', 'no name -> PIN-stage session only');
   // a listed name survives trimming (the picker never sends padding, but the sanitizer must not break it)
-  assert.equal(cookieOf(await login('  שירן ')).split('=')[1].split('.').length, 3);
+  assert.equal(cookieOf(await login('  שירן ')).split('=')[1].split('.').length, 4);
   assert.equal(server.validateSessionUser('יעל'), 'יעל');
   assert.equal(server.validateSessionUser('יעל2'), '');
   assert.equal(server.validateSessionUser(12345), '');
@@ -266,11 +268,12 @@ test('B: POST /api/sheets ALWAYS overwrites body.user from the cookie — a clie
   assert.equal(r1.status, 200);
   assert.equal(lastUpstream.body.user, 'ורד');
   assert.equal(lastUpstream.body.action, 'saveAll');
-  // legacy (user-less) cookie -> '' is forwarded, still overwriting the client value
+  // a name-less (PIN-stage) cookie can no longer write at all: refused, nothing forwarded
   const legacy = { Cookie: cookieOf(await login()) };
-  await request('POST', '/api/sheets', { action: 'savePaymentAmountOverride', user: 'HACKER', clientId: 'c1', paymentId: 'p1', amount: 5 }, legacy);
-  assert.equal(lastUpstream.body.user, '');
-  assert.equal(lastUpstream.body.action, 'savePaymentAmountOverride');
+  lastUpstream = null;
+  const refused = await request('POST', '/api/sheets', { action: 'savePaymentAmountOverride', user: 'HACKER', clientId: 'c1', paymentId: 'p1', amount: 5 }, legacy);
+  assert.equal(refused.status, 401);
+  assert.equal(lastUpstream, null);
   // and a request that never mentioned user gets it set too
   await request('POST', '/api/sheets', { action: 'mergeClients', survivorId: 'a', dupIds: ['b'] }, named);
   assert.equal(lastUpstream.body.user, 'ורד');
@@ -285,7 +288,7 @@ test('B: /api/logout expires the cookie; /healthz stays open; requireSession mid
   assert.deepEqual((await request('GET', '/healthz')).json, { ok: true });
   // middleware: valid -> next(); missing -> 401 without calling next()
   let called = false;
-  server.requireSession({ headers: { cookie: 'ezone_session=' + createSessionToken(SECRET) } }, {}, () => { called = true; });
+  server.requireSession({ headers: { cookie: 'ezone_session=' + createSessionToken(SECRET, undefined, undefined, 'ורד') } }, {}, () => { called = true; });
   assert.equal(called, true);
   const res = { statusCode: null, body: null, status(c) { this.statusCode = c; return this; }, json(o) { this.body = o; return this; } };
   let nextCalled = false;
@@ -714,11 +717,13 @@ test('F: no Railway route serves another app — the only open routes are /healt
   // every /api route except verify-pin + logout is mounted behind requireSession
   const routes = [];
   server._router.stack.forEach((m) => {
-    if (m.route) routes.push({ path: m.route.path, methods: Object.keys(m.route.methods), gated: m.route.stack.some((l) => l.handle === server.requireSession) });
+    if (m.route) routes.push({ path: m.route.path, methods: Object.keys(m.route.methods), gated: m.route.stack.some((l) => l.handle === server.requireSession || l.handle === server.requireLoginStage) });
   });
   const api = routes.filter((r) => r.path.indexOf('/api/') === 0);
   const open = api.filter((r) => !r.gated).map((r) => r.path).sort();
   assert.deepEqual(open, ['/api/debug/cache', '/api/debug/cache/clear', '/api/debug/env', '/api/debug/last-load', '/api/debug/routes', '/api/logout', '/api/verify-pin',
+    // clearing the Vered-only cookie needs no credential (same as /api/logout); login/status/rpc ARE session-gated
+    '/api/catalog-admin/logout',
     // public deploy check: returns only { commit, builtAt } (lib/version.js, test/api-version.test.js)
     '/api/version'].sort());
   // the debug routes are gated by the router-level app.use('/api/debug', requireSession)

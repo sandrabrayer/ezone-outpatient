@@ -27,7 +27,7 @@ process.env.SHEETS_URL = SHEETS_URL;
 const SESSION_SECRET = 'test-session-secret-0123456789abcdef';
 process.env.SESSION_SECRET = SESSION_SECRET;
 const { createSessionToken } = require('../lib/session');
-const COOKIE = 'ezone_session=' + createSessionToken(SESSION_SECRET);
+const COOKIE = 'ezone_session=' + createSessionToken(SESSION_SECRET, undefined, undefined, 'ורד');
 
 let capturedUrl = null;
 global.fetch = async (url) => {

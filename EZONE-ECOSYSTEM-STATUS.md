@@ -1,7 +1,7 @@
-# Outpatient current handoff — 2026-10-19
+# Outpatient current handoff — 2026-10-20
 
-Deployed baseline: `094100434461cf84a0fc4e96602963ab815b7b6a`, source 98,
-SW 13, branch `claude/youthful-volta-laarnk`. #121 financial journal and #123
+Deployed Node baseline: `f7b37d70691caa775b81f6ab1fab32b1fb79e54e`, SW 15;
+Apps Script @99 (run 39298379832). Branch `claude/youthful-volta-laarnk`. #121 financial journal and #123
 protected price assets are released. Therapists #106 is released at
 `e9021a5a15363d017d0733771b242001057e61bc`, source 74, SW 46. Do not push merged
 branches or repeat those releases. Source deploy is explicit dispatch AFTER
@@ -16,14 +16,19 @@ See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
 real Google round-trip with nonempty journal/session data, scheduled evidence,
 independent review and separate final production approval remain open.
 
-Claude retains ownership of package #122 / Therapists #105. #122 observed at
-`8887ed5cd613211372e42daef5f973f53c408d92`: its new commit documents Sandra's
-VAT/current-price/Solo/continuation decisions and adds min/mid/max Solo selection.
-Those owner decisions are recorded by Claude, not independently re-confirmed in
-this session. Do not ask for the same decisions again. Configuration and final
-release approval remain separate gates. Backup sections overlap: integrate the
-registry/metadata/hold explicitly, retaining both package tables and journal
-families. Do not edit Claude's branches concurrently.
+OP-03 now integrates the exact released #122/#126 tree. Its registry retains
+both package datasets; the package lock rechecks recovery hold after acquisition.
+A real catalog + approved request survives manifest-checked local restore and
+an exact submission retry without another row. The full integrated UTC suite
+passes 1,624 tests with 37 skipped (1,661 total). Removing the new package-lock
+check makes both queued-writer regressions fail. Google execution is separate.
+
+Read-only source inspection Oct 20: Sheet1 has no cell values/formulas in its
+entire 1,000 x 26 grid. Copy of Clients has 21 unique-id rows and 33 headers;
+all 21 ids exist in Clients, but values were not equated. It is retained as a
+historical archive, never merged into Clients. No source cell was changed.
+The native full safety copy of Oct 19 predates the package tables and is not
+an up-to-date full backup. Unknown-tab recovery remains blocked pending review.
 
 Keep FinancialOps history/marker and both operation kinds. Never roll source
 back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and
@@ -38,12 +43,41 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
-## Outpatient: price / pay constants protection (released in #123, Oct 19, 2026)
+## Outpatient: packages and pricing access (released #122 / #126; Oct 20, 2026)
 
-Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
-served without any session; now session-only, `no-store`, loaded after sign-in, dropped on logout, never
-cached (SW v13). Browser + server tests. Details and limits (shared-PIN holders still see them):
-`CHANGELOG-protect-price-constants.md`. Release BEFORE the package-catalog PR; the later PR re-bumps the SW.
+#122 merged at `3c1d2607e166ad3d09565ac4cc47b365647fbe42`; its explicit source
+deploy workflow 39298379832 confirmed the existing deployment at @99. #126 merged at
+`f7b37d70691caa775b81f6ab1fab32b1fb79e54e` and changes Node/UI only. Public
+/api/version now reports f7b37d7 and /healthz is healthy. PackageCatalog and
+PackageRequests exist in the source workbook. This does not independently
+verify every configured secret or manager end-to-end usage.
+
+Sandra's removal of the extra catalog PIN is recorded in #126. Access uses the
+signed-in name allowlist (Vered), a scoped 15-minute session bound to the unique
+base login, server revocation and a body-bound source HMAC. Anyone with shared
+APP_PIN can choose Vered; name-only access is an accepted limitation in that
+owner record, not personal authentication. The catalog PIN/limiter are gone.
+Do not reintroduce the superseded PIN gate or describe it as still required.
+
+Claude owns Therapists #105, still draft at
+`7ac9c3a740371f74d5554477de514232e14d67fd` on its correct deployed base.
+It supplies the managers' price-free catalog/status and idempotent request flow;
+configuration and its separate release approval remain open. Keep two distinct
+PACKAGE_* secrets. Quotes remain integer-agorot immutable snapshots; priced is
+not paid, attach stores a reference, and package quotes do not create charges.
+Sandra's current prices, VAT, Solo tiers/extensions and Vered continuation
+ownership are documented by Claude; do not ask for those decisions again.
+See docs/package-catalog.md and docs/package-release-checklist.md for design and
+remaining rollout steps; older draft/release labels there are historical until
+reconciled by the package owner.
+
+## Outpatient: price / pay constants protection (released #123, Oct 19, 2026)
+
+Price assets require a signed session, use no-store, load after sign-in and are
+removed on logout; SW excludes them. Shared APP_PIN holders still see them after
+sign-in. Therapists #106 removes browser amounts while preserving the debt gate.
+Neither released branch needs another push or release. See
+CHANGELOG-protect-price-constants.md for the original change.
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 
@@ -81,14 +115,26 @@ outpatient was switched dashboard-hKjf9 → volta, orphaning a day of work). The
 clasp CI deploy workflow, by contrast, DOES store the deployed branch (its
 `branches:` list) in the repo — see "Apps Script deployment" below.
 
-## Apps Script deployment — automatic via clasp CI (rollout COMPLETE, verified 22/07/2026)
+## Apps Script deployment — clasp CI (Outpatient: EXPLICIT dispatch, no push trigger)
 
-Every E-Zone app's Apps Script backend now auto-deploys from GitHub Actions via
-clasp. No more hand-pasting `Code.gs` into the editor. The rollout is complete
+> **Correction (Oct 2026).** The sections below describe the July 2026 rollout in
+> which a push to the deployed branch triggered the deploy. **That no longer holds
+> for Outpatient:** `deploy-apps-script.yml` has **no push trigger** (it deadlocked
+> with Railway's *Wait for CI*, PR #115). After an approved merge and once
+> `GET /api/version` serves the merge SHA, the releasing agent/operator runs
+> *Actions → Deploy Apps Script → Run workflow* on `claude/youthful-volta-laarnk`
+> with `expected_commit` = the full merge SHA. Nothing is ever pasted by hand and
+> no new deployment is created. Check each other app's own workflow before
+> assuming either behaviour. See `DEPLOY.md`.
+
+(Historical, July 2026 — kept for the clasp setup details:)
+
+Every E-Zone app's Apps Script backend deploys from GitHub Actions via
+clasp (Outpatient: on explicit dispatch, see the correction above). No more hand-pasting `Code.gs` into the editor. The rollout is complete
 and was verified green across all six apps on 22/07/2026 (ezone-therapists
 already ran this exact setup — it was the template the six were matched to).
 
-- **Automatic via GitHub Actions** — `.github/workflows/deploy-apps-script.yml`,
+- **GitHub Actions + clasp (Outpatient: explicit dispatch, not automatic)** — `.github/workflows/deploy-apps-script.yml`,
   clasp pinned to `@google/clasp@3.3.0`, hardened workflow: it fails loudly and
   early (before touching the live deployment) if a secret is missing or
   `CLASPRC_JSON` isn't valid JSON, and it requires clasp's `Deployed …@<version>`
@@ -96,11 +142,11 @@ already ran this exact setup — it was the template the six were matched to).
   as a green no-op. Runners use `actions/checkout@v5` + `actions/setup-node@v5`
   (Node 24 native — clears the Node 20 deprecation warning) with the clasp
   toolchain on `node-version: '22'`.
-- **Trigger** — a push/merge to the app's **deployed branch** that touches
-  `apps-script/**` (also `.clasp.json` or the workflow file itself). A
-  `workflow_dispatch` trigger allows manual on-demand runs from the Actions tab,
-  and a `concurrency` group serializes runs so two pushes can't race the same
-  deployment.
+- **Trigger** — *historical (July 2026):* a push/merge to the deployed branch that
+  touched `apps-script/**`. **Outpatient today:** `workflow_dispatch` only, with a
+  required `expected_commit` input and a pre-credential readiness gate (see the
+  correction above). A `concurrency` group serializes runs so two dispatches can't
+  race the same deployment.
 - **Redeploys the EXISTING deployment (same `/exec` URL)** — `clasp push -f`
   uploads `apps-script/**`, then `clasp deploy -i <DEPLOYMENT_ID>` republishes
   the existing deployment as a NEW VERSION. The deployment ID is reused, so **the
@@ -422,9 +468,10 @@ check against pre-June-17 branches.
 
 ## Known pitfalls (hard-won, extended July 4)
 
-- **[OBSOLETE for routine deploys — Apps Script now deploys automatically via
-  clasp CI; see "Apps Script deployment" above. Kept as history / emergency
-  fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
+- **[OBSOLETE for routine deploys — Apps Script is published through the clasp
+  workflow (Outpatient: explicit `workflow_dispatch` with `expected_commit`, no
+  push trigger); see "Apps Script deployment" above. Never paste Code.gs by hand.
+  Kept as history / emergency fallback only.]** Apps Script NEVER auto-syncs from GitHub: paste Code.gs →
   Save → deploy a NEW VERSION of the EXISTING deployment. Wrong choices seen this
   week: new deployment (URL changes, consumers break) and access flipped off
   "Anyone" (consumers get Google's HTML page → "Non-JSON from Apps Script").

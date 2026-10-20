@@ -446,7 +446,7 @@ var STOP_ALERT_TYPES = { stop: true, resume: true };
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
-var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true };
+var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true, patientPhone: true };
 
 /* Mirror of recoverPhone() in public/app.js — keep both in sync. Normalizes to
  * the leading-zero canonical form and restores a leading zero that Sheets
@@ -506,7 +506,7 @@ function _crossAppPhone(cl) {
 /* Columns that must be stored as plain text: phones (leading zeros) and the
  * who/when stamps (ISO timestamps that Sheets would otherwise Date-coerce). */
 function _isTextForcedColumn(name) {
-  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name]);
+  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name] || PACKAGE_TEXT_COLUMNS[name]);
 }
 
 /* Force '@' (plain text) format on any phone / stamp columns in this sheet,
@@ -4509,6 +4509,714 @@ function _finishRenewal(payload, cancel) {
 }
 
 
+/* ===== Package catalog, quotes and pricing requests (OP-PKG) ================
+ *
+ * A QUOTATION source only. Nothing here reads or writes Clients charges,
+ * Payments, renewals, Credits, TherapistRates or payout math; `priced` means
+ * "quoted/approved", never "paid", and attaching a request to a patient or
+ * lead stores a reference on the request row only.
+ *
+ * TWO AUDIENCES, TWO BOUNDARIES (never mixed):
+ *   Managers (Oren / Shahar, via the therapists Node + Apps Script) get ONLY
+ *   price-free views, built field-by-field by the _pkgPublic* / _pkgSubmit* /
+ *   _pkgStatus* builders below (an allowlist — never "copy the row and delete
+ *   the price keys"). Their secrets are PACKAGE_CATALOG_SECRET (reads) and
+ *   PACKAGE_REQUEST_SECRET (submissions); the proxy key unlocks neither.
+ *   Vered (admin) actions need the Node proxy key AND a short-lived HMAC
+ *   assertion minted by Node only after the server-verified CATALOG_ADMIN_PIN
+ *   (see _pkgAdminAssertionOk) — a display name or browser flag grants nothing.
+ *
+ * MONEY: integer AGOROT everywhere (never floats, never whole shekels).
+ * VAT: explicit basis ('inclusive' — the catalog prices include VAT, PDF p9)
+ * and rate in basis points; net = round-half-up(gross * 10000 / (10000+bp))
+ * in integer math, vat = gross - net.
+ *
+ * VERSIONS: PackageCatalog rows are append-only versions (id = key@vN). An
+ * edit appends version N+1 with a new global `epoch` and flips the old row's
+ * `active` cell; no price cell is ever overwritten. Every request stores an
+ * immutable `quoteSnapshot` of the exact row/figures used, so a later catalog
+ * edit can never change an existing quote.
+ *
+ * Both sheets are append-only-header (never reorder/remove a column).
+ */
+var PACKAGE_CATALOG_SHEET = 'PackageCatalog';
+var PACKAGE_REQUESTS_SHEET = 'PackageRequests';
+var PACKAGE_CATALOG_HEADERS = [
+  'id', 'key', 'version', 'epoch', 'family', 'tier', 'unit',
+  'sessions', 'sessionMinutes', 'allowedMonths',
+  'pricePerSessionAgorot', 'priceTotalAgorot', 'monthlyPriceAgorot',
+  'priceMinAgorot', 'priceMaxAgorot',
+  'vatBasis', 'vatRateBp', 'active', 'sortOrder', 'sourceRef',
+  'validFromIso', 'createdAtIso', 'createdBy'
+];
+var PACKAGE_REQUEST_HEADERS = [
+  'id', 'payloadHash', 'status', 'revision', 'requesterKey',
+  'patientName', 'patientPhone', 'packageKey', 'months',
+  'catalogRowId', 'catalogEpoch', 'selectedMonthlyAgorot',
+  'quoteSnapshot', 'adjustedTotalAgorot', 'adjustReason', 'adjustLog',
+  'approvedTotalAgorot', 'approvedSnapshot', 'approvedAtIso', 'approvedBy',
+  'attachedType', 'attachedId', 'attachedAtIso', 'attachedBy',
+  'opLog', 'createdAtIso', 'updatedAt', 'updatedBy'
+];
+/* Columns Sheets would otherwise coerce (ISO timestamps -> Date, hex hashes ->
+ * numbers). Forced to plain text next to PHONE/STAMP columns. */
+var PACKAGE_TEXT_COLUMNS = {
+  payloadHash: true, validFromIso: true, createdAtIso: true,
+  approvedAtIso: true, attachedAtIso: true, allowedMonths: true
+};
+/* Stable requester keys (Hebrew labels are render-time only, in the UI). */
+var PACKAGE_REQUESTERS = { oren: true, shahar: true };
+var PACKAGE_UNITS = { per_session_pack: true, flat: true, per_month: true, per_month_range: true };
+var PACKAGE_MAX_AGOROT = 100000000;      // 1,000,000 ₪ sanity cap on any amount
+var PACKAGE_VAT_RATE_BP_DEFAULT = 1800;  // 18% — ASSUMPTION, see docs/package-catalog.md
+var PACKAGE_MANAGER_ACTIONS = { getPackageCatalogPublic: true, getPackageRequestStatus: true, createPackageRequest: true };
+var PACKAGE_ADMIN_ACTIONS = {
+  adminGetPackageCatalog: true, adminSeedPackageCatalog: true, adminSavePackageCatalogRow: true,
+  adminQuotePackage: true, adminListPackageRequests: true, adminAdjustPackageRequest: true,
+  adminApprovePackageRequest: true, adminAttachPackageRequest: true
+};
+var PACKAGE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/* Initial catalog = the supplied PDF "קטלוג שירותים איזון 2026" (version 2.0,
+ * May 2026; every price includes VAT, p9). One row per option key; page
+ * references are PDF page numbers. */
+var PACKAGE_CATALOG_SEED = [
+  { key: 'day_track_basic', family: 'day_track', tier: 'basic', unit: 'per_month', sessions: 0, sessionMinutes: 0, allowedMonths: '1', monthlyPriceAgorot: 1500000, sourceRef: 'PDF p3: מסלול בסיסי, 3 days/week, 15,000 ₪ per month' },
+  { key: 'day_track_extended', family: 'day_track', tier: 'extended', unit: 'per_month', sessions: 0, sessionMinutes: 0, allowedMonths: '1', monthlyPriceAgorot: 1800000, sourceRef: 'PDF p3: מסלול מורחב, 5 days/week, 18,000 ₪ per month' },
+  { key: 'emdr_core', family: 'emdr', tier: 'core', unit: 'per_session_pack', sessions: 4, sessionMinutes: 60, pricePerSessionAgorot: 85000, sourceRef: 'PDF p5: EMDR Core, 4 sessions, 3,400 ₪ total, 850 ₪ per session' },
+  { key: 'emdr_standard', family: 'emdr', tier: 'standard', unit: 'per_session_pack', sessions: 8, sessionMinutes: 60, pricePerSessionAgorot: 85000, sourceRef: 'PDF p5: EMDR Standard, 8 sessions, 6,800 ₪ total' },
+  { key: 'emdr_complex', family: 'emdr', tier: 'complex', unit: 'per_session_pack', sessions: 16, sessionMinutes: 60, pricePerSessionAgorot: 85000, sourceRef: 'PDF p5: EMDR Complex, 16 sessions, 13,600 ₪ total' },
+  { key: 'emdr_single', family: 'emdr', tier: 'single', unit: 'per_session_pack', sessions: 1, sessionMinutes: 60, pricePerSessionAgorot: 85000, sourceRef: 'PDF p5: single EMDR session 850 ₪ (30-day conversion credit NOT modelled)' },
+  { key: 'cbt_core', family: 'cbt', tier: 'core', unit: 'per_session_pack', sessions: 6, sessionMinutes: 50, pricePerSessionAgorot: 50000, sourceRef: 'PDF p6: CBT Core, 6 sessions, 3,000 ₪ total, 500 ₪ per session' },
+  { key: 'cbt_standard', family: 'cbt', tier: 'standard', unit: 'per_session_pack', sessions: 12, sessionMinutes: 50, pricePerSessionAgorot: 50000, sourceRef: 'PDF p6: CBT Standard, 12 sessions, 6,000 ₪ total' },
+  { key: 'cbt_complex', family: 'cbt', tier: 'complex', unit: 'per_session_pack', sessions: 20, sessionMinutes: 50, pricePerSessionAgorot: 50000, sourceRef: 'PDF p6: CBT Complex, 20 sessions, 10,000 ₪ total' },
+  { key: 'cbt_single', family: 'cbt', tier: 'single', unit: 'per_session_pack', sessions: 1, sessionMinutes: 50, pricePerSessionAgorot: 50000, sourceRef: 'PDF p6: single CBT session 500 ₪ (30-day conversion credit NOT modelled)' },
+  { key: 'emdr_cbt_combined', family: 'emdr_cbt', tier: 'combined', unit: 'flat', sessions: 12, sessionMinutes: 0, priceTotalAgorot: 850000, sourceRef: 'PDF p6: combined EMDR+CBT, 12 sessions, flat 8,500 ₪ (not 12 x a per-session rate)' },
+  { key: 'continuation_monthly', family: 'continuation', tier: 'monthly', unit: 'per_month', sessions: 4, sessionMinutes: 50, allowedMonths: '1', monthlyPriceAgorot: 200000, sourceRef: 'PDF p7: טיפולי המשך, 4 sessions per month, 2,000 ₪ per month, month-to-month' },
+  { key: 'psychiatric_consult', family: 'psychiatric', tier: 'consult', unit: 'per_session_pack', sessions: 1, sessionMinutes: 0, pricePerSessionAgorot: 90000, sourceRef: 'PDF p7: ייעוץ פסיכיאטרי 900 ₪ per meeting (distinct from the 1,100 ₪ מעקב פסיכיאטרי billing price)' },
+  { key: 'psychiatric_diagnosis', family: 'psychiatric', tier: 'diagnosis', unit: 'flat', sessions: 1, sessionMinutes: 0, priceTotalAgorot: 250000, sourceRef: 'PDF p7: אבחון פסיכיאטרי, one-time 2,500 ₪ incl. written report (distinct from the 2,300 ₪ אינטייק billing price)' },
+  { key: 'solo_housing', family: 'solo_housing', tier: 'range', unit: 'per_month_range', sessions: 0, sessionMinutes: 0, allowedMonths: '3', priceMinAgorot: 800000, priceMaxAgorot: 1000000, sourceRef: 'PDF p8: Solo, 8,000–10,000 ₪ per month, 3 months (extension by clinical judgment). Vered must select the monthly price' }
+];
+
+/* ---------- small pure helpers (mirrored by test/package-catalog.test.js) ---------- */
+function _pkgInt(v) {
+  if (v === '' || v === null || v === undefined) return 0;
+  var n = Number(v);
+  return (isFinite(n) && Math.floor(n) === n) ? n : 0;
+}
+function _pkgIsIntInRange(v, min, max) {
+  return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= min && v <= max;
+}
+function _pkgBytesToHex(bytes) {
+  var out = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var b = bytes[i] & 0xff;
+    out += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return out;
+}
+function _pkgSha256Hex(text) {
+  return _pkgBytesToHex(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8));
+}
+function _pkgHmacHex(key, message) {
+  return _pkgBytesToHex(Utilities.computeHmacSha256Signature(message, key));
+}
+/* Key-sorted, whitespace-free JSON. lib/catalog-admin.js canonicalJson() is the
+ * byte-identical Node twin (a test signs in Node and verifies here). */
+function _pkgCanonicalJson(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Array.isArray(v)) return '[' + v.map(_pkgCanonicalJson).join(',') + ']';
+  var keys = Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort();
+  return '{' + keys.map(function (k) { return JSON.stringify(k) + ':' + _pkgCanonicalJson(v[k]); }).join(',') + '}';
+}
+function _pkgConstEq(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+function _pkgText(v, maxLen) {
+  var s = _sanitizeLeadText(v, maxLen);
+  // A leading = + - @ would be parsed as a formula by Sheets.
+  return s.replace(/^[=+\-@\s]+/, '');
+}
+function _pkgParseMonths(csv) {
+  var out = [];
+  String(csv == null ? '' : csv).split(',').forEach(function (p) {
+    var n = Number(String(p).trim());
+    if (isFinite(n) && Math.floor(n) === n && n >= 1 && n <= 24 && out.indexOf(n) < 0) out.push(n);
+  });
+  return out.sort(function (a, b) { return a - b; });
+}
+function _pkgNow() { return new Date().toISOString(); }
+function _pkgUnitOk(u) { return Object.prototype.hasOwnProperty.call(PACKAGE_UNITS, u); }
+
+/* Net/VAT split of a VAT-INCLUSIVE gross amount, integer math, round half up. */
+function _pkgSplitVat(grossAgorot, vatRateBp) {
+  var denom = 10000 + vatRateBp;
+  var net = Math.floor((grossAgorot * 10000 + Math.floor(denom / 2)) / denom);
+  return { netAgorot: net, vatAgorot: grossAgorot - net };
+}
+
+/* Deterministic quote from ONE catalog row. Never trusts a client amount.
+ * Returns { ok:true, ... } or { ok:false, error:<fixed code> }. For a range
+ * row without a selection: ok:true, needsSelection:true, grossAgorot:null. */
+function _pkgComputeQuote(row, months, selectedMonthlyAgorot) {
+  if (!row || !_pkgUnitOk(String(row.unit))) return { ok: false, error: 'invalid_package' };
+  if (String(row.vatBasis) !== 'inclusive') return { ok: false, error: 'unsupported_vat_basis' };
+  var vatBp = _pkgInt(row.vatRateBp);
+  if (!_pkgIsIntInRange(vatBp, 0, 5000)) return { ok: false, error: 'invalid_package' };
+  var unit = String(row.unit);
+  var allowed = _pkgParseMonths(row.allowedMonths);
+  var q = { ok: true, unit: unit, sessions: _pkgInt(row.sessions), months: 0, monthlyAgorot: null,
+    commitmentMonths: null, grossAgorot: null, netAgorot: null, vatAgorot: null,
+    vatBasis: 'inclusive', vatRateBp: vatBp, needsSelection: false };
+  var gross = null;
+  if (unit === 'per_session_pack') {
+    if (months) return { ok: false, error: 'invalid_months' };
+    var pps = _pkgInt(row.pricePerSessionAgorot);
+    if (!_pkgIsIntInRange(q.sessions, 1, 200) || !_pkgIsIntInRange(pps, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+    gross = q.sessions * pps;
+  } else if (unit === 'flat') {
+    if (months) return { ok: false, error: 'invalid_months' };
+    gross = _pkgInt(row.priceTotalAgorot);
+    if (!_pkgIsIntInRange(gross, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };   // a flat package is never free
+  } else {
+    if (!_pkgIsIntInRange(months, 1, 24) || allowed.indexOf(months) < 0) return { ok: false, error: 'invalid_months' };
+    q.months = months; q.commitmentMonths = months;
+    if (unit === 'per_month') {
+      q.monthlyAgorot = _pkgInt(row.monthlyPriceAgorot);
+      if (!_pkgIsIntInRange(q.monthlyAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+      gross = q.monthlyAgorot * months;
+    } else {
+      var lo = _pkgInt(row.priceMinAgorot), hi = _pkgInt(row.priceMaxAgorot);
+      if (!_pkgIsIntInRange(lo, 1, PACKAGE_MAX_AGOROT) || !_pkgIsIntInRange(hi, lo, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+      if (selectedMonthlyAgorot === null || selectedMonthlyAgorot === undefined || selectedMonthlyAgorot === '') {
+        q.needsSelection = true;   // never silently pick min/midpoint
+        return q;
+      }
+      if (!_pkgIsIntInRange(selectedMonthlyAgorot, lo, hi)) return { ok: false, error: 'selection_out_of_range' };
+      q.monthlyAgorot = selectedMonthlyAgorot;
+      gross = selectedMonthlyAgorot * months;
+    }
+  }
+  if (!_pkgIsIntInRange(gross, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+  var split = _pkgSplitVat(gross, vatBp);
+  q.grossAgorot = gross; q.netAgorot = split.netAgorot; q.vatAgorot = split.vatAgorot;
+  return q;
+}
+
+/* ---------- storage ---------- */
+function _pkgCatalogSheet() { return _ensureSheet(PACKAGE_CATALOG_SHEET, PACKAGE_CATALOG_HEADERS); }
+function _pkgRequestSheet() { return _ensureSheet(PACKAGE_REQUESTS_SHEET, PACKAGE_REQUEST_HEADERS); }
+function _pkgRowToCells(headers, obj) {
+  return headers.map(function (h) { return obj[h] === undefined || obj[h] === null ? '' : obj[h]; });
+}
+function _pkgIsActive(r) { return String(r.active) === '1' || r.active === true || String(r.active).toLowerCase() === 'true'; }
+function _pkgActiveRows(rows) {
+  var out = [];
+  rows.forEach(function (r) { if (_pkgIsActive(r)) out.push(r); });
+  out.sort(function (a, b) { return _pkgInt(a.sortOrder) - _pkgInt(b.sortOrder); });
+  return out;
+}
+function _pkgMaxEpoch(rows) {
+  var m = 0;
+  rows.forEach(function (r) { var e = _pkgInt(r.epoch); if (e > m) m = e; });
+  return m;
+}
+function _pkgFindRowById(rows, id) {
+  for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === String(id)) return rows[i];
+  return null;
+}
+function _pkgActiveRowByKey(rows, key) {
+  for (var i = 0; i < rows.length; i++) if (String(rows[i].key) === String(key) && _pkgIsActive(rows[i])) return rows[i];
+  return null;
+}
+function _pkgLock(ms) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(ms); } catch (e) { return null; }
+  if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) {
+    lock.releaseLock();
+    return null;
+  }
+  return lock;
+}
+function _pkgUnlock(lock) { try { if (lock) lock.releaseLock(); } catch (_) {} }
+
+/* ---------- MANAGER boundary: explicit safe response builders ---------- */
+function _pkgPublicItem(r) {
+  return {
+    key: String(r.key),
+    family: String(r.family),
+    tier: String(r.tier),
+    unit: String(r.unit),
+    sessions: _pkgInt(r.sessions),
+    sessionMinutes: _pkgInt(r.sessionMinutes),
+    allowedMonths: _pkgParseMonths(r.allowedMonths),
+    needsPricing: String(r.unit) === 'per_month_range',
+    sortOrder: _pkgInt(r.sortOrder)
+  };
+}
+function _pkgSubmitView(req, duplicate) {
+  return { ok: true, requestId: String(req.id), status: String(req.status) === 'priced' ? 'priced' : 'pending', duplicate: duplicate === true };
+}
+function _pkgStatusItem(req) {
+  return {
+    requestId: String(req.id),
+    status: String(req.status) === 'priced' ? 'priced' : 'pending',
+    packageKey: String(req.packageKey),
+    months: _pkgInt(req.months),
+    createdAt: String(req.createdAtIso)
+  };
+}
+
+function _pkgConfigSecretOk(key, expected) {
+  var props = PropertiesService.getScriptProperties();
+  if (typeof expected !== 'string' || expected.trim().length < 32) return false;
+  var others = ['PACKAGE_CATALOG_SECRET', 'PACKAGE_REQUEST_SECRET', 'OUTPATIENT_PROXY_SECRET', 'CATALOG_ADMIN_ASSERTION_SECRET'];
+  for (var i = 0; i < others.length; i++) {
+    if (others[i] === key) continue;
+    var v = props.getProperty(others[i]);
+    if (v && v === expected) return false;      // each secret must be distinct
+  }
+  return true;
+}
+
+function _pkgPublicCatalog() {
+  try {
+    var rows = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
+    return { ok: true, catalogEpoch: _pkgMaxEpoch(rows), items: _pkgActiveRows(rows).map(_pkgPublicItem) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgManagerStatus(params) {
+  try {
+    var requester = String(params && params.requesterKey != null ? params.requesterKey : '');
+    if (!PACKAGE_REQUESTERS.hasOwnProperty(requester)) return { ok: false, error: 'invalid_requester' };
+    var wanted = String(params && params.requestId != null ? params.requestId : '');
+    if (wanted && !PACKAGE_UUID_RE.test(wanted)) return { ok: false, error: 'invalid_request_id' };
+    var rows = _readAll(_pkgRequestSheet(), PACKAGE_REQUEST_HEADERS);
+    var mine = rows.filter(function (r) {
+      return String(r.requesterKey) === requester && (!wanted || String(r.id) === wanted);
+    });
+    mine.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
+    return { ok: true, items: mine.slice(0, 50).map(_pkgStatusItem) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgCreateRequest(payload) {
+  try {
+    var p = payload || {};
+    var requestId = String(p.requestId == null ? '' : p.requestId).toLowerCase();
+    if (!PACKAGE_UUID_RE.test(requestId)) return { ok: false, error: 'invalid_request_id' };
+    var requester = String(p.requesterKey == null ? '' : p.requesterKey);
+    if (!PACKAGE_REQUESTERS.hasOwnProperty(requester)) return { ok: false, error: 'invalid_requester' };
+    var name = _pkgText(p.patientName, 120);
+    if (name.length < 2) return { ok: false, error: 'invalid_patient' };
+    var phone = _recoverPhone(p.patientPhone);
+    if (phone && !/^0\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
+    var packageKey = String(p.packageKey == null ? '' : p.packageKey);
+    if (!/^[a-z][a-z0-9_]{2,40}$/.test(packageKey)) return { ok: false, error: 'invalid_package' };
+    var months = p.months === undefined || p.months === null || p.months === '' ? 0 : p.months;
+    if (typeof months !== 'number') return { ok: false, error: 'invalid_months' };
+    var epoch = p.catalogEpoch;
+    if (!_pkgIsIntInRange(epoch, 1, 1000000)) return { ok: false, error: 'stale_catalog' };
+
+    var canonical = {
+      requesterKey: requester, patientName: name, patientPhone: phone,
+      packageKey: packageKey, months: months, catalogEpoch: epoch
+    };
+    var hash = _pkgSha256Hex(_pkgCanonicalJson(canonical));
+
+    var lock = _pkgLock(10000);
+    if (!lock) return { ok: false, error: 'busy' };
+    try {
+      var reqSh = _pkgRequestSheet();
+      var existing = _pkgFindRowById(_readAll(reqSh, PACKAGE_REQUEST_HEADERS), requestId);
+      if (existing) {
+        // Same id + same payload -> the existing safe result (any time later).
+        // Same id + different payload -> rejected.
+        if (_pkgConstEq(existing.payloadHash, hash)) return _pkgSubmitView(existing, true);
+        return { ok: false, error: 'request_id_conflict' };
+      }
+      var cat = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
+      if (_pkgMaxEpoch(cat) !== epoch) return { ok: false, error: 'stale_catalog' };
+      var row = _pkgActiveRowByKey(cat, packageKey);
+      if (!row) return { ok: false, error: 'invalid_package' };
+      var q = _pkgComputeQuote(row, months, null);
+      if (!q.ok) return { ok: false, error: q.error };
+      var now = _pkgNow();
+      var rec = {
+        id: requestId, payloadHash: hash, status: 'pending', revision: 1,
+        requesterKey: requester, patientName: name, patientPhone: phone,
+        packageKey: packageKey, months: months, catalogRowId: String(row.id), catalogEpoch: epoch,
+        selectedMonthlyAgorot: '', quoteSnapshot: JSON.stringify(_pkgSnapshot(row, q, now)),
+        adjustedTotalAgorot: '', adjustReason: '', adjustLog: '[]',
+        approvedTotalAgorot: '', approvedSnapshot: '', approvedAtIso: '', approvedBy: '',
+        attachedType: '', attachedId: '', attachedAtIso: '', attachedBy: '',
+        opLog: '[]', createdAtIso: now, updatedAt: now, updatedBy: requester
+      };
+      reqSh.appendRow(_pkgRowToCells(PACKAGE_REQUEST_HEADERS, rec));
+      return _pkgSubmitView(rec, false);
+    } finally { _pkgUnlock(lock); }
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgSnapshot(row, q, atIso) {
+  return {
+    rowId: String(row.id), key: String(row.key), version: _pkgInt(row.version), epoch: _pkgInt(row.epoch),
+    family: String(row.family), tier: String(row.tier), unit: q.unit, sessions: q.sessions,
+    months: q.months, monthlyAgorot: q.monthlyAgorot, commitmentMonths: q.commitmentMonths,
+    grossAgorot: q.grossAgorot, netAgorot: q.netAgorot, vatAgorot: q.vatAgorot,
+    vatBasis: q.vatBasis, vatRateBp: q.vatRateBp, needsSelection: q.needsSelection, computedAtIso: atIso
+  };
+}
+
+/* ---------- ADMIN boundary ---------- */
+/* Short-lived HMAC assertion minted by Node ONLY after the server-verified
+ * CATALOG_ADMIN_PIN. Bound to the action, an expiry (<=300 s ahead), a nonce
+ * and a hash of the whole request body (so the actor/fields cannot be swapped
+ * in transit). Fail-closed: missing/short/duplicated secret => reject. */
+function _pkgAdminAssertionOk(action, payload) {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('CATALOG_ADMIN_ASSERTION_SECRET');
+  if (!_pkgConfigSecretOk('CATALOG_ADMIN_ASSERTION_SECRET', secret)) return false;
+  var a = payload && payload.adminAssertion;
+  if (typeof a !== 'string') return false;
+  var parts = a.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v1') return false;
+  if (!/^\d{9,12}$/.test(parts[1]) || !/^[A-Za-z0-9_-]{8,64}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
+  var exp = Number(parts[1]);
+  var now = Math.floor(Date.now() / 1000);
+  if (now > exp || exp - now > 300) return false;
+  var body = {};
+  Object.keys(payload).forEach(function (k) {
+    if (k !== 'proxySecret' && k !== 'adminAssertion' && k !== 'secret' && k !== 'action') body[k] = payload[k];
+  });
+  var message = 'pkgadmin.v1|' + action + '|' + parts[1] + '|' + parts[2] + '|' + _pkgSha256Hex(_pkgCanonicalJson(body));
+  return _pkgConstEq(_pkgHmacHex(secret, message), parts[3]);
+}
+
+function _pkgAdminItem(r) {
+  var qs = null, as = null, log = [];
+  try { qs = r.quoteSnapshot ? JSON.parse(r.quoteSnapshot) : null; } catch (_) {}
+  try { as = r.approvedSnapshot ? JSON.parse(r.approvedSnapshot) : null; } catch (_) {}
+  try { log = r.adjustLog ? JSON.parse(r.adjustLog) : []; } catch (_) {}
+  var adjusted = r.adjustedTotalAgorot === '' ? null : _pkgInt(r.adjustedTotalAgorot);
+  var gross = qs && qs.grossAgorot !== null && qs.grossAgorot !== undefined ? qs.grossAgorot : null;
+  return {
+    id: String(r.id), status: String(r.status), revision: _pkgInt(r.revision),
+    requesterKey: String(r.requesterKey), patientName: String(r.patientName), patientPhone: String(r.patientPhone),
+    packageKey: String(r.packageKey), months: _pkgInt(r.months), catalogEpoch: _pkgInt(r.catalogEpoch),
+    quote: qs, needsSelection: !!(qs && qs.needsSelection),
+    selectedMonthlyAgorot: r.selectedMonthlyAgorot === '' ? null : _pkgInt(r.selectedMonthlyAgorot),
+    adjustedTotalAgorot: adjusted, adjustReason: String(r.adjustReason || ''), adjustLog: log,
+    effectiveTotalAgorot: adjusted !== null ? adjusted : gross,
+    approvedTotalAgorot: r.approvedTotalAgorot === '' ? null : _pkgInt(r.approvedTotalAgorot),
+    approved: as, approvedAt: String(r.approvedAtIso || ''), approvedBy: String(r.approvedBy || ''),
+    attachedType: String(r.attachedType || ''), attachedId: String(r.attachedId || ''),
+    attachedAt: String(r.attachedAtIso || ''), createdAt: String(r.createdAtIso || '')
+  };
+}
+function _pkgAdminCatalogItem(r) {
+  return {
+    id: String(r.id), key: String(r.key), version: _pkgInt(r.version), epoch: _pkgInt(r.epoch),
+    family: String(r.family), tier: String(r.tier), unit: String(r.unit),
+    sessions: _pkgInt(r.sessions), sessionMinutes: _pkgInt(r.sessionMinutes),
+    allowedMonths: _pkgParseMonths(r.allowedMonths),
+    pricePerSessionAgorot: _pkgInt(r.pricePerSessionAgorot), priceTotalAgorot: _pkgInt(r.priceTotalAgorot),
+    monthlyPriceAgorot: _pkgInt(r.monthlyPriceAgorot), priceMinAgorot: _pkgInt(r.priceMinAgorot),
+    priceMaxAgorot: _pkgInt(r.priceMaxAgorot), vatBasis: String(r.vatBasis), vatRateBp: _pkgInt(r.vatRateBp),
+    active: _pkgIsActive(r), sortOrder: _pkgInt(r.sortOrder), sourceRef: String(r.sourceRef || ''),
+    createdAt: String(r.createdAtIso || ''), createdBy: String(r.createdBy || '')
+  };
+}
+
+function _pkgAdminGetCatalog() {
+  try {
+    var rows = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
+    return { ok: true, catalogEpoch: _pkgMaxEpoch(rows), items: rows.map(_pkgAdminCatalogItem) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+/* One-time initial import. Idempotent: refuses when ANY catalog row exists. */
+function _pkgAdminSeed(payload) {
+  try {
+    var lock = _pkgLock(10000);
+    if (!lock) return { ok: false, error: 'busy' };
+    try {
+      var sh = _pkgCatalogSheet();
+      if (_readAll(sh, PACKAGE_CATALOG_HEADERS).length) return { ok: false, error: 'already_seeded' };
+      var now = _pkgNow(), by = _requestUser(payload) || 'catalog-admin';
+      PACKAGE_CATALOG_SEED.forEach(function (s, i) {
+        var rec = {
+          id: s.key + '@v1', key: s.key, version: 1, epoch: 1, family: s.family, tier: s.tier, unit: s.unit,
+          sessions: s.sessions || 0, sessionMinutes: s.sessionMinutes || 0, allowedMonths: s.allowedMonths || '',
+          pricePerSessionAgorot: s.pricePerSessionAgorot || '', priceTotalAgorot: s.priceTotalAgorot || '',
+          monthlyPriceAgorot: s.monthlyPriceAgorot || '', priceMinAgorot: s.priceMinAgorot || '',
+          priceMaxAgorot: s.priceMaxAgorot || '', vatBasis: 'inclusive', vatRateBp: PACKAGE_VAT_RATE_BP_DEFAULT,
+          active: 1, sortOrder: (i + 1) * 10, sourceRef: s.sourceRef, validFromIso: now, createdAtIso: now, createdBy: by
+        };
+        sh.appendRow(_pkgRowToCells(PACKAGE_CATALOG_HEADERS, rec));
+      });
+      return { ok: true, seeded: PACKAGE_CATALOG_SEED.length };
+    } finally { _pkgUnlock(lock); }
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgValidateCatalogFields(f) {
+  if (!f || typeof f !== 'object') return null;
+  var out = {};
+  out.family = String(f.family == null ? '' : f.family);
+  out.tier = String(f.tier == null ? '' : f.tier);
+  if (!/^[a-z][a-z0-9_]{1,40}$/.test(out.family) || !/^[a-z][a-z0-9_]{1,40}$/.test(out.tier)) return null;
+  out.unit = String(f.unit == null ? '' : f.unit);
+  if (!_pkgUnitOk(out.unit)) return null;
+  var ints = ['sessions', 'sessionMinutes', 'pricePerSessionAgorot', 'priceTotalAgorot', 'monthlyPriceAgorot', 'priceMinAgorot', 'priceMaxAgorot', 'sortOrder'];
+  for (var i = 0; i < ints.length; i++) {
+    var v = f[ints[i]] === undefined || f[ints[i]] === null || f[ints[i]] === '' ? 0 : f[ints[i]];
+    if (!_pkgIsIntInRange(v, 0, ints[i] === 'sortOrder' || ints[i] === 'sessionMinutes' || ints[i] === 'sessions' ? 100000 : PACKAGE_MAX_AGOROT)) return null;
+    out[ints[i]] = v;
+  }
+  var months = Array.isArray(f.allowedMonths) ? f.allowedMonths : _pkgParseMonths(f.allowedMonths);
+  var clean = _pkgParseMonths(months.join(','));
+  if (clean.length !== months.length) return null;
+  out.allowedMonths = clean.join(',');
+  var vat = f.vatRateBp === undefined || f.vatRateBp === null || f.vatRateBp === '' ? PACKAGE_VAT_RATE_BP_DEFAULT : f.vatRateBp;
+  if (!_pkgIsIntInRange(vat, 0, 5000)) return null;
+  out.vatRateBp = vat;
+  out.sourceRef = _pkgText(f.sourceRef, 300);
+  out.active = f.active === false ? 0 : 1;
+  // Unit-specific completeness: a row that cannot produce a quote is refused.
+  var probe = {
+    unit: out.unit, vatBasis: 'inclusive', vatRateBp: vat, sessions: out.sessions, allowedMonths: out.allowedMonths,
+    pricePerSessionAgorot: out.pricePerSessionAgorot, priceTotalAgorot: out.priceTotalAgorot,
+    monthlyPriceAgorot: out.monthlyPriceAgorot, priceMinAgorot: out.priceMinAgorot, priceMaxAgorot: out.priceMaxAgorot
+  };
+  var probeMonths = (out.unit === 'per_month' || out.unit === 'per_month_range') ? _pkgParseMonths(out.allowedMonths)[0] : 0;
+  var mid = out.unit === 'per_month_range' ? out.priceMinAgorot : null;
+  if (!_pkgComputeQuote(probe, probeMonths || 0, mid).ok) return null;
+  return out;
+}
+
+/* Edit = append version N+1 (new global epoch); the previous row only has its
+ * `active` cell flipped. `expectedVersion` (0 for a new key) is a revision
+ * check against concurrent edits. */
+function _pkgAdminSaveRow(payload) {
+  try {
+    var p = payload || {};
+    var key = String(p.key == null ? '' : p.key);
+    if (!/^[a-z][a-z0-9_]{2,40}$/.test(key)) return { ok: false, error: 'invalid_package' };
+    var fields = _pkgValidateCatalogFields(p.fields);
+    if (!fields) return { ok: false, error: 'invalid_fields' };
+    if (!_pkgIsIntInRange(p.expectedVersion, 0, 100000)) return { ok: false, error: 'invalid_version' };
+    var lock = _pkgLock(10000);
+    if (!lock) return { ok: false, error: 'busy' };
+    try {
+      var sh = _pkgCatalogSheet();
+      var rows = _readAll(sh, PACKAGE_CATALOG_HEADERS);
+      var latest = 0, activeRow = null;
+      rows.forEach(function (r) {
+        if (String(r.key) === key) {
+          if (_pkgInt(r.version) > latest) latest = _pkgInt(r.version);
+          if (_pkgIsActive(r)) activeRow = r;
+        }
+      });
+      if (latest !== p.expectedVersion) return { ok: false, error: 'version_conflict' };
+      var version = latest + 1, epoch = _pkgMaxEpoch(rows) + 1, now = _pkgNow();
+      var rec = {
+        id: key + '@v' + version, key: key, version: version, epoch: epoch,
+        family: fields.family, tier: fields.tier, unit: fields.unit,
+        sessions: fields.sessions, sessionMinutes: fields.sessionMinutes, allowedMonths: fields.allowedMonths,
+        pricePerSessionAgorot: fields.pricePerSessionAgorot || '', priceTotalAgorot: fields.priceTotalAgorot || '',
+        monthlyPriceAgorot: fields.monthlyPriceAgorot || '', priceMinAgorot: fields.priceMinAgorot || '',
+        priceMaxAgorot: fields.priceMaxAgorot || '', vatBasis: 'inclusive', vatRateBp: fields.vatRateBp,
+        active: fields.active, sortOrder: fields.sortOrder, sourceRef: fields.sourceRef,
+        validFromIso: now, createdAtIso: now, createdBy: _requestUser(payload) || 'catalog-admin'
+      };
+      sh.appendRow(_pkgRowToCells(PACKAGE_CATALOG_HEADERS, rec));
+      if (activeRow) {
+        // Flip only the OLD row's active cell; no price cell is ever rewritten.
+        var all = sh.getRange(2, 1, Math.max(1, sh.getLastRow() - 1), PACKAGE_CATALOG_HEADERS.length).getValues();
+        var idCol = PACKAGE_CATALOG_HEADERS.indexOf('id'), actCol = PACKAGE_CATALOG_HEADERS.indexOf('active') + 1;
+        for (var i = 0; i < all.length; i++) {
+          if (String(all[i][idCol]) === String(activeRow.id)) { sh.getRange(i + 2, actCol).setValue(0); break; }
+        }
+      }
+      return { ok: true, id: rec.id, version: version, catalogEpoch: epoch };
+    } finally { _pkgUnlock(lock); }
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgAdminQuote(payload) {
+  try {
+    var p = payload || {};
+    var rows = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
+    var row = _pkgActiveRowByKey(rows, String(p.packageKey == null ? '' : p.packageKey));
+    if (!row) return { ok: false, error: 'invalid_package' };
+    var months = p.months === undefined || p.months === null || p.months === '' ? 0 : p.months;
+    if (typeof months !== 'number') return { ok: false, error: 'invalid_months' };
+    var sel = p.selectedMonthlyAgorot === undefined ? null : p.selectedMonthlyAgorot;
+    if (sel !== null && typeof sel !== 'number') return { ok: false, error: 'selection_out_of_range' };
+    var q = _pkgComputeQuote(row, months, sel);
+    if (!q.ok) return { ok: false, error: q.error };
+    return { ok: true, catalogEpoch: _pkgMaxEpoch(rows), quote: _pkgSnapshot(row, q, _pkgNow()) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgAdminList() {
+  try {
+    var rows = _readAll(_pkgRequestSheet(), PACKAGE_REQUEST_HEADERS);
+    rows.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
+    var pending = 0, priced = 0;
+    rows.forEach(function (r) { if (String(r.status) === 'priced') priced++; else pending++; });
+    return { ok: true, counts: { pending: pending, priced: priced }, items: rows.slice(0, 500).map(_pkgAdminItem) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+/* Shared skeleton for adjust / approve / attach: validate the op id, take the
+ * lock, replay a seen op id as a no-op success, check the revision, run the
+ * mutation, bump the revision, remember the op id. */
+function _pkgMutate(payload, mutator) {
+  try {
+    var p = payload || {};
+    var id = String(p.requestId == null ? '' : p.requestId).toLowerCase();
+    var opId = String(p.opId == null ? '' : p.opId).toLowerCase();
+    if (!PACKAGE_UUID_RE.test(id)) return { ok: false, error: 'invalid_request_id' };
+    if (!PACKAGE_UUID_RE.test(opId)) return { ok: false, error: 'invalid_op_id' };
+    if (!_pkgIsIntInRange(p.expectedRevision, 1, 100000)) return { ok: false, error: 'invalid_revision' };
+    var lock = _pkgLock(10000);
+    if (!lock) return { ok: false, error: 'busy' };
+    try {
+      var sh = _pkgRequestSheet();
+      var grid = sh.getRange(2, 1, Math.max(1, sh.getLastRow() - 1), PACKAGE_REQUEST_HEADERS.length).getValues();
+      var idCol = PACKAGE_REQUEST_HEADERS.indexOf('id'), rowNum = -1, rec = null;
+      for (var i = 0; i < grid.length; i++) {
+        if (String(grid[i][idCol]) === id) {
+          rowNum = i + 2;
+          rec = {};
+          PACKAGE_REQUEST_HEADERS.forEach(function (h, c) { rec[h] = grid[i][c] === null || grid[i][c] === undefined ? '' : grid[i][c]; });
+          rec.patientPhone = _recoverPhone(rec.patientPhone);
+          break;
+        }
+      }
+      if (!rec) return { ok: false, error: 'not_found' };
+      var ops = [];
+      try { ops = rec.opLog ? JSON.parse(rec.opLog) : []; } catch (_) { ops = []; }
+      if (ops.indexOf(opId) >= 0) return { ok: true, replay: true, request: _pkgAdminItem(rec) };
+      if (_pkgInt(rec.revision) !== p.expectedRevision) return { ok: false, error: 'revision_conflict' };
+      var user = _requestUser(payload) || 'catalog-admin';
+      var now = _pkgNow();
+      var res = mutator(rec, user, now);
+      if (!res.ok) return res;
+      if (res.noop) return { ok: true, noop: true, request: _pkgAdminItem(rec) };
+      ops.push(opId);
+      if (ops.length > 30) ops = ops.slice(ops.length - 30);
+      rec.opLog = JSON.stringify(ops);
+      rec.revision = _pkgInt(rec.revision) + 1;
+      rec.updatedAt = now; rec.updatedBy = user;
+      sh.getRange(rowNum, 1, 1, PACKAGE_REQUEST_HEADERS.length).setValues([_pkgRowToCells(PACKAGE_REQUEST_HEADERS, rec)]);
+      return { ok: true, request: _pkgAdminItem(rec) };
+    } finally { _pkgUnlock(lock); }
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+function _pkgCatalogRowForRequest(rec) {
+  return _pkgFindRowById(_readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS), rec.catalogRowId);
+}
+
+function _pkgAdminAdjust(payload) {
+  var p = payload || {};
+  return _pkgMutate(payload, function (rec, user, now) {
+    if (String(rec.status) !== 'pending') return { ok: false, error: 'already_priced' };
+    var hasSel = p.selectedMonthlyAgorot !== undefined && p.selectedMonthlyAgorot !== null;
+    var hasAdj = p.adjustedTotalAgorot !== undefined && p.adjustedTotalAgorot !== null;
+    if (hasSel === hasAdj) return { ok: false, error: 'invalid_adjustment' };
+    var log = [];
+    try { log = rec.adjustLog ? JSON.parse(rec.adjustLog) : []; } catch (_) { log = []; }
+    var reason = _pkgText(p.reason, 200);
+    var snap = null;
+    try { snap = JSON.parse(rec.quoteSnapshot); } catch (_) { return { ok: false, error: 'package_error' }; }
+    if (hasSel) {
+      if (!snap.needsSelection && rec.selectedMonthlyAgorot === '') return { ok: false, error: 'selection_not_required' };
+      var row = _pkgCatalogRowForRequest(rec);
+      if (!row) return { ok: false, error: 'package_error' };
+      var q = _pkgComputeQuote(row, _pkgInt(rec.months), p.selectedMonthlyAgorot);
+      if (!q.ok) return { ok: false, error: q.error };
+      var next = _pkgSnapshot(row, q, now);
+      log.push({ at: now, by: user, kind: 'select', to: p.selectedMonthlyAgorot, reason: reason });
+      rec.selectedMonthlyAgorot = p.selectedMonthlyAgorot;
+      rec.quoteSnapshot = JSON.stringify(next);
+      rec.adjustedTotalAgorot = '';
+    } else {
+      if (snap.needsSelection) return { ok: false, error: 'selection_required' };
+      if (!_pkgIsIntInRange(p.adjustedTotalAgorot, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_adjustment' };
+      if (reason.length < 2) return { ok: false, error: 'reason_required' };
+      var before = rec.adjustedTotalAgorot === '' ? snap.grossAgorot : _pkgInt(rec.adjustedTotalAgorot);
+      log.push({ at: now, by: user, kind: 'adjust', from: before, to: p.adjustedTotalAgorot, reason: reason });
+      rec.adjustedTotalAgorot = p.adjustedTotalAgorot;
+      rec.adjustReason = reason;
+    }
+    rec.adjustLog = JSON.stringify(log);
+    return { ok: true };
+  });
+}
+
+function _pkgAdminApprove(payload) {
+  return _pkgMutate(payload, function (rec, user, now) {
+    if (String(rec.status) !== 'pending') return { ok: false, error: 'already_priced' };
+    var snap = null;
+    try { snap = JSON.parse(rec.quoteSnapshot); } catch (_) { return { ok: false, error: 'package_error' }; }
+    if (snap.needsSelection) return { ok: false, error: 'selection_required' };
+    var adjusted = rec.adjustedTotalAgorot === '' ? null : _pkgInt(rec.adjustedTotalAgorot);
+    var total = adjusted !== null ? adjusted : snap.grossAgorot;
+    if (!_pkgIsIntInRange(total, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'package_error' };
+    var split = _pkgSplitVat(total, _pkgInt(snap.vatRateBp));
+    var final = {};
+    Object.keys(snap).forEach(function (k) { final[k] = snap[k]; });
+    final.adjusted = adjusted !== null;
+    final.finalGrossAgorot = total; final.finalNetAgorot = split.netAgorot; final.finalVatAgorot = split.vatAgorot;
+    final.approvedAtIso = now;
+    rec.approvedTotalAgorot = total;
+    rec.approvedSnapshot = JSON.stringify(final);
+    rec.approvedAtIso = now; rec.approvedBy = user;
+    rec.status = 'priced';      // quoted/approved — NOT paid
+    return { ok: true };
+  });
+}
+
+/* Attach stores a REFERENCE on the request only. It never touches Clients,
+ * Leads, Payments, ClientCharges or Credits. */
+function _pkgAdminAttach(payload) {
+  var p = payload || {};
+  return _pkgMutate(payload, function (rec, user, now) {
+    if (String(rec.status) !== 'priced') return { ok: false, error: 'not_priced' };
+    var type = String(p.targetType == null ? '' : p.targetType);
+    var tid = String(p.targetId == null ? '' : p.targetId);
+    if ((type !== 'client' && type !== 'lead') || !tid || tid.length > 80) return { ok: false, error: 'invalid_target' };
+    if (rec.attachedType) {
+      if (rec.attachedType === type && String(rec.attachedId) === tid) return { ok: true, noop: true };
+      return { ok: false, error: 'already_attached' };
+    }
+    var exists = false;
+    if (type === 'client') {
+      _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === tid) exists = true; });
+    } else {
+      _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS).forEach(function (l) { if (String(l.id) === tid) exists = true; });
+    }
+    if (!exists) return { ok: false, error: 'target_not_found' };
+    rec.attachedType = type; rec.attachedId = tid; rec.attachedAtIso = now; rec.attachedBy = user;
+    return { ok: true };
+  });
+}
+
+function _pkgIsPackageAction(action) {
+  return Object.prototype.hasOwnProperty.call(PACKAGE_MANAGER_ACTIONS, action) ||
+    Object.prototype.hasOwnProperty.call(PACKAGE_ADMIN_ACTIONS, action);
+}
+
+
 // Additional-charge creation uses the same client reservation and backup set.
 // The client stays unchanged. The two create-only effects have separate markers.
 function _extraIntent(payload, stored) {
@@ -4733,7 +5441,10 @@ var SOURCE_GET_AUTH = {
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   getCredits: 'OUTPATIENT_PROXY_SECRET',
-  getRemovedClients: 'OUTPATIENT_PROXY_SECRET'
+  getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
+  // Package catalog (managers): price-free reads, their own scoped secret.
+  getPackageCatalogPublic: 'PACKAGE_CATALOG_SECRET',
+  getPackageRequestStatus: 'PACKAGE_CATALOG_SECRET'
 };
 var SOURCE_POST_AUTH = {
   getExtraChargeState: 'OUTPATIENT_PROXY_SECRET',
@@ -4793,7 +5504,18 @@ var SOURCE_POST_AUTH = {
   removePayment: 'OUTPATIENT_PROXY_SECRET',
   removeChargesForClient: 'OUTPATIENT_PROXY_SECRET',
   removePaymentsForClient: 'OUTPATIENT_PROXY_SECRET',
-  removeLead: 'OUTPATIENT_PROXY_SECRET'
+  removeLead: 'OUTPATIENT_PROXY_SECRET',
+  // Package catalog: managers submit with their own secret; every admin
+  // action ALSO needs the CATALOG_ADMIN assertion (see _sourceAuthOk).
+  createPackageRequest: 'PACKAGE_REQUEST_SECRET',
+  adminGetPackageCatalog: 'OUTPATIENT_PROXY_SECRET',
+  adminSeedPackageCatalog: 'OUTPATIENT_PROXY_SECRET',
+  adminSavePackageCatalogRow: 'OUTPATIENT_PROXY_SECRET',
+  adminQuotePackage: 'OUTPATIENT_PROXY_SECRET',
+  adminListPackageRequests: 'OUTPATIENT_PROXY_SECRET',
+  adminAdjustPackageRequest: 'OUTPATIENT_PROXY_SECRET',
+  adminApprovePackageRequest: 'OUTPATIENT_PROXY_SECRET',
+  adminAttachPackageRequest: 'OUTPATIENT_PROXY_SECRET'
 };
 
 function _sourceAuthOk(action, method, params, payload) {
@@ -4812,10 +5534,17 @@ function _sourceAuthOk(action, method, params, payload) {
   var expected = PropertiesService.getScriptProperties().getProperty(key);
   if (typeof expected !== 'string' || !expected || typeof got !== 'string') return false;
   if (key === 'OUTPATIENT_PROXY_SECRET' && expected.trim().length < 32) return false;
+  if ((key === 'PACKAGE_CATALOG_SECRET' || key === 'PACKAGE_REQUEST_SECRET') && !_pkgConfigSecretOk(key, expected)) return false;
   if (got.length !== expected.length) return false;
   var diff = 0;
   for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
-  return diff === 0;
+  if (diff !== 0) return false;
+  // Vered-only package actions: the proxy key alone is NOT enough — a signed,
+  // short-lived assertion minted after the server-verified CATALOG_ADMIN_PIN.
+  if (method === 'POST' && Object.prototype.hasOwnProperty.call(PACKAGE_ADMIN_ACTIONS, action)) {
+    return _pkgAdminAssertionOk(action, payload);
+  }
+  return true;
 }
 
 function doGet(e) {
@@ -4876,9 +5605,12 @@ function doGet(e) {
     // INTERNAL dashboard read (same trust level as getData): un-restored
     // Clients-removed tombstones, for the admin restore surface.
     if (action === 'getRemovedClients') return _json(_getRemovedClients());
+    // Package catalog (managers): price-free explicit views only.
+    if (action === 'getPackageCatalogPublic') return _json(_pkgPublicCatalog());
+    if (action === 'getPackageRequestStatus') return _json(_pkgManagerStatus(e && e.parameter));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
-    return _json({ ok: false, error: String(err) });
+    return _json({ ok: false, error: _pkgIsPackageAction(action) ? 'package_error' : String(err) });
   }
 }
 
@@ -5135,9 +5867,21 @@ function doPost(e) {
       return _json(_removePaymentsForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead, _requestUser(payload)));
+    // Package catalog. Managers: createPackageRequest (own secret, safe view).
+    // Vered-only admin actions already passed the CATALOG_ADMIN assertion in
+    // _sourceAuthOk above; each handler returns fixed error codes only.
+    if (action === 'createPackageRequest') return _json(_pkgCreateRequest(payload));
+    if (action === 'adminGetPackageCatalog') return _json(_pkgAdminGetCatalog());
+    if (action === 'adminSeedPackageCatalog') return _json(_pkgAdminSeed(payload));
+    if (action === 'adminSavePackageCatalogRow') return _json(_pkgAdminSaveRow(payload));
+    if (action === 'adminQuotePackage') return _json(_pkgAdminQuote(payload));
+    if (action === 'adminListPackageRequests') return _json(_pkgAdminList());
+    if (action === 'adminAdjustPackageRequest') return _json(_pkgAdminAdjust(payload));
+    if (action === 'adminApprovePackageRequest') return _json(_pkgAdminApprove(payload));
+    if (action === 'adminAttachPackageRequest') return _json(_pkgAdminAttach(payload));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
-    return _json({ ok: false, error: String(err) });
+    return _json({ ok: false, error: _pkgIsPackageAction(action) ? 'package_error' : String(err) });
   }
 }
 

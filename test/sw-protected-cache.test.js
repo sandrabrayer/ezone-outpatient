@@ -77,7 +77,7 @@ test('no-store / private responses are not written to Cache Storage; plain ones 
 
 test('purge-protected (and activate) evict stored aliases under any spelling but keep the shell', async () => {
   const sw = makeSw(async () => resp('x'));
-  const c = await sw.cacheApi.open('ezone-outpatient-v13');
+  const c = await sw.cacheApi.open(/var CACHE = '([^']+)'/.exec(SRC)[1]);
   for (const u of ['/%74reatment-map.js', '/treatment-map.js', '/Therapist-Pay.js', '/style.css']) await c.put('http://x.test' + u, resp('old'));
   let p; sw.listeners.message({ data: { type: 'purge-protected' }, waitUntil: (x) => { p = x; } });
   await p;

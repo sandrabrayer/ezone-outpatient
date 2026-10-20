@@ -473,6 +473,7 @@
   }
   function handleUnauthorized() {
     dropProtectedScripts();
+    try { if (window.PackagePricing) window.PackagePricing.reset(); } catch (_) {}
     try { sessionStorage.removeItem('ez_role'); } catch (_) {}
     state.role = 'viewer';
     state.user = '';
@@ -1300,6 +1301,24 @@
     else if (state.view === 'inactive') renderInactive();
     else if (state.view === 'payouts') renderPayouts();
     else if (state.view === 'continuation') renderContinuation();
+    else if (state.view === 'packages') renderPackages();
+  }
+
+  // ---- תמחור חבילות (Vered only). The tab is visible to everyone; the server
+  // decides: without the separately-verified catalog-admin cookie every
+  // call answers 401 and the module shows its PIN gate. A name picked at login
+  // grants nothing here.
+  function renderPackages() {
+    if (!window.PackagePricing) return;
+    window.PackagePricing.mount($('#packagesRoot'), {
+      notify: toast,
+      onUnauthorized: handleUnauthorized,
+      onPending: function (n) { var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות'; },
+      targets: function () {
+        return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '' }; })
+          .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '' }; }));
+      }
+    });
   }
 
   // ---- Dashboard
@@ -2176,7 +2195,7 @@
     })
       .then(function (res) {
         if (res && res.alert && res.alert.id) optimistic.id = res.alert.id;
-        toast('נשלחה התראת עצירה לירדן');
+        toast('נשלחה התראת עצירה לצוות מסלול המשך');
       })
       .catch(function (err) {
         var idx = state.myStopAlerts.indexOf(optimistic);
@@ -2225,7 +2244,7 @@
     closeResumeTreatmentModal();
     apiPostAction('resumeTreatmentAlert', { clientId: c.id, clientName: c.name, createdBy: 'Vered' })
       .then(function (res) {
-        toast(res && res.resumeCreated ? 'נשלח חידוש טיפול לירדן' : 'התראת העצירה בוטלה');
+        toast(res && res.resumeCreated ? 'נשלח חידוש טיפול לצוות מסלול המשך' : 'התראת העצירה בוטלה');
       })
       .catch(function (err) {
         state.myStopAlerts = snapshot; // roll back to the pre-click state
@@ -6210,7 +6229,7 @@
     if (err) err.hidden = true;
     box.textContent = '';
     apiUsers().then(function (users) {
-      if (!users.length) { enterEditor(); return; } // nothing to pick — user-less session, as before
+      if (!users.length) { showPin(); return; } // nothing to pick: a name-less session reaches no data, so start over
       users.forEach(function (name) {
         var b = document.createElement('button');
         b.type = 'button';
@@ -6239,9 +6258,9 @@
         box.appendChild(b);
       });
     }).catch(function (e) {
-      // 401 already flipped to the PIN screen; any other failure must not
-      // lock anyone out — continue user-less (today's behaviour).
-      if (!(e && e.message === 'unauthorized')) enterEditor();
+      // 401 already flipped to the PIN screen. A name-less session cannot reach data (server
+      // refuses it), so any other failure also returns to the PIN screen to retry.
+      if (!(e && e.message === 'unauthorized')) showPin();
     });
   }
 
@@ -6411,6 +6430,8 @@
       // Expire the server session cookie too (fire-and-forget) so a shared
       // device does not keep a live 7-day session after יציאה.
       try { fetch('/api/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
+      try { fetch('/api/catalog-admin/logout', { method: 'POST' }).catch(function () {}); } catch (_) {}
+      try { if (window.PackagePricing) window.PackagePricing.reset(); } catch (_) {}
       dropProtectedScripts();
       try { sessionStorage.removeItem('ez_role'); } catch (_) {}
       state.role = 'viewer';

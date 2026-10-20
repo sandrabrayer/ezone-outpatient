@@ -752,14 +752,14 @@ function startStub() {
           if (pl.pin !== '424242') { res.statusCode = 401; return json({ ok: false }); }
           // A user-less cookie is a VALID session that has not picked a name
           // yet — that is what puts the name picker on screen.
-          const user = ['ורד', 'שירן', 'יעל', 'ירדן'].indexOf(pl.user) >= 0 ? pl.user : '';
+          const user = ['ורד', 'שירן', 'יעל'].indexOf(pl.user) >= 0 ? pl.user : '';
           json({ ok: true }, { 'Set-Cookie': 'ezone_session=' + encodeURIComponent(user) + '; Path=/; HttpOnly' });
         });
       }
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false }); }
       if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
-      if (p === '/api/users') return json({ ok: true, users: ['ורד', 'שירן', 'יעל', 'ירדן'] });
+      if (p === '/api/users') return json({ ok: true, users: ['ורד', 'שירן', 'יעל'] });
       if (p === '/api/sheets') {
         if (req.method === 'GET') {
           const a = u.searchParams.get('action') || 'getData';

@@ -53,6 +53,9 @@ for (const [method, actions] of Object.entries(policies)) {
       assert.equal(f.touched(), 0);
       assert.equal(f.calls.length, 0);
     });
+    // Admin package actions need a body-bound HMAC assertion on top of the proxy
+    // key; they have dedicated coverage in test/package-admin-boundary.test.js.
+    if (method === 'POST' && initial.ctx.PACKAGE_ADMIN_ACTIONS && initial.ctx.PACKAGE_ADMIN_ACTIONS[action]) continue;
     test(`${method} ${action}: scoped authorized request reaches exactly one business handler`, () => {
       const key = policyKey === 'resolveStopFlag' ? 'OUTPATIENT_PROXY_SECRET' : policyKey;
       const field = key === 'OUTPATIENT_PROXY_SECRET' ? 'proxySecret' : 'secret';

@@ -2,7 +2,7 @@
 
 Issue: [#124](https://github.com/sandrabrayer/ezone-outpatient/issues/124).
 Base: `claude/youthful-volta-laarnk` at
-`094100434461cf84a0fc4e96602963ab815b7b6a` (source 98, SW 13).
+`f7b37d70691caa775b81f6ab1fab32b1fb79e54e` (released #122/#126, source @99, SW 15).
 This document describes a candidate, not a production release or completed DR drill.
 
 ## Why the eight-table set was insufficient
@@ -33,8 +33,8 @@ recovery drill. ScriptLock cannot stop manual spreadsheet edits.
 | Inventory | __RecoveryMetadata (backup only) | key/value |
 | Unclassified tabs | Every other source tab, including Sheet1 and Copy of Clients | opaque values, original name in manifest |
 
-The base captures 17 known datasets plus recovery metadata, and any unclassified
-tabs. A combined package build captures 19 known datasets plus metadata. Optional
+The integrated build captures 19 known datasets plus recovery metadata, and
+any unclassified tabs. The pre-package build had 17 known datasets. Optional
 absence is explicit and never materialized by capture. Clients/Leads are required;
 FinancialOps is required whenever FINANCIAL_OPS_CREATED is set.
 
@@ -119,6 +119,14 @@ contention, source admission during a hold, and nonempty package datasets.
 Existing mixed-kind FinancialOps crash/restore tests remain in the suite.
 Only Google APIs are mocked; business handlers are not mirrored.
 
+The October 20 integration uses the actual released #122/#126 tree, not the
+previous synthetic source combination. The full UTC suite passes 1,624 / 0 fail /
+37 skipped (1,661 total). The package regression seeds the real catalog, approves
+a real request, snapshots/restores it and retries the exact submission: one row,
+unchanged approved quote/status, no charge/payment. Two queued package-writer
+tests fail if the post-acquisition hold check is removed. CI for the resulting
+commit must be checked separately; do not attribute earlier CI to this tree.
+
 Local synthetic tests do not prove real Google coercion, runtime quotas,
 scheduled execution, alert delivery or secure configuration recovery. Before
 release require a private Google round-trip with nonempty SessionLog and both
@@ -133,14 +141,31 @@ Track timezone coverage under remaining OP-02 date/business-logic review.
 
 ## Package branch integration and rollback
 
-Claude owns #122/#105. Do not push this implementation to either branch. #122's
-backup list/manifest/retention edits overlap: retain this registry and metadata
-validator, pick up PACKAGE_CATALOG_HEADERS/PACKAGE_REQUEST_HEADERS from the package
-module, and preserve both package datasets. Add the recovery-hold recheck to new
-package writer locks as well. Rerun both backup/recovery and package auth/replay
-tests after the actual integration; a synthetic combined source is preparatory
-evidence, not approval of a future merge SHA. No SW bump is needed here because
-no public asset changes.
+#122 and #126 are already merged. This branch integrates their exact deployed
+tree, keeping the registry/metadata validator and both PACKAGE_* schemas.
+_pkgLock now rechecks the recovery hold immediately after acquisition, releasing
+and returning busy before any write. Public assets exactly match the released
+SW 15 tree; this backup-only change needs no SW bump. Claude still owns the
+unreleased Therapists #105; no changes were pushed to his branches.
+
+### Manual tabs: observed state and proposed recovery treatment
+
+Read-only Google inspection on 2026-10-20 covered the full observed grid bounds:
+Sheet1 A1:Z1000 is empty; Copy of Clients A1:AG993 contains 21 records, 33 headers
+and no formula cells. All 21 ids also occur in Clients, which has 54 records.
+Shared ids do not prove equal row values or that the archive is expendable.
+
+Retain Sheet1 as an empty structural tab and Copy of Clients as an immutable
+historical archive; never merge the archive into live Clients, use it as billing
+input, or delete it because ids overlap. Preserve native properties through the
+separate full-workbook copy. Its prior October 19 copy predates PackageCatalog /
+PackageRequests, so it is not a current complete package-era backup.
+
+This is a proposal for independent review, not a whitelist implemented in the
+recovery gate. Unknown tabs still block operational certification. Do not bypass
+that check by deleting tabs/manifest rows or by clearing the hold manually.
+Recheck schema/content/formatting and the exact reviewed target during the
+private Google drill before implementing any approved recovery exception.
 
 After approval: merge to the deployed branch, wait for matching healthy Node,
 then dispatch Deploy Apps Script with expected_commit = approved full merge SHA.

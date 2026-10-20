@@ -60,6 +60,12 @@ This inventory is a code contract, not proof every feature is used in production
 | POST renewal (released #120) | `getRenewalState` (read), `reserveRenewal`, `applyRenewal`, `acknowledgeRenewal`, `cancelRenewal`, `resolveRenewalReview`; all use the same proxy key, GET refused |
 | POST extra-charge candidate | `getExtraChargeState` (read), `reserveExtraCharge`, `applyExtraCharge`, `acknowledgeExtraCharge`, `cancelExtraCharge`, `resolveExtraChargeReview`; existing proxy key/editor session, GET refused |
 | POST dual path | `resolveStopFlag` by id uses the proxy key; by phone uses the existing `STOP_FLAG_SECRET` body field |
+| Package manager reads (therapists) | GET `getPackageCatalogPublic`, `getPackageRequestStatus` — `PACKAGE_CATALOG_SECRET` only; price-free allowlisted builders |
+| Package manager submit (therapists) | POST `createPackageRequest` — `PACKAGE_REQUEST_SECRET` only |
+| Package admin (Vered only) | POST `adminGetPackageCatalog`, `adminSeedPackageCatalog`, `adminSavePackageCatalogRow`, `adminQuotePackage`, `adminListPackageRequests`, `adminAdjustPackageRequest`, `adminApprovePackageRequest`, `adminAttachPackageRequest` — proxy key **and** a body-bound `adminAssertion` minted by Node only after `CATALOG_ADMIN_PIN`; refused on `/api/sheets` |
+
+Package secrets must be ≥ 32 chars and pairwise distinct (catalog, request, proxy,
+assertion); otherwise `unauthorized`. See `package-catalog.md`.
 
 ## Consumer inventory and compatibility
 

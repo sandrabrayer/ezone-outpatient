@@ -242,15 +242,15 @@ test('wiring(app.js): submitResumeTreatment posts resumeTreatmentAlert with clie
   assert.match(fn, /a\.status = 'cancelled'/, 'optimistically cancels unread stops');
   assert.match(fn, /type: 'resume'/, 'optimistically appends a resume when a stop was read');
   assert.match(fn, /state\.myStopAlerts = snapshot/, 'rolls back on failure');
-  assert.match(fn, /res && res\.resumeCreated \? 'נשלח חידוש טיפול לירדן' : 'התראת העצירה בוטלה'/, 'toast reflects the response');
+  assert.match(fn, /res && res\.resumeCreated \? 'נשלח חידוש טיפול לצוות מסלול המשך' : 'התראת העצירה בוטלה'/, 'toast reflects the response');
 });
 
 test('wiring(index.html): resume-treatment confirm modal exists and explains the branch', () => {
   assert.match(HTML, /id="resumeTreatmentModal"/);
   assert.match(HTML, /id="resumeTreatmentClientName"/);
   assert.match(HTML, /id="resumeTreatmentConfirm"/);
-  assert.match(HTML, /מבטלת את התראת העצירה אם ירדן טרם קראה אותה/, 'explains cancel-if-unread');
-  assert.match(HTML, /תישלח לירדן התראת חידוש טיפול/, 'explains resume-if-read');
+  assert.match(HTML, /מבטלת את התראת העצירה אם הצוות טרם קרא אותה/, 'explains cancel-if-unread');
+  assert.match(HTML, /תישלח לצוות מסלול המשך התראת חידוש טיפול/, 'explains resume-if-read');
 });
 
 // ===========================================================================
@@ -347,7 +347,7 @@ test('e2e: send → sent chip + חידוש טיפול; the createStopAlert POST 
     await page.click('#stopAlertSubmit');
     await page.waitForSelector('[data-client-id="c1"] [data-action="resume-treatment"]', { timeout: 5000 });
     assert.match(await ctlText(page, 'c1'), /נשלחה התראת עצירה/, 'c1 now standing');
-    assert.equal(await page.$eval('#toast', (el) => el.textContent), 'נשלחה התראת עצירה לירדן', 'toast fired');
+    assert.equal(await page.$eval('#toast', (el) => el.textContent), 'נשלחה התראת עצירה לצוות מסלול המשך', 'toast fired');
 
     const createPost = captured.find((c) => c.action === 'createStopAlert');
     assert.ok(createPost && createPost.clientName && createPost.clientName.trim(), 'clientName is non-empty');

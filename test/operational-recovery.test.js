@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { sandbox } = require('../test-support/apps-script-sandbox');
 const { harness } = require('../test-support/backup-sandbox.cjs');
+const { signAssertion } = require('../lib/catalog-admin');
+const { randomUUID } = require('node:crypto');
 const dayOf = h => h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
 const event = { sessionId: 'synthetic-session-001', phone: '0500000001', patientName: 'בדיקת שחזור',
   clinicalTreatmentType: 'פרטני CBT', date: '2026-10-19', outcome: 'therapist_cancelled', therapist: 'synthetic' };
@@ -35,6 +37,62 @@ function restored(h) {
 }
 const target = s => ({ ...s.ctx.SpreadsheetApp.getActiveSpreadsheet(), getId: () => 'isolated-target' });
 const preflight = (h, s, config = true) => h.ctx._integrityVerifyRecoveredWorkbook(h.backup, dayOf(h), target(s), config);
+
+function configurePackages(s) {
+  Object.assign(s.props, {
+    PACKAGE_CATALOG_SECRET: 'synthetic-catalog-secret-0123456789-A',
+    PACKAGE_REQUEST_SECRET: 'synthetic-request-secret-0123456789-B',
+    CATALOG_ADMIN_ASSERTION_SECRET: 'synthetic-admin-assertion-0123456789-C'
+  });
+}
+function packageAdmin(s, action, fields = {}) {
+  const body = { user: 'ורד', ...fields };
+  return s.post({ action, ...body, adminAssertion: signAssertion(action, body, s.props.CATALOG_ADMIN_ASSERTION_SECRET) });
+}
+
+test('real package catalog and approved request survive operational restore and exact retry without duplicate rows', () => {
+  const s = world(); configurePackages(s);
+  assert.equal(packageAdmin(s, 'adminSeedPackageCatalog').ok, true);
+  const request = { action: 'createPackageRequest', secret: s.props.PACKAGE_REQUEST_SECRET,
+    requestId: randomUUID(), requesterKey: 'oren', patientName: event.patientName,
+    patientPhone: event.phone, packageKey: 'emdr_core', months: 0,
+    catalogEpoch: packageAdmin(s, 'adminGetPackageCatalog').catalogEpoch };
+  assert.equal(s.post(request).ok, true);
+  assert.equal(packageAdmin(s, 'adminApprovePackageRequest', {
+    requestId: request.requestId, expectedRevision: 1, opId: randomUUID()
+  }).ok, true);
+  const expectedCatalog = s.rows('PackageCatalog'), expectedRequests = s.rows('PackageRequests');
+  const h = snapshot(s), r = restored(h);
+  assert.equal(preflight(h, r).ok, true);
+  configurePackages(r); // Operator-supplied fixture config; never restored from backup.
+  const replay = r.post(request);
+  assert.equal(replay.ok, true);
+  assert.equal(replay.status, 'priced');
+  assert.equal(r.rows('PackageRequests').length, 1);
+  assert.deepEqual(r.rows('PackageRequests'), expectedRequests);
+  assert.deepEqual(r.rows('PackageCatalog'), expectedCatalog);
+  assert.equal(r.rows('ClientCharges').length, 0);
+  assert.equal(r.rows('Payments').length, 0);
+});
+
+for (const action of ['adminSeedPackageCatalog', 'createPackageRequest']) {
+  test('queued package writer ' + action + ' refuses a hold acquired while waiting for its lock', () => {
+    const s = world(); configurePackages(s);
+    assert.equal(packageAdmin(s, 'adminSeedPackageCatalog').ok, true);
+    const epoch = packageAdmin(s, 'adminGetPackageCatalog').catalogEpoch;
+    const before = JSON.stringify(s.sheets);
+    const wait = s.lock.waitLock;
+    s.lock.waitLock = () => { wait(); s.props.OUTPATIENT_RECOVERY_HOLD = '1'; };
+    const reply = action === 'adminSeedPackageCatalog' ? packageAdmin(s, action) : s.post({
+      action, secret: s.props.PACKAGE_REQUEST_SECRET, requestId: randomUUID(), requesterKey: 'oren',
+      patientName: event.patientName, patientPhone: event.phone, packageKey: 'emdr_core', months: 0, catalogEpoch: epoch
+    });
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error, 'busy');
+    assert.equal(s.isLocked(), false, 'the acquired lock is released');
+    assert.equal(JSON.stringify(s.sheets), before, 'no sheet is created or changed');
+  });
+}
 
 test('snapshot -> manifest -> isolated restore -> cancellation retry keeps one credit; correction reverses it once', () => {
   const s = world(); assert.equal(send(s).ok, true); assert.equal(Number(s.rows('Clients')[0].creditsOwed), 1);
@@ -77,7 +135,7 @@ test('all nine operational sheets capture under the same script lock; append-onl
   s.seed('AuditLog', [...s.ctx.AUDIT_LOG_HEADERS, 'futureColumn'], [{ timestamp: '2026-10-19', action: 'synthetic', futureColumn: '=literal-not-formula' }]);
   s.seed('RepairPlan', s.ctx.REPAIR_PLAN_HEADERS, [{ sheet: 'Clients', row: 2, column: 'name', newValue: 'never applied', approved: true }]);
   const h = snapshot(s), set = h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h));
-  assert.equal(set.length, 18);
+  assert.equal(set.length, 20);
   for (const spec of s.ctx._integritySourceSpecs().slice(8)) assert.equal(set.find(x => x.source === spec.source).absent, false);
   const reads = h.events.filter(e => e[0] === 'read' && e[1] === 'live' && ['SessionLog','TherapistRates','Settings','AuditLog','RepairPlan'].includes(e[2]));
   assert.ok(reads.length >= 5); assert.ok(reads.every(e => e[3] === true));
@@ -92,7 +150,7 @@ test('unclassified and future tabs are preserved as values and inventory; never 
   s.seed('Sheet1', ['manual'], [{ manual: 'keep' }]);
   s.seed('Copy of Clients', ['legacy'], [{ legacy: 'keep too' }]);
   const h = snapshot(s), set = h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h));
-  assert.equal(set.length, 20);
+  assert.equal(set.length, 22);
   for (const name of ['Sheet1','Copy of Clients']) {
     const item = set.find(x => x.source === name);
     assert.match(item.prefix, /^other-[a-f0-9]{64}-$/);
@@ -196,7 +254,7 @@ test('retention failure is surfaced without deleting the newly verified operatio
   h.backup.deleteSheet = sh => { if (sh.getName().includes('2000')) throw Error('synthetic retention failure'); return remove(sh); };
   h.ctx.nightlyIntegrityJob();
   assert.ok(h.logs.some(l => l.includes('synthetic retention failure')));
-  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length, 18);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length, 20);
   assert.ok(h.backup.getSheetByName('outpatient-session-log-2000-01-01'));
 });
 
