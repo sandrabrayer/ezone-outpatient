@@ -6432,7 +6432,10 @@ function _integritySendAlert(body) {
 function nightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
   var admission = LockService.getScriptLock();
-  if (!admission.tryLock(5000)) return { ok: false, error: 'backup_busy' };
+  if (!admission.tryLock(5000)) {
+    _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
+    return { ok: false, error: 'backup_busy' };
+  }
   var runMarker = '', admissionError = '';
   try {
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
@@ -6595,7 +6598,12 @@ function nightlyIntegrityJob() {
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
   }
   } finally {
-    var completion = LockService.getScriptLock(); completion.waitLock(30000);
+    var completion = LockService.getScriptLock();
+    try { completion.waitLock(30000); }
+    catch (err) {
+      Logger.log('nightlyIntegrityJob: marker stranded; completion lock unavailable. INTEGRITY_ACTIVE_BACKUP requires operator investigation.');
+      throw err;
+    }
     try {
       // Never clear a different execution's marker. An uncatchable runtime
       // termination leaves this marker fail-closed for operator investigation.

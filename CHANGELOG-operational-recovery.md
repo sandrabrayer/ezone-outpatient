@@ -40,6 +40,9 @@
 - New jobs cannot enter during a hold or another job. Begin reports draining;
   finish refuses while active. No long script lock spans snapshot/network work.
 - Adds five overlap/concurrency/failure/abandoned-marker tests; removing the
-  finish guard makes both overlap regressions fail. Full UTC: 1638/0/37.
+  finish guard makes both overlap regressions fail. Full UTC after two observability regressions: 1640/0/37.
 - Documents verified operator cleanup for uncatchable termination, plus remaining
   hold-age alert, manual-tab retirement and remnant-monitoring follow-ups.
+
+- Final review follow-up: admission lock timeout alerts through the existing path;
+  completion lock timeout logs a stranded-marker diagnosis, with two regressions.

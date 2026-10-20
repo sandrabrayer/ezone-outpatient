@@ -321,6 +321,30 @@ test('an abandoned execution marker is never expired or removed automatically to
   assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
 });
 
+test('an admission lock timeout reports the missed backup without writing or claiming another execution marker', () => {
+  const h = harness(); h.faults.captureLock = true;
+  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.ok(h.logs.some(l => l.includes('script lock unavailable')));
+  assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
+  assert.equal(h.events.some(e => e[0] === 'write'), false);
+  assert.deepEqual(h.locks(), [false, false]);
+});
+
+test('a completion lock timeout leaves the marker fail-closed and logs an actionable investigation message', () => {
+  const h = harness(), getLock = h.ctx.LockService.getScriptLock;
+  let calls = 0;
+  h.ctx.LockService.getScriptLock = () => {
+    const lock = getLock();
+    if (++calls === 3) lock.waitLock = () => { throw Error('synthetic completion timeout'); };
+    return lock;
+  };
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /synthetic completion timeout/);
+  assert.ok(h.props.INTEGRITY_ACTIVE_BACKUP);
+  assert.ok(h.logs.some(l => l.includes('marker stranded')));
+  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.deepEqual(h.locks(), [false, false]);
+});
+
 for (const fault of ['cache', 'journal', 'activation-marker']) {
   test('editor finish leaves recovery held after a real ' + fault + ' failure', () => {
     const s = world();

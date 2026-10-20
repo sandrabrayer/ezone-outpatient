@@ -144,6 +144,9 @@ never expires automatically. A stale-marker alert is an investigation, not a
 permission to clear it: first pause scheduled/manual invocations, verify in
 Apps Script execution history that no job is running, preserve/review published
 sets and pending/previous remnants, and record the operator's recovery decision.
+Admission lock timeout now reports a missed backup through the existing alert
+path. Completion lock timeout logs an explicit stranded-marker diagnosis while
+remaining fail-closed; it does not release an unowned lock.
 Only then may an authorized operator remove that specific abandoned active-run
 marker while keeping the recovery hold and financial marker/history intact,
 and retry begin. Do not automate this cleanup or use age alone as proof.
@@ -164,8 +167,8 @@ Existing mixed-kind FinancialOps crash/restore tests remain in the suite.
 Only Google APIs are mocked; business handlers are not mirrored.
 
 The October 20 integration uses the actual released #122/#126 tree, not the
-previous synthetic source combination. The full UTC suite passes 1,638 / 0 fail /
-37 skipped (1,675 total), including fourteen regressions added after review. The package regression seeds the real catalog, approves
+previous synthetic source combination. The full UTC suite passes 1,640 / 0 fail /
+37 skipped (1,677 total), including sixteen regressions added after review. The package regression seeds the real catalog, approves
 a real request, snapshots/restores it and retries the exact submission: one row,
 unchanged approved quote/status, no charge/payment. Two queued package-writer
 tests fail if the post-acquisition hold check is removed. CI for the resulting
