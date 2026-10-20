@@ -102,3 +102,9 @@ test('range items (Solo): Vered chooses min / midpoint / max from a fixed list; 
   for (const t of tiers) assert.ok(t.agorot >= solo.priceMinAgorot && t.agorot <= solo.priceMaxAgorot);
   assert.doesNotMatch(MODULE, /מחיר חודשי ב-₪/);
 });
+
+test('no second code: the pricing tab has no code field and auto-opens only when the SERVER says the signed-in name is eligible', () => {
+  assert.doesNotMatch(MODULE, /type: 'password'|pkgPin|קוד תמחור|incorrect_pin/);
+  assert.match(MODULE, /st\.configured && st\.eligible/);
+  assert.match(MODULE, /call\('\/api\/catalog-admin\/login', 'POST', \{\}\)/, 'login carries no secret from the browser');
+});

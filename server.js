@@ -4,6 +4,7 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
+const { CATALOG_ADMIN_USERS } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
@@ -24,14 +25,13 @@ const SESSION_SECRET = process.env.SESSION_SECRET || '';
 if (!SESSION_SECRET) {
   console.error('[config] SESSION_SECRET is not set — /api/verify-pin will return 500 and the data routes (/api/sheets, /api/continuation-roster, /api/me, /api/debug/*) will return 401 until it is configured (fail-closed).');
 }
-/* Vered-only package catalog (quotes / pricing requests). TWO extra secrets, set
+/* Vered-only package catalog (quotes / pricing requests). ONE extra secret, set
  * on Railway by the operator — never in code, never logged:
- *   CATALOG_ADMIN_PIN                — the PIN only Vered knows (8–32 chars, != APP_PIN)
  *   CATALOG_ADMIN_ASSERTION_SECRET   — >=32 chars, shared with the Apps Script property
  *                                      of the same name, distinct from every other key.
- * FAIL-CLOSED: if either is missing/invalid every /api/catalog-admin route that
- * needs it answers 503 and nothing price-related is reachable. */
-const CATALOG_ADMIN_PIN = process.env.CATALOG_ADMIN_PIN || '';
+ * Access = the signed-in NAME (lib/users.js CATALOG_ADMIN_USERS); there is no second code
+ * (owner decision 2026-10-19). FAIL-CLOSED: if the secret is missing/invalid every
+ * /api/catalog-admin route that needs it answers 503 and nothing price-related is reachable. */
 const CATALOG_ADMIN_ASSERTION_SECRET = process.env.CATALOG_ADMIN_ASSERTION_SECRET || '';
 const SESSION_COOKIE = 'ezone_session';
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // 604800 seconds (7 days), matches the token TTL
@@ -542,17 +542,16 @@ app.post('/api/verify-pin', (req, res) => {
 
 /* ---- Vered-only package catalog (/api/catalog-admin/*) ---------------------
  * Every route needs the normal session AND, except login/logout/status, a valid
- * short-lived admin cookie minted by a correct CATALOG_ADMIN_PIN. The admin
+ * short-lived admin cookie minted for a signed-in CATALOG_ADMIN_USERS name. The admin
  * cookie is scoped (cannot verify as a session), HttpOnly, SameSite=Strict and
  * Path-limited to this prefix. Authority never comes from the picked display
  * name or from anything the browser stores. */
-const catalogAdminLimiter = catalogAdmin.createFailureLimiter();
 const catalogAdminSessions = catalogAdmin.createAdminSessions();
 
 function catalogAdminConfig() {
   return catalogAdmin.adminConfigStatus({
     SESSION_SECRET, APP_PIN, OUTPATIENT_PROXY_SECRET,
-    CATALOG_ADMIN_PIN, CATALOG_ADMIN_ASSERTION_SECRET
+    CATALOG_ADMIN_ASSERTION_SECRET
   });
 }
 
@@ -584,7 +583,9 @@ function requireCatalogAdmin(req, res, next) {
 app.get('/api/catalog-admin/status', requireSession, (req, res) => {
   res.set('Cache-Control', 'no-store');
   const configured = catalogAdminConfig().ok;
-  res.status(200).json({ ok: true, configured, admin: configured && hasAdminCookie(req) });
+  const user = sessionUserFromRequest(req);
+  const eligible = !!user && CATALOG_ADMIN_USERS.indexOf(user) >= 0 && RETIRED_SESSION_USERS.indexOf(user) < 0;
+  res.status(200).json({ ok: true, configured, eligible: configured && eligible, admin: configured && hasAdminCookie(req) });
 });
 
 app.post('/api/catalog-admin/login', requireSession, (req, res) => {
@@ -594,19 +595,11 @@ app.post('/api/catalog-admin/login', requireSession, (req, res) => {
   const user = sessionUserFromRequest(req);
   if (!user) return res.status(403).json({ ok: false, error: 'named_session_required' });
   if (!sessionJtiFromRequest(req)) return res.status(403).json({ ok: false, error: 'fresh_login_required' });
+  // Vered's NAME is the authorization (no second code). Anyone else: refused, nothing minted.
+  if (CATALOG_ADMIN_USERS.indexOf(user) < 0 || RETIRED_SESSION_USERS.indexOf(user) >= 0) {
+    return res.status(403).json({ ok: false, error: 'vered_only' });
+  }
   const binding = adminBinding(req);
-  const ip = getClientIp(req);
-  const gate = catalogAdminLimiter.check(binding, ip);
-  if (!gate.allowed) {
-    res.set('Retry-After', String(gate.retryAfterSec));
-    if (gate.scope === 'global') console.warn('[catalog-admin] global failed-PIN cap reached; logins paused for up to ' + gate.retryAfterSec + 's');
-    return res.status(429).json({ ok: false, error: 'too_many_attempts', retryAfterSec: gate.retryAfterSec });
-  }
-  if (!catalogAdmin.verifyAdminPin(req.body && req.body.pin, CATALOG_ADMIN_PIN)) {
-    catalogAdminLimiter.fail(binding, ip);
-    return res.status(401).json({ ok: false, error: 'incorrect_pin' });
-  }
-  catalogAdminLimiter.success(binding);
   const sid = catalogAdminSessions.create(binding, user);
   if (!sid) return res.status(500).json({ ok: false, error: 'catalog_admin_unavailable' });
   res.set('Set-Cookie', catalogAdmin.buildAdminCookie(catalogAdmin.createAdminToken(SESSION_SECRET, sid), requestIsHttps(req)));

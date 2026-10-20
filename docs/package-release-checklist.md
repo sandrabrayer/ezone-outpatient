@@ -26,7 +26,7 @@ Legend: 🧑 = Sandra/operator action (Claude never changes Railway or Script Pr
 
    | Service | Must exist | Currently (names-only check, 2026-10-19, by the reviewer) |
    | --- | --- | --- |
-   | ezone-outpatient | `APP_PIN`, `SESSION_SECRET`, `OUTPATIENT_PROXY_SECRET`, **`CATALOG_ADMIN_PIN`**, **`CATALOG_ADMIN_ASSERTION_SECRET`** | the last two are **absent** |
+   | ezone-outpatient | `APP_PIN`, `SESSION_SECRET`, `OUTPATIENT_PROXY_SECRET`, **`CATALOG_ADMIN_ASSERTION_SECRET`** | the assertion secret is **absent** until you add it |
    | ezone-therapists | `ROLE_CODES`, `OUTPATIENT_SHEETS_URL`, **`PACKAGE_CATALOG_SECRET`**, **`PACKAGE_REQUEST_SECRET`**, **`PACKAGE_WHATSAPP_NUMBER`** | the last three are **absent**; `ROLE_CODES` exists, contents unverified |
    | Outpatient Apps Script → Project Settings → Script properties | `OUTPATIENT_PROXY_SECRET`, **`CATALOG_ADMIN_ASSERTION_SECRET`**, **`PACKAGE_CATALOG_SECRET`**, **`PACKAGE_REQUEST_SECRET`** | **not inspected** — do not infer |
 
@@ -57,7 +57,7 @@ Other configuration:
 
 | Item | Where | Rule |
 | --- | --- | --- |
-| `CATALOG_ADMIN_PIN` | Outpatient Railway | **Vered alone** knows it; 8–32 chars; ≠ `APP_PIN`; not shared with anyone else |
+| ~~`CATALOG_ADMIN_PIN`~~ | — | **Removed 2026-10-19** (owner decision): Vered's signed-in name opens pricing. Delete the variable if you set it. Residual: anyone who knows `APP_PIN` can pick «ורד» |
 | `PACKAGE_WHATSAPP_NUMBER` | Therapists Railway | digits only, international (e.g. 9725XXXXXXXX), `^\d{9,15}$`; destination is config only — there is no default and the browser can never set it |
 | `ROLE_CODES` | Therapists Railway | `{"coordinator":{"אורן":"<6+ digit code>","שחר":"<a DIFFERENT 6+ digit code>"}}` — **distinct personal codes** for Oren and Shahar; keep every other approved setting; a single shared coordinator code lets each sign in as the other |
 | `APP_PIN` + `SESSION_SECRET` rotation | Outpatient Railway | a **coordinated operator step** (signs everyone out once; revokes a leaver's shared-PIN knowledge). Do it deliberately, not as a side effect; Claude does not do it |
@@ -70,9 +70,9 @@ project → **Project Settings** (gear) → **Script properties** → edit → S
 
 * ✅ Fingerprints are only for the moment you enter a secret (compute it from the value you are about to paste, compare it with the one
   you recorded at generation). Railway/Script Properties are never read back for comparison — after entry, rely on the functional checks below.
-* ✅ Outpatient: `GET /api/catalog-admin/status` (signed in) → `{"configured": true}` proves PIN length/difference and the
+* ✅ Outpatient: `GET /api/catalog-admin/status` (signed in) → `{"configured": true}` proves the
   assertion secret's presence/length/distinctness on the Node side. `false` ⇒ one of them is missing or mis-set.
-* ✅ After #122 is live and the Script properties are set: Vered signs in to «תמחור חבילות» (PIN). If the Node assertion secret
+* ✅ After #122 is live and the Script properties are set: Vered signs in to «תמחור חבילות» (it opens by itself). If the Node assertion secret
   and the Script property differ, the first action answers `unauthorized` — fix #1 and retry.
 * ✅ After #105 is live: as Oren, the catalog loads (15 items) ⇒ #2 aligned; a test request submits ⇒ #3 aligned.
   `503 package_not_configured` ⇒ a therapists variable is missing/short/equal/reused; `unauthorized`/`upstream_unavailable` ⇒ the
@@ -93,7 +93,7 @@ project → **Project Settings** (gear) → **Script properties** → edit → S
 
 ## 4. Controlled enablement (🧑 Vered + Sandra)
 
-1. Vered signs in with the app PIN + her name, opens «תמחור חבילות», enters the separate admin PIN.
+1. Vered signs in with the app PIN + her name «ורד», opens «תמחור חבילות» — it opens by itself (no second code).
 2. **One-time import** («ייבוא ראשוני», idempotent — refuses if any row exists). Review the 15 rows against the verified PDF table
    in `docs/package-catalog.md`; confirm the VAT rate (assumed 18 %). Fix any row **by editing** (appends a new version; nothing is overwritten).
 3. ✅ Check: exactly 15 active rows; `sourceRef` present on each; the manager-facing feed (`getPackageCatalogPublic`) carries no price.
@@ -117,7 +117,7 @@ project → **Project Settings** (gear) → **Script properties** → edit → S
 * Disabling the feature for managers without a deploy: remove `PACKAGE_CATALOG_SECRET`/`PACKAGE_REQUEST_SECRET` from the therapists
   Railway service (routes then answer `503 package_not_configured`) — an operator action, not Claude's.
 * Residual limitations that stay documented: any holder of the shared Outpatient `APP_PIN` can read the (now session-only) price/pay
-  constants after sign-in; shared per-IP / global PIN-failure caps can pause Vered's PIN entry for up to 15 minutes (a restart clears them).
+  constants after sign-in, and — since the second code was removed — can open «תמחור חבילות» by picking the name «ורד». There is no PIN lock-out any more.
 
 ## 7. Final report template (rule 7)
 

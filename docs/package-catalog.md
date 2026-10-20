@@ -21,16 +21,17 @@ payout. `priced` means **quoted/approved, not paid**.
 | --- | --- | --- |
 | Oren / Shahar (therapists app) | price-free catalog (key, family, tier, sessions, allowed months, `needsPricing`); their own request IDs + status (`pending`/`priced`) | any amount, total, VAT, adjustment, approval, snapshot, other requester's rows |
 | Ordinary therapists | nothing — no access to any new endpoint | everything |
-| Vered (this app) | everything, **after** the separate `CATALOG_ADMIN_PIN` | — |
-| Anyone with only `APP_PIN` / any display name | the normal app | the pricing tab's data (the server answers 401) |
+| Vered (this app) | everything, when signed in with the name «ורד» (no second code — owner decision 2026-10-19) | — |
+| Any other name | the normal app | the pricing tab's data (`403 vered_only`) |
+| **Anyone who knows the shared `APP_PIN`** | the normal app **and** — by picking the name «ורד» at sign-in — the pricing tab | **Honest limit:** the name is not authentication. Rotate `APP_PIN` + `SESSION_SECRET` to revoke a leaver; a personal code per user would be the real fix |
 
 ### Authorization layers (Vered only)
 
 1. **Session** — normal signed `APP_PIN` cookie (`requireSession`).
-2. **Server-verified `CATALOG_ADMIN_PIN`** → `POST /api/catalog-admin/login`:
-   constant-time compare; only WRONG PINs count, in three failure-only buckets per 15 min —
-   **5 per base session, 30 per client address, 60 global** (see "Lock-out — residual risk");
-   8–32 chars; must differ from `APP_PIN`; fails closed (503) when unset or mis-set.
+2. **Signed-in name = Vered** (`CATALOG_ADMIN_USERS` in `lib/users.js`, decided on the server) →
+   `POST /api/catalog-admin/login` (no code, no body field is trusted). Any other name gets `403 vered_only`,
+   nothing minted. The browser only asks; the tab opens by itself for Vered. Fails closed (503) when
+   `CATALOG_ADMIN_ASSERTION_SECRET` is unset/mis-set. **There is no PIN guessing surface and no failure limiter any more.**
 3. **Scoped, signed, HttpOnly cookie** `ezone_catalog_admin` — 15 minutes,
    `SameSite=Strict`, `Path=/api/catalog-admin`, `Secure` on HTTPS, token scope
    `catalog-admin` (never verifies as a session and vice versa).
@@ -182,28 +183,20 @@ rotation complements, and does not replace, these code checks.
 
 ## Pricing authorization model (what the code enforces)
 
-* `CATALOG_ADMIN_PIN` is verified **on the server** and mints a 15-minute HttpOnly,
+* Vered's signed-in name (server allowlist, no second code) mints a 15-minute HttpOnly,
   SameSite=Strict, Path-scoped cookie that carries only a random id. The id points at an
   **in-memory server-side admin session** bound to the **exact base session cookie** and the
   **named user** it was minted for. A copied admin cookie is useless with any other session or user.
 * **Revocation is server-side:** `/api/catalog-admin/logout` and `/api/logout` delete the record
   (and every record of that base session) immediately; **every successful `/api/verify-pin` login
   (re-login or account switch) also revokes the privilege of the session whose cookie it presented and
-  clears the admin cookie**; a server restart forgets all records (fail closed — re-enter the PIN);
+  clears the admin cookie**; a server restart forgets all records (fail closed — the tab re-opens by itself);
   absolute 15-minute expiry.
 * **Unique login identity:** every session token carries a random 128-bit login id inside the signed
   payload, so two logins of the same name in the same second never share a token (and thus never share
   the admin binding). Cookies minted before this change (no login id) still serve ordinary routes until
   they expire, but cannot enter pricing (`403 fresh_login_required`) — sign in again once.
-* **Lock-out — residual risk (honest statement):** only *wrong* PINs count, a correct PIN is never counted,
-  and the per-session cap (5 / 15 min) is the primary control. **But the per-IP cap (30) and the global
-  cap (60) are shared:** 30 wrong admin-PIN attempts from the office address, or 60 anywhere, DO block
-  Vered's fresh session for up to 15 minutes (the limiter runs before her PIN is evaluated, which is what
-  keeps the cap meaningful against guessing). A block returns `429` + `Retry-After` and is logged.
-  Recovery: wait out `Retry-After` (≤ 15 min), or restart the service (clears the in-memory counters).
-  Not relaxed on purpose: letting a correct PIN bypass the shared caps would remove their value against
-  a holder of the shared `APP_PIN` who rotates sessions. PIN length is 8–32.
-* Apps Script still verifies the body-bound HMAC assertion (the second, independent check).
+* **Lock-out: gone.** With no PIN there is nothing to guess and no failure counter, so nobody can lock Vered out. (The earlier shared limiter, its residual risk and `verifyAdminPin` are unused leftovers kept only in `lib/catalog-admin.js`; no route calls them.)
 
 ## Configuration — an explicit PREREQUISITE of enablement (values are never in code or git)
 
@@ -211,8 +204,7 @@ The feature is inert until configured (every route fails closed). The complete, 
 locations, what must match what, and presence/alignment checks that never print a value — is
 **`docs/package-release-checklist.md`** (single source; the therapists repo links to it). Summary of what exists:
 
-* Outpatient **Railway** variables: `CATALOG_ADMIN_PIN` (Vered only, 8–32 chars, ≠ `APP_PIN`),
-  `CATALOG_ADMIN_ASSERTION_SECRET` (≥ 32 random chars, distinct from every other secret).
+* Outpatient **Railway** variable: `CATALOG_ADMIN_ASSERTION_SECRET` (≥ 32 random chars, distinct from every other secret).
 * Outpatient **Apps Script → Script properties**: the **same** `CATALOG_ADMIN_ASSERTION_SECRET`, plus
   `PACKAGE_CATALOG_SECRET` and `PACKAGE_REQUEST_SECRET` (≥ 32 chars each; the four secrets pairwise distinct and distinct
   from `OUTPATIENT_PROXY_SECRET`, otherwise Apps Script fails closed).

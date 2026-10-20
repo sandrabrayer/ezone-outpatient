@@ -9,6 +9,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
 
+### Pricing tab opens for Vered's name — second code removed (owner decision 2026-10-19, draft)
+- `CATALOG_ADMIN_PIN` and its failure limiter are no longer used by any route; `POST /api/catalog-admin/login` needs no body and mints the
+  scoped admin cookie only for the signed-in name in `CATALOG_ADMIN_USERS` (`ורד`); others get `403 vered_only`. The tab opens by itself.
+  Honest limit: anyone who knows the shared `APP_PIN` can pick «ורד». SW v14 → v15. See `CHANGELOG-pricing-name-only.md`.
+
 ### Package catalog + pricing requests (OP-PKG, draft)
 - Solo (range) price is now chosen from three tiers — minimum / midpoint / maximum — instead of free text (owner decision 2026-10-19); VAT 18 % and current prices confirmed.
 - New Vered-only tab «תמחור חבילות» (calculator, requests with badge, catalog

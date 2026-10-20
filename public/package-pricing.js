@@ -29,7 +29,7 @@
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
   var REQUESTER = { oren: 'אורן', shahar: 'שחר' };
   var ERRORS = {
-    incorrect_pin: 'קוד שגוי', named_session_required: 'יש להיכנס עם שם משתמש (לא כניסה אנונימית) כדי לגשת לתמחור', too_many_attempts: 'יותר מדי ניסיונות — נסי שוב מאוחר יותר',
+    vered_only: 'האזור הזה מיועד לורד בלבד', named_session_required: 'יש להיכנס עם שם משתמש (לא כניסה אנונימית) כדי לגשת לתמחור', too_many_attempts: 'יותר מדי ניסיונות — נסי שוב מאוחר יותר',
     catalog_admin_not_configured: 'התמחור עדיין לא הוגדר בשרת', admin_required: 'נדרשת כניסה מחדש',
     revision_conflict: 'הבקשה עודכנה — נטענה מחדש', version_conflict: 'השורה עודכנה — נטענה מחדש',
     already_priced: 'הבקשה כבר תומחרה', selection_required: 'יש לבחור מחיר חודשי לפני אישור',
@@ -99,7 +99,7 @@
       headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
     if (r.status === 401) {
       var j401 = null; try { j401 = await r.json(); } catch (_) {}
-      if (j401 && j401.error === 'admin_required') { S.phase = 'gate'; draw(); throw new Error('admin_required'); }
+      if (j401 && j401.error === 'admin_required') { S.phase = 'loading'; S.catalog = null; S.requests = null; boot(); throw new Error('admin_required'); }
       S.onUnauthorized();
       throw new Error('unauthorized');
     }
@@ -112,8 +112,13 @@
   async function boot() {
     try {
       var st = await call('/api/catalog-admin/status');
-      S.configured = !!st.configured;
+      S.configured = !!st.configured; S.eligible = !!st.eligible;
       S.phase = st.admin ? 'admin' : 'gate';
+      // Vered's signed-in name is the authorization: no second code. The server decides; this only asks.
+      if (!st.admin && st.configured && st.eligible) {
+        var r = await call('/api/catalog-admin/login', 'POST', {});
+        if (r && r.ok) S.phase = 'admin';
+      }
     } catch (_) { S.phase = 'gate'; }
     if (S.phase === 'admin') await loadAll();
     draw();
@@ -136,25 +141,11 @@
   }
 
   function gateView() {
-    var pin = h('input', { type: 'password', id: 'pkgPin', autocomplete: 'off', inputmode: 'numeric', maxlength: '12', 'aria-label': 'קוד תמחור' });
-    var msg = h('p', { class: 'pkg-msg', role: 'alert' });
-    var go = h('button', { type: 'button', class: 'btn btn-primary', text: 'כניסה' });
-    async function submit() {
-      go.disabled = true; msg.textContent = '';
-      try {
-        var r = await call('/api/catalog-admin/login', 'POST', { pin: pin.value });
-        pin.value = '';
-        if (r.ok) { S.phase = 'admin'; await loadAll(); draw(); return; }
-        msg.textContent = errorText(r.error) + (r.error === 'too_many_attempts' && r.retryAfterSec ? ' (בעוד כ-' + Math.max(1, Math.ceil(r.retryAfterSec / 60)) + ' דקות)' : '');
-      } catch (e) { msg.textContent = errorText(e.message); }
-      go.disabled = false;
-    }
-    go.addEventListener('click', submit);
-    pin.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+    var text = !S.configured ? 'התמחור עדיין לא הוגדר בשרת. פני לסנדרה.'
+      : (S.eligible ? 'לא ניתן לפתוח את התמחור כרגע. נסי לרענן או להיכנס מחדש.' : 'האזור הזה מיועד לורד בלבד.');
     return h('div', { class: 'pkg-gate card' }, [
       h('h2', { text: 'תמחור חבילות' }),
-      h('p', { class: 'muted', text: S.configured ? 'האזור הזה מיועד לורד בלבד. יש להזין את קוד התמחור.' : 'התמחור עדיין לא הוגדר בשרת. פני לסנדרה.' }),
-      S.configured ? h('div', { class: 'pkg-row' }, [pin, go]) : null, msg
+      h('p', { class: 'muted', text: text })
     ]);
   }
 

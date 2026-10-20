@@ -101,8 +101,8 @@ updates, Railway skipped the deploy.
 ## Package catalog configuration (OP-PKG — values are never committed)
 
 Railway → *ezone-outpatient* → **Variables** (applies to deployments started
-after saving): `CATALOG_ADMIN_PIN` (8–32 chars, ≠ `APP_PIN`) and
-`CATALOG_ADMIN_ASSERTION_SECRET` (≥ 32 chars). Apps Script → **Project
+after saving): `CATALOG_ADMIN_ASSERTION_SECRET` (≥ 32 chars). There is no
+admin PIN any more (2026-10-19): Vered's signed-in name opens pricing. Apps Script → **Project
 Settings → Script properties**: `CATALOG_ADMIN_ASSERTION_SECRET` (same value as
 Railway), `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET` (each ≥ 32 chars,
 all pairwise distinct and distinct from `OUTPATIENT_PROXY_SECRET`). The two
