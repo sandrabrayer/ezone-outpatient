@@ -42,10 +42,8 @@ secret-looking is added to it.
   served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
   never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
   See `CHANGELOG-protect-price-constants.md`.
-- "המשך כצופה בלבד" hides all edit controls (read-only). It rides the same
-  cookie: the data loads only if this device already has a live session.
-- The editor/viewer choice is stored in `sessionStorage` for the session
-  only; the credential is the cookie, never a browser flag.
+- The former "המשך כצופה בלבד" button was removed (2026-10-20): the PIN screen has only the PIN entry. A stale
+  remembered viewer flag is ignored and cleared. The credential is the cookie, never a browser flag.
 - Who/when: every Clients / Leads write stamps `updatedAt` (server time) and
   `updatedBy` (the `user` embedded in the signed cookie — only a name from
   `lib/users.js`; blank until the name picker ships in PR 2). See

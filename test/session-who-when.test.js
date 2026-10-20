@@ -786,7 +786,8 @@ test('G: every /api data call in app.js goes through apiFetch (401 -> PIN screen
   // the load fired at init is refused until the PIN mints the cookie, so a
   // successful PIN (and the viewer button) loads the data if nothing loaded yet
   assert.match(APP, /state\.role = 'editor';\s*enterApp\(\);[\s\S]{0,300}?if \(!state\.loaded\) loadAll\(\)\.catch/);
-  assert.match(APP, /state\.role = 'viewer';\s*enterApp\(\);[\s\S]{0,300}?if \(!state\.loaded\) loadAll\(\)\.catch/);
+  // (the viewer button was removed 2026-10-20: no second entry path that loads data)
+  assert.doesNotMatch(APP, /state\.role = 'viewer';\s*enterApp\(\);/);
   // and the 401 path raises no error toast on top of the PIN screen
   assert.match(APP, /if \(!\(e && e\.message === 'unauthorized'\)\) toast\('שגיאה בטעינת הנתונים: '/);
 });

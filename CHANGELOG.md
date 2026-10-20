@@ -9,6 +9,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
 
+### PIN screen: «המשך כצופה בלבד» removed (owner decision 2026-10-20, draft)
+- The PIN screen only offers the PIN entry. A stale remembered viewer flag is ignored and cleared. It was a client-only display mode and never an
+  access control (the cookie is the credential), so this removes an option, it does not change server authorization. SW v15 → v16. No `apps-script/**` change.
+
 ### Pricing tab opens for Vered's name — second code removed (owner decision 2026-10-19, draft)
 - `CATALOG_ADMIN_PIN` and its failure limiter are no longer used by any route; `POST /api/catalog-admin/login` needs no body and mints the
   scoped admin cookie only for the signed-in name in `CATALOG_ADMIN_USERS` (`ורד`); others get `403 vered_only`. The tab opens by itself.

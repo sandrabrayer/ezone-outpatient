@@ -6417,15 +6417,6 @@
       var err = $('#pinError'); if (err) err.hidden = true;
       if (e.key === 'Enter') { e.preventDefault(); var btn = $('#pinSubmit'); if (btn) btn.click(); }
     });
-    on('#pinViewer', 'click', function () {
-      try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {}
-      state.role = 'viewer';
-      enterApp();
-      // Viewer mode rides the same session cookie (the data routes are
-      // gated): with a live cookie on this device the data loads; without
-      // one the 401 handler returns to the PIN screen.
-      if (!state.loaded) loadAll().catch(function () {});
-    });
     function logout() {
       // Expire the server session cookie too (fire-and-forget) so a shared
       // device does not keep a live 7-day session after יציאה.
@@ -7202,7 +7193,10 @@
     try { wireEvents(); } catch (e) { console.error('[ezone] wireEvents failed', e); }
     var saved = null;
     try { saved = sessionStorage.getItem('ez_role'); } catch (_) {}
-    if (saved === 'editor' || saved === 'viewer') {
+    // "Continue as viewer" was removed (owner decision 2026-10-20): a stale remembered 'viewer' flag is dropped
+    // and the PIN screen is shown. The flag never granted access (the cookie is the credential).
+    if (saved === 'viewer') { try { sessionStorage.removeItem('ez_role'); } catch (_) {} saved = null; }
+    if (saved === 'editor') {
       state.role = saved;
       enterApp();
       // Read the session's name first (a 401 here flips to the PIN screen
