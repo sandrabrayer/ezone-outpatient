@@ -1,12 +1,14 @@
 # Outpatient current handoff — 2026-10-20
 
-Deployed Node baseline: `f7b37d70691caa775b81f6ab1fab32b1fb79e54e`, SW 15;
-Apps Script @99 (run 39298379832). Branch `claude/youthful-volta-laarnk`. #121 financial journal and #123
-protected price assets are released. Therapists #106 is released at
-`e9021a5a15363d017d0733771b242001057e61bc`, source 74, SW 46. Do not push merged
-branches or repeat those releases. Source deploy is explicit dispatch AFTER
-matching Node, with expected_commit = approved full merge SHA; historical
-all-app automatic-deploy wording below does not override this repo's DEPLOY.md.
+Latest Git base: `8b68cd7547d394a00483da51a11cab086be62eca`, SW18 assets,
+branch `claude/youthful-volta-laarnk` (#127/#128/#129 now merged). Last direct
+live check this morning was Node f7b37d7 / SW15 and Apps Script @99
+(run 39298379832); refresh live evidence before release. #121/#123/#122/#126
+remain released. Therapists #105 merged to d38d85b1 and #107 advanced its deploy
+branch to a8a1afbc. Merges alone do not prove the latest live package flow.
+Never push merged branches or repeat releases. Source deployment remains an
+explicit dispatch AFTER matching healthy Node, with the approved full merge SHA.
+Historical all-app automatic-deploy text never overrides this repo's DEPLOY.md.
 
 Codex owns isolated OP-03 issue #124 implementation, branch
 `codex/op03-operational-backup-20261019`. The prior eight-table nightly set loses
@@ -16,7 +18,9 @@ See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
 real Google round-trip with nonempty journal/session data, scheduled evidence,
 independent review and separate final production approval remain open.
 
-OP-03 now integrates the exact released #122/#126 tree. Its registry retains
+OP-03 now integrates base 8b68cd75, retaining #122/#126 and the newer sign-in,
+calculator and favicon work. The production source logic is unchanged from
+PR125 head29195b24; public assets exactly match the latest base. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
 an exact submission retry without another row. The full integrated UTC suite
@@ -31,8 +35,11 @@ Read-only source inspection Oct 20: Sheet1 has no cell values/formulas in its
 entire 1,000 x 26 grid. Copy of Clients has 21 unique-id rows and 33 headers;
 all 21 ids exist in Clients, but values were not equated. It is retained as a
 historical archive, never merged into Clients. No source cell was changed.
-The native full safety copy of Oct 19 predates the package tables and is not
-an up-to-date full backup. Unknown-tab recovery remains blocked pending review.
+The private full safety copy of Oct20 has20 tabs including packages; the Oct19
+copy is historical. Neither proves restoration. Unknown-tab recovery stays
+blocked pending review. The phased synthetic Google drill is prepared at
+docs/google-operational-drill.md; seven local service-double tests pass. An
+authorized isolated Apps Script runtime is still needed; no native run is claimed.
 
 Keep FinancialOps history/marker and both operation kinds. Never roll source
 back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and
@@ -52,7 +59,7 @@ subscriptions, check-ins or unapproved production release.
 #122 merged at `3c1d2607e166ad3d09565ac4cc47b365647fbe42`; its explicit source
 deploy workflow 39298379832 confirmed the existing deployment at @99. #126 merged at
 `f7b37d70691caa775b81f6ab1fab32b1fb79e54e` and changes Node/UI only. Public
-/api/version now reports f7b37d7 and /healthz is healthy. PackageCatalog and
+The morning /api/version check reported f7b37d7 with healthy /healthz. PackageCatalog and
 PackageRequests exist in the source workbook. This does not independently
 verify every configured secret or manager end-to-end usage.
 
@@ -63,10 +70,10 @@ APP_PIN can choose Vered; name-only access is an accepted limitation in that
 owner record, not personal authentication. The catalog PIN/limiter are gone.
 Do not reintroduce the superseded PIN gate or describe it as still required.
 
-Claude owns Therapists #105, still draft at
-`7ac9c3a740371f74d5554477de514232e14d67fd` on its correct deployed base.
+Claude owns continuation of package verification. Therapists #105 merged at
+`d38d85b1c0554b419f7da352d0069363dbe3c5eb`; do not merge it again.
 It supplies the managers' price-free catalog/status and idempotent request flow;
-configuration and its separate release approval remain open. Keep two distinct
+current configuration and live end-to-end evidence still need verification here. Keep two distinct
 PACKAGE_* secrets. Quotes remain integer-agorot immutable snapshots; priced is
 not paid, attach stores a reference, and package quotes do not create charges.
 Sandra's current prices, VAT, Solo tiers/extensions and Vered continuation
@@ -82,6 +89,16 @@ removed on logout; SW excludes them. Shared APP_PIN holders still see them after
 sign-in. Therapists #106 removes browser amounts while preserving the debt gate.
 Neither released branch needs another push or release. See
 CHANGELOG-protect-price-constants.md for the original change.
+
+## Browser-tab favicons (Oct 20, 2026 — merged; live release verification separate)
+
+Assets: Therapists = pink **T** on `#2c1a28`, Outpatient = green **O** on `#071410`
+(same palette as each app's PWA icons, so the two tabs differ by letter AND colour).
+Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
+`favicon-16x16.png`, `favicon-32x32.png`, generated by `scripts/gen-favicons.js`
+(no deps); served by explicit public routes in `server.js`; how to replace:
+`docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
+
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 

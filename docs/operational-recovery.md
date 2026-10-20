@@ -2,7 +2,9 @@
 
 Issue: [#124](https://github.com/sandrabrayer/ezone-outpatient/issues/124).
 Base: `claude/youthful-volta-laarnk` at
-`f7b37d70691caa775b81f6ab1fab32b1fb79e54e` (released #122/#126, source @99, SW 15).
+`8b68cd7547d394a00483da51a11cab086be62eca` (includes #122/#126/#127/#128/#129,
+source last verified @99; base assets SW18). The current branch head is not
+itself proof of the live Node version; refresh live evidence before release.
 This document describes a candidate, not a production release or completed DR drill.
 
 ## Why the eight-table set was insufficient
@@ -50,7 +52,8 @@ not a full-workbook recovery contract. Unknown tabs are preserved as values in
 hashed-name snapshots and listed explicitly, but block automatic operational
 certification pending a separately reviewed recovery plan. Do not omit them or
 edit their manifest away to pass the gate. The private full native safety copy
-made 19 October remains separate containment; it is not an automatic backup fix.
+made 20 October (20 tabs, after packages) remains separate containment; it is
+not an automatic backup fix. The older 19 October copy is historical.
 
 ## Manifest, retention and compatibility
 
@@ -159,6 +162,13 @@ need size/count monitoring and manual review, never blind retention cleanup.
 
 ## Evidence and remaining gates
 
+The evening base integration preserves the released sign-in/calculator/favicon
+changes and source recovery logic. A separate [phased Google drill](google-operational-drill.md)
+is now prepared, with nonempty synthetic sessions, both journal kinds, catalog
+and approved request. Seven tests execute its exact generated helpers with
+service doubles, including identity/order/hash refusals and cache-failure hold.
+The runner has NOT executed in Google; isolated runtime access remains required.
+
 The new real-source tests perform snapshot -> manifest validation -> isolated
 restore -> event retry/correction, covering credit idempotency, payroll stamps,
 custom rates, schemas/keys, missing state, legacy sets, retention, writer lock
@@ -203,8 +213,9 @@ Track timezone coverage under remaining OP-02 date/business-logic review.
 tree, keeping the registry/metadata validator and both PACKAGE_* schemas.
 _pkgLock now rechecks the recovery hold immediately after acquisition, releasing
 and returning busy before any write. Public assets exactly match the released
-SW 15 tree; this backup-only change needs no SW bump. Claude still owns the
-unreleased Therapists #105; no changes were pushed to his branches.
+SW18 base tree; this backup-only change needs no SW bump. Therapists #105 is
+merged at d38d85b1; its branch advanced to a8a1afbc with #107. Claude retains
+ownership of package release/flow verification. No changes were pushed to his branches.
 
 ### Manual tabs: observed state and proposed recovery treatment
 
@@ -216,8 +227,8 @@ Shared ids do not prove equal row values or that the archive is expendable.
 Retain Sheet1 as an empty structural tab and Copy of Clients as an immutable
 historical archive; never merge the archive into live Clients, use it as billing
 input, or delete it because ids overlap. Preserve native properties through the
-separate full-workbook copy. Its prior October 19 copy predates PackageCatalog /
-PackageRequests, so it is not a current complete package-era backup.
+separate full-workbook copy. The October 20 private copy has 20 tabs including
+packages; the prior October 19 copy is historical. Neither is a proved restore.
 
 This is a proposal for independent review, not a whitelist implemented in the
 recovery gate. Unknown tabs still block operational certification. Do not bypass

@@ -6,15 +6,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Integrate released base 8b68cd75 without changing its public assets; add an
+  isolated phased Google acceptance runner with explicit project binding,
+  synthetic mixed journals/sessions/packages and local failure-path tests.
 - Integrate released packages and gate recovery completion on whole-run backup
   drainage; retain marker on uncatchable termination for operator review.
 - Nightly backup now includes session/rate/configuration and operational history,
   a complete inventory, and guarded recovery verification. Unknown tabs remain
   explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
+### Browser-tab favicon — letter O (draft)
+- Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
+  `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.
+  See `CHANGELOG-favicon.md`, `docs/favicons.md`.
 
 ### Price and pay constants are session-only (confidentiality fix, draft)
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
+
+### One-screen sign-in + calculator shows every option (owner decisions 2026-10-20, draft)
+- Sign-in: the names are shown next to the PIN field and posted together `{pin, user}` (no second screen). `GET /api/users` is now PUBLIC
+  (`no-store`, first names only). Oren/Shahar stay in the Therapists app (no Outpatient role). Calculator: all packages/months/Solo tiers as buttons.
+  SW v16 → v17. No `apps-script/**` change. See `CHANGELOG-one-screen-signin.md`.
+
+### PIN screen: «המשך כצופה בלבד» removed (owner decision 2026-10-20, draft)
+- The PIN screen only offers the PIN entry. A stale remembered viewer flag is ignored and cleared. It was a client-only display mode and never an
+  access control (the cookie is the credential), so this removes an option, it does not change server authorization. SW v15 → v16. No `apps-script/**` change.
 
 ### Pricing tab opens for Vered's name — second code removed (owner decision 2026-10-19, draft)
 - `CATALOG_ADMIN_PIN` and its failure limiter are no longer used by any route; `POST /api/catalog-admin/login` needs no body and mints the

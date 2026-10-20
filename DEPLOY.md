@@ -3,6 +3,8 @@
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
 > The older eight-table evidence below proves only that subset, not full recovery.
 > The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> Use the [isolated Google drill](docs/google-operational-drill.md) for runtime
+> evidence. It is not part of deployment and must not use this repo's clasp target.
 
 ## Source authentication — configuration prerequisites
 

@@ -1,5 +1,19 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Current-base integration and isolated drill preparation — 2026-10-20 evening
+
+- Integrate base 8b68cd75 (#127/#128/#129), retaining its sign-in, calculator,
+  favicons and SW18 byte-for-byte. Resolve only two documentation conflicts.
+- Add reproducible helper-hashed Google drill generation and five separate
+  phases using newly created synthetic source/backup/target workbooks.
+- Keep project/phase/hash guards, scoped fixture properties, failure evidence,
+  both journal kinds, cancellation/payroll identity, custom rate, approved quote
+  and native typed readback in the acceptance contract. Unknown tabs still block.
+- Seven local service-double tests pass. These are not Google execution evidence.
+  Include the base's calculator browser test in the existing CI browser job.
+- No source runtime logic changed after 29195b24. Access to an isolated Google
+  runtime, the manual-tab plan and production approval remain open.
+
 - Adds SessionLog, TherapistRates, Settings and six workflow/audit tables to the
   locked backup set, preserving their own schemas and optional absence.
 - Captures unknown tabs as values with explicit inventory; requires a reviewed

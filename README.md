@@ -3,6 +3,8 @@
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
 > The older eight-table evidence below proves only that subset, not full recovery.
 > The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> A phased [isolated Google drill](docs/google-operational-drill.md) is prepared;
+> its checked-in runner refuses execution until a separate test project is pinned.
 
 Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israel.
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
@@ -46,10 +48,8 @@ secret-looking is added to it.
   served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
   never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
   See `CHANGELOG-protect-price-constants.md`.
-- "המשך כצופה בלבד" hides all edit controls (read-only). It rides the same
-  cookie: the data loads only if this device already has a live session.
-- The editor/viewer choice is stored in `sessionStorage` for the session
-  only; the credential is the cookie, never a browser flag.
+- The former "המשך כצופה בלבד" button was removed (2026-10-20): the PIN screen has only the PIN entry. A stale
+  remembered viewer flag is ignored and cleared. The credential is the cookie, never a browser flag.
 - Who/when: every Clients / Leads write stamps `updatedAt` (server time) and
   `updatedBy` (the `user` embedded in the signed cookie — only a name from
   `lib/users.js`; blank until the name picker ships in PR 2). See
@@ -148,6 +148,12 @@ and persists treatment type/frequency already entered in the UI. See the
 Other financial flows and the wider structure/logic/features/security/speed/control
 audit remain open. Separate approval is required for every new release.
 
+## Browser-tab favicon
+
+Green «O» tab icon (`public/favicon.ico`, `favicon.svg`, `favicon-16x16.png`, `favicon-32x32.png`), served
+by explicit public routes in `server.js` and linked from `index.html`. Where they live and how to replace them:
+[`docs/favicons.md`](docs/favicons.md).
+
 ## Local development
 
 ```bash
@@ -218,7 +224,7 @@ checkout ever drifts back.
   `ezone_session` cookie on match (`user` is stored in the cookie only if it
   is one of `lib/users.js` `SESSION_USERS`), `401` on mismatch, `429` after 10
   attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset.
-  **Two-step:** `{pin}` → `{ ok, stage: 'name_required' }` and a 10-minute name-less session that only reaches
+  **ONE screen (2026-10-20):** the sign-in page shows the names next to the PIN field and posts `{pin, user}` once. The old **two-step** flow below remains as a server-side capability / client fallback: `{pin}` → `{ ok, stage: 'name_required' }` and a 10-minute name-less session that only reaches
   `/api/users` + `/api/me`; `{pin, user}` with an allow-listed name → `{ ok, stage: 'named' }` and the 7-day session;
   an unknown / retired name → `403 user_not_allowed`, no cookie. Every other route requires a named session.
 - `GET /api/me` → `{ ok, user }` — the name in this session's cookie (`''`
@@ -227,8 +233,8 @@ checkout ever drifts back.
   text), which re-posts `/api/verify-pin` with `{ pin, user }` so the cookie
   is re-issued with the name inside (same 7-day TTL). The header then shows
   `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
-- `GET /api/users` → `{ ok, users }` — the picker's list (`lib/users.js`
-  `SESSION_USERS`, the only names `/api/verify-pin` accepts). Session-gated.
+- `GET /api/users` → `{ ok, users }` — the sign-in screen's name list (`lib/users.js`
+  `SESSION_USERS`, the only names `/api/verify-pin` accepts). **PUBLIC, `no-store`, names only** (needed before any session exists): staff first names are visible to anyone who opens the page — accepted trade-off of the one-screen sign-in.
   **The users are ורד, שירן, יעל** (ירדן is retired and refused) — one flat allow-list of names,
   **not** a role table: every name on it has exactly the same permissions,
   and editor vs. viewer is decided by which PIN button was used, never by
