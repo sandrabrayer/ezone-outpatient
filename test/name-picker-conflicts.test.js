@@ -627,7 +627,8 @@ test('D: a save with conflicts shows the banner (conflictsMessage) and reloads �
 test('D: no other UI change — the PIN card, its buttons and the topbar tabs are as before', () => {
   assert.match(INDEX, /<input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" \/>/);
   assert.match(INDEX, /<button type="button" id="pinSubmit" class="btn btn-primary">כניסה<\/button>/);
-  assert.match(INDEX, /<button type="button" id="pinViewer" class="btn btn-ghost">המשך כצופה בלבד<\/button>/);
+  assert.doesNotMatch(INDEX, /pinViewer|המשך כצופה בלבד/, 'the viewer-only entry was removed (owner decision 2026-10-20)');
+  assert.doesNotMatch(APP, /#pinViewer/);
   assert.match(INDEX, /<button id="logoutBtn" class="btn btn-ghost">יציאה<\/button>/);
   // The eight tabs THIS PR left untouched must all still be there, and none
   // may be dropped. The exact COUNT is deliberately not pinned: a later PR
@@ -822,16 +823,16 @@ test('F: e2e — a remembered EDITOR session whose cookie has no name gets the P
     assert.equal(await p2.isHidden('#pinScreen'), true);
     assert.equal(await p2.isHidden('#userScreen'), true);
     assert.equal(seen.logins.length, 2, 'no login round-trip for a named session');
-    // a remembered VIEWER with a user-less cookie never sees the picker
+    // a stale remembered VIEWER flag is dropped: PIN screen, no app, no picker
     const ctx3 = await browser.newContext();
     await ctx3.addCookies([{ name: 'ezone_session', value: '', url: 'http://127.0.0.1:' + port }]);
     const p3 = await ctx3.newPage();
     await p3.addInitScript(() => { try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {} });
     await p3.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'networkidle' });
-    await p3.waitForSelector('#app:not([hidden])');
-    assert.equal(await p3.isHidden('#pinScreen'), true);
+    await p3.waitForSelector('#pinScreen:not([hidden])');
+    assert.equal(await p3.isHidden('#app'), true);
     assert.equal(await p3.isHidden('#userScreen'), true);
-    assert.equal(await p3.isHidden('#sessionUser'), true, 'no name -> no header line');
+    assert.equal(await p3.evaluate(() => sessionStorage.getItem('ez_role')), null, 'the stale viewer flag was removed')
   } finally {
     await browser.close();
     srv.close();
