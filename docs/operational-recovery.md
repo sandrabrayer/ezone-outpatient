@@ -68,6 +68,13 @@ Legacy eight-dataset and ten-dataset package manifests remain inspectable. They
 are never certified as full operational recovery sets. This is deliberately a
 separate promise from verifying their financial subset.
 
+Optional absence is a capture/inspection contract, not permission to invent
+missing operational state at recovery. Any backup predating SessionLog or
+Settings, or with absent/empty TherapistRates, is inspection-only under the
+current recovery gate. The registry comparison is exact: before adding another
+registered source, design and review a versioned compatibility/migration path
+for existing version-2 artifacts; never erase inventory entries to make them fit.
+
 Strict retention names cover the added families and 64-hex hashed other-tab
 families. Manual backup tabs, other apps and pending/previous recovery remnants
 remain outside retention. Retention stays 30 days, runs only after verification,
@@ -120,12 +127,23 @@ Existing mixed-kind FinancialOps crash/restore tests remain in the suite.
 Only Google APIs are mocked; business handlers are not mirrored.
 
 The October 20 integration uses the actual released #122/#126 tree, not the
-previous synthetic source combination. The full UTC suite passes 1,624 / 0 fail /
-37 skipped (1,661 total). The package regression seeds the real catalog, approves
+previous synthetic source combination. The full UTC suite passes 1,633 / 0 fail /
+37 skipped (1,670 total), including nine regressions added after review. The package regression seeds the real catalog, approves
 a real request, snapshots/restores it and retries the exact submission: one row,
 unchanged approved quote/status, no charge/payment. Two queued package-writer
 tests fail if the post-acquisition hold check is removed. CI for the resulting
 commit must be checked separately; do not attribute earlier CI to this tree.
+
+Claude's limited static review of 917bae83 (PR comment 6283463196) found no
+high/medium defects in registry, manifest and recovery gate. It ran no tests and
+did not review _finJournal internals, writer locks or the complete PR. Its test
+gaps led to regressions for cache failure, a real corrupt journal, activation
+marker mismatch, write ordering before hold deletion, absent-sheet recreation,
+and four self-consistently rehashed inventory corruptions. No runtime logic
+changed for these additions. A persistent who/when attestation audit is a
+follow-up design/control item; configVerified is still a bare operator boolean,
+not automated evidence of secure configuration. Full independent coverage and
+the real Google drill remain open.
 
 Local synthetic tests do not prove real Google coercion, runtime quotas,
 scheduled execution, alert delivery or secure configuration recovery. Before

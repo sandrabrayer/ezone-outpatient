@@ -248,6 +248,79 @@ test('editor finish keeps hold on failure and clears it only after target, confi
   assert.deepEqual(h.locks(), [false,false]);
 });
 
+for (const fault of ['cache', 'journal', 'activation-marker']) {
+  test('editor finish leaves recovery held after a real ' + fault + ' failure', () => {
+    const s = world();
+    if (fault === 'journal') s.seed('FinancialOps', s.ctx.FINANCIAL_OP_HEADERS,
+      [{ id: 'synthetic-bad-intent', intent: '{invalid-json' }]);
+    const h = snapshot(s), r = restored(h);
+    assert.equal(preflight(h, r).ok, true, 'snapshot/schema preflight succeeds before finish validation');
+    h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+    h.ctx.CacheService = { getScriptCache: () => ({ remove() {
+      if (fault === 'cache') throw Error('synthetic cache unavailable');
+    } }) };
+    h.props.OUTPATIENT_RECOVERY_HOLD = '1';
+    if (fault === 'activation-marker') h.props.FINANCIAL_OPS_CREATED = '1';
+    const before = JSON.stringify(r.sheets), properties = JSON.stringify(h.props);
+    const errors = { cache: /cache invalidation failed/, journal: /financial_journal_corrupt/,
+      'activation-marker': /Restore journal required/ };
+    assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), errors[fault]);
+    assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+    assert.equal(JSON.stringify(r.sheets), before);
+    assert.equal(JSON.stringify(h.props), properties);
+    assert.deepEqual(h.locks(), [false, false]);
+  });
+}
+
+test('editor finish persists journal marker and source inventory under lock before deleting the hold', () => {
+  const s = world(); s.seed('FinancialOps', s.ctx.FINANCIAL_OP_HEADERS, []);
+  s.props.FINANCIAL_OPS_CREATED = '1';
+  const h = snapshot(s), r = restored(h), writes = [];
+  delete h.props.FINANCIAL_OPS_CREATED; // New runtime has not yet restored the activation marker.
+  h.props.OUTPATIENT_RECOVERY_HOLD = '1';
+  h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+  h.ctx.CacheService = { getScriptCache: () => ({ remove() {
+    assert.equal(h.locks()[0], true); writes.push('cache');
+  } }) };
+  h.ctx.PropertiesService.getScriptProperties = () => ({
+    getProperty: k => h.props[k] ?? null,
+    setProperty(k, v) { assert.equal(h.locks()[0], true); writes.push('set:' + k); h.props[k] = v; },
+    deleteProperty(k) { assert.equal(h.locks()[0], true); writes.push('delete:' + k); delete h.props[k]; }
+  });
+  assert.equal(h.ctx.finishOutpatientRecovery('backup', dayOf(h), true).ok, true);
+  assert.deepEqual(writes, ['cache', 'set:FINANCIAL_OPS_CREATED', 'set:INTEGRITY_REQUIRED_SOURCES', 'delete:OUTPATIENT_RECOVERY_HOLD']);
+  assert.equal(h.props.FINANCIAL_OPS_CREATED, '1');
+  assert.deepEqual(JSON.parse(h.props.INTEGRITY_REQUIRED_SOURCES).sort(), Object.keys(r.sheets).sort());
+  assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, undefined);
+});
+
+test('a source absent at capture may not be silently materialized during recovery', () => {
+  const h = snapshot(world()), r = restored(h);
+  r.seed('Credits', r.ctx.CREDIT_COLUMNS, []);
+  assert.throws(() => preflight(h, r), /Absent source recreated: Credits/);
+});
+
+for (const fault of ['absent', 'prefix', 'overlap', 'duplicate']) {
+  test('self-consistently rehashed metadata still refuses ' + fault + ' inventory tampering', () => {
+    const h = snapshot(world()), day = dayOf(h);
+    const sh = h.backup.getSheetByName('outpatient-recovery-meta-' + day);
+    const grid = sh.getDataRange().getValues();
+    const entry = key => grid.find(r => r[0] === key);
+    const inventory = JSON.parse(entry('inventory')[1]);
+    if (fault === 'absent') inventory[0][2] = '1';
+    if (fault === 'prefix') inventory[0][1] = 'wrong-prefix-';
+    if (fault === 'duplicate') inventory[1] = inventory[0];
+    if (fault === 'overlap') entry('unclassifiedSources')[1] = '["Clients"]';
+    entry('inventory')[1] = JSON.stringify(inventory);
+    sh.getRange(1, 1, grid.length, 2).setValues(grid);
+    const manifest = h.backup.getSheetByName('outpatient-manifest-' + day);
+    const rows = manifest.getDataRange().getValues();
+    rows.find(r => r[1] === '__RecoveryMetadata')[4] = h.ctx._integrityFingerprint(grid);
+    manifest.getRange(1, 1, rows.length, 5).setValues(rows);
+    assert.throws(() => h.ctx._integrityValidateRestoreSet(h.backup, day), /[Ii]nventory/);
+  });
+}
+
 test('retention failure is surfaced without deleting the newly verified operational set', () => {
   const h = harness(); h.backup.insertSheet('outpatient-session-log-2000-01-01', [['sessionId']]);
   const remove = h.backup.deleteSheet;

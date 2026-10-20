@@ -20,7 +20,8 @@ OP-03 now integrates the exact released #122/#126 tree. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
 an exact submission retry without another row. The full integrated UTC suite
-passes 1,624 tests with 37 skipped (1,661 total). Removing the new package-lock
+passes 1,633 tests with 37 skipped (1,670 total), including nine failure-path
+regressions added after Claude's limited static review. Removing the new package-lock
 check makes both queued-writer regressions fail. Google execution is separate.
 
 Read-only source inspection Oct 20: Sheet1 has no cell values/formulas in its

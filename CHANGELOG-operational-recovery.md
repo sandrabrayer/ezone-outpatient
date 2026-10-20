@@ -22,3 +22,12 @@
 - Adds real seeded/approved package restore/retry and queued-writer regressions.
 - Records read-only manual-tab inventory and a proposed archive treatment;
   unknown-tab gate remains closed pending review. No production writes.
+
+## Limited review follow-up — 2026-10-20
+
+- Clarifies that missing required operational state is inspection-only, registry
+  evolution needs a reviewed migration path, and configuration remains an
+  operator attestation without persistent who/when evidence.
+- Adds nine real-source failure/order/inventory regressions after Claude's
+  limited static review of 917bae83. No runtime code changed in this follow-up.
+- Review does not cover writer locks/journal internals or replace the Google drill.
