@@ -164,7 +164,7 @@
 
   async function lock() {
     try { await call('/api/catalog-admin/logout', 'POST', {}); } catch (_) {}
-    S.catalog = null; S.requests = null; S.phase = 'gate'; S.error = ''; ops = {}; draw();
+    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; ops = {}; draw();
   }
 
   function pkgName(key) {
@@ -269,40 +269,73 @@
   }
 
   // -- calculator (compute-only; creates nothing) --
+  // Every option is visible at once as a button (no hidden dropdowns): all packages grouped by family, then the months and,
+  // for range items (Solo), the minimum / midpoint / maximum tiers. The quote is computed on every choice.
+  function chips(options, selected, onPick, aria) {
+    return h('div', { class: 'pkg-chips', role: 'group', 'aria-label': aria }, options.map(function (o) {
+      var on = String(o.value) === String(selected);
+      return h('button', { type: 'button', class: 'btn ' + (on ? 'btn-primary' : 'btn-ghost') + ' pkg-chip', 'aria-pressed': on ? 'true' : 'false', text: o.text, onclick: function () { onPick(o.value); } });
+    }));
+  }
   function calcView() {
     var items = S.catalog ? S.catalog.items.filter(function (i) { return i.active; }) : [];
     if (!items.length) return h('p', { class: 'muted', text: 'הקטלוג ריק. עברי ללשונית קטלוג.' });
-    var pick = h('select', { 'aria-label': 'חבילה' }, items.map(function (i) { return h('option', { value: i.key, text: label(FAMILY, i.family) + ' — ' + label(TIER, i.tier) }); }));
-    var months = h('select', { 'aria-label': 'חודשים' });
-    var sel = h('select', { 'aria-label': 'מדרגת מחיר חודשי' });
-    var out = h('div', { class: 'pkg-calc-out', 'aria-live': 'polite' });
-    function cur() { return items.filter(function (i) { return i.key === pick.value; })[0]; }
-    function sync() {
-      var it = cur();
-      while (months.firstChild) months.removeChild(months.firstChild);
-      it.allowedMonths.forEach(function (m) { months.appendChild(h('option', { value: String(m), text: m + ' חודשים' })); });
-      months.hidden = !it.allowedMonths.length; sel.hidden = it.unit !== 'per_month_range';
-      while (sel.firstChild) sel.removeChild(sel.firstChild);
-      sel.appendChild(h('option', { value: '', text: 'בחירת מדרגת מחיר…' }));
-      rangeTiers(it).forEach(function (t) { sel.appendChild(h('option', { value: String(t.agorot), text: t.text + ' · ' + formatAgorot(t.agorot) })); });
+    var C = S.calc = S.calc || { key: '', months: '', tier: '', out: null };
+    var box = h('div', { class: 'pkg-calc card' });
+    function cur() { return items.filter(function (i) { return i.key === C.key; })[0] || null; }
+    function pickItem(key) {
+      var it = items.filter(function (i) { return i.key === key; })[0];
+      C.key = key; C.tier = ''; C.out = null;
+      C.months = it && it.allowedMonths.length ? String(it.allowedMonths[0]) : '';
+      run();
     }
     async function run() {
-      var it = cur(), f = { packageKey: it.key };
-      if (it.allowedMonths.length) f.months = parseInt(months.value, 10);
-      if (it.unit === 'per_month_range' && sel.value) f.selectedMonthlyAgorot = parseInt(sel.value, 10);
+      var it = cur();
+      if (!it) { paint(); return; }
+      var f = { packageKey: it.key };
+      if (it.allowedMonths.length) f.months = parseInt(C.months, 10);
+      if (it.unit === 'per_month_range' && C.tier) f.selectedMonthlyAgorot = parseInt(C.tier, 10);
       var res = await rpc('quote', f).catch(function (e) { return { ok: false, error: e.message }; });
-      while (out.firstChild) out.removeChild(out.firstChild);
-      if (!res.ok) { out.textContent = errorText(res.error); return; }
-      var q = res.quote;
-      if (q.needsSelection) { out.textContent = 'זהו טווח מחירים — יש לבחור מדרגת מחיר: מינימום / אמצע / מקסימום (אין מחיר ברירת מחדל).'; return; }
-      if (q.monthlyAgorot !== null) out.appendChild(h('div', { text: 'מחיר חודשי: ' + formatAgorot(q.monthlyAgorot) }));
-      out.appendChild(h('div', { class: 'pkg-total', text: (q.commitmentMonths ? 'סה״כ התחייבות ל-' + q.commitmentMonths + ' חודשים' : 'סה״כ') + ': ' + formatAgorot(q.grossAgorot) }));
-      out.appendChild(h('div', { class: 'muted', text: 'לפני מע״מ ' + formatAgorot(q.netAgorot) + ' · מע״מ ' + formatAgorot(q.vatAgorot) + ' (מחיר כולל מע״מ ' + (q.vatRateBp / 100) + '%)' }));
+      C.out = res; paint();
     }
-    pick.addEventListener('change', function () { sync(); out.textContent = ''; });
-    sync();
-    return h('div', { class: 'pkg-calc card' }, [h('div', { class: 'pkg-row' }, [pick, months, sel, h('button', { type: 'button', class: 'btn btn-primary', text: 'חישוב', onclick: run })]), out,
-      h('p', { class: 'muted', text: 'המחשבון לא יוצר בקשה, חיוב או תשלום.' })]);
+    function resultView() {
+      var res = C.out, it = cur();
+      if (!it) return h('p', { class: 'muted', text: 'בחרי חבילה כדי לראות מחיר.' });
+      if (!res) return h('p', { class: 'muted', text: '…' });
+      if (!res.ok) return h('p', { class: 'pkg-msg', role: 'alert', text: errorText(res.error) });
+      var q = res.quote, kids = [];
+      if (q.needsSelection) return h('p', { class: 'muted', text: 'זהו טווח מחירים — יש לבחור מדרגת מחיר: מינימום / אמצע / מקסימום (אין מחיר ברירת מחדל).' });
+      if (q.monthlyAgorot !== null) kids.push(h('div', { text: 'מחיר חודשי: ' + formatAgorot(q.monthlyAgorot) }));
+      kids.push(h('div', { class: 'pkg-total', text: (q.commitmentMonths ? 'סה״כ התחייבות ל-' + q.commitmentMonths + ' חודשים' : 'סה״כ') + ': ' + formatAgorot(q.grossAgorot) }));
+      kids.push(h('div', { class: 'muted', text: 'לפני מע״מ ' + formatAgorot(q.netAgorot) + ' · מע״מ ' + formatAgorot(q.vatAgorot) + ' (מחיר כולל מע״מ ' + (q.vatRateBp / 100) + '%)' }));
+      return h('div', { class: 'pkg-calc-out', 'aria-live': 'polite' }, kids);
+    }
+    function paint() {
+      while (box.firstChild) box.removeChild(box.firstChild);
+      var order = [], byFam = {};
+      items.forEach(function (i) { if (!byFam[i.family]) { byFam[i.family] = []; order.push(i.family); } byFam[i.family].push(i); });
+      order.forEach(function (fam) {
+        box.appendChild(h('div', { class: 'pkg-fam' }, [
+          h('div', { class: 'pkg-fam-title', text: label(FAMILY, fam) }),
+          chips(byFam[fam].map(function (i) { return { value: i.key, text: label(TIER, i.tier) }; }), C.key, pickItem, label(FAMILY, fam))
+        ]));
+      });
+      var it = cur();
+      if (it && it.allowedMonths.length > 1) {
+        box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'משך (חודשים)' }),
+          chips(it.allowedMonths.map(function (m) { return { value: String(m), text: m + ' חודשים' }; }), C.months, function (v) { C.months = v; run(); }, 'משך')]));
+      } else if (it && it.allowedMonths.length === 1) {
+        box.appendChild(h('div', { class: 'muted', text: 'משך: ' + it.allowedMonths[0] + ' חודשים' }));
+      }
+      if (it && it.unit === 'per_month_range') {
+        box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'מדרגת מחיר חודשי' }),
+          chips(rangeTiers(it).map(function (t) { return { value: String(t.agorot), text: t.text + ' · ' + formatAgorot(t.agorot) }; }), C.tier, function (v) { C.tier = v; run(); }, 'מדרגת מחיר חודשי')]));
+      }
+      box.appendChild(resultView());
+      box.appendChild(h('p', { class: 'muted', text: 'המחשבון לא יוצר בקשה, חיוב או תשלום.' }));
+    }
+    paint();
+    return box;
   }
 
   // -- catalog --
@@ -358,7 +391,7 @@
     S.targets = opts.targets || S.targets; S.notify = opts.notify || S.notify; S.onPending = opts.onPending || S.onPending; S.onUnauthorized = opts.onUnauthorized || S.onUnauthorized;
     if (S.phase === 'loading' || S.phase === 'gate') boot(); else draw();
   }
-  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.error = ''; ops = {}; if (S.root) draw(); }
+  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; ops = {}; if (S.root) draw(); }
 
   return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, REQUESTER: REQUESTER, ERRORS: ERRORS };

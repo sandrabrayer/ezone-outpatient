@@ -75,9 +75,9 @@ async function fixture(t, initial) {
     // during boot can otherwise precede the app's event-handler registration.
     await page.goto(origin, { waitUntil: 'networkidle' });
     await page.waitForSelector('#pinScreen:not([hidden])');
+    await page.locator('#pinNames .user-btn').getByText(user, { exact: true }).click();
     await page.fill('#pinInput', '424242');
     await page.click('#pinSubmit');
-    await page.locator('#userButtons .user-btn').getByText(user, { exact: true }).click();
     await page.waitForSelector('#app:not([hidden])');
     await page.click('.tab[data-view="leads"]');
     await card(page, A.name).waitFor();

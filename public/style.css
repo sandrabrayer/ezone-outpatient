@@ -101,6 +101,8 @@ button, input, select, textarea {
 /* Name picker (after the PIN): one full-width button per allow-listed name */
 .user-buttons { display: flex; flex-direction: column; gap: 4px; }
 .user-buttons .btn { font-size: 18px; padding: 14px; }
+#pinNames { margin-bottom: 12px; }
+#pinNames:empty { display: none; }
 
 /* "מחובר/ת כ: <name> · החלף" in the topbar; החלף is a bare link-style button */
 .session-user { font-size: 13px; color: var(--muted); white-space: nowrap; margin-inline-end: 6px; }
@@ -1210,5 +1212,9 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .pkg-msg { color: var(--red); min-height: 1.2em; }
 .pkg-log { margin: 0; padding-inline-start: 18px; }
 .pkg-root input, .pkg-root select { min-width: 0; flex: 1 1 140px; }
+.pkg-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pkg-fam { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.pkg-fam-title { font-weight: 600; color: var(--muted); }
+.pkg-chip { white-space: normal; }
 .chip.warn { background: #3a2f12; color: var(--amber); border-color: #6b5a2a; }
 .pkg-root .muted { color: var(--muted); }

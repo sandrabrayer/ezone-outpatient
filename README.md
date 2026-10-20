@@ -212,7 +212,7 @@ checkout ever drifts back.
   `ezone_session` cookie on match (`user` is stored in the cookie only if it
   is one of `lib/users.js` `SESSION_USERS`), `401` on mismatch, `429` after 10
   attempts in 15 minutes from the same IP, `500` if `SESSION_SECRET` is unset.
-  **Two-step:** `{pin}` → `{ ok, stage: 'name_required' }` and a 10-minute name-less session that only reaches
+  **ONE screen (2026-10-20):** the sign-in page shows the names next to the PIN field and posts `{pin, user}` once. The old **two-step** flow below remains as a server-side capability / client fallback: `{pin}` → `{ ok, stage: 'name_required' }` and a 10-minute name-less session that only reaches
   `/api/users` + `/api/me`; `{pin, user}` with an allow-listed name → `{ ok, stage: 'named' }` and the 7-day session;
   an unknown / retired name → `403 user_not_allowed`, no cookie. Every other route requires a named session.
 - `GET /api/me` → `{ ok, user }` — the name in this session's cookie (`''`
@@ -221,8 +221,8 @@ checkout ever drifts back.
   text), which re-posts `/api/verify-pin` with `{ pin, user }` so the cookie
   is re-issued with the name inside (same 7-day TTL). The header then shows
   `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
-- `GET /api/users` → `{ ok, users }` — the picker's list (`lib/users.js`
-  `SESSION_USERS`, the only names `/api/verify-pin` accepts). Session-gated.
+- `GET /api/users` → `{ ok, users }` — the sign-in screen's name list (`lib/users.js`
+  `SESSION_USERS`, the only names `/api/verify-pin` accepts). **PUBLIC, `no-store`, names only** (needed before any session exists): staff first names are visible to anyone who opens the page — accepted trade-off of the one-screen sign-in.
   **The users are ורד, שירן, יעל** (ירדן is retired and refused) — one flat allow-list of names,
   **not** a role table: every name on it has exactly the same permissions,
   and editor vs. viewer is decided by which PIN button was used, never by
