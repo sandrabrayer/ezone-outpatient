@@ -687,9 +687,11 @@ app.get('/api/me', requireLoginStage, (req, res) => {
 /* GET /api/users — the fixed list of names the login name picker offers
  * (lib/users.js SESSION_USERS, the same list /api/verify-pin accepts a
  * `user` from), so the client never carries a duplicate that could drift.
- * Session-gated: the picker only appears after a correct PIN minted the
- * cookie, and the names are staff, not public. Read-only, no input. */
-app.get('/api/users', requireLoginStage, (req, res) => {
+ * Public (see the handler): names only, read-only, no input. */
+app.get('/api/users', (req, res) => {
+  // PUBLIC since 2026-10-20 (one-screen sign-in: the names are shown next to the PIN field, before any session
+  // exists). Only the staff FIRST NAMES on the fixed allow-list are exposed — no PIN, no data, nothing else.
+  res.set('Cache-Control', 'no-store');
   res.status(200).json({ ok: true, users: SESSION_USERS.slice() });
 });
 

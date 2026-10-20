@@ -17,7 +17,7 @@ service-worker issue.
   auth and the SPA catch-all — fixed file per route, explicit image type,
   `nosniff`, 1-day cache, script-free CSP on the SVG. No auth middleware change.
 - **HTML**: icon `<link>` tags (root-absolute) in `public/index.html` (PIN / name-picker screen + app — the only page).
-- **`public/sw.js`**: cache `v15` → `v16` (live was v15), so installed PWAs refresh.
+- **`public/sw.js`**: cache `v17` → `v18` (live was v17), so installed PWAs refresh.
 - **Docs**: `docs/favicons.md` (where the icons live, how to replace them),
   `README.md`, `EZONE-ECOSYSTEM-STATUS.md`.
 
@@ -28,7 +28,7 @@ mark is the right letter and colours; each icon route is `200` + image type +
 `nosniff` + cache header **without a cookie** (GET and HEAD); traversal,
 encoded-traversal, look-alike and directory probes never return an image,
 source or a listing; every HTML file under `public/` and every served page
-carries the link tags; SW cache floor v16.
+carries the link tags; SW cache floor v18.
 
 ## Security
 - Static-only, public by design (an icon is never session data). Exact paths,

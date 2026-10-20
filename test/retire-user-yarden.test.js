@@ -73,12 +73,15 @@ test('B: a login that names ירדן is REFUSED (403, no cookie) — never a ses
 });
 
 test('C: an OLD cookie that carries ירדן is refused by every session-gated route; the other names still work', async () => {
-  for (const p of ['/api/me', '/api/users', '/api/catalog-admin/status']) {
+  for (const p of ['/api/me', '/api/catalog-admin/status']) {
     const old = await request('GET', p, null, { Cookie: cookieFor(YARDEN) });
     assert.equal(old.status, 401, p + ' must refuse a retired user\'s stale cookie');
     const ok = await request('GET', p, null, { Cookie: cookieFor('ורד') });
     assert.equal(ok.status, 200, p + ' still serves a current user');
   }
+  // the public name list (one-screen sign-in) never offers the retired name
+  const names = await request('GET', '/api/users');
+  assert.equal(names.status, 200); assert.ok(!names.json.users.includes(YARDEN));
   const post = await request('POST', '/api/sheets', { action: 'saveAll' }, { Cookie: cookieFor(YARDEN) });
   assert.equal(post.status, 401);
 });

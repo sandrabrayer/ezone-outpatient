@@ -222,7 +222,8 @@ test('ordinary data / write routes refuse name-less, unknown-name, retired-name 
   assert.equal((await request('GET', '/api/users', null, { Cookie: stage })).status, 200);
   // the retired / unknown tokens do not even get the picker
   assert.equal((await request('GET', '/api/me', null, { Cookie: jar['retired name'] })).status, 401);
-  assert.equal((await request('GET', '/api/users', null, { Cookie: jar['unknown name (validly signed)'] })).status, 401);
+  // /api/users is public since the one-screen sign-in (names only), so it no longer depends on the cookie
+  assert.equal((await request('GET', '/api/users', null, { Cookie: jar['unknown name (validly signed)'] })).status, 200);
 });
 
 test('PIN-stage session is short-lived (10 minutes) and the step-2 upgrade yields a fresh 7-day named session', async () => {

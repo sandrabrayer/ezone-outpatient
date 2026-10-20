@@ -27,7 +27,7 @@ const Gen = require('../scripts/gen-favicons.js');
 const app = require('../server.js');
 
 const LETTER = 'O';
-const SW_FLOOR = 16;
+const SW_FLOOR = 18;
 const SERVED_PAGES = ['/', '/index.html'];
 
 const ICONS = {

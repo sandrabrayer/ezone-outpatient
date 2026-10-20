@@ -756,6 +756,7 @@ function startStub() {
           json({ ok: true }, { 'Set-Cookie': 'ezone_session=' + encodeURIComponent(user) + '; Path=/; HttpOnly' });
         });
       }
+      if (p === '/api/users') return json({ ok: true, users: ['ורד', 'שירן', 'יעל'] }); // public, like the real server
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false }); }
       if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
@@ -794,10 +795,10 @@ test('K: e2e — the הכנסות חודשיות tab renders the four figures, a
   try {
     const page = await (await browser.newContext()).newPage();
     await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'networkidle' });
+    await page.waitForSelector('#pinNames .user-btn');
+    await page.click('#pinNames .user-btn >> nth=0');
     await page.fill('#pinInput', '424242');
     await page.click('#pinSubmit');
-    await page.waitForSelector('#userScreen:not([hidden]) .user-btn');
-    await page.click('#userButtons .user-btn >> nth=0');
     await page.waitForSelector('#app:not([hidden])');
 
     // The new tab exists and opens.

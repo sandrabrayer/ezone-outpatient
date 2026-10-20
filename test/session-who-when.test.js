@@ -713,7 +713,7 @@ test('E: source-scan — every Clients write path stamps (no writer left behind)
 
 /* ================= F. cross-app endpoints unchanged ================= */
 
-test('F: no Railway route serves another app — the only open routes are /healthz, /api/verify-pin, /api/logout, /api/version and static files', () => {
+test('F: no Railway route serves another app — the only open routes are /healthz, /api/verify-pin, /api/logout, /api/users (names only), /api/version and static files', () => {
   // every /api route except verify-pin + logout is mounted behind requireSession
   const routes = [];
   server._router.stack.forEach((m) => {
@@ -722,6 +722,8 @@ test('F: no Railway route serves another app — the only open routes are /healt
   const api = routes.filter((r) => r.path.indexOf('/api/') === 0);
   const open = api.filter((r) => !r.gated).map((r) => r.path).sort();
   assert.deepEqual(open, ['/api/debug/cache', '/api/debug/cache/clear', '/api/debug/env', '/api/debug/last-load', '/api/debug/routes', '/api/logout', '/api/verify-pin',
+    // public name list for the one-screen sign-in (first names only, no-store)
+    '/api/users',
     // clearing the Vered-only cookie needs no credential (same as /api/logout); login/status/rpc ARE session-gated
     '/api/catalog-admin/logout',
     // public deploy check: returns only { commit, builtAt } (lib/version.js, test/api-version.test.js)
@@ -786,7 +788,8 @@ test('G: every /api data call in app.js goes through apiFetch (401 -> PIN screen
   // the load fired at init is refused until the PIN mints the cookie, so a
   // successful PIN (and the viewer button) loads the data if nothing loaded yet
   assert.match(APP, /state\.role = 'editor';\s*enterApp\(\);[\s\S]{0,300}?if \(!state\.loaded\) loadAll\(\)\.catch/);
-  assert.match(APP, /state\.role = 'viewer';\s*enterApp\(\);[\s\S]{0,300}?if \(!state\.loaded\) loadAll\(\)\.catch/);
+  // (the viewer button was removed 2026-10-20: no second entry path that loads data)
+  assert.doesNotMatch(APP, /state\.role = 'viewer';\s*enterApp\(\);/);
   // and the 401 path raises no error toast on top of the PIN screen
   assert.match(APP, /if \(!\(e && e\.message === 'unauthorized'\)\) toast\('שגיאה בטעינת הנתונים: '/);
 });

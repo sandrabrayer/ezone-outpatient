@@ -165,13 +165,14 @@ test('A: the user is accepted ONLY from SESSION_USERS — listed names round-tri
   assert.equal(setCookies(wrong).length, 0, 'no cookie on a wrong PIN, whatever the user');
 });
 
-test('A: GET /api/users serves SESSION_USERS to the PIN stage and is session-gated; the route table has no new open route', async () => {
+test('A: GET /api/users is PUBLIC (one-screen sign-in): only the fixed first names, no-store, nothing else', async () => {
   await waitForListen();
   const noCookie = await request('GET', '/api/users');
-  assert.equal(noCookie.status, 401);
-  assert.deepEqual(noCookie.json, { ok: false, error: 'unauthorized' });
+  assert.equal(noCookie.status, 200);
+  assert.deepEqual(noCookie.json, { ok: true, users: SESSION_USERS });
+  assert.match(String(noCookie.headers['cache-control']), /no-store/);
   const bad = await request('GET', '/api/users', null, { Cookie: 'ezone_session=1.deadbeef' });
-  assert.equal(bad.status, 401);
+  assert.equal(bad.status, 200, 'a bad cookie changes nothing');
   const login = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN });
   const ok = await request('GET', '/api/users', null, { Cookie: cookieOf(login) });
   assert.equal(ok.status, 200);
@@ -179,7 +180,7 @@ test('A: GET /api/users serves SESSION_USERS to the PIN stage and is session-gat
   assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל'], 'the three current names, nothing invented (ירדן is retired)');
   const route = server._router.stack.find((m) => m.route && m.route.path === '/api/users');
   assert.ok(route, '/api/users mounted');
-  assert.ok(route.route.stack.some((l) => l.handle === server.requireLoginStage), '/api/users behind the login-stage gate');
+  assert.ok(!route.route.stack.some((l) => l.handle === server.requireLoginStage || l.handle === server.requireSession), '/api/users is deliberately open (names only)');
 });
 
 /* ================= Code.gs sandbox harness ================= */
@@ -627,7 +628,8 @@ test('D: a save with conflicts shows the banner (conflictsMessage) and reloads �
 test('D: no other UI change — the PIN card, its buttons and the topbar tabs are as before', () => {
   assert.match(INDEX, /<input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="off" \/>/);
   assert.match(INDEX, /<button type="button" id="pinSubmit" class="btn btn-primary">כניסה<\/button>/);
-  assert.match(INDEX, /<button type="button" id="pinViewer" class="btn btn-ghost">המשך כצופה בלבד<\/button>/);
+  assert.doesNotMatch(INDEX, /pinViewer|המשך כצופה בלבד/, 'the viewer-only entry was removed (owner decision 2026-10-20)');
+  assert.doesNotMatch(APP, /#pinViewer/);
   assert.match(INDEX, /<button id="logoutBtn" class="btn btn-ghost">יציאה<\/button>/);
   // The eight tabs THIS PR left untouched must all still be there, and none
   // may be dropped. The exact COUNT is deliberately not pinned: a later PR
@@ -694,6 +696,7 @@ function startStub() {
         });
       }
       if (p === '/api/logout') { seen.logouts++; return json({ ok: true }, { 'Set-Cookie': 'ezone_session=; Path=/; Max-Age=0' }); }
+      if (p === '/api/users') return json({ ok: true, users: SESSION_USERS }); // public, like the real server
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false, error: 'unauthorized' }); }
       if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
@@ -743,20 +746,20 @@ test('F: e2e — PIN -> name picker (one button per SESSION_USERS name, no input
     // 1. PIN screen (no remembered role)
     assert.equal(await page.isVisible('#pinScreen'), true);
     assert.equal(await page.isHidden('#userScreen'), true);
+    // 2. ONE screen: the names (buttons, no free text) sit next to the PIN field
+    await page.waitForSelector('#pinNames .user-btn');
+    assert.deepEqual(await page.$$eval('#pinNames .user-btn', (bs) => bs.map((b) => b.textContent)), SESSION_USERS);
+    assert.equal(await page.isHidden('#userScreen'), true, 'no second screen');
+    // no name chosen -> nothing is sent
     await page.fill('#pinInput', '424242');
     await page.click('#pinSubmit');
-    // 2. the picker, only after the PIN, only names
-    await page.waitForSelector('#userScreen:not([hidden]) .user-btn');
-    assert.equal(await page.isHidden('#app'), true, 'the app stays hidden behind the picker');
-    assert.deepEqual(await page.$$eval('#userButtons .user-btn', (bs) => bs.map((b) => b.textContent)), SESSION_USERS);
-    assert.equal(await page.$('#userScreen input'), null, 'no free text');
-    assert.deepEqual(seen.logins, [{ pin: '424242' }], 'the PIN form sent only the PIN');
-    // 3. pick -> re-issue with {pin, user} -> header
-    await page.click('#userButtons .user-btn >> text=שירן');
+    assert.equal(seen.logins.length, 0, 'no name -> no login request');
+    // 3. pick + PIN -> ONE request {pin, user} -> app + header
+    await page.click('#pinNames .user-btn >> text=שירן');
+    await page.click('#pinSubmit');
     await page.waitForSelector('#app:not([hidden])');
     await page.waitForSelector('[data-client-id="c1"], .kpi', { timeout: 8000 });
-    assert.deepEqual(seen.logins[1], { pin: '424242', user: 'שירן' }, 'the picker re-posted PIN + name once');
-    assert.equal(seen.logins.length, 2);
+    assert.deepEqual(seen.logins, [{ pin: '424242', user: 'שירן' }], 'PIN and name were sent together, once');
     await page.waitForSelector('#sessionUser:not([hidden])');
     assert.equal((await page.textContent('#sessionUser')).replace(/\s+/g, ' ').trim(), 'מחובר/ת כ: שירן · החלף');
     assert.equal(await page.evaluate(() => Object.keys(sessionStorage).concat(Object.keys(localStorage)).filter((k) => /pin/i.test(k)).length), 0, 'no PIN in web storage');
@@ -804,13 +807,12 @@ test('F: e2e — a remembered EDITOR session whose cookie has no name gets the P
     await p1.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'networkidle' });
     await p1.waitForSelector('#pinScreen:not([hidden])');
     assert.equal(await p1.isHidden('#app'), true, 'sent through the PIN once');
+    await p1.click('#pinNames .user-btn >> text=ורד');
     await p1.fill('#pinInput', '424242');
     await p1.click('#pinSubmit');
-    await p1.waitForSelector('#userScreen:not([hidden]) .user-btn');
-    await p1.click('#userButtons .user-btn >> text=ורד');
     await p1.waitForSelector('#sessionUser:not([hidden])');
     assert.equal(await p1.textContent('#sessionUserName'), 'ורד');
-    assert.equal(seen.logins.length, 2);
+    assert.equal(seen.logins.length, 1);
     // named cookie + remembered editor role -> no PIN, no picker, header set
     const ctx2 = await browser.newContext();
     await ctx2.addCookies([{ name: 'ezone_session', value: encodeURIComponent('יעל'), url: 'http://127.0.0.1:' + port }]);
@@ -821,17 +823,17 @@ test('F: e2e — a remembered EDITOR session whose cookie has no name gets the P
     assert.equal(await p2.textContent('#sessionUserName'), 'יעל');
     assert.equal(await p2.isHidden('#pinScreen'), true);
     assert.equal(await p2.isHidden('#userScreen'), true);
-    assert.equal(seen.logins.length, 2, 'no login round-trip for a named session');
-    // a remembered VIEWER with a user-less cookie never sees the picker
+    assert.equal(seen.logins.length, 1, 'no login round-trip for a named session');
+    // a stale remembered VIEWER flag is dropped: PIN screen, no app, no picker
     const ctx3 = await browser.newContext();
     await ctx3.addCookies([{ name: 'ezone_session', value: '', url: 'http://127.0.0.1:' + port }]);
     const p3 = await ctx3.newPage();
     await p3.addInitScript(() => { try { sessionStorage.setItem('ez_role', 'viewer'); } catch (_) {} });
     await p3.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'networkidle' });
-    await p3.waitForSelector('#app:not([hidden])');
-    assert.equal(await p3.isHidden('#pinScreen'), true);
+    await p3.waitForSelector('#pinScreen:not([hidden])');
+    assert.equal(await p3.isHidden('#app'), true);
     assert.equal(await p3.isHidden('#userScreen'), true);
-    assert.equal(await p3.isHidden('#sessionUser'), true, 'no name -> no header line');
+    assert.equal(await p3.evaluate(() => sessionStorage.getItem('ez_role')), null, 'the stale viewer flag was removed')
   } finally {
     await browser.close();
     srv.close();

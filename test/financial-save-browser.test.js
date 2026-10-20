@@ -111,9 +111,9 @@ async function fixture(t, options = {}) {
     });
     await page.goto(origin, { waitUntil: 'networkidle' });
     await page.waitForSelector('#pinScreen:not([hidden])');
+    await page.locator('#pinNames .user-btn').getByText(user, { exact: true }).click();
     await page.fill('#pinInput', '424242');
     await page.click('#pinSubmit');
-    await page.locator('#userButtons .user-btn').getByText(user, { exact: true }).click();
     await page.waitForSelector('#app:not([hidden])');
     await page.click('.tab[data-view="clients"]');
     await page.locator('#clientsList .client-card').first().waitFor();

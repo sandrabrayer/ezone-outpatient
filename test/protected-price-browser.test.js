@@ -74,9 +74,9 @@ test('browser: constants are absent before sign-in, present after, dropped on lo
   assert.deepEqual(await globals(), { map: 'undefined', pay: 'undefined', payout: 'undefined', nodes: 0 }, 'nothing before sign-in');
   assert.deepEqual(protectedResponses, [], 'the page did not even request them while signed out');
 
+  await page.locator('#pinNames .user-btn').getByText('ורד', { exact: true }).click();
   await page.fill('#pinInput', '424242');
   await page.click('#pinSubmit');
-  await page.locator('#userButtons .user-btn').getByText('ורד', { exact: true }).click();
   await page.waitForSelector('#app:not([hidden])');
   await page.waitForFunction(() => typeof window.TherapistPay === 'object' && typeof window.TreatmentMap === 'object' && typeof window.TherapistPayout === 'object');
   assert.deepEqual((await globals()).nodes, 3);
@@ -121,9 +121,9 @@ test('browser: encoded aliases never enter Cache Storage; seeded aliases are pur
   const protectedIn = (urls) => urls.filter((u) => { let d = u; try { d = decodeURIComponent(decodeURIComponent(u)); } catch (_) {} return /(treatment-map|therapist-pay)(?![a-z0-9-])/i.test(d); });
 
   await page.goto(fx.origin, { waitUntil: 'networkidle' });
+  await page.locator('#pinNames .user-btn').getByText('ורד', { exact: true }).click();
   await page.fill('#pinInput', '424242');
   await page.click('#pinSubmit');
-  await page.locator('#userButtons .user-btn').getByText('ורד', { exact: true }).click();
   await page.waitForSelector('#app:not([hidden])');
   await page.waitForFunction(() => typeof window.TherapistPay === 'object');
   await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
