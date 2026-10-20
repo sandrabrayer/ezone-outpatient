@@ -63,8 +63,10 @@
  *   (#122 merge 3c1d260) before this bump.
  * - v16 (2026-10-20): the PIN screen no longer offers «המשך כצופה בלבד»; index.html
  *   and app.js changed together. LIVE v15 was verified-by-merge (#126) before this bump.
+ * - v17 (2026-10-20): one-screen sign-in (names next to the PIN field) in index.html + app.js, and the
+ *   pricing calculator shows every option as buttons (package-pricing.js, style.css). LIVE v16 (#128) verified.
  */
-var CACHE = 'ezone-outpatient-v16';
+var CACHE = 'ezone-outpatient-v17';
 var SHELL = [
   './',
   './index.html',

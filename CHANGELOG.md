@@ -9,6 +9,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.
 
+### One-screen sign-in + calculator shows every option (owner decisions 2026-10-20, draft)
+- Sign-in: the names are shown next to the PIN field and posted together `{pin, user}` (no second screen). `GET /api/users` is now PUBLIC
+  (`no-store`, first names only). Oren/Shahar stay in the Therapists app (no Outpatient role). Calculator: all packages/months/Solo tiers as buttons.
+  SW v16 → v17. No `apps-script/**` change. See `CHANGELOG-one-screen-signin.md`.
+
 ### PIN screen: «המשך כצופה בלבד» removed (owner decision 2026-10-20, draft)
 - The PIN screen only offers the PIN entry. A stale remembered viewer flag is ignored and cleared. It was a client-only display mode and never an
   access control (the cookie is the credential), so this removes an option, it does not change server authorization. SW v15 → v16. No `apps-script/**` change.

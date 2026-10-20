@@ -6168,7 +6168,43 @@
   function applyRole() {
     document.body.classList.toggle('viewer', state.role !== 'editor');
   }
+  // One-screen sign-in (2026-10-20): the allow-listed names are shown next to the PIN field; the PIN and the chosen name are
+  // posted together ({pin, user}), so no second screen is needed. If the names cannot be loaded the old two-step flow
+  // (PIN -> name picker) still works as a fallback.
+  var pinChosen = '';
+  function loadPinNames() {
+    var box = $('#pinNames');
+    if (!box) return;
+    pinChosen = '';
+    // plain fetch on purpose: apiFetch's 401 handler calls showPin(), which would call this again (loop)
+    fetch('/api/users', { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      var users = Array.isArray(data && data.users) ? data.users.filter(function (u) { return typeof u === 'string' && u; }) : [];
+      box.textContent = '';
+      users.forEach(function (name) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-ghost user-btn';
+        b.textContent = name;
+        b.setAttribute('aria-pressed', 'false');
+        b.addEventListener('click', function () {
+          pinChosen = name;
+          $$('#pinNames .user-btn').forEach(function (x) {
+            var on = x === b;
+            x.className = 'btn ' + (on ? 'btn-primary' : 'btn-ghost') + ' user-btn';
+            x.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+          var err = $('#pinError'); if (err) err.hidden = true;
+          var pi = $('#pinInput'); if (pi) pi.focus();
+        });
+        box.appendChild(b);
+      });
+    }).catch(function () { box.textContent = ''; });
+  }
   function showPin() {
+    loadPinNames();
     var picker = $('#userScreen');
     if (picker) picker.hidden = true;
     $('#pinScreen').hidden = false;
@@ -6399,7 +6435,25 @@
       var btn = $('#pinSubmit');
       var err = $('#pinError');
       if (err) err.hidden = true;
+      var haveNames = $$('#pinNames .user-btn').length > 0;
+      if (haveNames && !pinChosen) { if (err) { err.textContent = 'בחרו שם'; err.hidden = false; } return; }
+      if (err) err.textContent = 'קוד שגוי';
       if (btn) btn.disabled = true;
+      if (haveNames) {
+        // one screen: the PIN and the chosen name go together; the server still checks both (allow-list + PIN)
+        apiVerifyPin(v, pinChosen).then(function (ok) {
+          if (!ok) throw new Error('refused');
+          return apiMe();
+        }).then(function (user) {
+          state.user = user;
+          enterEditor();
+        }).catch(function () {
+          if (err) err.hidden = false;
+        }).finally(function () {
+          if (btn) btn.disabled = false;
+        });
+        return;
+      }
       apiVerifyPin(v).then(function (ok) {
         if (ok) {
           // Cookie minted. Name picker next unless the session already

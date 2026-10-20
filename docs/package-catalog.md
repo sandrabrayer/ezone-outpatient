@@ -166,7 +166,7 @@ Still open:
 ## Yarden (ירדן) — what code does and what stays manual
 
 Code: removed from the login picker and the `assignedTo` dropdown; added to
-`RETIRED_SESSION_USERS`. **Sign-in is now two-step and fail-closed:**
+`RETIRED_SESSION_USERS`. **Sign-in is one screen (names + PIN, since 2026-10-20) and fail-closed; the server still supports the two-step flow:**
 
 1. `POST /api/verify-pin {pin}` mints only a **name-less PIN-stage session** (10 minutes, unique login id).
    It can reach **nothing but** `GET /api/users` and `GET /api/me` (the name picker). Every other route —

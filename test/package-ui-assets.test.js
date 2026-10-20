@@ -108,3 +108,15 @@ test('no second code: the pricing tab has no code field and auto-opens only when
   assert.match(MODULE, /st\.configured && st\.eligible/);
   assert.match(MODULE, /call\('\/api\/catalog-admin\/login', 'POST', \{\}\)/, 'login carries no secret from the browser');
 });
+
+test('calculator: every option is visible as a button (packages by family, months, Solo tiers) — no dropdown, quote on every choice, state dropped on reset', () => {
+  const start = MODULE.indexOf('function calcView()'); const end = MODULE.indexOf('// -- catalog --');
+  const calc = MODULE.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.doesNotMatch(calc, /h\('select'/, 'no hidden dropdown in the calculator');
+  assert.match(calc, /pkg-chip|chips\(/);
+  assert.match(calc, /byFam\[i\.family\]/, 'packages are grouped by family');
+  assert.match(calc, /rangeTiers\(it\)/, 'Solo tiers shown as buttons');
+  assert.match(calc, /rpc\('quote', f\)/, 'the quote is computed on every choice');
+  assert.match(MODULE, /function reset\(\) \{[^}]*S\.calc = null/, 'calculator state is dropped on reset');
+});
