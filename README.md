@@ -142,6 +142,12 @@ and persists treatment type/frequency already entered in the UI. See the
 Other financial flows and the wider structure/logic/features/security/speed/control
 audit remain open. Separate approval is required for every new release.
 
+## Browser-tab favicon
+
+Green «O» tab icon (`public/favicon.ico`, `favicon.svg`, `favicon-16x16.png`, `favicon-32x32.png`), served
+by explicit public routes in `server.js` and linked from `index.html`. Where they live and how to replace them:
+[`docs/favicons.md`](docs/favicons.md).
+
 ## Local development
 
 ```bash

@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Browser-tab favicon — letter O (draft)
+- Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
+  `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.
+  See `CHANGELOG-favicon.md`, `docs/favicons.md`.
+
 ### Price and pay constants are session-only (confidentiality fix, draft)
 - `treatment-map.js` / `therapist-pay.js` no longer public: session-only, `no-store`, loaded after sign-in,
   dropped on logout, never cached; SW v13. See `CHANGELOG-protect-price-constants.md`.

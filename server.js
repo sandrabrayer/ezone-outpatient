@@ -238,6 +238,33 @@ function sendIndex(res) {
 app.get('/', (req, res) => sendIndex(res));
 app.get('/index.html', (req, res) => sendIndex(res));
 
+// --- Browser-tab favicons (public, static) ------------------------------------
+// Without these the SPA catch-all below answered /favicon.ico with index.html
+// (200 text/html), so the tab showed no icon. Exact paths only, each mapped to
+// ONE fixed file under public/ (no user input reaches the file path, so no
+// traversal and no directory listing), with an explicit image type, nosniff and
+// a 1-day cache. Registered before any auth: an icon is never session data.
+// Regenerate with `node scripts/gen-favicons.js` (docs/favicons.md).
+const FAVICONS = Object.freeze({
+  '/favicon.ico': 'image/x-icon',
+  '/favicon.svg': 'image/svg+xml',
+  '/favicon-16x16.png': 'image/png',
+  '/favicon-32x32.png': 'image/png'
+});
+const FAVICON_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+for (const [route, type] of Object.entries(FAVICONS)) {
+  const file = path.join(__dirname, 'public', route.slice(1));
+  app.get(route, (req, res) => {
+    res.type(type);
+    res.set('X-Content-Type-Options', 'nosniff');
+    // An SVG is a document: forbid it from running script or loading anything.
+    if (type === 'image/svg+xml') res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+    res.sendFile(file, { maxAge: FAVICON_MAX_AGE_MS, dotfiles: 'deny' }, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
+  });
+}
+
 /* PRICE / PAY CONSTANTS ARE NOT PUBLIC ASSETS. treatment-map.js holds the client price
  * table (incl. VAT) and therapist-pay.js the per-therapist pay rates; before this they were
  * served to anyone who could reach the site, with no PIN. They are now served ONLY to a

@@ -65,8 +65,11 @@
  *   and app.js changed together. LIVE v15 was verified-by-merge (#126) before this bump.
  * - v17 (2026-10-20): one-screen sign-in (names next to the PIN field) in index.html + app.js, and the
  *   pricing calculator shows every option as buttons (package-pricing.js, style.css). LIVE v16 (#128) verified.
+ * - v18 (2026-10-20): browser-tab favicons (favicon.ico / .svg / -16x16 / -32x32,
+ *   letter O) + <link rel="icon"> tags in index.html. LIVE v17 (#129 merge 60f541d)
+ *   was verified before this bump.
  */
-var CACHE = 'ezone-outpatient-v17';
+var CACHE = 'ezone-outpatient-v18';
 var SHELL = [
   './',
   './index.html',
