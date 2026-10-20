@@ -61,8 +61,11 @@
  * - v15 (2026-10-19): the pricing tab no longer asks for a second code (Vered's
  *   signed-in name opens it); package-pricing.js changed. LIVE v14 was verified
  *   (#122 merge 3c1d260) before this bump.
+ * - v16 (2026-10-20): browser-tab favicons (favicon.ico / .svg / -16x16 / -32x32,
+ *   letter O) + <link rel="icon"> tags in index.html. LIVE v15 was verified
+ *   before this bump.
  */
-var CACHE = 'ezone-outpatient-v15';
+var CACHE = 'ezone-outpatient-v16';
 var SHELL = [
   './',
   './index.html',
