@@ -6,6 +6,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Integrate released packages and gate recovery completion on whole-run backup
+  drainage; retain marker on uncatchable termination for operator review.
 - Nightly backup now includes session/rate/configuration and operational history,
   a complete inventory, and guarded recovery verification. Unknown tabs remain
   explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.

@@ -91,7 +91,10 @@ separate operator authorization and an approved target/cutover plan.
 1. Pause editor jobs and direct spreadsheet edits. Run beginOutpatientRecovery
    **before** restoring or repointing any live workbook. It sets
    OUTPATIENT_RECOVERY_HOLD under ScriptLock. HTTP GET/POST and nightly backup
-   refuse while held. Existing cooperating writers recheck after acquiring their
+   refuse new admissions while held. If begin returns backup_draining, the hold
+   is already active but cutover is NOT authorized: wait for the previously
+   admitted backup to finish, then retry begin until ok:true. Do not restore,
+   repoint or read a changing backup set during this drain. Existing writers recheck after acquiring their
    lock, so an already-admitted queued request cannot write past the hold. Drain
    remaining in-flight read/editor work before manipulating the target.
 2. Validate the chosen day with _integrityValidateRestoreSet. Restore into a
@@ -108,7 +111,8 @@ separate operator authorization and an approved target/cutover plan.
    unclassified tabs, the original source workbook, and the backup workbook.
    A changed repair plan is not silently accepted or applied.
 5. Only after the approved cutover points the script at that verified isolated
-   target, finishOutpatientRecovery(backupId, day, true) repeats the checks under
+   target, finishOutpatientRecovery(backupId, day, true) first refuses any active
+   backup marker, then repeats the checks under
    ScriptLock, runs the existing real FinancialOps validator, invalidates the
    rates cache, restores FINANCIAL_OPS_CREATED where needed, then clears the hold
    **last**. Failure leaves the hold set. Never clear it manually to bypass a
@@ -116,6 +120,39 @@ separate operator authorization and an approved target/cutover plan.
 
 Read-only preflight is not a restore writer. No production data restoration,
 configuration change, mail, trigger installation or release is performed by tests.
+
+### Backup admission and recovery drain
+
+A ScriptLock-protected INTEGRITY_ACTIVE_BACKUP marker identifies one whole job
+(UUID + start time). The lock is released before reads, Google snapshot writes,
+retention and alerts, so interactive saves do not wait for the entire backup.
+The marker remains until ALL sentinel/property updates finish. Cleanup removes
+only that run's marker, under ScriptLock. This works across Google users, unlike
+the existing per-sheet UserLock. A second job is refused and reports the existing
+backup alert; no additional job or email is manually triggered by this change.
+
+beginOutpatientRecovery sets the hold and reports backup_draining while a job is
+active. New jobs are refused. finishOutpatientRecovery cannot clear the hold
+until the admitted job has exited, so an old job cannot overwrite recovery
+markers after cutover. Snapshot publication already in progress may finish
+while the hold is active; operators must wait for begin to return ok:true before
+handling the target. Checks cover overlap after capture and after manifest
+publication; removing the finish guard makes both fail.
+
+An uncatchable Apps Script termination can leave the active marker behind. It
+never expires automatically. A stale-marker alert is an investigation, not a
+permission to clear it: first pause scheduled/manual invocations, verify in
+Apps Script execution history that no job is running, preserve/review published
+sets and pending/previous remnants, and record the operator's recovery decision.
+Only then may an authorized operator remove that specific abandoned active-run
+marker while keeping the recovery hold and financial marker/history intact,
+and retry begin. Do not automate this cleanup or use age alone as proof.
+
+Other low-severity operations items remain: an abandoned hold currently pauses
+nightly work without an age-based alert; deliberate retirement/rename of a
+previously captured source needs a reviewed migration; pending/previous remnants
+need size/count monitoring and manual review, never blind retention cleanup.
+
 
 ## Evidence and remaining gates
 
@@ -127,8 +164,8 @@ Existing mixed-kind FinancialOps crash/restore tests remain in the suite.
 Only Google APIs are mocked; business handlers are not mirrored.
 
 The October 20 integration uses the actual released #122/#126 tree, not the
-previous synthetic source combination. The full UTC suite passes 1,633 / 0 fail /
-37 skipped (1,670 total), including nine regressions added after review. The package regression seeds the real catalog, approves
+previous synthetic source combination. The full UTC suite passes 1,638 / 0 fail /
+37 skipped (1,675 total), including fourteen regressions added after review. The package regression seeds the real catalog, approves
 a real request, snapshots/restores it and retries the exact submission: one row,
 unchanged approved quote/status, no charge/payment. Two queued package-writer
 tests fail if the post-acquisition hold check is removed. CI for the resulting

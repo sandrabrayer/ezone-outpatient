@@ -248,6 +248,79 @@ test('editor finish keeps hold on failure and clears it only after target, confi
   assert.deepEqual(h.locks(), [false,false]);
 });
 
+for (const phase of ['after-capture', 'after-manifest']) {
+  test('recovery cannot finish while a previously admitted backup drains ' + phase, () => {
+    const h = snapshot(world()), r = restored(h);
+    h.ctx.CacheService = { getScriptCache: () => ({ remove() {} }) };
+    let exercised = false;
+    function overlap() {
+      if (exercised) return; exercised = true;
+      assert.ok(h.props.INTEGRITY_ACTIVE_BACKUP);
+      assert.equal(h.ctx.beginOutpatientRecovery().error, 'backup_draining');
+      h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+      assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), /backup still running/);
+      assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+      assert.equal(h.ctx.nightlyIntegrityJob().error, 'recovery_pending');
+    }
+    if (phase === 'after-capture') {
+      const capture = h.ctx._integrityCaptureData;
+      h.ctx._integrityCaptureData = ss => { const rows = capture(ss); overlap(); return rows; };
+    } else {
+      const write = h.ctx._integrityWriteSnapshot;
+      h.ctx._integrityWriteSnapshot = (...args) => {
+        const sh = write(...args); if (args[1].includes('-manifest-')) overlap(); return sh;
+      };
+    }
+    h.ctx.nightlyIntegrityJob();
+    assert.equal(exercised, true);
+    assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
+    assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+    assert.equal(h.ctx.beginOutpatientRecovery().ok, true, 'cutover becomes eligible only after all backup/sentinel writes finish');
+    assert.equal(h.ctx.finishOutpatientRecovery('backup', dayOf(h), true).ok, true);
+    assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, undefined);
+  });
+}
+
+test('one backup execution is admitted across the whole run; a competing caller cannot clear its marker', () => {
+  const h = harness(), capture = h.ctx._integrityCaptureData;
+  let tested = false;
+  h.ctx._integrityCaptureData = ss => {
+    if (!tested) {
+      tested = true; const marker = h.props.INTEGRITY_ACTIVE_BACKUP;
+      assert.ok(JSON.parse(marker).startedAt);
+      assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+      assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, marker);
+    }
+    return capture(ss);
+  };
+  h.ctx.nightlyIntegrityJob();
+  assert.equal(tested, true);
+  assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
+  assert.equal(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length, 20);
+});
+
+test('a failed backup clears its own execution marker in finally and keeps recovery held', () => {
+  const h = harness();
+  h.ctx._integrityCaptureData = () => { h.ctx.beginOutpatientRecovery(); throw Error('synthetic capture crash'); };
+  h.ctx._integritySendAlert = () => { throw Error('synthetic unexpected reporting crash'); };
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /unexpected reporting crash/);
+  assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
+  assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+  assert.deepEqual(h.locks(), [false, false]);
+});
+
+test('an abandoned execution marker is never expired or removed automatically to bypass the drain gate', () => {
+  const h = snapshot(world()), r = restored(h);
+  h.props.INTEGRITY_ACTIVE_BACKUP = '{"id":"stale-synthetic-run","startedAt":"2000-01-01T00:00:00Z"}';
+  const marker = h.props.INTEGRITY_ACTIVE_BACKUP;
+  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.equal(h.ctx.beginOutpatientRecovery().error, 'backup_draining');
+  h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+  assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), /backup still running/);
+  assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, marker);
+  assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
 for (const fault of ['cache', 'journal', 'activation-marker']) {
   test('editor finish leaves recovery held after a real ' + fault + ' failure', () => {
     const s = world();
@@ -387,9 +460,10 @@ test('a previously captured operational sheet cannot disappear silently and age 
 test('a nightly capture queued before recovery rechecks the hold after acquiring its lock', () => {
   const h = harness();
   const getLock = h.ctx.LockService.getScriptLock;
+  let acquisitions = 0;
   h.ctx.LockService.getScriptLock = () => {
     const lock = getLock(), acquire = lock.tryLock;
-    lock.tryLock = () => { h.props.OUTPATIENT_RECOVERY_HOLD = '1'; return acquire(); };
+    lock.tryLock = () => { if (++acquisitions === 2) h.props.OUTPATIENT_RECOVERY_HOLD = '1'; return acquire(); };
     return lock;
   };
   h.ctx.nightlyIntegrityJob();

@@ -20,9 +20,12 @@ OP-03 now integrates the exact released #122/#126 tree. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
 an exact submission retry without another row. The full integrated UTC suite
-passes 1,633 tests with 37 skipped (1,670 total), including nine failure-path
-regressions added after Claude's limited static review. Removing the new package-lock
-check makes both queued-writer regressions fail. Google execution is separate.
+passes 1,638 tests with 37 skipped (1,675 total), including fourteen failure-path
+and coordination regressions added after Claude's bounded static reviews. Removing the new package-lock
+check makes both queued-writer regressions fail. Google execution is separate. A reproduced capture/recovery overlap is now gated
+by a whole-run backup marker admitted under ScriptLock. Begin reports draining;
+finish refuses until all old-job writes complete. Interrupted-run markers stay
+fail-closed for operator investigation, without automatic expiry.
 
 Read-only source inspection Oct 20: Sheet1 has no cell values/formulas in its
 entire 1,000 x 26 grid. Copy of Clients has 21 unique-id rows and 33 headers;

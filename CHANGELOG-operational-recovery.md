@@ -31,3 +31,15 @@
 - Adds nine real-source failure/order/inventory regressions after Claude's
   limited static review of 917bae83. No runtime code changed in this follow-up.
 - Review does not cover writer locks/journal internals or replace the Google drill.
+
+## Backup/recovery coordination — 2026-10-20
+
+- Reproduced the second Claude review's overlap: a pre-hold job could still write
+  source inventory/sentinels after capture. A whole-run ScriptLock-protected
+  marker now blocks recovery completion until all backup writes finish.
+- New jobs cannot enter during a hold or another job. Begin reports draining;
+  finish refuses while active. No long script lock spans snapshot/network work.
+- Adds five overlap/concurrency/failure/abandoned-marker tests; removing the
+  finish guard makes both overlap regressions fail. Full UTC: 1638/0/37.
+- Documents verified operator cleanup for uncatchable termination, plus remaining
+  hold-age alert, manual-tab retirement and remnant-monitoring follow-ups.

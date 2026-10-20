@@ -6231,9 +6231,14 @@ function _integrityRecoveryMetadata(captured) {
 // changing/restoring the configured workbook; pause editor jobs as well.
 function beginOutpatientRecovery() {
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
-  try { PropertiesService.getScriptProperties().setProperty('OUTPATIENT_RECOVERY_HOLD', '1'); }
-  finally { lock.releaseLock(); }
-  return { ok: true, state: 'recovery_pending' };
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('OUTPATIENT_RECOVERY_HOLD', '1');
+    // Freeze new admissions now, but do not authorize cutover while a job
+    // admitted before this hold can still publish or update its sentinels.
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
+    return { ok: true, state: 'recovery_pending' };
+  } finally { lock.releaseLock(); }
 }
 
 // Read-only proof for an isolated target. Credentials/triggers are NOT in the
@@ -6278,6 +6283,7 @@ function finishOutpatientRecovery(backupId, day, configVerified) {
   if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('Recovery backup still running');
     var result = _integrityVerifyRecoveredWorkbook(SpreadsheetApp.openById(backupId), day, _ss(), configVerified);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
     try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
@@ -6425,7 +6431,25 @@ function _integritySendAlert(body) {
  * failure never silences the others; internal errors join the alert. */
 function nightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) return { ok: false, error: 'recovery_pending' };
+  var admission = LockService.getScriptLock();
+  if (!admission.tryLock(5000)) return { ok: false, error: 'backup_busy' };
+  var runMarker = '', admissionError = '';
+  try {
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
+    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) admissionError = 'backup_busy';
+    else {
+      runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
+      props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
+    }
+  } finally { admission.releaseLock(); }
+  if (admissionError) {
+    if (admissionError === 'backup_busy') _integritySendAlert('Backup not started: another backup is active or its execution marker requires operator review.');
+    return { ok: false, error: admissionError };
+  }
+  // This marker spans the WHOLE run, including publication, retention, alerts
+  // and sentinel writes. It uses Script Properties/ScriptLock across users;
+  // the short per-sheet UserLock is not a recovery/cutover barrier.
+  try {
   var errors = [];
 
   // ---- read-only reads of the live data (getSheetByName, NEVER _ensureSheet:
@@ -6569,6 +6593,14 @@ function nightlyIntegrityJob() {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+  }
+  } finally {
+    var completion = LockService.getScriptLock(); completion.waitLock(30000);
+    try {
+      // Never clear a different execution's marker. An uncatchable runtime
+      // termination leaves this marker fail-closed for operator investigation.
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') === runMarker) props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    } finally { completion.releaseLock(); }
   }
 }
 
