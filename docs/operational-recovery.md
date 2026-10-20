@@ -165,7 +165,7 @@ need size/count monitoring and manual review, never blind retention cleanup.
 The evening base integration preserves the released sign-in/calculator/favicon
 changes and source recovery logic. A separate [phased Google drill](google-operational-drill.md)
 is now prepared, with nonempty synthetic sessions, both journal kinds, catalog
-and approved request. Seven tests execute its exact generated helpers with
+and approved request. Thirteen tests execute its exact generated helpers with
 service doubles, including identity/order/hash refusals and cache-failure hold.
 The runner has NOT executed in Google; isolated runtime access remains required.
 

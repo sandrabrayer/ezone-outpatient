@@ -11,6 +11,9 @@ by the configuration owner. No application-bound project, existing deployment,
 production Code.gs, production credentials, real patient data or production
 workbook is used. The builder refuses the repository's production script ID;
 the runner refuses a different script ID or any spreadsheet-bound project.
+Preparation also refuses any existing Script Property names without reading
+their values. The hardcoded ID denial covers this repo only, not every E-ZONE
+application: the operator must verify this is a newly created test project.
 
 The current session has Sheets read/copy tools but no authenticated isolated
 Apps Script execution channel. Do not look for credentials or reuse the
@@ -36,6 +39,9 @@ as an input. Preserve failed-run artifacts; there is no implicit reset/delete.
    `apps-script/`, create a deployment, install triggers or change Railway.
 4. Keep the emitted source/helper/drill-definition SHA-256 values with the result.
    The definition hash binds the wrapper, fixtures, helpers and test project ID.
+   Before phase 1 compare the entire loaded test file with a fresh local build
+   of the reviewed candidate. Embedded hashes detect inter-phase build drift;
+   they do not detect a hand-edited body with unchanged embedded constants.
    The generated
    file checked into the PR has a placeholder and deliberately refuses to run.
    Do not commit an execution-specific project binding over that safe default.
@@ -69,12 +75,22 @@ permissions, triggers or secrets. The scheduled `nightlyIntegrityJob` is never
 invoked, so this does not test scheduled admission/drain, retention or mail.
 
 Every completed/failed phase writes `_DrillReport` in the new backup workbook,
-including source/helper hashes. Execution logs contain phase status and the
+including source/helper/definition hashes and elapsed milliseconds. A secondary
+report failure is logged without masking the original phase error. The phase
+must remain safely below the runtime execution limit; split it if actual timing
+approaches that limit, preserving all evidence. No runtime duration is yet measured.
+Execution logs contain phase status and the
 three synthetic workbook IDs. All successful results explicitly retain
 `productionCertified:false`. Retain execution timestamps, durations, workbook
 links, report rows and the exact candidate SHA; do not label local doubles as
 Google evidence. Capture the actual Google scopes requested before consenting;
 no mail, external fetch, deployment or trigger scope is needed by this harness.
+
+The financial fixtures are terminal history and the sessions already recorded.
+Their retries must remain valid after their original dates. A local regression
+moves verification to June2031; native execution still needs to prove the same
+behavior. Only the audit fixture includes an explicit Date scalar; date columns
+represented by the app as ISO strings are kept as strings.
 
 ## Manual production tabs remain a separate gate
 

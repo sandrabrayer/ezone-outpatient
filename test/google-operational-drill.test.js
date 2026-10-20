@@ -58,3 +58,33 @@ test('cache failure prevents completion, preserves the hold and refuses automati
   assert.equal(r.state().phase,'restored');assert.equal(r.state().failed,true);
   assert.throws(()=>r.ctx.verifyOperationalDrill(),/state, order/);
 });
+
+test('a pre-existing property refuses preparation without inspecting its value or creating a workbook',()=>{
+  const r=start();Object.defineProperty(r.props,'existing-app-property',{enumerable:true,get(){throw Error('Must not inspect value');}});
+  assert.throws(()=>r.ctx.prepareOperationalDrill(),/Fresh standalone/);assert.equal(r.events.length,0);
+});
+for(const role of ['backup','target'])test('renamed '+role+' refuses phase before any cell read',()=>{
+  const r=start();r.ctx.prepareOperationalDrill();r.books[r.state().ids[role]].rename('another workbook');
+  const at=r.events.length;assert.throws(()=>r.ctx.captureOperationalDrill(),/name mismatch/);
+  assert.ok(r.events.slice(at).every(e=>e[0]==='open'));
+});
+test('duplicate workbook IDs reject without reading workbook cells',()=>{
+  const r=start();r.ctx.prepareOperationalDrill();const state=r.state();state.ids.target=state.ids.backup;
+  r.props.OP03_DRILL_STATE=JSON.stringify(state);const at=r.events.length;
+  assert.throws(()=>r.ctx.captureOperationalDrill(),/Invalid isolated workbook IDs/);
+  assert.ok(r.events.slice(at).every(e=>e[0]==='open'));
+});
+test('restore interruption keeps the hold and original error even if reporting also fails',()=>{
+  const r=start();r.ctx.prepareOperationalDrill();r.ctx.captureOperationalDrill();r.faults.copy=true;r.faults.report=true;
+  assert.throws(()=>r.ctx.restoreOperationalDrill(),/Native copy interrupted/);
+  assert.equal(r.props.OP03_DRILL_FIXTURE_OUTPATIENT_RECOVERY_HOLD,'1');
+  assert.equal(r.state().failed,true);assert.equal(r.state().phase,'captured');
+  assert.ok(r.logs.some(s=>s.includes('evidence write failed')));
+});
+test('terminal journal and recorded session retries still work years after fixture generation',()=>{
+  const r=start();restore(r);
+  function FutureDate(...args){return new Date(...(args.length?args:['2031-06-15T10:00:00.000Z']));}
+  Object.setPrototypeOf(FutureDate,Date);FutureDate.prototype=Date.prototype;
+  FutureDate.now=()=>Date.parse('2031-06-15T10:00:00.000Z');r.ctx.Date=FutureDate;
+  assert.equal(r.ctx.verifyOperationalDrill().phase,'verified');
+});

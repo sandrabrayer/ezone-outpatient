@@ -15,6 +15,7 @@ function op03Drill_(phase) {
   if (SpreadsheetApp.getActiveSpreadsheet()) throw new Error('Standalone test project required');
   var metadata = __METADATA_JSON__;
   var fixture = __FIXTURE_JSON__;
+  var phaseStartedAt = Date.now();
   var nativeSheets = SpreadsheetApp, nativeProps = PropertiesService.getScriptProperties();
   var stateKey = 'OP03_DRILL_STATE', prefix = 'OP03_DRILL_FIXTURE_';
   var state, books, currentBook, lock = LockService.getScriptLock();
@@ -26,6 +27,8 @@ function op03Drill_(phase) {
     state = raw ? JSON.parse(raw) : null;
     if (phase === 'prepare') {
       if (state) throw new Error('Drill already exists; preserve its evidence');
+      // Names only: do not inspect any values from a pre-existing project.
+      if (nativeProps.getKeys().length) throw new Error('Fresh standalone test project required');
       state = { tag: Utilities.getUuid(), phase: '', ids: {}, running: true,
         sourceHash: metadata.sourceCodeSHA256, helperHash: metadata.helperSHA256, drillHash: metadata.drillDefinitionSHA256,
         day: Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd') };
@@ -59,7 +62,7 @@ function op03Drill_(phase) {
     var sh = books.backup.getSheetByName('_DrillReport');
     if (!sh) throw new Error('Drill report missing');
     var row = [new Date().toISOString(), phase, result, detail,
-      metadata.sourceCodeSHA256, metadata.helperSHA256, metadata.drillDefinitionSHA256];
+      metadata.sourceCodeSHA256, metadata.helperSHA256, metadata.drillDefinitionSHA256, Date.now() - phaseStartedAt];
     sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@')
       .setValues([row.map(function (v) { return "'" + String(v); })]);
   }
@@ -85,8 +88,8 @@ function op03Drill_(phase) {
         books[role] = nativeSheets.create(name(role));
         state.ids[role] = books[role].getId(); saveState();
       });
-      books.backup.getSheets()[0].setName('_DrillReport').getRange(1, 1, 1, 7)
-        .setValues([['at', 'phase', 'result', 'detail', 'sourceSHA256', 'helperSHA256', 'drillSHA256']]);
+      books.backup.getSheets()[0].setName('_DrillReport').getRange(1, 1, 1, 8)
+        .setValues([['at', 'phase', 'result', 'detail', 'sourceSHA256', 'helperSHA256', 'drillSHA256', 'durationMs']]);
     } else books = loadBooks();
     currentBook = phase === 'verify' ? books.target : books.source;
     var result = (function (SpreadsheetApp, PropertiesService) {
@@ -199,11 +202,13 @@ __HELPERS__
     state.phase = result.stage; report('PASS', result.detail); saveState();
     Logger.log(JSON.stringify({ phase: phase, result: 'PASS', detail: result.detail,
       workbookIds: state.ids, sourceCodeSHA256: metadata.sourceCodeSHA256,
-      helperSHA256: metadata.helperSHA256, drillDefinitionSHA256: metadata.drillDefinitionSHA256, productionCertified: false }));
+      helperSHA256: metadata.helperSHA256, drillDefinitionSHA256: metadata.drillDefinitionSHA256,
+      durationMs: Date.now() - phaseStartedAt, productionCertified: false }));
     return { ok: true, phase: state.phase, workbookIds: state.ids, productionCertified: false };
   } catch (error) {
-    state.failed = true; saveState();
-    report('FAIL', String(error).slice(0, 500));
+    state.failed = true;
+    try { saveState(); report('FAIL', String(error).slice(0, 500)); }
+    catch (reportError) { Logger.log('Drill evidence write failed: ' + String(reportError).slice(0, 200)); }
     throw error;
   } finally {
     lock.waitLock(30000);

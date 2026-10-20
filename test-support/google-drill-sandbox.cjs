@@ -32,7 +32,7 @@ function runtime(output, scriptId) {
             const range = {
               getValues() { events.push(['read',id,name]);return Array.from({length:nr},(_,i)=>Array.from({length:nc},(_,j)=>clone(get(r-1+i,c-1+j)))); },
               getValue: () => clone(get(r-1,c-1)),
-              setValues(rows) { events.push(['write',id,name]); rows.forEach((row,i)=>row.forEach((v,j)=>{(cells[r-1+i]||=[])[c-1+j]=typeof v==='string'&&v.startsWith("'")?v.slice(1):clone(v);}));return range; },
+              setValues(rows) { if(faults.report && name==='_DrillReport')throw Error('Report unavailable');events.push(['write',id,name]); rows.forEach((row,i)=>row.forEach((v,j)=>{(cells[r-1+i]||=[])[c-1+j]=typeof v==='string'&&v.startsWith("'")?v.slice(1):clone(v);}));return range; },
               setValue(v) { return range.setValues([[v]]); },
               getNumberFormats: () => Array.from({length:nr},(_,i)=>Array.from({length:nc},(_,j)=>formats[r-1+i]?.[c-1+j]||'General')),
               setNumberFormats(rows) { rows.forEach((row,i)=>row.forEach((v,j)=>{(formats[r-1+i]||=[])[c-1+j]=v;}));return range; },
@@ -42,6 +42,7 @@ function runtime(output, scriptId) {
             };return range;
           },
           copyTo(target) {
+            if(faults.copy)throw Error('Native copy interrupted');
             const copy=target.insertSheet('Copy of '+name),grid=sh.getDataRange().getValues();
             if(copy.getMaxColumns()<grid[0].length)copy.insertColumnsAfter(copy.getMaxColumns(),grid[0].length-copy.getMaxColumns());
             copy.getRange(1,1,grid.length,grid[0].length).setValues(grid);
@@ -61,7 +62,7 @@ function runtime(output, scriptId) {
     ScriptApp:{getScriptId:()=>scriptId},SpreadsheetApp:{getActiveSpreadsheet:()=>bound,
       create(title) { const id='synthetic-book-'+(++seq);events.push(['create',id]);return books[id]=book(id,title); },
       openById(id) { events.push(['open',id]);if(!books[id])throw Error('No such fixture workbook');return books[id]; },flush(){}},
-    PropertiesService:{getScriptProperties:()=>({getProperty:k=>props[k]??null,
+    PropertiesService:{getScriptProperties:()=>({getKeys:()=>Object.keys(props),getProperty:k=>props[k]??null,
       setProperty(k,v){props[k]=String(v);},deleteProperty(k){delete props[k];}})},
     LockService:{getScriptLock:()=>scriptLock,getUserLock:()=>userLock},
     CacheService:{getScriptCache:()=>({get:k=>cache[k]||null,put(k,v){cache[k]=v;},remove(k){if(faults.cache)throw Error('Cache unavailable');delete cache[k];}})},

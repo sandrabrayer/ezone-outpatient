@@ -9,7 +9,7 @@
 - Keep project/phase/hash guards, scoped fixture properties, failure evidence,
   both journal kinds, cancellation/payroll identity, custom rate, approved quote
   and native typed readback in the acceptance contract. Unknown tabs still block.
-- Seven local service-double tests pass. These are not Google execution evidence.
+- Thirteen local service-double tests pass after review. These are not Google execution evidence.
   Include the base's calculator browser test in the existing CI browser job.
 - No source runtime logic changed after 29195b24. Access to an isolated Google
   runtime, the manual-tab plan and production approval remain open.
@@ -60,3 +60,14 @@
 
 - Final review follow-up: admission lock timeout alerts through the existing path;
   completion lock timeout logs a stranded-marker diagnosis, with two regressions.
+
+## Drill review follow-up — 2026-10-20
+
+Claude statically reviewed head545cb134 (comment6296064861), without tests or
+reading the complete generated helper closure. No blocker in that limited scope.
+The follow-up clarifies artifact verification and per-repo ID denial, refuses
+pre-existing project property names without reading values, records phase
+duration, and preserves the original error if evidence writing also fails.
+Six additional regressions cover interruption, duplicate IDs, backup/target
+rename, property isolation and verification under a June2031 clock. Full UTC:
+1669 pass,0 fail,38 skipped (1707 total). No source runtime logic changed.

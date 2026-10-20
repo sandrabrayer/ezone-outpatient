@@ -38,7 +38,8 @@ historical archive, never merged into Clients. No source cell was changed.
 The private full safety copy of Oct20 has20 tabs including packages; the Oct19
 copy is historical. Neither proves restoration. Unknown-tab recovery stays
 blocked pending review. The phased synthetic Google drill is prepared at
-docs/google-operational-drill.md; seven local service-double tests pass. An
+docs/google-operational-drill.md; 13 local service-double tests pass after Claude review. The complete UTC
+suite passes1669 with38 skips (1707 total); current CI is checked separately. An
 authorized isolated Apps Script runtime is still needed; no native run is claimed.
 
 Keep FinancialOps history/marker and both operation kinds. Never roll source
