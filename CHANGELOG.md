@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 operational recovery (draft)
+- Integrate released base 8b68cd75 without changing its public assets; add an
+  isolated phased Google acceptance runner with explicit project binding,
+  synthetic mixed journals/sessions/packages and local failure-path tests.
+- Integrate released packages and gate recovery completion on whole-run backup
+  drainage; retain marker on uncatchable termination for operator review.
+- Nightly backup now includes session/rate/configuration and operational history,
+  a complete inventory, and guarded recovery verification. Unknown tabs remain
+  explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
 ### Browser-tab favicon — letter O (draft)
 - Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
   `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.

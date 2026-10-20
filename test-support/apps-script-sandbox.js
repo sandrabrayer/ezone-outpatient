@@ -38,7 +38,7 @@ function sandbox(leads = [], clients = []) {
   let held = false, uuid = 0;
   const lock = { tryLock: () => { held = true; return true; }, waitLock: () => { held = true; }, releaseLock: () => { held = false; } };
   const ctx = {
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getId: () => 'synthetic-source', getSheets: () => Object.values(sheets), getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
     LockService: { getScriptLock: () => lock }, Logger: { log() {} },
     Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
     Utilities: {
@@ -48,7 +48,7 @@ function sandbox(leads = [], clients = []) {
       computeDigest: (_alg, text) => Array.from(crypto.createHash('sha256').update(String(text), 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b)),
       computeHmacSha256Signature: (msg, key) => Array.from(crypto.createHmac('sha256', String(key)).update(String(msg), 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b))
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; } }) },
     ContentService: { MimeType: { JSON: 'JSON' }, createTextOutput: (text) => ({ setMimeType() { return this; }, getContent: () => text }) }
   };
   vm.createContext(ctx);
