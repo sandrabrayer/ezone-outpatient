@@ -210,6 +210,9 @@ checkout ever drifts back.
   PIN answers 500 and every data route 401 until it is configured. Railway
   variables apply only to deployments started after saving.
 - The app listens on `process.env.PORT`.
+- Full list of every variable, Script Property and GitHub secret — what it
+  unlocks, risk, where to rotate it, and whether rotating it signs users out:
+  [`docs/SECRETS-INVENTORY.md`](docs/SECRETS-INVENTORY.md).
 - Deploy as a single service — one URL only.
 
 ## API (frontend → backend, relative only)

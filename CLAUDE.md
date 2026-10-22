@@ -14,6 +14,7 @@ generic defaults; ask Sandra only when a rule below says to.
 | `GET /api/version` | Exists — public, `no-store`, returns `{ commit, builtAt }` (`commit` = `RAILWAY_GIT_COMMIT_SHA`, hex-validated, else `null`) |
 | Service-worker cache | `public/sw.js` → `var CACHE = 'ezone-outpatient-vN'` |
 | Ecosystem ground truth | `EZONE-ECOSYSTEM-STATUS.md` |
+| Secrets / env-var inventory | `docs/SECRETS-INVENTORY.md` (names only, never values) |
 
 ## Rules
 
@@ -61,3 +62,11 @@ generic defaults; ask Sandra only when a rule below says to.
 7. **Final report to Sandra:** PR link, merge SHA, test count, Apps Script
    deploy run (if any), `/api/version` result, timings, and **only** the
    manual steps left for her (with links). No step-by-step narration.
+8. **Secrets inventory.** `docs/SECRETS-INVENTORY.md` is the single list of
+   every env var, Script Property and GitHub secret the repo reads (names,
+   what each unlocks, risk, where to rotate, logout/breakage effect). Any
+   change that adds, removes or repurposes one updates that file in the same
+   PR — `test/secrets-inventory.test.js` enforces it. Names only: **never**
+   write, log, echo or print a secret value anywhere (code, docs, tests,
+   PRs, chat). When Sandra asks about secrets or rotation, answer from that
+   file and link it.

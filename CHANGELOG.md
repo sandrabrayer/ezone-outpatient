@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Secrets & env-var inventory (docs only, draft)
+- New `docs/SECRETS-INVENTORY.md`: every Railway variable, Apps Script Script Property and GitHub secret — what it unlocks,
+  risk, where to rotate, logout/breakage effect. Names only, no values. CLAUDE.md rule 8 keeps it current;
+  `test/secrets-inventory.test.js` fails if code reads an unlisted name or the file holds a value. No runtime code change.
+  See `CHANGELOG-secrets-inventory.md`.
+
 ### Browser-tab favicon — letter O (draft)
 - Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
   `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.
