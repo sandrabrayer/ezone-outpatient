@@ -438,6 +438,8 @@ table) drifts.
   its shared login code, which replaced APP_PIN there). Coordinators' staffing
   pair (STAFFING_SHEETS_URL / STAFFING_GUIDES_SECRET) and staffing's
   COORDINATORS_READ_SECRET: see the Sep 10 coordinators section above.
+- Outpatient's full per-secret inventory (risk, where to rotate, whether it
+  signs users out): `ezone-outpatient/docs/SECRETS-INVENTORY.md`.
 
 ## Therapists: roster source = the ezone-staffing feed
 
