@@ -61,3 +61,11 @@ generic defaults; ask Sandra only when a rule below says to.
 7. **Final report to Sandra:** PR link, merge SHA, test count, Apps Script
    deploy run (if any), `/api/version` result, timings, and **only** the
    manual steps left for her (with links). No step-by-step narration.
+8. **Repo footer.** End EVERY reply to Sandra with one footer line naming the
+   repo and branch you are working in, so she always sees where the work is
+   happening (she uses the Claude app/web, where the terminal status line is
+   not shown):
+   `📁 Repo: sandrabrayer/ezone-outpatient · Branch: <current branch>`
+   Use the real current branch (`git branch --show-current`); add
+   `(not pushed)` when it does not exist on GitHub yet. In a multi-repo
+   session, list each repo touched in that reply.
