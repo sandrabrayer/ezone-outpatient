@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CLAUDE.md — repo footer rule (draft)
+- New rule 8: every Claude reply to Sandra ends with `📁 Repo: sandrabrayer/ezone-outpatient · Branch: <current branch>`
+  (`(not pushed)` when the branch is not on GitHub yet). Docs/agent instructions only; no app, `apps-script/**` or SW change.
+  See `CHANGELOG-claude-md-repo-footer.md`.
+
 ### Browser-tab favicon — letter O (draft)
 - Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
   `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.
