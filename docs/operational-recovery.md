@@ -224,17 +224,20 @@ Sheet1 A1:Z1000 is empty; Copy of Clients A1:AG993 contains 21 records, 33 heade
 and no formula cells. All 21 ids also occur in Clients, which has 54 records.
 Shared ids do not prove equal row values or that the archive is expendable.
 
-Retain Sheet1 as an empty structural tab and Copy of Clients as an immutable
+Retain Sheet1 as an empty structural tab and Copy of Clients as a retained
 historical archive; never merge the archive into live Clients, use it as billing
 input, or delete it because ids overlap. Preserve native properties through the
 separate full-workbook copy. The October 20 private copy has 20 tabs including
 packages; the prior October 19 copy is historical. Neither is a proved restore.
 
-This is a proposal for independent review, not a whitelist implemented in the
-recovery gate. Unknown tabs still block operational certification. Do not bypass
-that check by deleting tabs/manifest rows or by clearing the hold manually.
-Recheck schema/content/formatting and the exact reviewed target during the
-private Google drill before implementing any approved recovery exception.
+A [default-disabled policy verifier](manual-tab-recovery-policy.md) is now
+implemented. Its approval pin is empty, so unknown tabs still block operational
+certification. Each eventual exception needs a contemporaneous evidence packet,
+the exact source/backup/day/target, recomputed grid/manifest/metadata hashes and
+a separate reviewed code pin. No real policy or evidence packet exists yet.
+Do not bypass checks by deleting tabs/manifest rows or clearing the hold manually.
+Recheck schema/content/formulas/native properties and the exact reviewed target
+during the private Google drill. Old observations cannot certify new snapshots.
 
 After approval: merge to the deployed branch, wait for matching healthy Node,
 then dispatch Deploy Apps Script with expected_commit = approved full merge SHA.

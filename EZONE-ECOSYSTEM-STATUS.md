@@ -1,4 +1,11 @@
-# Outpatient current handoff — 2026-10-20
+# Outpatient current handoff — 2026-10-25
+
+OP-03 follow-up: a manual-tab policy verifier is implemented with a blank
+approval pin. Unknown tabs remain blocked. Synthetic tests exercise exact scope,
+typed grids, formulas, evidence and hold retention; native Google execution and
+a real evidence packet/pin are still missing. See docs/manual-tab-recovery-policy.md.
+A fresh audit found the Oct22 body-parser high advisory; compatible dependency
+lockfile patches are included. Read exact-head validation in PR125. No release.
 
 Latest Git base: `8b68cd7547d394a00483da51a11cab086be62eca`, SW18 assets,
 branch `claude/youthful-volta-laarnk` (#127/#128/#129 now merged). Last direct

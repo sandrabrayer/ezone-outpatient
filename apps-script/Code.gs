@@ -6241,14 +6241,100 @@ function beginOutpatientRecovery() {
   } finally { lock.releaseLock(); }
 }
 
+// Intentionally disabled. A recovery-specific reviewed commit may pin ONE
+// evidence-backed policy. Never populate this from properties, cells or input.
+var INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = '';
+
+// Canonical fixed-field rows, domain separated, hashed by the existing typed
+// fingerprint. Only tab entries are sorted; captured cells are never normalized.
+function _integrityManualPolicyRows(policy) {
+  function fields(value, keys) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(keys.slice().sort())) {
+      throw new Error('Invalid manual recovery policy fields');
+    }
+    return keys.map(function (key) { return value[key]; });
+  }
+  var keys = ['version', 'sourceId', 'backupId', 'day', 'targetId', 'manifestSha256', 'metadataSha256', 'evidence', 'tabs'];
+  fields(policy, keys);
+  var evidenceKeys = ['recordPath', 'sha256', 'operator', 'captureStartedAt', 'captureEndedAt',
+    'beforeInventorySha256', 'afterInventorySha256', 'nativeCopyId', 'directWritesPaused',
+    'formulasAbsent', 'nativePropertiesVerified', 'targetCreatedAt', 'targetInitiallyEmpty', 'targetOwnerOnly'];
+  var tabKeys = ['source', 'sheetId', 'prefix', 'absent', 'role', 'sha256', 'rows', 'columns', 'allocatedRows', 'allocatedColumns'];
+  if (!Array.isArray(policy.tabs)) throw new Error('Invalid manual recovery policy tabs');
+  var tabs = policy.tabs.map(function (tab) { return fields(tab, tabKeys); });
+  tabs.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+  return [['outpatient-manual-recovery-policy-v1'], keys.slice(0, 7).map(function (key) { return policy[key]; }),
+    fields(policy.evidence, evidenceKeys)].concat(tabs);
+}
+
+function _integrityVerifyManualPolicy(backupSs, day, targetSs, captured, meta, policy) {
+  var pin = INTEGRITY_APPROVED_MANUAL_POLICY_SHA256;
+  if (typeof pin !== 'string' || !/^[a-f0-9]{64}$/.test(pin)) {
+    throw new Error('Unclassified sheets require a separately reviewed recovery plan');
+  }
+  if (_integrityFingerprint(_integrityManualPolicyRows(policy)) !== pin) throw new Error('Manual recovery policy digest mismatch');
+  function hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
+  function text(value) { return typeof value === 'string' && value.trim().length > 0; }
+  function instant(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && isFinite(Date.parse(value)); }
+  var metadata = captured.filter(function (item) { return item.source === '__RecoveryMetadata'; })[0];
+  var manifest = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day).getDataRange().getValues();
+  if (policy.version !== 1 || policy.sourceId !== meta.sourceSpreadsheetId || policy.backupId !== backupSs.getId() ||
+      policy.day !== day || policy.targetId !== targetSs.getId() ||
+      policy.manifestSha256 !== _integrityFingerprint(manifest) || policy.metadataSha256 !== _integrityFingerprint(metadata.grid)) {
+    throw new Error('Manual recovery policy scope mismatch');
+  }
+  // These are reviewed operator attestations, NOT facts proved by v2 snapshots.
+  // Their evidence digest is pinned; no Drive access or new scopes are implied.
+  var e = policy.evidence;
+  if (typeof e.recordPath !== 'string' || !/^docs\/evidence\/op03-manual-tabs-\d{4}-\d{2}-\d{2}(?:-[a-z0-9-]+)?\.md$/.test(e.recordPath) ||
+      !hash(e.sha256) || !text(e.operator) || !instant(e.captureStartedAt) || !instant(e.captureEndedAt) ||
+      Date.parse(e.captureStartedAt) > Date.parse(meta.capturedAt) || Date.parse(e.captureEndedAt) < Date.parse(meta.capturedAt) ||
+      !hash(e.beforeInventorySha256) || e.beforeInventorySha256 !== e.afterInventorySha256 ||
+      !text(e.nativeCopyId) || [policy.sourceId, policy.backupId, policy.targetId].indexOf(e.nativeCopyId) >= 0 ||
+      e.directWritesPaused !== true || e.formulasAbsent !== true || e.nativePropertiesVerified !== true ||
+      !instant(e.targetCreatedAt) || e.targetInitiallyEmpty !== true || e.targetOwnerOnly !== true) {
+    throw new Error('Manual recovery evidence incomplete');
+  }
+  var unknown = JSON.parse(meta.unclassifiedSources), seen = Object.create(null), ids = Object.create(null);
+  if (policy.tabs.length !== unknown.length) throw new Error('Manual recovery tab set mismatch');
+  policy.tabs.forEach(function (tab) {
+    var item = captured.filter(function (x) { return x.source === tab.source; })[0];
+    if (unknown.indexOf(tab.source) < 0 || _hasOwn(seen, tab.source) || !item || item.absent || tab.absent !== false ||
+        tab.prefix !== item.prefix || tab.sha256 !== _integrityFingerprint(item.grid) ||
+        !Number.isInteger(tab.sheetId) || tab.sheetId < 0 || _hasOwn(ids, tab.sheetId) ||
+        ['structural-empty', 'retained-archive'].indexOf(tab.role) < 0 ||
+        tab.rows !== item.grid.length || tab.columns !== item.grid[0].length ||
+        !Number.isInteger(tab.allocatedRows) || tab.allocatedRows < tab.rows ||
+        !Number.isInteger(tab.allocatedColumns) || tab.allocatedColumns < tab.columns) {
+      throw new Error('Manual recovery tab mismatch');
+    }
+    if (tab.role === 'structural-empty' && item.grid.some(function (row) { return row.some(function (v) { return v !== ''; }); })) {
+      throw new Error('Manual recovery structural tab is not empty');
+    }
+    seen[tab.source] = true; ids[tab.sheetId] = true;
+  });
+  return policy.tabs;
+}
+
+function _integrityVerifyManualTarget(item, target, tab) {
+  if (!target || target.getMaxRows() !== tab.allocatedRows || target.getMaxColumns() !== tab.allocatedColumns) {
+    throw new Error('Manual recovery target bounds mismatch');
+  }
+  _integrityVerifyGrid(item.grid, target.getDataRange().getValues());
+  if (target.getDataRange().getFormulas().some(function (row) { return row.some(function (v) { return v !== ''; }); })) {
+    throw new Error('Manual recovery target contains formulas');
+  }
+}
+
 // Read-only proof for an isolated target. Credentials/triggers are NOT in the
 // backup: the operator must separately verify configuration before release.
-function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified) {
+function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy) {
   if (configVerified !== true) throw new Error('Recovery configuration verification required');
   var captured = _integrityValidateRestoreSet(backupSs, day, false), meta = _integrityRecoveryMetadata(captured);
   if (targetSs.getId() === backupSs.getId() || targetSs.getId() === meta.sourceSpreadsheetId) throw new Error('Recovery requires an isolated target');
   var unknown = JSON.parse(meta.unclassifiedSources);
-  if (unknown.length) throw new Error('Unclassified sheets require a separately reviewed recovery plan');
+  var manualTabs = unknown.length ? _integrityVerifyManualPolicy(backupSs, day, targetSs, captured, meta, manualPolicy) : [];
   var specs = _integritySourceSpecs(), names = Object.create(null);
   captured.forEach(function (item) {
     if (item.source === '__RecoveryMetadata') return;
@@ -6256,6 +6342,10 @@ function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerifi
     var target = targetSs.getSheetByName(item.source);
     if (item.absent) { if (target) throw new Error('Absent source recreated: ' + item.source); return; }
     if (!target) throw new Error('Recovered sheet missing: ' + item.source);
+    if (unknown.indexOf(item.source) >= 0) {
+      _integrityVerifyManualTarget(item, target, manualTabs.filter(function (tab) { return tab.source === item.source; })[0]);
+      return; // Unknown tabs never enter a known business schema or billing path.
+    }
     _integrityVerifyGrid(item.grid, target.getDataRange().getValues());
     var spec = specs.filter(function (x) { return x.source === item.source; })[0];
     if (!spec || JSON.stringify(item.grid[0].slice(0, spec.headers.length)) !== JSON.stringify(spec.headers)) throw new Error('Recovery schema mismatch: ' + item.source);
@@ -6278,18 +6368,22 @@ function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerifi
   return { ok: true, journalRequired: !journal.absent || meta.financialOpsCreated === '1' };
 }
 
-function finishOutpatientRecovery(backupId, day, configVerified) {
+function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
     if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('Recovery backup still running');
-    var result = _integrityVerifyRecoveredWorkbook(SpreadsheetApp.openById(backupId), day, _ss(), configVerified);
+    var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
+    var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
     try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
     if (result.journalRequired) props.setProperty('FINANCIAL_OPS_CREATED', '1');
     else if (props.getProperty('FINANCIAL_OPS_CREATED')) throw new Error('Restore journal required');
     props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(_ss().getSheets().map(function (sh) { return sh.getName(); })));
+    // Repeat the proof after journal/cache/property work, as late as possible.
+    // ScriptLock does not stop direct editors: the coordinated pause is required.
+    if (manualPolicy) _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     // Clear LAST, only after all reads, schema checks and marker persistence.
     props.deleteProperty('OUTPATIENT_RECOVERY_HOLD');
     return { ok: true, state: 'verified' };

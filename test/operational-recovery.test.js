@@ -160,6 +160,188 @@ test('unclassified and future tabs are preserved as values and inventory; never 
   assert.throws(() => preflight(h, restored(h)), /Unclassified sheets/);
 });
 
+// Only this synthetic VM receives a pin. The shipped source and generated Google
+// runner MUST stay disabled; no real evidence or approval is simulated here.
+function manualWorld() {
+  const s = world(); assert.equal(send(s).ok, true);
+  const journals = ['renewal-journal-fixture.cjs', 'extra-charge-journal-fixture.cjs'].flatMap(file => {
+    const f = require('../test-support/' + file).fixture();
+    assert.equal(f.reserve().ok, true); assert.equal(f.apply().ok, true); assert.equal(f.ack().ok, true);
+    return f.sb.rows('FinancialOps');
+  });
+  s.seed('FinancialOps', s.ctx.FINANCIAL_OP_HEADERS, journals); s.props.FINANCIAL_OPS_CREATED = '1';
+  s.seed('Sheet1', [''], []);
+  s.seed('Copy of Clients', ['id', 'name', 'count', 'flag', 'instant'], [
+    { id: 'synthetic-client', name: 'historical name', count: 7, flag: true, instant: new Date('2026-10-20T10:11:12.000Z') },
+    { id: 'other-archive-row', name: '=literal', count: 0, flag: false, instant: '' }
+  ]);
+  const h = snapshot(s), r = restored(h), set = h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h));
+  const meta = h.ctx._integrityRecoveryMetadata(set), stamp = new Date(meta.capturedAt);
+  const policy = { version: 1, sourceId: 'live', backupId: 'backup', day: dayOf(h), targetId: 'isolated-target',
+    manifestSha256: h.ctx._integrityFingerprint(h.backup.getSheetByName('outpatient-manifest-' + dayOf(h)).getDataRange().getValues()),
+    metadataSha256: h.ctx._integrityFingerprint(set.find(x => x.source === '__RecoveryMetadata').grid),
+    evidence: { recordPath: 'docs/evidence/op03-manual-tabs-2026-10-25.md', sha256: 'a'.repeat(64), operator: 'synthetic operator',
+      captureStartedAt: new Date(stamp.getTime() - 1000).toISOString(), captureEndedAt: new Date(stamp.getTime() + 1000).toISOString(),
+      beforeInventorySha256: 'b'.repeat(64), afterInventorySha256: 'b'.repeat(64), nativeCopyId: 'private-native-fixture',
+      directWritesPaused: true, formulasAbsent: true, nativePropertiesVerified: true,
+      targetCreatedAt: stamp.toISOString(), targetInitiallyEmpty: true, targetOwnerOnly: true },
+    tabs: ['Sheet1', 'Copy of Clients'].map((name, i) => {
+      const item = set.find(x => x.source === name), sh = r.sheets[name], range = sh.getDataRange;
+      sh.getMaxColumns = () => 33;
+      sh.getDataRange = () => ({ ...range(), getFormulas: () => sh.grid.map(row => row.map(() => '')) });
+      return { source: name, sheetId: i, prefix: item.prefix, absent: false,
+        role: i ? 'retained-archive' : 'structural-empty', sha256: h.ctx._integrityFingerprint(item.grid),
+        rows: item.grid.length, columns: item.grid[0].length, allocatedRows: sh.getMaxRows(), allocatedColumns: sh.getMaxColumns() };
+    }) };
+  h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+  h.ctx.CacheService = { getScriptCache: () => ({ remove() {} }) };
+  h.props.OUTPATIENT_RECOVERY_HOLD = '1';
+  const pin = () => { h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = h.ctx._integrityFingerprint(h.ctx._integrityManualPolicyRows(policy)); };
+  const finish = (config = true) => h.ctx.finishOutpatientRecovery('backup', dayOf(h), config, policy);
+  return { h, r, policy, pin, finish };
+}
+
+test('shipped blank manual pin refuses missing, blank and complete policies; malformed pins also refuse', () => {
+  const { h, policy } = manualWorld();
+  assert.equal(h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256, '');
+  for (const pin of ['', undefined, 'x'.repeat(64), 'a'.repeat(63)]) {
+    h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = pin;
+    for (const p of [undefined, '', policy]) {
+      assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true, p), /Unclassified sheets/);
+      assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+    }
+  }
+});
+
+test('review-pinned synthetic policy preserves separate archive and active Clients, journal, cache and hold-last order', () => {
+  const { h, r, policy, pin, finish } = manualWorld(); pin();
+  const before = JSON.stringify(r.sheets), journal = h.ctx._finJournal, seen = [];
+  h.ctx._finJournal = () => { seen.push('journal'); const result = journal(); assert.equal(result.ops.length, 2); return result; };
+  h.ctx.CacheService = { getScriptCache: () => ({ remove() { seen.push('cache'); assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1'); } }) };
+  const props = h.ctx.PropertiesService.getScriptProperties;
+  h.ctx.PropertiesService.getScriptProperties = () => ({ ...props(), deleteProperty(key) {
+    assert.equal(key, 'OUTPATIENT_RECOVERY_HOLD'); assert.deepEqual(seen, ['journal', 'cache']);
+    assert.equal(h.props.FINANCIAL_OPS_CREATED, '1');
+    assert.ok(JSON.parse(h.props.INTEGRITY_REQUIRED_SOURCES).includes('Copy of Clients'));
+    props().deleteProperty(key);
+  } });
+  assert.equal(finish().ok, true);
+  assert.equal(JSON.stringify(r.sheets), before);
+  assert.notEqual(r.rows('Clients')[0].name, r.rows('Copy of Clients')[0].name);
+  assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, undefined);
+  assert.equal(policy.tabs.length, 2);
+});
+
+test('manual policy canonical digest ignores object insertion/tab entry order, never captured cell order', () => {
+  const { h, policy, pin } = manualWorld(); pin();
+  const reverse = value => Array.isArray(value) ? value.map(reverse).reverse() : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).reverse().map(([key, v]) => [key, reverse(v)])) : value;
+  const reordered = reverse(policy);
+  assert.equal(h.ctx._integrityFingerprint(h.ctx._integrityManualPolicyRows(reordered)), h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256);
+  assert.equal(h.ctx.finishOutpatientRecovery('backup', dayOf(h), true, reordered).ok, true);
+});
+
+const manualTargetFaults = {
+  'changed archive cell': ({ r }) => { r.sheets['Copy of Clients'].grid[1][1] = 'new name'; },
+  'number changed to string': ({ r }) => { r.sheets['Copy of Clients'].grid[1][2] = '7'; },
+  'boolean changed to string': ({ r }) => { r.sheets['Copy of Clients'].grid[1][3] = 'true'; },
+  'Date changed to ISO string': ({ r }) => { r.sheets['Copy of Clients'].grid[1][4] = '2026-10-20T10:11:12.000Z'; },
+  'reordered archive headers': ({ r }) => { r.sheets['Copy of Clients'].grid[0].reverse(); },
+  'reordered archive rows': ({ r }) => { [r.sheets['Copy of Clients'].grid[1], r.sheets['Copy of Clients'].grid[2]] = [r.sheets['Copy of Clients'].grid[2], r.sheets['Copy of Clients'].grid[1]]; },
+  'changed empty structural tab': ({ r }) => { r.sheets.Sheet1.grid[0][0] = 'new content'; },
+  'missing archive': ({ r }) => { delete r.sheets['Copy of Clients']; },
+  'renamed archive': ({ r }) => { r.sheets['renamed archive'] = r.sheets['Copy of Clients']; delete r.sheets['Copy of Clients']; },
+  'preexisting unexpected target tab': ({ r }) => r.seed('Unrelated', ['id'], []),
+  'changed allocated bounds': ({ r }) => { r.sheets.Sheet1.getMaxColumns = () => 34; },
+  'formula with identical value': ({ r }) => {
+    const sh = r.sheets['Copy of Clients'], get = sh.getDataRange;
+    sh.getDataRange = () => ({ ...get(), getFormulas: () => sh.grid.map((row, i) => row.map((_, j) => i === 1 && j === 2 ? '=7' : '')) });
+  },
+  'missing known header': ({ r }) => { r.sheets.Settings.grid[0][0] = 'bad-key'; },
+  'corrupt real journal': ({ r }) => { r.sheets.FinancialOps.grid[1][r.sheets.FinancialOps.grid[0].indexOf('intent')] = '{broken'; },
+  'rate cache error': ({ h }) => { h.ctx.CacheService = { getScriptCache: () => ({ remove() { throw Error('cache failure'); } }) }; },
+  'edit during rate invalidation': ({ h, r }) => { h.ctx.CacheService = { getScriptCache: () => ({ remove() { r.sheets.Sheet1.grid[0][0] = 'late edit'; } }) }; }
+};
+for (const [name, fault] of Object.entries(manualTargetFaults)) test('pinned manual recovery holds on ' + name, () => {
+  const f = manualWorld(); f.pin(); fault(f);
+  const backupBefore = JSON.stringify(f.h.ctx._integrityValidateRestoreSet(f.h.backup, dayOf(f.h)));
+  assert.throws(f.finish);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+  assert.equal(JSON.stringify(f.h.ctx._integrityValidateRestoreSet(f.h.backup, dayOf(f.h))), backupBefore);
+  assert.deepEqual(f.h.locks(), [false, false]);
+});
+
+const manualPolicyFaults = {
+  'wrong source': p => { p.sourceId = 'another-source'; },
+  'wrong backup': p => { p.backupId = 'another-backup'; },
+  'wrong day': p => { p.day = '2020-01-01'; },
+  'replay to another target': p => { p.targetId = 'another-target'; },
+  'wrong manifest hash': p => { p.manifestSha256 = 'c'.repeat(64); },
+  'wrong metadata hash': p => { p.metadataSha256 = 'c'.repeat(64); },
+  'wrong grid hash': p => { p.tabs[0].sha256 = 'c'.repeat(64); },
+  'changed absent flag': p => { p.tabs[0].absent = true; },
+  'changed prefix': p => { p.tabs[0].prefix = 'clients-'; },
+  'known source in manual policy': p => { p.tabs[0].source = 'Clients'; },
+  'duplicate tab': p => { p.tabs[0] = p.tabs[1]; },
+  'missing tab': p => { p.tabs.pop(); },
+  'extra tab': p => { p.tabs.push({ ...p.tabs[0], source: 'future-manual' }); },
+  'missing formula attestation': p => { p.evidence.formulasAbsent = false; },
+  'missing native evidence': p => { p.evidence.nativePropertiesVerified = false; },
+  'missing evidence digest': p => { p.evidence.sha256 = ''; },
+  'no direct-writer pause': p => { p.evidence.directWritesPaused = false; },
+  'no empty-target evidence': p => { p.evidence.targetInitiallyEmpty = false; },
+  'no private-target evidence': p => { p.evidence.targetOwnerOnly = false; },
+  'postdated capture evidence': p => { p.evidence.captureStartedAt = p.evidence.captureEndedAt; },
+  'concurrent source edit': p => { p.evidence.afterInventorySha256 = 'c'.repeat(64); },
+  'archive labelled empty': p => { p.tabs[1].role = 'structural-empty'; }
+};
+for (const [name, fault] of Object.entries(manualPolicyFaults)) test('manual policy rejects ' + name + ' even with a matching synthetic pin', () => {
+  const f = manualWorld(); fault(f.policy); f.pin();
+  const before = JSON.stringify(f.r.sheets);
+  assert.throws(f.finish, /Manual recovery/);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+  assert.equal(JSON.stringify(f.r.sheets), before);
+});
+
+test('a policy edited after review, unknown fields, missing evidence fields and config false all retain hold', () => {
+  const f = manualWorld(); f.pin();
+  f.policy.evidence.operator = 'someone else'; assert.throws(f.finish, /digest mismatch/);
+  f.pin(); assert.throws(() => f.finish(false), /configuration verification/);
+  f.policy.approved = true; assert.throws(f.finish, /Invalid manual recovery policy fields/);
+  delete f.policy.approved; delete f.policy.evidence.formulasAbsent;
+  assert.throws(f.finish, /Invalid manual recovery policy fields/);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
+test('self-consistently rehashed backup/target cannot reuse a policy for the previous snapshot', () => {
+  const f = manualWorld(); f.pin();
+  const name = 'outpatient-' + f.policy.tabs[1].prefix + dayOf(f.h);
+  const snap = f.h.backup.getSheetByName(name), grid = snap.getDataRange().getValues();
+  grid[1][1] = 'unreviewed replacement'; snap.getDataRange().setValues(grid);
+  f.r.sheets['Copy of Clients'].grid[1][1] = grid[1][1];
+  const manifest = f.h.backup.getSheetByName('outpatient-manifest-' + dayOf(f.h)), rows = manifest.getDataRange().getValues();
+  rows.find(row => row[1] === 'Copy of Clients')[4] = f.h.ctx._integrityFingerprint(grid);
+  manifest.getDataRange().setValues(rows);
+  assert.ok(f.h.ctx._integrityValidateRestoreSet(f.h.backup, dayOf(f.h)));
+  assert.throws(f.finish, /policy scope mismatch/);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
+test('matching manual policy never substitutes for the real financial-journal validator', () => {
+  const f = manualWorld();
+  const item = f.h.ctx._integrityValidateRestoreSet(f.h.backup, dayOf(f.h)).find(x => x.source === 'FinancialOps');
+  item.grid[1][item.grid[0].indexOf('intent')] = '{broken';
+  f.h.backup.getSheetByName('outpatient-' + item.prefix + dayOf(f.h)).getDataRange().setValues(item.grid);
+  f.r.sheets.FinancialOps.grid[1][item.grid[0].indexOf('intent')] = '{broken';
+  const manifest = f.h.backup.getSheetByName('outpatient-manifest-' + dayOf(f.h)), rows = manifest.getDataRange().getValues();
+  rows.find(row => row[1] === 'FinancialOps')[4] = f.h.ctx._integrityFingerprint(item.grid);
+  manifest.getDataRange().setValues(rows);
+  f.policy.manifestSha256 = f.h.ctx._integrityFingerprint(rows); f.pin();
+  assert.equal(f.h.ctx._integrityVerifyRecoveredWorkbook(f.h.backup, dayOf(f.h), target(f.r), true, f.policy).ok, true);
+  assert.throws(f.finish, /financial_journal_corrupt/);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
 for (const name of ['SessionLog','TherapistRates','Settings']) {
   test('operational recovery rejects a missing ' + name + ' in target or captured absence', () => {
     const s = world(), h = snapshot(s), r = restored(h);

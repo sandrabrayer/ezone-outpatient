@@ -6,6 +6,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Add a default-disabled, evidence-pinned manual-tab recovery verifier, retaining
+  all known-table/journal/configuration checks and hold-last ordering. Synthetic
+  tests cover exact scope, changed grids/types, formulas, missing evidence and
+  late target edits. No approved real policy or Google execution yet.
+- Refresh compatible Express/body-parser/qs lockfile patches after the current
+  audit found GHSA-27r3-jxmh-p828 (body-parser denial of service). See the OP-03
+  changelog for validation; application routes and dependency ranges unchanged.
 - Integrate released base 8b68cd75 without changing its public assets; add an
   isolated phased Google acceptance runner with explicit project binding,
   synthetic mixed journals/sessions/packages and local failure-path tests.

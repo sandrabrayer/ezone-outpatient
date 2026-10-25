@@ -1,5 +1,29 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Disabled manual-tab policy verifier — 2026-10-25
+
+- Implement the revised evidence contract after Claude's bounded design review
+  at e9a26111 (PR comment6401543025). Review was static and ran no tests.
+- Require a valid nonempty reviewed in-code pin, canonical fixed-field typed
+  fingerprint, exact source/backup/day/target/manifest/metadata/tab set and
+  explicit contemporaneous out-of-band evidence. Ship the pin empty.
+- Preserve typed unknown grids separately from known schemas; reject formulas,
+  allocated-size changes and nonempty structural tabs. Repeat proof immediately
+  before hold release, preserving real journal/cache/config checks.
+- No version-2 metadata migration, scopes, property configuration or HTTP route.
+  Target creation/permissions and native properties remain operator evidence;
+  code cannot prove their provenance. See docs/manual-tab-recovery-policy.md.
+- Update compatible lockfile patches for the Oct22 body-parser high-severity
+  advisory GHSA-27r3-jxmh-p828, discovered by a fresh audit. No package.json range
+  or application route change. Tests/audit results are recorded on the exact PR
+  commit, not inherited from the Oct20 results below.
+- Real evidence packet, reviewed per-recovery pin, native Google drill and
+  separate production approval remain open. No production change.
+- Local UTC full suite: 1,713 pass / 0 fail / 38 skipped (1,751 total), including
+  44 new manual-policy regressions. Fresh npm audit: 0 vulnerabilities after
+  Express 4.22.1 → 4.22.3, body-parser 1.20.8 → 1.20.9 and qs → 6.16.1.
+  CI/browser results and implementation review are separate exact-head evidence.
+
 ## Current-base integration and isolated drill preparation — 2026-10-20 evening
 
 - Integrate base 8b68cd75 (#127/#128/#129), retaining its sign-in, calculator,
