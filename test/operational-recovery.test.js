@@ -253,6 +253,7 @@ const manualTargetFaults = {
   'renamed archive': ({ r }) => { r.sheets['renamed archive'] = r.sheets['Copy of Clients']; delete r.sheets['Copy of Clients']; },
   'preexisting unexpected target tab': ({ r }) => r.seed('Unrelated', ['id'], []),
   'changed allocated bounds': ({ r }) => { r.sheets.Sheet1.getMaxColumns = () => 34; },
+  'changed allocated rows': ({ r }) => { r.sheets.Sheet1.getMaxRows = () => 101; },
   'formula with identical value': ({ r }) => {
     const sh = r.sheets['Copy of Clients'], get = sh.getDataRange;
     sh.getDataRange = () => ({ ...get(), getFormulas: () => sh.grid.map((row, i) => row.map((_, j) => i === 1 && j === 2 ? '=7' : '')) });
@@ -292,7 +293,14 @@ const manualPolicyFaults = {
   'no empty-target evidence': p => { p.evidence.targetInitiallyEmpty = false; },
   'no private-target evidence': p => { p.evidence.targetOwnerOnly = false; },
   'postdated capture evidence': p => { p.evidence.captureStartedAt = p.evidence.captureEndedAt; },
+  'capture evidence ending too early': p => { p.evidence.captureEndedAt = p.evidence.captureStartedAt; },
   'concurrent source edit': p => { p.evidence.afterInventorySha256 = 'c'.repeat(64); },
+  'native copy is source': p => { p.evidence.nativeCopyId = p.sourceId; },
+  'native copy is backup': p => { p.evidence.nativeCopyId = p.backupId; },
+  'native copy is target': p => { p.evidence.nativeCopyId = p.targetId; },
+  'row count as string': p => { p.tabs[0].rows = String(p.tabs[0].rows); },
+  'column count as string': p => { p.tabs[0].columns = String(p.tabs[0].columns); },
+  'duplicate source sheet ID': p => { p.tabs[1].sheetId = p.tabs[0].sheetId; },
   'archive labelled empty': p => { p.tabs[1].role = 'structural-empty'; }
 };
 for (const [name, fault] of Object.entries(manualPolicyFaults)) test('manual policy rejects ' + name + ' even with a matching synthetic pin', () => {
@@ -305,12 +313,37 @@ for (const [name, fault] of Object.entries(manualPolicyFaults)) test('manual pol
 
 test('a policy edited after review, unknown fields, missing evidence fields and config false all retain hold', () => {
   const f = manualWorld(); f.pin();
+  assert.throws(() => f.h.ctx.finishOutpatientRecovery('backup', dayOf(f.h), true), /Invalid manual recovery policy fields/);
   f.policy.evidence.operator = 'someone else'; assert.throws(f.finish, /digest mismatch/);
   f.pin(); assert.throws(() => f.finish(false), /configuration verification/);
   f.policy.approved = true; assert.throws(f.finish, /Invalid manual recovery policy fields/);
   delete f.policy.approved; delete f.policy.evidence.formulasAbsent;
   assert.throws(f.finish, /Invalid manual recovery policy fields/);
   assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
+test('an unrelated manual policy is refused for a restore with no unknown tabs', () => {
+  const f = manualWorld(); f.pin();
+  const h = snapshot(world()), r = restored(h);
+  h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = f.h.ctx.INTEGRITY_APPROVED_MANUAL_POLICY_SHA256;
+  h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+  h.props.OUTPATIENT_RECOVERY_HOLD = '1';
+  assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true, f.policy), /without unclassified sheets/);
+  assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+});
+
+test('late-proof failure retains hold and already-written markers for investigation', () => {
+  const f = manualWorld(); f.pin();
+  const service = f.h.ctx.PropertiesService.getScriptProperties;
+  f.h.ctx.PropertiesService.getScriptProperties = () => ({ ...service(), setProperty(key, value) {
+    service().setProperty(key, value);
+    if (key === 'INTEGRITY_REQUIRED_SOURCES') f.r.sheets.Sheet1.grid[0][0] = 'late direct write';
+  } });
+  assert.throws(f.finish, /Backup value mismatch/);
+  assert.equal(f.h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+  assert.equal(f.h.props.FINANCIAL_OPS_CREATED, '1');
+  assert.ok(JSON.parse(f.h.props.INTEGRITY_REQUIRED_SOURCES).includes('Copy of Clients'));
+  assert.equal(f.h.ctx.nightlyIntegrityJob().error, 'recovery_pending');
 });
 
 test('self-consistently rehashed backup/target cannot reuse a policy for the previous snapshot', () => {

@@ -23,6 +23,14 @@
   44 new manual-policy regressions. Fresh npm audit: 0 vulnerabilities after
   Express 4.22.1 → 4.22.3, body-parser 1.20.8 → 1.20.9 and qs → 6.16.1.
   CI/browser results and implementation review are separate exact-head evidence.
+- Claude's bounded static implementation review of f6eddada found no blocker
+  (comment6401651506); it read code, but not test bodies, policy docs or generated
+  helpers. Follow-up explicitly refuses a policy when no unknown tabs exist,
+  adds native-copy/sheet-ID/count/interval/bounds/late-marker failure cases, and
+  documents retained markers, operator classification and native timing limits.
+  Follow-up full UTC suite: 1,723 pass / 0 fail / 38 skipped (1,761 total),
+  including 54 new manual-policy regressions across both commits. Final-head
+  CI and any follow-up review are recorded separately in PR125.
 
 ## Current-base integration and isolated drill preparation — 2026-10-20 evening
 

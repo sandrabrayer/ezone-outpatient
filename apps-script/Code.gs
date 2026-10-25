@@ -6334,6 +6334,7 @@ function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerifi
   var captured = _integrityValidateRestoreSet(backupSs, day, false), meta = _integrityRecoveryMetadata(captured);
   if (targetSs.getId() === backupSs.getId() || targetSs.getId() === meta.sourceSpreadsheetId) throw new Error('Recovery requires an isolated target');
   var unknown = JSON.parse(meta.unclassifiedSources);
+  if (!unknown.length && manualPolicy != null) throw new Error('Manual recovery policy supplied without unclassified sheets');
   var manualTabs = unknown.length ? _integrityVerifyManualPolicy(backupSs, day, targetSs, captured, meta, manualPolicy) : [];
   var specs = _integritySourceSpecs(), names = Object.create(null);
   captured.forEach(function (item) {

@@ -56,6 +56,9 @@ from the source; their provenance remains evidence, not a live-source read.
 Every unknown source must occur once, with its exact prefix and `absent:false`.
 Known sources cannot be reclassified. Roles are `structural-empty` (every captured
 cell empty) or `retained-archive`; neither permits billing or merging into Clients.
+The role is a pinned operator classification; the verifier enforces structural
+emptiness, but cannot prove that a nonempty tab is historically an archive.
+Supplying a manual policy for a set with no unknown tabs is an error.
 
 ## Evidence is an operator attestation
 
@@ -113,6 +116,12 @@ must match. Finish still checks the drain marker, real FinancialOps validator,
 rate-cache invalidation and marker persistence. With a policy, it repeats the
 full read-only proof immediately before clearing the hold last. This narrows,
 but does not eliminate, the direct-editor race; the coordinated pause is essential.
+If this late proof fails, the journal/source markers may already be persisted.
+They are retained for investigation; the hold prevents nightly work and a fully
+verified retry rewrites them. This deliberate ordering keeps proof closest to
+hold release. It does not promise transactional rollback of properties. Measure
+both full preflights and the lock's elapsed time in the first native policy drill:
+the second pass rereads the complete backup/target and may reach Google quotas.
 Successful inventory persistence includes the manual tabs, so deleting either
 later blocks a nightly capture until a reviewed retirement/migration exists.
 
