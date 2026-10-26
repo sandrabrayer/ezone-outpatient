@@ -38,6 +38,64 @@ function restored(h) {
 const target = s => ({ ...s.ctx.SpreadsheetApp.getActiveSpreadsheet(), getId: () => 'isolated-target' });
 const preflight = (h, s, config = true) => h.ctx._integrityVerifyRecoveredWorkbook(h.backup, dayOf(h), target(s), config);
 
+for (const timing of ['before-admission', 'while-queued', 'lock-busy']) {
+  test('preferred-house writer preserves cells and headers when ' + timing, () => {
+    const s = world();
+    // A queued old-width sheet would be extended by _ensureSheet before the
+    // cell write. The hold must prevent that mutation as well as the value.
+    s.sheets.Clients.grid.forEach(row => row.pop());
+    const before = JSON.stringify(s.sheets);
+    if (timing === 'before-admission') s.props.OUTPATIENT_RECOVERY_HOLD = '1';
+    if (timing === 'while-queued') {
+      const acquire = s.lock.tryLock;
+      s.lock.tryLock = () => { const ok = acquire(); s.props.OUTPATIENT_RECOVERY_HOLD = '1'; return ok; };
+    }
+    if (timing === 'lock-busy') s.lock.tryLock = () => false;
+    const reply = s.post({ action: 'setPreferredHouse', clientId: 'synthetic-client', preferredHouse: 'רמות השבים' });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, timing === 'lock-busy' ? /busy/ : /recovery_pending/);
+    assert.equal(JSON.stringify(s.sheets), before);
+    assert.equal(s.isLocked(), false);
+  });
+}
+
+const preferredSchemas = [
+  ['Clients', 'CLIENTS_HEADERS'], ['Leads', 'LEADS_HEADERS'],
+  ['Clients-removed', 'CLIENTS_REMOVED_HEADERS'], ['לידים שהוסרו', 'REMOVED_LEADS_HEADERS']
+];
+test('preferred house survives typed capture and isolated recovery in all four appended schemas', () => {
+  const s = world();
+  for (const [name, header] of preferredSchemas) {
+    s.seed(name, s.ctx[header], [{ id: 'synthetic-' + name, preferredHouse: 'רמות השבים' }]);
+  }
+  const h = snapshot(s), r = restored(h);
+  assert.equal(preflight(h, r).ok, true);
+  for (const [name] of preferredSchemas) {
+    assert.equal(r.rows(name)[0].preferredHouse, 'רמות השבים');
+    assert.deepEqual(Array.from(r.sheets[name].grid, row => Array.from(row)),
+      Array.from(s.sheets[name].grid, row => Array.from(row)));
+  }
+});
+
+for (const [name, header] of preferredSchemas) {
+  test('old-width ' + name + ' backup stays inspection-only and cannot release recovery', () => {
+    const s = world();
+    const oldHeader = Array.from(s.ctx[header]).slice(0, -1);
+    assert.equal(s.ctx[header][oldHeader.length], 'preferredHouse');
+    s.seed(name, oldHeader, [{ id: 'synthetic-old-schema' }]);
+    const h = snapshot(s), r = restored(h);
+    assert.ok(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length);
+    const before = JSON.stringify(r.sheets);
+    assert.throws(() => preflight(h, r), /Recovery schema mismatch/);
+    h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
+    h.props.OUTPATIENT_RECOVERY_HOLD = '1';
+    assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), /Recovery schema mismatch/);
+    assert.equal(h.props.OUTPATIENT_RECOVERY_HOLD, '1');
+    assert.equal(JSON.stringify(r.sheets), before, 'no invented blank tail or header repair');
+    assert.deepEqual(h.locks(), [false, false]);
+  });
+}
+
 function configurePackages(s) {
   Object.assign(s.props, {
     PACKAGE_CATALOG_SECRET: 'synthetic-catalog-secret-0123456789-A',

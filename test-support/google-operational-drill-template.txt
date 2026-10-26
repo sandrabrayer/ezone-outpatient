@@ -154,6 +154,12 @@ __HELPERS__
         return { stage: 'restored', detail: 'Native copy into separate target; every restored grid matched' };
       }
       if (phase === 'verify') {
+        var heldClients = _integrityFingerprint(grid('Clients'));
+        rejected(function () { _setPreferredHouse({ clientId: 'drill-session-client', preferredHouse: '' }); }, /recovery_pending/);
+        check(heldClients === _integrityFingerprint(grid('Clients')), 'Held preferred-house write changed the target');
+        check(_readAll(books.target.getSheetByName('Clients'), CLIENTS_HEADERS).some(function (row) {
+          return row.id === 'drill-session-client' && row.preferredHouse === fixture.preferredHouse;
+        }), 'Preferred house did not survive recovery');
         rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, state.day, books.target, false); }, /configuration verification/);
         rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, state.day, books.source, true); }, /isolated target/);
         var sessions = books.target.getSheetByName('SessionLog');

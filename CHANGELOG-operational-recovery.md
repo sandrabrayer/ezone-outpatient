@@ -1,6 +1,30 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
-## Native Google acceptance evidence — 2026-10-26
+## PR132 integration — 2026-10-26 (draft)
+
+- Integrate base336c8ef9 into PR125; preserve preferred-house business logic,
+  public assets/SW19, server and dependency ranges exactly as that base.
+- Add the post-lock recovery-hold check to `_setPreferredHouse` before
+  `_ensureSheet`, so queued requests cannot extend headers or change cells.
+  The new queued-request regression failed before the fix (write succeeded).
+- Eight new regressions cover admission/queued/busy refusal, nonempty preferred
+  house across all four appended schemas and refusal of each old-width schema
+  at preflight/finish, retaining the hold without inventing missing cells.
+- Regenerate the unbound drill. Its fixture sets a preferred house through the
+  real writer; verification checks restored value and refusal while held.
+  Source/helper/definition hashes change. Native evidence below remains valid
+  only for09a00ab5; the combined harness has not run in Google yet.
+- Keep exact schema validation and the blank manual-policy pin. Require a fresh
+  verified v2 set with all current headers before certifying recovery; deployment
+  alone or the first subsequent night does not establish this condition.
+- This implements stage4 (backup/recovery) of the canonical ten-app program.
+  CRM, financial controls, remaining write integrity and performance remain
+  explicit return points. No new feature, live write or production release.
+- Local UTC full suite: 1,754 pass / 0 fail / 38 skipped (1,792 total).
+  Fresh npm audit: 0 vulnerabilities. CI browser execution and exact-head
+  independent review are recorded separately in PR125.
+
+## Native Google acceptance evidence — 2026-10-26 (historical candidate)
 
 All five phases passed on candidate 09a00ab5, using a new standalone project
 and three private synthetic workbooks. The entire saved harness matched the

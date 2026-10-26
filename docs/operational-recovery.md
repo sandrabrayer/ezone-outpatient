@@ -1,12 +1,15 @@
 # OP-03 — operational backup coverage (draft)
 
 Issue: [#124](https://github.com/sandrabrayer/ezone-outpatient/issues/124).
-Base: `claude/youthful-volta-laarnk` at
-`8b68cd7547d394a00483da51a11cab086be62eca` (includes #122/#126/#127/#128/#129,
-source last verified @99; base assets SW18). The current branch head is not
+Integrated base: `claude/youthful-volta-laarnk` at
+`336c8ef9b19b40192f77d18ddd4a7bc18d2f8f11` (includes #132 preferred house and
+#122/#126/#127/#128/#129; base assets SW19). Node reported this SHA in the
+October26 read-only inspection; source99 was observed before132, and the source
+deployment after132 was not verified by that inspection. The current branch head is not
 itself proof of the live Node version; refresh live evidence before release.
 This document describes a candidate, not a production release or completed
-production DR exercise. The isolated synthetic Google drill passed on October 26.
+production DR exercise. The isolated synthetic Google drill passed on October26 at09a00ab5, before
+this integration; the combined source/harness has no native acceptance yet.
 
 ## Why the eight-table set was insufficient
 
@@ -86,6 +89,27 @@ and reports failures. Published sheets shrink to actual data dimensions to avoid
 allocating a default 1000-by-26 grid per small daily table. Actual live workbook
 growth/quota and run duration remain deployment observations, not measurements
 established by synthetic tests.
+
+### Append-only headers and recovery readiness
+
+PR132 appends `preferredHouse` to Clients, Leads and both removal archives.
+Capture preserves existing values and headers without migrating live data.
+The recovery verifier still requires the entire current header prefix. An
+old-width v2 snapshot is inspectable but cannot pass operational preflight or
+clear the recovery hold. The verifier does not invent blank trailing cells.
+This applies independently to all four schemas, including header-only archives.
+
+Before certifying a restore, verify source-header readiness through the approved
+application/configuration process and capture a fresh complete v2 set matching
+that schema. Do not mutate source headers through the backup job or weaken the
+gate to reuse a pre-change set. A first-night backup may still contain old-width
+optional tables, so its date alone is not acceptance. If a fresh complete set
+cannot be demonstrated, retain the recovery-readiness gap explicitly. Legacy
+nightly sets and native safety copies remain inspection/containment evidence.
+
+The queued `setPreferredHouse` writer now checks the recovery hold immediately
+after acquiring ScriptLock, before `_ensureSheet` or any cell/stamp write.
+Its financial-operation guard and normal released behavior remain unchanged.
 
 ## Recovery hold and release gate (editor only)
 
@@ -205,7 +229,11 @@ production-scale runtime quotas, scheduled execution, alert delivery or secure
 configuration recovery. Before release require real manual-tab evidence and a
 reviewed target policy, native acceptance of any enabled policy, independent
 review and Sandra's explicit approval. Do not manually run the mail-triggering job to
-obtain evidence. Scheduled trigger/timezone/alert observations remain OP-03.
+obtain evidence. Read-only October26 [operational observations](https://github.com/sandrabrayer/ezone-outpatient/pull/125#issuecomment-6416538625)
+confirm the existing ten-dataset job ran, not PR125. Seven executions were
+Completed; the latest log also verified all ten entries, retention and final ok.
+The destination was private and Jerusalem timezones/alert address configured;
+mail delivery and the new job's scheduling/admission behavior remain unverified.
 
 Full suite uses CI's UTC timezone. An initial run inherited this host's
 America/Los_Angeles timezone and reproduced 17 existing date-helper failures
@@ -218,7 +246,7 @@ Track timezone coverage under remaining OP-02 date/business-logic review.
 tree, keeping the registry/metadata validator and both PACKAGE_* schemas.
 _pkgLock now rechecks the recovery hold immediately after acquisition, releasing
 and returning busy before any write. Public assets exactly match the released
-SW18 base tree; this backup-only change needs no SW bump. Therapists #105 is
+SW19 base tree from132; this backup-only change needs no SW bump. Therapists #105 is
 merged at d38d85b1; its branch advanced to a8a1afbc with #107. Claude retains
 ownership of package release/flow verification. No changes were pushed to his branches.
 

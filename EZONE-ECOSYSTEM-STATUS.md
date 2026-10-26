@@ -10,10 +10,12 @@ remain unverified. See docs/manual-tab-recovery-policy.md.
 A fresh audit found the Oct22 body-parser high advisory; compatible dependency
 lockfile patches are included. Read exact-head validation in PR125. No release.
 
-Latest Git base: `8b68cd7547d394a00483da51a11cab086be62eca`, SW18 assets,
-branch `claude/youthful-volta-laarnk` (#127/#128/#129 now merged). Last direct
-live check on October 20 morning was Node f7b37d7 / SW15 and Apps Script @99
-(run 39298379832); refresh live evidence before release. #121/#123/#122/#126
+Integrated Git base: `336c8ef9b19b40192f77d18ddd4a7bc18d2f8f11`, SW19 assets,
+branch `claude/youthful-volta-laarnk` (PR132 now merged). October26 read-only
+/api/version reported336c8ef9 and /healthz returned ok; earlier source executions
+were99. Source deployment after132 was not verified in that inspection.
+The prior native Google drill at09a00ab5 is historical, not acceptance of this
+combined source. Refresh matching live evidence before release. #121/#123/#122/#126
 remain released. Therapists #105 merged to d38d85b1 and #107 advanced its deploy
 branch to a8a1afbc. Merges alone do not prove the latest live package flow.
 Never push merged branches or repeat releases. Source deployment remains an
@@ -25,12 +27,21 @@ Codex owns isolated OP-03 issue #124 implementation, branch
 session replay identity/payroll state and custom rates on whole-workbook recovery.
 Candidate extends the set and adds inventory, validation and recovery hold.
 See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
-real per-target evidence and approved-policy acceptance, scheduled/configuration
-evidence, full independent coverage and separate final production approval remain open.
+real per-target evidence and approved-policy acceptance, combined native drill,
+release configuration, full independent coverage and separate final production
+approval remain open. October26 read-only evidence verifies the old nightly
+job's scheduling/latest success and private destination, not the candidate's
+runtime or alert delivery (PR comment6416538625).
 
-OP-03 now integrates base 8b68cd75, retaining #122/#126 and the newer sign-in,
-calculator and favicon work. Candidate 09a00ab5 includes the later default-disabled
-manual-policy verifier; public assets exactly match the integrated base. Its registry retains
+OP-03 now integrates base336c8ef9/PR132, retaining preferred house and all prior
+released features. Public assets/SW19 and server.js exactly match that base.
+The new preferred-house writer rechecks hold under its lock before header or
+cell mutation. Eight new regressions cover write refusal, four-schema round-trip
+and old-width rejection. Full current header prefixes remain mandatory; require
+a fresh verified matching v2 set, never an automatic blank-tail migration.
+The generated unbound drill now includes preferred house and its hold refusal;
+its new hashes need new native evidence. Candidate09a00ab5 remains the historical
+native-tested default-disabled manual-policy implementation. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
 an exact submission retry without another row. The October 20 integrated UTC suite
@@ -113,6 +124,22 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+
+## Outpatient: preferred house `preferredHouse` (בית מועדף) (Oct 26, 2026 — DRAFT, not released)
+
+- Branch `feat/preferred-house` (base `claude/youthful-volta-laarnk` @ `8b68cd7`, live SW v18 → **v19**).
+- Schema (append-only): `CLIENTS_HEADERS` gains `preferredHouse` at position **38**; also appended
+  last on `CLIENTS_REMOVED_HEADERS`, `LEADS_HEADERS`, `REMOVED_LEADS_HEADERS`. No migration; old rows blank.
+- Allowed values (exact): קיסריה עפרוני · קיסריה ריהאב · רעננה אשר · רעננה הפרדס · רמות השבים · or blank.
+- **Dashboard → Outpatient `createLead`** accepts one more OPTIONAL body field `preferredHouse`. Absent/blank:
+  unchanged behaviour. Any other value: `{ ok:false, error:'invalid_preferred_house' }`, no lead written.
+  Auth unchanged (`CREATE_LEAD_SECRET`, fail-closed, checked first). Still no phone dedupe. The value rides on
+  the lead and moves to the client on activation. The Dashboard does not send it yet — a Dashboard change
+  is needed to use it.
+- Edits: new internal action `setPreferredHouse` (proxy key, single-cell write under LockService, refused while
+  a financial operation is active). `saveAll` never changes it on an existing row.
+- Release: Node first, then dispatch **Deploy Apps Script** (`apps-script/**` changed). Details:
+  `CHANGELOG-preferred-house.md`.
 
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 

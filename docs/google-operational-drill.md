@@ -1,8 +1,13 @@
 # Isolated Google operational recovery drill
 
-Status: **all five phases passed natively on 2026-10-26**, using candidate
+Historical status: **all five phases passed natively on 2026-10-26**, using candidate
 `09a00ab5e9d057c3d3c1913f93415fb949233860` and private synthetic workbooks.
 See [retained evidence and limits](evidence/op03-google-drill-2026-10-26.md).
+The PR132 integration has regenerated the harness with new source/helper hashes,
+a nonempty preferred-house fixture and refusal of that writer while held.
+It has local service-double coverage, but **has not run natively yet**. Preserve
+the completed project's files/state; use a separate fresh project and new
+workbooks for combined-code acceptance. Do not relabel the older report.
 This is acceptance tooling for PR125, not a deployment, a live restore, or a
 replacement for the scheduled backup/configuration evidence.
 
@@ -63,10 +68,10 @@ or runtime dependency is installed. Tests pin reproducibility and refusal paths.
 
 | Order | Function | Evidence |
 | --- | --- | --- |
-| 1 | `prepareOperationalDrill` | Fresh source/backup/target; two session rows, both financial journal kinds, custom rate 777, real seeded catalog and approved synthetic quote, literal strings/booleans/number/Date |
+| 1 | `prepareOperationalDrill` | Fresh source/backup/target; two session rows, both financial journal kinds, custom rate 777, real seeded catalog and approved synthetic quote, preferred house set through the real writer, literal strings/booleans/number/Date |
 | 2 | `captureOperationalDrill` | Actual capture/writer/manifest validator; 19 registered datasets plus metadata, including explicit optional absence |
 | 3 | `restoreOperationalDrill` | Fixture-only hold; native sheet copies into the distinct target, exact typed readback |
-| 4 | `verifyOperationalDrill` | Actual finish gate/journal validator, refusal of missing SessionLog/unverified config/original target, financial/session retries with no duplicate effect, retained payroll stamp/rate and unchanged source |
+| 4 | `verifyOperationalDrill` | Actual finish gate/journal validator, refusal of missing SessionLog/unverified config/original target, financial/session retries with no duplicate effect, retained payroll stamp/rate/preferred house, held preferred-house writer refusal and unchanged source |
 | 5 | `verifyManualTabDrill` | Synthetic empty Sheet1 and archive preserved in a separate snapshot set; existing unknown-tab recovery gate correctly refuses certification |
 
 Separate phases bound per-execution work. A phase must complete before the next;

@@ -58,15 +58,16 @@ const CLIENTS_H = headers('CLIENTS_HEADERS');
 test('assignedTo is last on the leads arrays; on CLIENTS it trails the payment tail', () => {
   // Leads sheets were untouched by the volta+dashboard unification.
   // The who/when stamps (session-who-when PR) were appended AFTER assignedTo,
-  // so it is now third-from-last on both leads arrays.
-  assert.deepEqual(LEADS_H.slice(-3), ['assignedTo', 'updatedAt', 'updatedBy']);
-  assert.deepEqual(REMOVED_H.slice(-3), ['assignedTo', 'updatedAt', 'updatedBy']);
+  // and preferredHouse (בית מועדף) after them, so it is now fourth-from-last
+  // on both leads arrays.
+  assert.deepEqual(LEADS_H.slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(REMOVED_H.slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
   // assignedTo is a volta-only column (physically unwritten on the live sheet) that
   // appended after the payment tail. The later paymentAmountOverrides column appended
   // after it, so assignedTo now sits second-from-last on CLIENTS.
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 4], 'paymentAmountOverrides');
-  assert.deepEqual(CLIENTS_H.slice(-7),
-    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate']);
+  assert.equal(CLIENTS_H[CLIENTS_H.length - 5], 'paymentAmountOverrides');
+  assert.deepEqual(CLIENTS_H.slice(-8),
+    ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
 });
 
 test('lead assignedTo round-trips positionally without misaligning earlier columns', () => {

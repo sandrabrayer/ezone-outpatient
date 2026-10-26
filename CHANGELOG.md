@@ -6,6 +6,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Integrate released PR132 (336c8ef9), keeping its preferred-house UI/SW19.
+  The new writer rechecks recovery hold after acquiring its lock, before even
+  extending headers. Add queued-write and four-schema recovery regressions;
+  regenerate the isolated drill with a nonempty preferred house and hold refusal.
+  Older-width snapshots remain inspection-only; no automatic schema migration.
+  Earlier native evidence stays attributable to 09a00ab5, not this integration.
 - Record five passing native Google drill phases on candidate 09a00ab5 with
   private synthetic workbooks, exact saved-code comparison and measured timings.
   Add retained evidence and narrow test-project consent to Sheets only. This is
@@ -26,6 +32,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Nightly backup now includes session/rate/configuration and operational history,
   a complete inventory, and guarded recovery verification. Unknown tabs remain
   explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
+
+### Preferred house (בית מועדף) on clients + createLead handoff (draft)
+- New append-only column `preferredHouse` at the END of `CLIENTS_HEADERS` (position 38), mirrored at the end of
+  `CLIENTS_REMOVED_HEADERS`, `LEADS_HEADERS` and `REMOVED_LEADS_HEADERS`. Allowed: קיסריה עפרוני, קיסריה ריהאב,
+  רעננה אשר, רעננה הפרדס, רמות השבים, or blank. Server-validated (exact match, ≤ 40 chars, formula-safe).
+- Edits go through the new single-cell `setPreferredHouse` action (script lock, proxy key, financial-op guard);
+  `saveAll` keeps the on-sheet value for existing rows. `createLead` accepts an optional `preferredHouse`
+  (invalid → `invalid_preferred_house`, no row); without it nothing changes. Dropdown in add/edit client forms,
+  row on the client card, chip on the lead card, carried lead → client on activation. SW v18 → v19.
+  `body-parser` 1.20.8 → 1.20.9 (lockfile, `npm audit` high). See `CHANGELOG-preferred-house.md`.
+
 ### Browser-tab favicon — letter O (draft)
 - Green «O» on the dark ground (`/favicon.ico`, `.svg`, 16/32 px PNG) served by explicit public static routes, plus
   `<link rel="icon">` tags in `index.html`; `/favicon.ico` used to return the SPA page (`200 text/html`). SW v17 → v18.

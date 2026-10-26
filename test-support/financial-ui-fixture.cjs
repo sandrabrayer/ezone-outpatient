@@ -53,7 +53,9 @@ function fixture(fields = {}) {
     persistPayment: async (row) => { out.writes.push({ kind: 'payment', row: copy(row) }); }
   };
   vm.createContext(ctx);
-  for (const name of ['toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
+  // בית מועדף helper the submit handlers call (real list + function).
+  vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
+  for (const name of ['preferredHouseOrBlank', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);

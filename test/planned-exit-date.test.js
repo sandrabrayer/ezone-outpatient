@@ -42,14 +42,16 @@ const plansById = (ctx) => Object.fromEntries(
 
 /* ================================ A. schema ================================ */
 
-test('A: plannedExitDate is appended LAST on Clients and on the tombstone literal', () => {
+test('A: plannedExitDate is appended after the stamps on Clients and on the tombstone literal', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
   const R = plain(ctx.CLIENTS_REMOVED_HEADERS);
-  assert.equal(H.length, 37);
+  // preferredHouse (position 38) was appended after it later — see
+  // test/preferred-house.test.js.
+  assert.equal(H.length, 38);
   assert.equal(H[36], 'plannedExitDate');
-  assert.deepEqual(H.slice(-3), ['updatedAt', 'updatedBy', 'plannedExitDate']);
-  assert.equal(R[R.length - 1], 'plannedExitDate');
+  assert.deepEqual(H.slice(-4), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(R.slice(-2), ['plannedExitDate', 'preferredHouse']);
   assert.equal(H.indexOf('exitDate'), 8, 'existing exitDate column untouched');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });

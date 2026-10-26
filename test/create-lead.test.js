@@ -74,7 +74,10 @@ const LEADS_HEADERS = [
   'assignedTo',
   // who/when stamps (session-who-when PR): appended last; _createLead stamps
   // updatedAt (WHEN) with a blank updatedBy — it is a cross-app receiver.
-  'updatedAt', 'updatedBy'
+  'updatedAt', 'updatedBy',
+  // preferredHouse (בית מועדף): optional createLead field, validated against
+  // PREFERRED_HOUSES — real-handler coverage in test/preferred-house.test.js.
+  'preferredHouse'
 ];
 
 function createLead(sheet, expectedSecret, payload, today) {

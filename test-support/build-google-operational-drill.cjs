@@ -17,7 +17,7 @@ const entries = ['_integrityCaptureData', '_integrityWriteSnapshot',
   '_integrityValidateRestoreSet', '_integrityVerifyRecoveredWorkbook',
   '_integrityVerifyGrid', '_integrityFingerprint', 'beginOutpatientRecovery',
   'finishOutpatientRecovery', '_finJournal', '_recordSessionOutcome',
-  '_applyRenewal', '_applyExtraCharge'];
+  '_applyRenewal', '_applyExtraCharge', '_setPreferredHouse'];
 
 function fixture() {
   const r = renewal.fixture(), e = extra.fixture();
@@ -43,6 +43,8 @@ function fixture() {
     id: 'drill-session-client', name: 'בדיקת שחזור סינתטית', phone: '0500000099',
     status: 'פעיל', sessionsPerWeek: '1', creditsOwed: 0
   }]);
+  const preferredHouse = 'רמות השבים';
+  assert.equal(s.post({ action: 'setPreferredHouse', clientId: 'drill-session-client', preferredHouse }).ok, true);
   const secret = 'synthetic-drill-session-secret-not-a-credential';
   s.props.SESSION_OUTCOME_SECRET = secret;
   const event = { sessionId: 'drill-cancelled-session', phone: '0500000099',
@@ -77,7 +79,7 @@ function fixture() {
   grids.AuditLog = [[...s.ctx.AUDIT_LOG_HEADERS, 'literal', 'leadingZero', 'flag', 'amount', 'instant'],
     ['2026-10-20', 'drill', 'fixture', 'synthetic', 'synthetic', 'not production',
       '=1+1', '000123', true, 777.25, { drillDate: '2026-10-20T10:11:12.000Z' }]];
-  return { grids, event, paidEvent, renewalId: r.request.opId, extraId: e.request.opId };
+  return { grids, event, paidEvent, preferredHouse, renewalId: r.request.opId, extraId: e.request.opId };
 }
 
 function build({ scriptId = PLACEHOLDER } = {}) {
