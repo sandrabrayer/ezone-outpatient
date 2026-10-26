@@ -8,6 +8,8 @@ reviewed build. Google execution durations: 24.263/42.091/34.744/48.542/61.297s.
 Retain [raw evidence and limits](docs/evidence/op03-google-drill-2026-10-26.md).
 This follow-up changes documentation only; the runtime, unbound generated
 harness, blank approval pin, public assets and dependencies remain unchanged.
+Claude's bounded evidence review of9f204b22 found no blocker; follow-up clarifies
+native retry age versus local June2031 coverage and redacts owner email addresses.
 The successful manual-policy path/repeated proof, real evidence packet,
 configuration/scheduled evidence and separate production approval remain open.
 Earlier dated entries below describe their status at that time.

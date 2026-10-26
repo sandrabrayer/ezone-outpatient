@@ -99,8 +99,9 @@ no mail, external fetch, deployment or trigger scope is needed by this harness.
 
 The financial fixtures are terminal history and the sessions already recorded.
 Their retries must remain valid after their original dates. A local regression
-moves verification to June2031; native execution still needs to prove the same
-behavior. Only the audit fixture includes an explicit Date scalar; date columns
+moves verification to June2031. The native October26 run verified retries after
+the original fixture dates, about a week later; the far-future clock remains
+local-double coverage only. Only the audit fixture includes an explicit Date scalar; date columns
 represented by the app as ISO strings are kept as strings.
 
 ## Manual production tabs remain a separate gate

@@ -116,7 +116,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -146,7 +146,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -176,7 +176,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -208,7 +208,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -238,7 +238,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -268,7 +268,7 @@
           {
             "type": "user",
             "role": "owner",
-            "emailAddress": "Brayersandra@gmail.com",
+            "emailAddress": "[redacted]",
             "domain": null,
             "displayName": null,
             "allowFileDiscovery": null
@@ -287,5 +287,6 @@
     "Synthetic fixture only; no production restore or deployment",
     "Approved manual-policy path and its repeated proof were not executed; blank pin retained",
     "No scheduled nightly admission/drain/retention/mail, configuration restoration or production-scale quota proof"
-  ]
+  ],
+  "privacyNote": "Owner identity verified during the connector reads; personal email addresses are redacted in this committed copy."
 }

@@ -54,9 +54,10 @@ Tag: `f5c48aa7-92c6-43ec-b1db-7916c6c036c8`. Each name begins with
 - [Backup and _DrillReport](https://docs.google.com/spreadsheets/d/18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc/edit?usp=drivesdk)
 - [Restored target](https://docs.google.com/spreadsheets/d/17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk/edit?usp=drivesdk)
 
-[Raw report and permission observations](op03-google-drill-2026-10-26.json)
+[Raw report and redacted permission observations](op03-google-drill-2026-10-26.json)
 were read through the Google connector after native execution. All artifacts
-and phase markers were retained.
+and phase markers were retained. The owner account was verified during the
+reads; personal email addresses are redacted in the committed permission copy.
 
 ## Results and timings
 
