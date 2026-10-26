@@ -50,6 +50,10 @@ const DUMMY_PIN = '424242';
 const SECRET = 'test-session-secret-name-picker-0123456789abcdef';
 process.env.PORT = String(TEST_PORT);
 process.env.APP_PIN = DUMMY_PIN;
+/* Personal PINs (2026-10-26) — throwaway fixture values. ורד = APP_PIN; אורן / דנה have their own. */
+process.env.USER_PIN_OREN = '515151';
+process.env.USER_PIN_DANA = '626262';
+const PIN_OF = { 'ורד': DUMMY_PIN, 'אורן': '515151', 'דנה': '626262' };
 process.env.SHEETS_URL = 'https://script.example.com/macros/s/AKfycbDUMMY/exec';
 process.env.SESSION_SECRET = SECRET;
 delete process.env.DASHBOARD_SHEETS_URL;
@@ -142,7 +146,7 @@ test('A: two-step login — {pin} mints a short name-less PIN-stage session; {pi
 test('A: the user is accepted ONLY from SESSION_USERS — listed names round-trip; unknown / retired / free-text names are REFUSED (403, no cookie); a wrong PIN with a user mints nothing', async () => {
   await waitForListen();
   for (const name of SESSION_USERS) {
-    const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: name });
+    const res = await request('POST', '/api/verify-pin', { pin: PIN_OF[name], user: name });
     assert.equal(res.status, 200);
     const ck = setCookies(res).find((c) => c.startsWith('ezone_session=')).split(';')[0];
     const me = await request('GET', '/api/me', null, { Cookie: ck });
@@ -177,7 +181,7 @@ test('A: GET /api/users is PUBLIC (one-screen sign-in): only the fixed first nam
   const ok = await request('GET', '/api/users', null, { Cookie: cookieOf(login) });
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.json, { ok: true, users: SESSION_USERS });
-  assert.deepEqual(ok.json.users, ['ורד', 'שירן', 'יעל'], 'the three current names, nothing invented (ירדן is retired)');
+  assert.deepEqual(ok.json.users, ['ורד', 'אורן', 'דנה'], 'the three current names, nothing invented (ירדן is retired)');
   const route = server._router.stack.find((m) => m.route && m.route.path === '/api/users');
   assert.ok(route, '/api/users mounted');
   assert.ok(!route.route.stack.some((l) => l.handle === server.requireLoginStage || l.handle === server.requireSession), '/api/users is deliberately open (names only)');
@@ -294,8 +298,8 @@ function baseClients(ctx) {
 function baseLeads(ctx) {
   const H = ctx.LEADS_HEADERS;
   return [H.slice(),
-    rowFrom(H, Object.assign({}, L1, { updatedAt: OLD_AT, updatedBy: 'יעל' })),
-    rowFrom(H, Object.assign({}, L2, { updatedAt: OLD_AT, updatedBy: 'יעל' }))
+    rowFrom(H, Object.assign({}, L1, { updatedAt: OLD_AT, updatedBy: 'דנה' })),
+    rowFrom(H, Object.assign({}, L2, { updatedAt: OLD_AT, updatedBy: 'דנה' }))
   ];
 }
 function sandboxWithData() {
@@ -305,7 +309,7 @@ function sandboxWithData() {
   return sb;
 }
 function save(sb, clients, leads, extra) {
-  return post(sb.ctx, Object.assign({ action: 'saveAll', user: 'שירן', clients, leads: leads || [] }, extra || {}));
+  return post(sb.ctx, Object.assign({ action: 'saveAll', user: 'אורן', clients, leads: leads || [] }, extra || {}));
 }
 function conflictLines(sb) {
   return sb.logger.filter((args) => String(args[0]).indexOf('[conflict]') === 0);
@@ -354,7 +358,7 @@ test('B: stale tab + real change -> REFUSED: sheet row kept byte-for-byte (stamp
   const lines = conflictLines(sb);
   assert.equal(lines.length, 1, 'one [conflict] audit line');
   assert.deepEqual(lines[0].slice(1, 5), ['client', 'c1', 'דנה כהן', 'notes']);
-  assert.ok(lines[0].indexOf('שירן') > 0, 'the audit line names who attempted the save');
+  assert.ok(lines[0].indexOf('אורן') > 0, 'the audit line names who attempted the save');
 });
 
 test('B: the refused row is written back exactly as _readAll handed it — every column equals the pre-save sheet row', () => {
@@ -396,7 +400,7 @@ test('B: EMPTY seenStamp (pre-stamping tab) + change -> last-writer-wins: writte
     assert.equal(c1.notes, 'LWW');
     assert.match(c1.updatedAt, ISO_RE);
     assert.notEqual(c1.updatedAt, OLD_AT);
-    assert.equal(c1.updatedBy, 'שירן');
+    assert.equal(c1.updatedBy, 'אורן');
   }
   assert.ok(sb, 'sandbox helper usable');
 });
@@ -409,7 +413,7 @@ test('B: EMPTY sheetStamp (never-stamped row) + any seenStamp + change -> last-w
   const c3 = byId(rowsOf(sb.sheets.Clients, sb.ctx.CLIENTS_HEADERS)).c3;
   assert.equal(c3.notes, 'FIRST');
   assert.match(c3.updatedAt, ISO_RE);
-  assert.equal(c3.updatedBy, 'שירן');
+  assert.equal(c3.updatedBy, 'אורן');
 });
 
 test('B: FRESH stamp (equals the sheet) + change -> normal write, stamped now + user', () => {
@@ -421,7 +425,7 @@ test('B: FRESH stamp (equals the sheet) + change -> normal write, stamped now + 
   assert.equal(c1.notes, 'FRESH');
   assert.match(c1.updatedAt, ISO_RE);
   assert.notEqual(c1.updatedAt, OLD_AT);
-  assert.equal(c1.updatedBy, 'שירן');
+  assert.equal(c1.updatedBy, 'אורן');
   assert.equal(conflictLines(sb).length, 0);
 });
 
@@ -433,7 +437,7 @@ test('B: NEW row (no existing id) is unaffected whatever updatedAt it carries', 
   const c9 = byId(rowsOf(sb.sheets.Clients, sb.ctx.CLIENTS_HEADERS)).c9;
   assert.equal(c9.name, 'חדש');
   assert.match(c9.updatedAt, ISO_RE);
-  assert.equal(c9.updatedBy, 'שירן');
+  assert.equal(c9.updatedBy, 'אורן');
 });
 
 test('B: mixed save — one refused, one accepted, one new, one preserved: each rule applies per row and the rest of the save proceeds', () => {
@@ -451,7 +455,7 @@ test('B: mixed save — one refused, one accepted, one new, one preserved: each 
   assert.equal(res.savedClients, 4);
   const C = byId(rowsOf(sb.sheets.Clients, sb.ctx.CLIENTS_HEADERS));
   assert.equal(C.c1.notes, 'a'); assert.equal(C.c1.updatedAt, OLD_AT);
-  assert.equal(C.c2.notes, 'OK'); assert.match(C.c2.updatedAt, ISO_RE); assert.equal(C.c2.updatedBy, 'שירן');
+  assert.equal(C.c2.notes, 'OK'); assert.match(C.c2.updatedAt, ISO_RE); assert.equal(C.c2.updatedBy, 'אורן');
   assert.equal(C.c3.notes, 'c'); assert.equal(C.c3.updatedAt, '');
   assert.match(C.c9.updatedAt, ISO_RE);
   assert.ok(Number(res.dataVersion) >= 1, 'dataVersion still bumped');
@@ -472,12 +476,12 @@ test('B: Leads mirror Clients — stale + change refused (row kept, conflicts en
     { id: 'l3', name: 'ליד חדש', phone: '0509990003', stage: 'new', updatedAt: 'forged' }
   ]);
   assert.equal(res.ok, true);
-  assert.deepEqual(plain(res.conflicts), [{ id: 'l1', name: 'ליד א', sheetUpdatedAt: OLD_AT, sheetUpdatedBy: 'יעל', changed: ['name'] }]);
+  assert.deepEqual(plain(res.conflicts), [{ id: 'l1', name: 'ליד א', sheetUpdatedAt: OLD_AT, sheetUpdatedBy: 'דנה', changed: ['name'] }]);
   assert.deepEqual(res.stamped, { clients: 0, leads: 2 });
   assert.equal(res.savedLeads, 3);
   const L = byId(rowsOf(sb.sheets.Leads, sb.ctx.LEADS_HEADERS));
-  assert.equal(L.l1.name, 'ליד א'); assert.equal(L.l1.updatedAt, OLD_AT); assert.equal(L.l1.updatedBy, 'יעל');
-  assert.equal(L.l2.name, 'ליד ב שונה'); assert.match(L.l2.updatedAt, ISO_RE); assert.equal(L.l2.updatedBy, 'שירן');
+  assert.equal(L.l1.name, 'ליד א'); assert.equal(L.l1.updatedAt, OLD_AT); assert.equal(L.l1.updatedBy, 'דנה');
+  assert.equal(L.l2.name, 'ליד ב שונה'); assert.match(L.l2.updatedAt, ISO_RE); assert.equal(L.l2.updatedBy, 'אורן');
   assert.match(L.l3.updatedAt, ISO_RE);
   assert.deepEqual(conflictLines(sb)[0].slice(1, 3), ['lead', 'l1']);
   // stale + meta-only / empty seenStamp on a lead -> no refusal
@@ -527,14 +531,14 @@ test('C: conflictsMessage — blank updatedBy -> מישהו/י; several names jo
   assert.equal(conflictsMessage({ conflicts: [
     { id: 'c1', name: 'דנה כהן', sheetUpdatedBy: 'ורד' },
     { id: 'c2', name: 'יוסי לוי', sheetUpdatedBy: '' },
-    { id: 'l1', name: 'ליד א', sheetUpdatedBy: 'יעל' },
+    { id: 'l1', name: 'ליד א', sheetUpdatedBy: 'דנה' },
     { id: 'c1', name: 'דנה כהן', sheetUpdatedBy: 'ורד' }
-  ] }), 'השינוי ל־דנה כהן, יוסי לוי, ליד א לא נשמר — ורד / יעל עדכן/ה קודם. הנתונים רועננו.');
+  ] }), 'השינוי ל־דנה כהן, יוסי לוי, ליד א לא נשמר — ורד / דנה עדכן/ה קודם. הנתונים רועננו.');
 });
 
 test('C: conflictsMessage — a nameless row falls back to its id; no/invalid conflicts -> "" (the caller\'s "show a banner?" test)', () => {
-  assert.equal(conflictsMessage({ conflicts: [{ id: 'c7', name: '', sheetUpdatedBy: 'שירן' }] }),
-    'השינוי ל־c7 לא נשמר — שירן עדכן/ה קודם. הנתונים רועננו.');
+  assert.equal(conflictsMessage({ conflicts: [{ id: 'c7', name: '', sheetUpdatedBy: 'אורן' }] }),
+    'השינוי ל־c7 לא נשמר — אורן עדכן/ה קודם. הנתונים רועננו.');
   for (const res of [undefined, null, {}, { ok: true }, { conflicts: [] }, { conflicts: 'x' }, { conflicts: [null, 3] }, { conflicts: {} }]) {
     assert.equal(conflictsMessage(res), '', JSON.stringify(res));
   }
@@ -718,7 +722,7 @@ function startStub() {
           seen.lastSave = pl;
           if (seen.saves === 1) {
             return json({ ok: true, savedLeads: pl.leads.length, savedClients: 1, dataVersion: 8, stamped: { clients: 0, leads: 1 },
-              conflicts: [{ id: 'c1', name: 'דנה כהן', sheetUpdatedAt: '2026-02-02T00:00:00.000Z', sheetUpdatedBy: 'יעל', changed: ['notes'] }] });
+              conflicts: [{ id: 'c1', name: 'דנה כהן', sheetUpdatedAt: '2026-02-02T00:00:00.000Z', sheetUpdatedBy: 'דנה', changed: ['notes'] }] });
           }
           return json({ ok: true, savedLeads: pl.leads.length, savedClients: 1, dataVersion: 9, stamped: { clients: 0, leads: 0 } });
         });
@@ -755,13 +759,13 @@ test('F: e2e — PIN -> name picker (one button per SESSION_USERS name, no input
     await page.click('#pinSubmit');
     assert.equal(seen.logins.length, 0, 'no name -> no login request');
     // 3. pick + PIN -> ONE request {pin, user} -> app + header
-    await page.click('#pinNames .user-btn >> text=שירן');
+    await page.click('#pinNames .user-btn >> text=אורן');
     await page.click('#pinSubmit');
     await page.waitForSelector('#app:not([hidden])');
     await page.waitForSelector('[data-client-id="c1"], .kpi', { timeout: 8000 });
-    assert.deepEqual(seen.logins, [{ pin: '424242', user: 'שירן' }], 'PIN and name were sent together, once');
+    assert.deepEqual(seen.logins, [{ pin: '424242', user: 'אורן' }], 'PIN and name were sent together, once');
     await page.waitForSelector('#sessionUser:not([hidden])');
-    assert.equal((await page.textContent('#sessionUser')).replace(/\s+/g, ' ').trim(), 'מחובר/ת כ: שירן · החלף');
+    assert.equal((await page.textContent('#sessionUser')).replace(/\s+/g, ' ').trim(), 'מחובר/ת כ: אורן · החלף');
     assert.equal(await page.evaluate(() => Object.keys(sessionStorage).concat(Object.keys(localStorage)).filter((k) => /pin/i.test(k)).length), 0, 'no PIN in web storage');
     // 4. a save the server refuses -> banner + reload; never retried
     await page.click('.tab[data-view="leads"]');
@@ -772,10 +776,10 @@ test('F: e2e — PIN -> name picker (one button per SESSION_USERS name, no input
     await page.selectOption('#leadForm [name="location"]', 'רעננה הפרדס');
     await page.selectOption('#leadForm [name="house_of_origin"]', 'raanana');
     await page.fill('#leadForm [name="created"]', '2026-09-04');
-    await page.selectOption('#leadForm [name="assignedTo"]', 'שירן');
+    await page.selectOption('#leadForm [name="assignedTo"]', 'אורן');
     await page.click('#leadFormSubmit');
     await page.waitForSelector('#conflictBanner:not([hidden])');
-    assert.equal(await page.textContent('#conflictBannerText'), 'השינוי ל־דנה כהן לא נשמר — יעל עדכן/ה קודם. הנתונים רועננו.');
+    assert.equal(await page.textContent('#conflictBannerText'), 'השינוי ל־דנה כהן לא נשמר — דנה עדכן/ה קודם. הנתונים רועננו.');
     await page.waitForFunction(() => true);
     await new Promise((r) => setTimeout(r, 600));
     assert.equal(seen.saves, 1, 'no automatic retry');
@@ -815,12 +819,12 @@ test('F: e2e — a remembered EDITOR session whose cookie has no name gets the P
     assert.equal(seen.logins.length, 1);
     // named cookie + remembered editor role -> no PIN, no picker, header set
     const ctx2 = await browser.newContext();
-    await ctx2.addCookies([{ name: 'ezone_session', value: encodeURIComponent('יעל'), url: 'http://127.0.0.1:' + port }]);
+    await ctx2.addCookies([{ name: 'ezone_session', value: encodeURIComponent('דנה'), url: 'http://127.0.0.1:' + port }]);
     const p2 = await ctx2.newPage();
     await p2.addInitScript(() => { try { sessionStorage.setItem('ez_role', 'editor'); } catch (_) {} });
     await p2.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'networkidle' });
     await p2.waitForSelector('#sessionUser:not([hidden])');
-    assert.equal(await p2.textContent('#sessionUserName'), 'יעל');
+    assert.equal(await p2.textContent('#sessionUserName'), 'דנה');
     assert.equal(await p2.isHidden('#pinScreen'), true);
     assert.equal(await p2.isHidden('#userScreen'), true);
     assert.equal(seen.logins.length, 1, 'no login round-trip for a named session');

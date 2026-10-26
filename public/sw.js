@@ -68,8 +68,10 @@
  * - v18 (2026-10-20): browser-tab favicons (favicon.ico / .svg / -16x16 / -32x32,
  *   letter O) + <link rel="icon"> tags in index.html. LIVE v17 (#129 merge 60f541d)
  *   was verified before this bump.
+ * - v20 (2026-10-26): login roster אורן / דנה replace שירן / יעל (משוייך ל dropdown in index.html + a legacy-assignee
+ *   option in app.js). Bumped from the deploy-branch value v19 (HEAD 336c8ef); re-check the LIVE /sw.js before release.
  */
-var CACHE = 'ezone-outpatient-v19';
+var CACHE = 'ezone-outpatient-v20';
 var SHELL = [
   './',
   './index.html',

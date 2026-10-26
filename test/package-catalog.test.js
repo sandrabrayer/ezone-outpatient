@@ -216,7 +216,7 @@ test('admin assertion: tampered body, other action, expired, far-future, wrong s
   const as = signAssertion('adminQuotePackage', signed, ASSERT);
   assert.equal(sb.post({ action: 'adminQuotePackage', user: 'ורד', packageKey: 'cbt_core', adminAssertion: as }).error, 'unauthorized');
   // actor swapped after signing
-  assert.equal(sb.post({ action: 'adminQuotePackage', user: 'שירן', packageKey: 'emdr_core', adminAssertion: as }).error, 'unauthorized');
+  assert.equal(sb.post({ action: 'adminQuotePackage', user: 'אורן', packageKey: 'emdr_core', adminAssertion: as }).error, 'unauthorized');
   // signed for a different action
   assert.equal(sb.post({ action: 'adminGetPackageCatalog', ...signed, adminAssertion: as }).error, 'unauthorized');
   // expired / too far ahead

@@ -247,7 +247,7 @@ This branch now contains that base (merge commit, no force-push; #121's branch u
   (`Clients, Leads, לידים שהוסרו, Clients-removed, Payments, ClientCharges, Credits, FinancialOps,
   PackageCatalog, PackageRequests`); legacy 8- and 9-row manifests still restore; #121's mixed-kind
   manifest restore test passes unchanged on the combined set.
-* **Yarden:** #121's browser tests now sign in as **שירן** (not the retired ירדן); no test in the
+* **Yarden:** #121's browser tests now sign in as **אורן** (שירן was retired 2026-10-26; ירדן earlier); no test in the
   merged tree relies on her name.
 * **Behaviour:** no dependency — this feature touches no charge/payment/renewal path.
 
