@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "candidate": "09a00ab5e9d057c3d3c1913f93415fb949233860",
+  "productionCertified": false,
+  "isolatedScriptId": "1Pb1fn4r__aeRFyha-IweLjgfy8QN50WzBAfML9SGrl-GiV3OHvwkJ2Ub",
+  "tag": "f5c48aa7-92c6-43ec-b1db-7916c6c036c8",
+  "workbookIds": {
+    "source": "1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI",
+    "backup": "18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc",
+    "target": "17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk"
+  },
+  "report": {
+    "range": "'_DrillReport'!A1:H10",
+    "majorDimension": "ROWS",
+    "values": [
+      [
+        "at",
+        "phase",
+        "result",
+        "detail",
+        "sourceSHA256",
+        "helperSHA256",
+        "drillSHA256",
+        "durationMs"
+      ],
+      [
+        "2026-10-26T08:21:41.829Z",
+        "prepare",
+        "PASS",
+        "Synthetic sessions, both journal kinds, approved quote and typed audit values seeded",
+        "928958b4427d08fde649e1e0c9f7e5401fea703dad84003a74d1c0ca640ce6bc",
+        "8c7286d432cb5099a4de671e2b2f194397f58bb2837d998c61366ba5b93edcff",
+        "88f83a34f11b9a45f52bd8e6a7e2c8456046d50c83a16d51d229818b0e706741",
+        "22487"
+      ],
+      [
+        "2026-10-26T08:24:07.838Z",
+        "capture",
+        "PASS",
+        "20 manifest entries fingerprint-verified in native Sheets",
+        "928958b4427d08fde649e1e0c9f7e5401fea703dad84003a74d1c0ca640ce6bc",
+        "8c7286d432cb5099a4de671e2b2f194397f58bb2837d998c61366ba5b93edcff",
+        "88f83a34f11b9a45f52bd8e6a7e2c8456046d50c83a16d51d229818b0e706741",
+        "40505"
+      ],
+      [
+        "2026-10-26T08:26:16.048Z",
+        "restore",
+        "PASS",
+        "Native copy into separate target; every restored grid matched",
+        "928958b4427d08fde649e1e0c9f7e5401fea703dad84003a74d1c0ca640ce6bc",
+        "8c7286d432cb5099a4de671e2b2f194397f58bb2837d998c61366ba5b93edcff",
+        "88f83a34f11b9a45f52bd8e6a7e2c8456046d50c83a16d51d229818b0e706741",
+        "32436"
+      ],
+      [
+        "2026-10-26T08:28:17.837Z",
+        "verify",
+        "PASS",
+        "Native round-trip and exact retries passed; not production certification",
+        "928958b4427d08fde649e1e0c9f7e5401fea703dad84003a74d1c0ca640ce6bc",
+        "8c7286d432cb5099a4de671e2b2f194397f58bb2837d998c61366ba5b93edcff",
+        "88f83a34f11b9a45f52bd8e6a7e2c8456046d50c83a16d51d229818b0e706741",
+        "46004"
+      ],
+      [
+        "2026-10-26T08:30:31.860Z",
+        "manual",
+        "PASS",
+        "Empty Sheet1 and synthetic archive preserved; certification correctly refused",
+        "928958b4427d08fde649e1e0c9f7e5401fea703dad84003a74d1c0ca640ce6bc",
+        "8c7286d432cb5099a4de671e2b2f194397f58bb2837d998c61366ba5b93edcff",
+        "88f83a34f11b9a45f52bd8e6a7e2c8456046d50c83a16d51d229818b0e706741",
+        "59658"
+      ]
+    ]
+  },
+  "executionDurationSeconds": {
+    "prepare": 24.263,
+    "capture": 42.091,
+    "restore": 34.744,
+    "verify": 48.542,
+    "manual": 61.297
+  },
+  "loggerDurationMs": {
+    "prepare": 22696,
+    "capture": 40639,
+    "restore": 32634,
+    "verify": 46300,
+    "manual": 59851
+  },
+  "sourceAndTargetTimeZone": "America/Los_Angeles",
+  "scriptRuntime": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets"
+  ],
+  "initialPermissions": [
+    {
+      "role": "source",
+      "file": {
+        "id": "1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 source",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-26T08:21:20.728Z",
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "backup",
+      "file": {
+        "id": "18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 backup",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-26T08:21:21.500Z",
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "target",
+      "file": {
+        "id": "17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 target",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-26T08:21:22.270Z",
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    }
+  ],
+  "finalPermissions": [
+    {
+      "role": "source",
+      "file": {
+        "id": "1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 source",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1WlaKF8Tok7NYDO16efir90LbqZ6FAlfqaPBq8P4aMfI/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": null,
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "backup",
+      "file": {
+        "id": "18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 backup",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/18njYPOj-oXD3s5J-shRNHbUNYxmflZUN0ZDMYyM3kkc/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": null,
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "target",
+      "file": {
+        "id": "17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION f5c48aa7-92c6-43ec-b1db-7916c6c036c8 target",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/17N_foD_ee9BHSRlROdpK6s-Qw0ZjvjcMHP5HFxfCFbk/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": null,
+        "modified_time": null,
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "Brayersandra@gmail.com",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    }
+  ],
+  "loadedFile": {
+    "utf8Bytes": 117842,
+    "characters": 116221,
+    "entireSavedEditorReadbackEqualToFreshBuild": true
+  },
+  "limitations": [
+    "Synthetic fixture only; no production restore or deployment",
+    "Approved manual-policy path and its repeated proof were not executed; blank pin retained",
+    "No scheduled nightly admission/drain/retention/mail, configuration restoration or production-scale quota proof"
+  ]
+}

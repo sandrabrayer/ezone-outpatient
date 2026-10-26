@@ -1,6 +1,8 @@
 # Isolated Google operational recovery drill
 
-Status: prepared and tested with service doubles; **not yet run in Google**.
+Status: **all five phases passed natively on 2026-10-26**, using candidate
+`09a00ab5e9d057c3d3c1913f93415fb949233860` and private synthetic workbooks.
+See [retained evidence and limits](evidence/op03-google-drill-2026-10-26.md).
 This is acceptance tooling for PR125, not a deployment, a live restore, or a
 replacement for the scheduled backup/configuration evidence.
 
@@ -15,8 +17,8 @@ Preparation also refuses any existing Script Property names without reading
 their values. The hardcoded ID denial covers this repo only, not every E-ZONE
 application: the operator must verify this is a newly created test project.
 
-The current session has Sheets read/copy tools but no authenticated isolated
-Apps Script execution channel. Do not look for credentials or reuse the
+Use an authenticated isolated Apps Script execution channel. Do not look for
+credentials or reuse the
 production clasp project to work around that boundary. Obtain test-project
 access through its normal Google authorization surface. Its script ID is not a
 secret; never send OAuth tokens or other credentials in chat.
@@ -45,6 +47,12 @@ as an input. Preserve failed-run artifacts; there is no implicit reset/delete.
    The generated
    file checked into the PR has a placeholder and deliberately refuses to run.
    Do not commit an execution-specific project binding over that safe default.
+5. In this isolated project's manifest, explicitly set `oauthScopes` to only
+   `https://www.googleapis.com/auth/spreadsheets`. Review the actual consent
+   screen before the owner grants access. Google grants account-wide Sheets
+   access; the harness's ID checks provide the narrower test-only boundary.
+   Auto-detected scopes included unnecessary third-party UI access in the
+   October 26 attempt; that request was cancelled and narrowed before consent.
 
 Each helper body is copied verbatim from the candidate. Its required constants
 are derived from that source. The generator rejects mail, fetch, Drive, HTTP
@@ -78,7 +86,10 @@ Every completed/failed phase writes `_DrillReport` in the new backup workbook,
 including source/helper/definition hashes and elapsed milliseconds. A secondary
 report failure is logged without masking the original phase error. The phase
 must remain safely below the runtime execution limit; split it if actual timing
-approaches that limit, preserving all evidence. No runtime duration is yet measured.
+approaches that limit, preserving all evidence.
+The October 26 execution-list durations were 24.263, 42.091, 34.744, 48.542 and
+61.297 seconds in phase order; this small fixture does not establish
+production-scale timing or the approved manual-policy branch's timing.
 Execution logs contain phase status and the
 three synthetic workbook IDs. All successful results explicitly retain
 `productionCertified:false`. Retain execution timestamps, durations, workbook

@@ -5,7 +5,8 @@ Base: `claude/youthful-volta-laarnk` at
 `8b68cd7547d394a00483da51a11cab086be62eca` (includes #122/#126/#127/#128/#129,
 source last verified @99; base assets SW18). The current branch head is not
 itself proof of the live Node version; refresh live evidence before release.
-This document describes a candidate, not a production release or completed DR drill.
+This document describes a candidate, not a production release or completed
+production DR exercise. The isolated synthetic Google drill passed on October 26.
 
 ## Why the eight-table set was insufficient
 
@@ -167,7 +168,10 @@ changes and source recovery logic. A separate [phased Google drill](google-opera
 is now prepared, with nonempty synthetic sessions, both journal kinds, catalog
 and approved request. Thirteen tests execute its exact generated helpers with
 service doubles, including identity/order/hash refusals and cache-failure hold.
-The runner has NOT executed in Google; isolated runtime access remains required.
+All five phases ran successfully in native Google on October 26 using
+candidate 09a00ab5. See [exact evidence and timing](evidence/op03-google-drill-2026-10-26.md).
+The manual phase proves preservation/refusal with a blank pin, not the
+successful manual-policy path or that path's repeated-proof duration.
 
 The new real-source tests perform snapshot -> manifest validation -> isolated
 restore -> event retry/correction, covering credit idempotency, payroll stamps,
@@ -193,13 +197,14 @@ and four self-consistently rehashed inventory corruptions. No runtime logic
 changed for these additions. A persistent who/when attestation audit is a
 follow-up design/control item; configVerified is still a bare operator boolean,
 not automated evidence of secure configuration. Full independent coverage and
-the real Google drill remain open.
+the real manual-tab/production configuration evidence remain open.
 
-Local synthetic tests do not prove real Google coercion, runtime quotas,
-scheduled execution, alert delivery or secure configuration recovery. Before
-release require a private Google round-trip with nonempty SessionLog and both
-FinancialOps kinds; a concrete plan for the two manual tabs; independent review;
-and Sandra's explicit approval. Do not manually run the mail-triggering job to
+The native synthetic drill proves the exercised coercion/retry paths at fixture
+scale, with nonempty SessionLog and both FinancialOps kinds. It does not prove
+production-scale runtime quotas, scheduled execution, alert delivery or secure
+configuration recovery. Before release require real manual-tab evidence and a
+reviewed target policy, native acceptance of any enabled policy, independent
+review and Sandra's explicit approval. Do not manually run the mail-triggering job to
 obtain evidence. Scheduled trigger/timezone/alert observations remain OP-03.
 
 Full suite uses CI's UTC timezone. An initial run inherited this host's
@@ -246,6 +251,6 @@ FinancialOps/marker/history. Code rollback does not restore data. A rollback to
 an older backup implementation cannot certify version-2 recovery sets: preserve
 all artifacts and keep recovery held; review a forward fix before resuming.
 
-Return points: package release gates, remaining OP-02b2 flows; OP-03 real Google
-and scheduled evidence; OP-04 speed; OP-05 controls; OP-06 delivery; CRM #114/#220
+Return points: package release gates, remaining OP-02b2 flows; OP-03 real manual
+policy/configuration and scheduled evidence; OP-04 speed; OP-05 controls; OP-06 delivery; CRM #114/#220
 and the ten-app program. This candidate does not close the application audit.

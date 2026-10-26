@@ -1,5 +1,17 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Native Google acceptance evidence — 2026-10-26
+
+All five phases passed on candidate 09a00ab5, using a new standalone project
+and three private synthetic workbooks. The entire saved harness matched the
+reviewed build. Google execution durations: 24.263/42.091/34.744/48.542/61.297s.
+Retain [raw evidence and limits](docs/evidence/op03-google-drill-2026-10-26.md).
+This follow-up changes documentation only; the runtime, unbound generated
+harness, blank approval pin, public assets and dependencies remain unchanged.
+The successful manual-policy path/repeated proof, real evidence packet,
+configuration/scheduled evidence and separate production approval remain open.
+Earlier dated entries below describe their status at that time.
+
 ## Disabled manual-tab policy verifier — 2026-10-25
 
 - Implement the revised evidence contract after Claude's bounded design review

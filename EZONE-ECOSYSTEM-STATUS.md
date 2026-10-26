@@ -1,15 +1,18 @@
-# Outpatient current handoff — 2026-10-25
+# Outpatient current handoff — 2026-10-26
 
 OP-03 follow-up: a manual-tab policy verifier is implemented with a blank
 approval pin. Unknown tabs remain blocked. Synthetic tests exercise exact scope,
-typed grids, formulas, evidence and hold retention; native Google execution and
-a real evidence packet/pin are still missing. See docs/manual-tab-recovery-policy.md.
+typed grids, formulas, evidence and hold retention. All five isolated native
+Google phases passed on candidate 09a00ab5 on October 26; see
+docs/evidence/op03-google-drill-2026-10-26.md for private artifacts and timings.
+The successful manual-policy branch/repeated proof and a real evidence packet/pin
+remain unverified. See docs/manual-tab-recovery-policy.md.
 A fresh audit found the Oct22 body-parser high advisory; compatible dependency
 lockfile patches are included. Read exact-head validation in PR125. No release.
 
 Latest Git base: `8b68cd7547d394a00483da51a11cab086be62eca`, SW18 assets,
 branch `claude/youthful-volta-laarnk` (#127/#128/#129 now merged). Last direct
-live check this morning was Node f7b37d7 / SW15 and Apps Script @99
+live check on October 20 morning was Node f7b37d7 / SW15 and Apps Script @99
 (run 39298379832); refresh live evidence before release. #121/#123/#122/#126
 remain released. Therapists #105 merged to d38d85b1 and #107 advanced its deploy
 branch to a8a1afbc. Merges alone do not prove the latest live package flow.
@@ -22,16 +25,16 @@ Codex owns isolated OP-03 issue #124 implementation, branch
 session replay identity/payroll state and custom rates on whole-workbook recovery.
 Candidate extends the set and adds inventory, validation and recovery hold.
 See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
-real Google round-trip with nonempty journal/session data, scheduled evidence,
-independent review and separate final production approval remain open.
+real per-target evidence and approved-policy acceptance, scheduled/configuration
+evidence, full independent coverage and separate final production approval remain open.
 
 OP-03 now integrates base 8b68cd75, retaining #122/#126 and the newer sign-in,
-calculator and favicon work. The production source logic is unchanged from
-PR125 head29195b24; public assets exactly match the latest base. Its registry retains
+calculator and favicon work. Candidate 09a00ab5 includes the later default-disabled
+manual-policy verifier; public assets exactly match the integrated base. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
-an exact submission retry without another row. The full integrated UTC suite
-passes 1,640 tests with 37 skipped (1,677 total), including sixteen failure-path
+an exact submission retry without another row. The October 20 integrated UTC suite
+passed 1,640 tests with 37 skipped (1,677 total), including sixteen failure-path
 and coordination regressions added after Claude's bounded static reviews. Removing the new package-lock
 check makes both queued-writer regressions fail. Google execution is separate. A reproduced capture/recovery overlap is now gated
 by a whole-run backup marker admitted under ScriptLock. Begin reports draining;
@@ -44,10 +47,13 @@ all 21 ids exist in Clients, but values were not equated. It is retained as a
 historical archive, never merged into Clients. No source cell was changed.
 The private full safety copy of Oct20 has20 tabs including packages; the Oct19
 copy is historical. Neither proves restoration. Unknown-tab recovery stays
-blocked pending review. The phased synthetic Google drill is prepared at
-docs/google-operational-drill.md; 13 local service-double tests pass after Claude review. The complete UTC
-suite passes1669 with38 skips (1707 total); current CI is checked separately. An
-authorized isolated Apps Script runtime is still needed; no native run is claimed.
+blocked pending reviewed real evidence. The phased synthetic Google drill at
+docs/google-operational-drill.md passed all five native phases on October 26.
+Thirteen local runner tests are separate service-double evidence.
+Candidate 09a00ab5 CI40222990471 passed 1,723/0/38 (1,761 total), plus 32/0/0 browser
+tests; bounded Claude reviews and exact scope limits are recorded in PR125.
+Native execution times ranged 24.263–61.297s on the small fixture. No production
+volume, scheduled-job or successful manual-policy acceptance is claimed.
 
 Keep FinancialOps history/marker and both operation kinds. Never roll source
 back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and

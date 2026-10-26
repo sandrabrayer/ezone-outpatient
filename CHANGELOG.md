@@ -6,10 +6,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Record five passing native Google drill phases on candidate 09a00ab5 with
+  private synthetic workbooks, exact saved-code comparison and measured timings.
+  Add retained evidence and narrow test-project consent to Sheets only. This is
+  documentation-only; production and approved manual-policy gates remain open.
 - Add a default-disabled, evidence-pinned manual-tab recovery verifier, retaining
   all known-table/journal/configuration checks and hold-last ordering. Synthetic
   tests cover exact scope, changed grids/types, formulas, missing evidence and
-  late target edits. No approved real policy or Google execution yet.
+  late target edits. No approved real policy yet; the isolated native drill
+  passed on October 26 (see the evidence document).
 - Refresh compatible Express/body-parser/qs lockfile patches after the current
   audit found GHSA-27r3-jxmh-p828 (body-parser denial of service). See the OP-03
   changelog for validation; application routes and dependency ranges unchanged.
