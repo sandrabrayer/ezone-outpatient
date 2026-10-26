@@ -752,9 +752,9 @@ test('CORRUPTION_LOCATIONS mirrors public/app.js LOCATIONS exactly', () => {
   assert.deepEqual(codeGs, frontend);
 });
 
-test('CLIENTS_HEADERS: 37 append-only columns — paymentAmountOverrides, the who/when stamps, then plannedExitDate', () => {
-  assert.equal(CLIENTS_HEADERS.length, 37);
-  assert.deepEqual(CLIENTS_HEADERS.slice(-4), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate']);
+test('CLIENTS_HEADERS: 38 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, then preferredHouse', () => {
+  assert.equal(CLIENTS_HEADERS.length, 38);
+  assert.deepEqual(CLIENTS_HEADERS.slice(-5), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
 });
 
 test('scan targets: every configured column exists in its sheet\'s header array', () => {

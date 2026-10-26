@@ -69,7 +69,7 @@
  *   letter O) + <link rel="icon"> tags in index.html. LIVE v17 (#129 merge 60f541d)
  *   was verified before this bump.
  */
-var CACHE = 'ezone-outpatient-v18';
+var CACHE = 'ezone-outpatient-v19';
 var SHELL = [
   './',
   './index.html',

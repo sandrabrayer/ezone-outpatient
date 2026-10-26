@@ -38,6 +38,15 @@
     'מעקב פסיכיאטרי'
   ];
   var LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
+  // בית מועדף: closed set of exact labels. Mirrors PREFERRED_HOUSES in
+  // apps-script/Code.gs (the server re-validates every write) and the
+  // <option>s in index.html. '' = none.
+  var PREFERRED_HOUSES = ['קיסריה עפרוני', 'קיסריה ריהאב', 'רעננה אשר', 'רעננה הפרדס', 'רמות השבים'];
+  function preferredHouseOrBlank(v) {
+    if (typeof v !== 'string') return '';
+    var s = v.trim();
+    return PREFERRED_HOUSES.indexOf(s) >= 0 ? s : '';
+  }
 
   var HOUSE_OF_ORIGIN_LABELS = {
     raanana_pardes: 'רעננה הפרדס',
@@ -587,7 +596,10 @@
       // server compares for stale-save conflict refusal. Client-sent stamps
       // are never written as-is.
       updatedAt: row.updatedAt || '',
-      updatedBy: row.updatedBy || ''
+      updatedBy: row.updatedBy || '',
+      // בית מועדף from the createLead handoff (read-only here; follows the lead
+      // onto the client on activation).
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
     };
   }
   function normalizeClientFromSheet(row) {
@@ -642,7 +654,9 @@
       updatedBy: row.updatedBy || '',
       // תאריך סיום מתוכנן: PLANNED discharge date ('yyyy-MM-dd' or ''), set from
       // the edit modal. Distinct from exitDate (the ACTUAL discharge date).
-      plannedExitDate: fmtDate(row.plannedExitDate)
+      plannedExitDate: fmtDate(row.plannedExitDate),
+      // בית מועדף ('' = none). Edited via the single-cell setPreferredHouse action.
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
     };
   }
 
@@ -688,7 +702,10 @@
       // stamps for unchanged ones — but it COMPARES the echoed updatedAt with
       // the sheet's: a changed row whose echo is stale is refused (conflict).
       updatedAt: l.updatedAt || '',
-      updatedBy: l.updatedBy || ''
+      updatedBy: l.updatedBy || '',
+      // Column alignment only: the server keeps the on-sheet value for an
+      // existing lead (createLead is the only writer).
+      preferredHouse: l.preferredHouse || ''
     };
   }
   function clientForSheet(c) {
@@ -746,7 +763,10 @@
       // Always sent (blank when none) so a cleared date is a real edit; the
       // server validates it and only carries the sheet value when the key is
       // absent (a pre-column tab).
-      plannedExitDate: c.plannedExitDate || ''
+      plannedExitDate: c.plannedExitDate || '',
+      // בית מועדף: seeds a brand-new client only; for an existing row the server
+      // keeps its on-sheet value (edits go through setPreferredHouse).
+      preferredHouse: c.preferredHouse || ''
     };
   }
 
@@ -1066,6 +1086,14 @@
     await apiPostAction('savePaymentAmountOverride', {
       clientId: clientId, paymentId: paymentId,
       amount: (amount === '' || amount == null) ? '' : toNum(amount)
+    });
+  }
+
+  // Persist one client's בית מועדף (single-cell server write under the script
+  // lock — never a full-sheet rewrite). '' clears it.
+  async function persistPreferredHouse(clientId, preferredHouse) {
+    await apiPostAction('setPreferredHouse', {
+      clientId: clientId, preferredHouse: preferredHouseOrBlank(preferredHouse)
     });
   }
 
@@ -4812,6 +4840,9 @@
     if (l.assignedTo) {
       chipsHtml += '<span class="chip">משוייך: ' + escapeHtml(l.assignedTo) + '</span>';
     }
+    if (l.preferredHouse) {
+      chipsHtml += '<span class="chip">בית מועדף: ' + escapeHtml(l.preferredHouse) + '</span>';
+    }
     var agreementFields = '';
     if (stage.id === 'agreement') {
       var breakdown = parseSessionsBreakdown(l.sessionsPerWeek, services);
@@ -5023,6 +5054,10 @@
     var plannedExitRow = c.plannedExitDate
       ? '<div class="cc-line"><span class="cc-k">סיום מתוכנן</span><span class="cc-v">' + escapeHtml(displayDate(c.plannedExitDate)) + '</span></div>'
       : '';
+    // בית מועדף — shown only when set.
+    var preferredHouseRow = c.preferredHouse
+      ? '<div class="cc-line"><span class="cc-k">בית מועדף</span><span class="cc-v">' + escapeHtml(c.preferredHouse) + '</span></div>'
+      : '';
 
     // Monthly base-payment status for the CURRENT month. Driven by the same
     // per-month payment row the גבייה tab uses (paymentForClientOn) so both
@@ -5144,6 +5179,7 @@
         creditRow +
         hooRow +
         plannedExitRow +
+        preferredHouseRow +
       '</div>';
 
     // Renewal status banner (overdue / due soon)
@@ -5615,6 +5651,7 @@
     if (form.house_of_origin) form.house_of_origin.value = client.house_of_origin || '';
     if (form.notes) form.notes.value = client.notes || '';
     if (form.plannedExitDate) form.plannedExitDate.value = client.plannedExitDate || '';
+    if (form.preferredHouse) form.preferredHouse.value = preferredHouseOrBlank(client.preferredHouse);
     // Treatment plan: service types + sessions per week per treatment
     var ecGroup = $('[data-group="serviceType"]', form);
     var ecHost = $('[data-host="editClientSessions"]', form);
@@ -6738,7 +6775,8 @@
           paymentStatus: payStatus,
           paymentDate: payDate,
           nextBillingDate: nextBill,
-          house_of_origin: (fd.get('house_of_origin') || '').trim()
+          house_of_origin: (fd.get('house_of_origin') || '').trim(),
+          preferredHouse: preferredHouseOrBlank(fd.get('preferredHouse'))
         };
         state.clients.push(client);
         // Mirror an already-paid/partial intake into a current-month payment ROW
@@ -6912,7 +6950,9 @@
         nextBillingDate: nextBill,
         house_of_origin: lead.house_of_origin || '',
         // משוייך ל: the assignee follows the person from lead to patient.
-        assignedTo: lead.assignedTo || ''
+        assignedTo: lead.assignedTo || '',
+        // בית מועדף (createLead handoff) follows the person too.
+        preferredHouse: preferredHouseOrBlank(lead.preferredHouse)
       };
       state.clients.push(client);
       var intakePaymentToPersist = null;
@@ -7127,6 +7167,7 @@
         sessionsUnit: client.sessionsUnit,
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes,
+        preferredHouse: client.preferredHouse,
         plannedExitDate: client.plannedExitDate
       };
       var newName = (fd.get('name') || '').trim();
@@ -7155,6 +7196,12 @@
         var ped = String(fd.get('plannedExitDate') || '').trim();
         client.plannedExitDate = /^\d{4}-\d{2}-\d{2}$/.test(ped) ? ped : '';
       }
+      // בית מועדף: allow setting OR clearing. Saved by its own single-cell
+      // action after the client save (the full save keeps the sheet value).
+      var prevPreferredHouse = preferredHouseOrBlank(client.preferredHouse);
+      if (fd.has('preferredHouse')) client.preferredHouse = preferredHouseOrBlank(fd.get('preferredHouse'));
+      var preferredHouseChanged = preferredHouseOrBlank(client.preferredHouse) !== prevPreferredHouse;
+      var preferredHouseFailed = false;
       // Treatment plan: service types + sessions per week
       var ecGroup2 = $('[data-group="serviceType"]', e.target);
       var ecHost2 = $('[data-host="editClientSessions"]', e.target);
@@ -7201,11 +7248,20 @@
       persistClientChange(client)
         .then(function () {
           clientSaved = true;
+          if (!preferredHouseChanged) return null;
+          return persistPreferredHouse(client.id, client.preferredHouse).catch(function (err) {
+            preferredHouseFailed = true;
+            client.preferredHouse = prevPreferredHouse;
+            toast('בית מועדף לא נשמר: ' + err.message, true);
+          });
+        })
+        .then(function () {
           return propagatePaid ? persistPayment(basePay) : null;
         })
         .then(function () {
           if (basePay) rememberConfirmedPayment(basePay);
-          render(); toast('נשמר');
+          render();
+          if (!preferredHouseFailed) toast('נשמר');
         })
         .catch(function (err) {
           if (clientSaved) {

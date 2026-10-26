@@ -126,11 +126,12 @@ test('CLIENTS_REMOVED_HEADERS = every CLIENTS_HEADERS column + removedAt/removed
   // (this sheet's own append-only rule), so the mirror is "every Clients column
   // except the stamps, then the bookkeeping, then the stamps".
   // plannedExitDate was appended after the stamps on BOTH literals, again at
-  // the very END (after the stamps) per each sheet's own append-only rule.
+  // the very END (after the stamps) per each sheet's own append-only rule,
+  // and preferredHouse after it the same way.
   const STAMPS = ['updatedAt', 'updatedBy'];
-  const AFTER_STAMPS = ['plannedExitDate'];
-  assert.deepEqual(clients.slice(-3), STAMPS.concat(AFTER_STAMPS));
-  assert.deepEqual(removed, clients.slice(0, -3).concat(['removedAt', 'removedVia', 'restoredAt']).concat(STAMPS).concat(AFTER_STAMPS));
+  const AFTER_STAMPS = ['plannedExitDate', 'preferredHouse'];
+  assert.deepEqual(clients.slice(-4), STAMPS.concat(AFTER_STAMPS));
+  assert.deepEqual(removed, clients.slice(0, -4).concat(['removedAt', 'removedVia', 'restoredAt']).concat(STAMPS).concat(AFTER_STAMPS));
   // Decoupling guard: the tombstone array must be a full literal, never
   // derived from CLIENTS_HEADERS at runtime (a concat would let a future
   // Clients append shift the meta columns under existing tombstone rows).
