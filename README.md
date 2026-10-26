@@ -229,15 +229,19 @@ checkout ever drifts back.
   `מחובר/ת כ: <name> · החלף`; החלף = logout → PIN → picker.
 - `GET /api/users` → `{ ok, users }` — the sign-in screen's name list (`lib/users.js`
   `SESSION_USERS`, the only names `/api/verify-pin` accepts). **PUBLIC, `no-store`, names only** (needed before any session exists): staff first names are visible to anyone who opens the page — accepted trade-off of the one-screen sign-in.
-  **The users are ורד, שירן, יעל** (ירדן is retired and refused) — one flat allow-list of names,
+  **The users are ורד, אורן, דנה** (ירדן, שירן and יעל are retired and refused) — one flat allow-list of names,
   **not** a role table: every name on it has exactly the same permissions,
   and editor vs. viewer is decided by which PIN button was used, never by
   which name was picked. The same list is pinned by test to the leads
   **משוייך ל** (`assignedTo`) `<select>` in `public/index.html`, so the
   login names and the assignment dropdown can never drift. **To add or
   rename a user, edit `lib/users.js` and `public/index.html` together** —
-  there is no Script Property, sheet tab or env var to touch, and no other
+  there is no Script Property or sheet tab to touch, and no other
   copy of the list anywhere (the client fetches it from this endpoint).
+  **Personal PINs (2026-10-26):** ורד signs in with the shared `APP_PIN` (unchanged); **אורן** and **דנה** each have their own PIN in the
+  Railway variables `USER_PIN_OREN` / `USER_PIN_DANA` (4–6 digits, distinct from `APP_PIN` and from each other). A name's PIN is the ONLY
+  code that signs in as that name — `APP_PIN` does not sign in as אורן or דנה. Unset / invalid / duplicate → that name cannot sign in
+  (fail-closed; only the variable name is logged). The name-less PIN stage accepts any configured PIN; the named login checks that name's PIN.
 - `POST /api/logout` → expires the cookie. Open.
 - `GET /api/sheets` → `{ ok, leads, clients, dataVersion }`. Session-gated.
 - `POST /api/sheets` with `{ leads, clients }` → saves everything.

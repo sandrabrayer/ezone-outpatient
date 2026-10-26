@@ -44,9 +44,11 @@ async function fixture(t, options = {}) {
   if (faults.extra === 'ambiguous') failWrite(sb, 'FinancialOps', 'payment_writing', 'after');
   const captured = [], errors = [];
   const oldFetch = global.fetch;
-  const keys = ['APP_PIN', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
+  const keys = ['APP_PIN', 'USER_PIN_OREN', 'USER_PIN_DANA', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
   const oldEnv = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   process.env.APP_PIN = '424242';
+  process.env.USER_PIN_OREN = '515151'; // personal PINs (2026-10-26) — throwaway fixture values
+  process.env.USER_PIN_DANA = '626262';
   process.env.SESSION_SECRET = 'fixture-session-secret-not-a-real-credential';
   process.env.SHEETS_URL = 'https://sheets.invalid/fixture';
   delete process.env.DASHBOARD_SHEETS_URL;
@@ -112,7 +114,7 @@ async function fixture(t, options = {}) {
     await page.goto(origin, { waitUntil: 'networkidle' });
     await page.waitForSelector('#pinScreen:not([hidden])');
     await page.locator('#pinNames .user-btn').getByText(user, { exact: true }).click();
-    await page.fill('#pinInput', '424242');
+    await page.fill('#pinInput', { 'אורן': '515151', 'דנה': '626262' }[user] || '424242');
     await page.click('#pinSubmit');
     await page.waitForSelector('#app:not([hidden])');
     await page.click('.tab[data-view="clients"]');
@@ -183,7 +185,7 @@ for(const extra of ['charge_done','apply_lost','reserve_lost']) {
     await first.locator('#extraRecovery:not([hidden])').waitFor();
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveExtraCharge').length,1);
     const id=fx.sb.rows('FinancialOps')[0].id;fx.sb.ctx._todayISODate=()=> '2026-11-01';
-    const second=await fx.login('שירן');await openExtra(second);
+    const second=await fx.login('אורן');await openExtra(second);
     assert.equal(await second.isHidden('#addChargeForm'),true);
     assert.match(await second.textContent('#extraRecoveryText'),/500/);
     if(extra!=='apply_lost')await second.click('#extraResume');
@@ -369,7 +371,7 @@ for(const renewal of ['client_done','apply_lost','reserve_lost']) {
     assert.equal(fx.captured.filter(r=>r.payload.action==='reserveRenewal').length,1);
     const opId=fx.sb.rows('FinancialOps')[0].id;
     assert.equal(fx.sb.rows('FinancialOps')[0].cycleDate,'2026-10-01');
-    const second=await fx.login('שירן');await openRenew(second);
+    const second=await fx.login('אורן');await openRenew(second);
     assert.match(await second.locator('#renewRecoveryText').textContent(),/650/);
     assert.equal(await second.isHidden('#renewForm'),true);
     if(renewal!=='apply_lost')await second.click('#renewResume');

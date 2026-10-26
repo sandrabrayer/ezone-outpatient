@@ -58,6 +58,10 @@ const DUMMY_SHEETS_URL = 'https://script.example.com/macros/s/AKfycbDUMMY/exec';
 const SECRET = 'test-session-secret-0123456789abcdef0123456789';
 process.env.PORT = String(TEST_PORT);
 process.env.APP_PIN = DUMMY_PIN;
+/* Personal PINs (2026-10-26): ורד signs in with APP_PIN; אורן / דנה each with their own — throwaway fixture values. */
+process.env.USER_PIN_OREN = '515151';
+process.env.USER_PIN_DANA = '626262';
+const PIN_OF = { 'ורד': DUMMY_PIN, 'אורן': '515151', 'דנה': '626262' };
 process.env.SHEETS_URL = DUMMY_SHEETS_URL;
 process.env.SESSION_SECRET = SECRET;
 delete process.env.DASHBOARD_SHEETS_URL;
@@ -113,7 +117,7 @@ async function waitForListen() {
 function setCookieOf(res) { return (res.headers['set-cookie'] || [])[0] || ''; }
 function cookieOf(res) { return setCookieOf(res).split(';')[0]; }
 async function login(user, extraHeaders) {
-  const body = user === undefined ? { pin: DUMMY_PIN } : { pin: DUMMY_PIN, user };
+  const body = user === undefined ? { pin: DUMMY_PIN } : { pin: PIN_OF[String(user).trim()] || DUMMY_PIN, user };
   const res = await request('POST', '/api/verify-pin', body, extraHeaders);
   assert.equal(res.status, 200);
   assert.equal(res.json.ok, true);
@@ -166,7 +170,7 @@ test('B: SESSION_USERS equals the index.html assignedTo options (nothing invente
   const options = Array.from(m[1].matchAll(/<option(?:[^>]*)>([^<]*)<\/option>/g))
     .map((x) => x[1].trim()).filter((v) => v && v !== '—');
   assert.deepEqual(SESSION_USERS, options);
-  assert.deepEqual(SESSION_USERS, ['ורד', 'שירן', 'יעל']); // ירדן retired (test/retire-user-yarden.test.js)
+  assert.deepEqual(SESSION_USERS, ['ורד', 'אורן', 'דנה']); // ירדן retired (test/retire-user-yarden.test.js)
 });
 
 test('B: verify-pin sets an HttpOnly SameSite=Lax 7-day cookie; Secure only behind HTTPS', async () => {
@@ -210,9 +214,9 @@ test('B: user accepted ONLY from SESSION_USERS — listed name rides inside the 
   }
   assert.equal(readSessionUser(cookieOf(await login('')).split('=')[1], SECRET), '', 'no name -> PIN-stage session only');
   // a listed name survives trimming (the picker never sends padding, but the sanitizer must not break it)
-  assert.equal(cookieOf(await login('  שירן ')).split('=')[1].split('.').length, 4);
-  assert.equal(server.validateSessionUser('יעל'), 'יעל');
-  assert.equal(server.validateSessionUser('יעל2'), '');
+  assert.equal(cookieOf(await login('  אורן ')).split('=')[1].split('.').length, 4);
+  assert.equal(server.validateSessionUser('דנה'), 'דנה');
+  assert.equal(server.validateSessionUser('דנה2'), '');
   assert.equal(server.validateSessionUser(12345), '');
 });
 
@@ -228,9 +232,9 @@ test('B: sanitizeSessionUser trims, caps at 40, strips angle brackets + control 
 test('B: /api/me round-trips the cookie user; legacy cookie -> ""; no cookie -> 401', async () => {
   await waitForListen();
   assert.equal((await request('GET', '/api/me')).status, 401);
-  const named = await request('GET', '/api/me', null, { Cookie: cookieOf(await login('שירן')) });
+  const named = await request('GET', '/api/me', null, { Cookie: cookieOf(await login('אורן')) });
   assert.equal(named.status, 200);
-  assert.deepEqual(named.json, { ok: true, user: 'שירן' });
+  assert.deepEqual(named.json, { ok: true, user: 'אורן' });
   const legacy = await request('GET', '/api/me', null, { Cookie: cookieOf(await login()) });
   assert.deepEqual(legacy.json, { ok: true, user: '' });
 });
@@ -250,7 +254,7 @@ test('B: /api/sheets GET + POST, /api/continuation-roster and /api/debug/* are 4
       assert.deepEqual(res.json, { ok: false, error: 'unauthorized' });
     }
   }
-  const cookie = { Cookie: cookieOf(await login('יעל')) };
+  const cookie = { Cookie: cookieOf(await login('דנה')) };
   assert.equal((await request('GET', '/api/sheets?fresh=1', null, cookie)).status, 200);
   assert.equal((await request('POST', '/api/sheets', { action: 'getData' }, cookie)).status, 200);
   assert.equal((await request('GET', '/api/debug/env', null, cookie)).status, 200);
@@ -389,15 +393,15 @@ function baseClients(ctx) {
   const H = ctx.CLIENTS_HEADERS;
   return [H.slice(),
     rowFrom(H, { id: 'c1', name: 'דנה כהן', phone: '0501234567', status: 'פעיל', notes: 'a', creditsOwed: 2, paymentAmountOverrides: '{"p1":100}', updatedAt: OLD_AT, updatedBy: 'ורד' }),
-    rowFrom(H, { id: 'c2', name: 'יוסי לוי', phone: '0502223333', status: 'פעיל', notes: 'b', creditsOwed: 0, updatedAt: OLD_AT, updatedBy: 'שירן' }),
+    rowFrom(H, { id: 'c2', name: 'יוסי לוי', phone: '0502223333', status: 'פעיל', notes: 'b', creditsOwed: 0, updatedAt: OLD_AT, updatedBy: 'אורן' }),
     rowFrom(H, { id: 'c3', name: 'רות', phone: '0503334444', status: 'פעיל', notes: 'c', creditsOwed: 0, updatedAt: '', updatedBy: '' })
   ];
 }
 function baseLeads(ctx) {
   const H = ctx.LEADS_HEADERS;
   return [H.slice(),
-    rowFrom(H, { id: 'l1', name: 'ליד א', phone: '0509990001', stage: 'new', updatedAt: OLD_AT, updatedBy: 'יעל' }),
-    rowFrom(H, { id: 'l2', name: 'ליד ב', phone: '0509990002', stage: 'new', updatedAt: OLD_AT, updatedBy: 'יעל' })
+    rowFrom(H, { id: 'l1', name: 'ליד א', phone: '0509990001', stage: 'new', updatedAt: OLD_AT, updatedBy: 'דנה' }),
+    rowFrom(H, { id: 'l2', name: 'ליד ב', phone: '0509990002', stage: 'new', updatedAt: OLD_AT, updatedBy: 'דנה' })
   ];
 }
 
@@ -473,7 +477,7 @@ test('D: _saveAll via doPost — changed row stamped now+user, unchanged row kee
   const before = Date.now();
   const res = post(ctx, {
     action: 'saveAll',
-    user: 'שירן', // what the Railway proxy injects from the cookie
+    user: 'אורן', // what the Railway proxy injects from the cookie
     clients: [
       // c1: real change (notes) + a forged updatedBy + stale server-managed
       // cells. updatedAt is the TRUE echo of the sheet stamp: a mismatching
@@ -501,24 +505,24 @@ test('D: _saveAll via doPost — changed row stamped now+user, unchanged row kee
   assert.equal(by.c1.notes, 'EDITED');
   assert.match(by.c1.updatedAt, ISO_RE);
   assert.ok(Date.parse(by.c1.updatedAt) >= before - 1000);
-  assert.equal(by.c1.updatedBy, 'שירן');
+  assert.equal(by.c1.updatedBy, 'אורן');
   // server-managed cells still preserved by id (the payload's 99/'' never landed)
   assert.equal(String(by.c1.creditsOwed), '2');
   assert.equal(by.c1.paymentAmountOverrides, '{"p1":100}');
   // unchanged echo -> the SHEET's stamps, never the forged ones
   assert.equal(by.c2.updatedAt, OLD_AT);
-  assert.equal(by.c2.updatedBy, 'שירן');
+  assert.equal(by.c2.updatedBy, 'אורן');
   assert.equal(by.c3.updatedAt, '', 'never-stamped unchanged row stays unstamped');
   assert.equal(by.c3.updatedBy, '');
   // new -> stamped (forged payload stamps discarded)
   assert.match(by.c4.updatedAt, ISO_RE);
-  assert.equal(by.c4.updatedBy, 'שירן');
+  assert.equal(by.c4.updatedBy, 'אורן');
   // Leads: same rules
   const L = rowsOf(sheets.Leads, ctx.LEADS_HEADERS);
   const lby = {}; L.forEach((r) => { lby[r.id] = r; });
-  assert.equal(lby.l1.updatedAt, OLD_AT); assert.equal(lby.l1.updatedBy, 'יעל');
-  assert.match(lby.l2.updatedAt, ISO_RE); assert.equal(lby.l2.updatedBy, 'שירן');
-  assert.match(lby.l3.updatedAt, ISO_RE); assert.equal(lby.l3.updatedBy, 'שירן');
+  assert.equal(lby.l1.updatedAt, OLD_AT); assert.equal(lby.l1.updatedBy, 'דנה');
+  assert.match(lby.l2.updatedAt, ISO_RE); assert.equal(lby.l2.updatedBy, 'אורן');
+  assert.match(lby.l3.updatedAt, ISO_RE); assert.equal(lby.l3.updatedBy, 'אורן');
 });
 
 test('D: legacy (user-less) cookie stamps a changed row with a blank updatedBy — allowed by contract; a forged user never lands', () => {
@@ -538,7 +542,7 @@ test('D: preserved (merge-don\'t-drop) rows are never re-stamped; an explicit de
   sheets.Leads = fakeSheet('Leads', baseLeads(ctx), []);
   // stale tab: sends only c1 (unchanged); c2 is omitted (-> preserved), c3 explicitly deleted
   const res = post(ctx, {
-    action: 'saveAll', user: 'יעל',
+    action: 'saveAll', user: 'דנה',
     clients: [{ id: 'c1', name: 'דנה כהן', phone: '0501234567', status: 'פעיל', notes: 'a', creditsOwed: 2, paymentAmountOverrides: '{"p1":100}' }],
     leads: [], explicitRemovedIds: ['c3']
   });
@@ -548,18 +552,18 @@ test('D: preserved (merge-don\'t-drop) rows are never re-stamped; an explicit de
   const C = rowsOf(sheets.Clients, ctx.CLIENTS_HEADERS);
   const c2 = C.find((r) => r.id === 'c2');
   assert.equal(c2.updatedAt, OLD_AT, 'preserved row keeps its own stamps');
-  assert.equal(c2.updatedBy, 'שירן');
+  assert.equal(c2.updatedBy, 'אורן');
   assert.equal(C.find((r) => r.id === 'c3'), undefined, 'explicit delete actually dropped');
   const T = rowsOf(sheets['Clients-removed'], ctx.CLIENTS_REMOVED_HEADERS);
   const del = T.find((t) => t.id === 'c3');
   assert.equal(del.removedVia, 'explicit-delete');
   assert.match(del.updatedAt, ISO_RE);
-  assert.equal(del.updatedBy, 'יעל', 'the tombstone names the deleter');
+  assert.equal(del.updatedBy, 'דנה', 'the tombstone names the deleter');
   assert.equal(del.updatedAt, del.removedAt);
   const pres = T.find((t) => t.id === 'c2');
   assert.equal(pres.removedVia, 'saveAll-diff-preserved');
   assert.equal(pres.updatedAt, OLD_AT, 'preserve-log snapshot keeps the row\'s OWN stamps');
-  assert.equal(pres.updatedBy, 'שירן');
+  assert.equal(pres.updatedBy, 'אורן');
 });
 
 /* ================= E. single-cell + other Clients/Leads writers ================= */
@@ -588,11 +592,11 @@ test('E: _writeCreditsOwed / _writePaymentAmountOverride / _writeNextBillingDate
   assert.equal(log.filter((w) => w.kind === 'setValues').length, 0);
 
   log.length = 0;
-  assert.equal(ctx._writeNextBillingDate(sh, 'c3', '2026-10-01', 'יעל'), true);
+  assert.equal(ctx._writeNextBillingDate(sh, 'c3', '2026-10-01', 'דנה'), true);
   const c3 = rowsOf(sh, H).find((r) => r.id === 'c3');
   assert.equal(c3.nextBillingDate, '2026-10-01');
   assert.match(c3.updatedAt, ISO_RE);
-  assert.equal(c3.updatedBy, 'יעל');
+  assert.equal(c3.updatedBy, 'דנה');
   // untouched rows keep their stamps
   c2 = rowsOf(sh, H).find((r) => r.id === 'c2');
   assert.equal(c2.updatedBy, '');
@@ -606,10 +610,10 @@ test('E: _writeCreditsOwed / _writePaymentAmountOverride / _writeNextBillingDate
 test('E: savePaymentAmountOverride (browser, via doPost) stamps with the proxy-injected user; repairStaleNextBilling passes it through', () => {
   const { ctx, sheets } = makeSandbox();
   sheets.Clients = fakeSheet('Clients', baseClients(ctx), []);
-  const res = post(ctx, { action: 'savePaymentAmountOverride', user: 'שירן', clientId: 'c2', paymentId: 'p9', amount: 300 });
+  const res = post(ctx, { action: 'savePaymentAmountOverride', user: 'אורן', clientId: 'c2', paymentId: 'p9', amount: 300 });
   assert.equal(res.ok, true);
   const c2 = rowsOf(sheets.Clients, ctx.CLIENTS_HEADERS).find((r) => r.id === 'c2');
-  assert.equal(c2.updatedBy, 'שירן');
+  assert.equal(c2.updatedBy, 'אורן');
   assert.match(c2.updatedAt, ISO_RE);
   assert.match(GS, /_repairStaleNextBilling\(rsApply, payload && payload\.today, _requestUser\(payload\)\)/);
   assert.match(GS, /_writeNextBillingDate\(clientsSh, f\.id, f\.to, user\)/);
@@ -661,15 +665,15 @@ test('E: mergeClients stamps the survivor (dups dropped, others untouched); rest
   // restore: a tombstone carrying old stamps comes back stamped with the restorer
   const RH = ctx.CLIENTS_REMOVED_HEADERS;
   sheets['Clients-removed'] = fakeSheet('Clients-removed', [RH.slice(),
-    rowFrom(RH, { id: 'gone', name: 'מנשה', status: 'פעיל', removedAt: OLD_AT, removedVia: 'explicit-delete', restoredAt: '', updatedAt: OLD_AT, updatedBy: 'שירן' })], []);
-  res = post(ctx, { action: 'restoreRemovedClient', user: 'יעל', id: 'gone' });
+    rowFrom(RH, { id: 'gone', name: 'מנשה', status: 'פעיל', removedAt: OLD_AT, removedVia: 'explicit-delete', restoredAt: '', updatedAt: OLD_AT, updatedBy: 'אורן' })], []);
+  res = post(ctx, { action: 'restoreRemovedClient', user: 'דנה', id: 'gone' });
   assert.equal(res.ok, true);
   rows = rowsOf(sheets.Clients, H);
   const back = rows.find((r) => r.id === 'gone');
   assert.equal(back.name, 'מנשה');
   assert.match(back.updatedAt, ISO_RE);
   assert.notEqual(back.updatedAt, OLD_AT);
-  assert.equal(back.updatedBy, 'יעל');
+  assert.equal(back.updatedBy, 'דנה');
 });
 
 test('E: createLead (cross-app) stamps WHEN only; removeLead stamps the REMOVER onto the removed-leads tombstone', () => {

@@ -56,7 +56,7 @@ const cookieFor = (user) => 'ezone_session=' + createSessionToken(SECRET, undefi
 
 test('A: ירדן is retired — not in SESSION_USERS, not in the picker, not in assignedTo, not accepted as a name', async () => {
   await ready();
-  assert.deepEqual(RETIRED_SESSION_USERS, [YARDEN]);
+  assert.ok(RETIRED_SESSION_USERS.includes(YARDEN), 'ירדן stays retired (שירן / יעל joined her 2026-10-26)');
   assert.ok(!SESSION_USERS.includes(YARDEN));
   assert.equal(server.validateSessionUser(YARDEN), '');
   const idx = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');

@@ -64,6 +64,7 @@ open owner decisions): `docs/package-release-checklist.md`. **No approval to rel
 - Quotation only: money in integer agorot, versioned catalog, immutable snapshots,
   `priced` ≠ paid, attach stores a reference only. No charge/payment/credit/
   TherapistRates/payout code changed.
+- 2026-10-26: login roster is ורד / אורן / דנה (שירן, יעל retired like ירדן). ורד = shared `APP_PIN`; אורן / דנה = personal PINs in Railway `USER_PIN_OREN` / `USER_PIN_DANA` (fail-closed; `APP_PIN` does not sign in as them). Residual: leavers who know `APP_PIN` can still sign in as ורד until `APP_PIN` + `SESSION_SECRET` are rotated.
 - ירדן is retired: not offered, old cookies refused (`RETIRED_SESSION_USERS`);
   rotating `APP_PIN` + `SESSION_SECRET` is the manual step that revokes the shared PIN.
 - Confidentiality (shipped, reported by the reviewer; live behaviour not verified from the build sandbox): the public

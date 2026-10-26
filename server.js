@@ -4,7 +4,7 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
-const { CATALOG_ADMIN_USERS } = require('./lib/users');
+const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
@@ -47,7 +47,30 @@ const BUILD = String(Date.now());
 const VERSION_INFO = require('./lib/version').buildVersion(process.env, Number(BUILD));
 
 if (!APP_PIN) {
-  console.warn('APP_PIN env var is not set — /api/verify-pin will reject every attempt.');
+  console.warn('APP_PIN env var is not set — ורד cannot sign in (/api/verify-pin rejects the shared PIN).');
+}
+
+/* PIN per allow-listed name (lib/users.js resolveUserPins): ורד = APP_PIN, every other name has ITS OWN
+ * Railway variable (USER_PIN_OREN, USER_PIN_DANA). Only the variable NAMES are ever logged, never a value. */
+const USER_PINS = (function () {
+  const r = resolveUserPins(process.env);
+  r.problems.forEach((msg) => console.warn('[config] personal PIN not usable — ' + msg + ' (that name cannot sign in until fixed).'));
+  return r.pins;
+})();
+
+/* Does `submitted` equal THIS name's PIN? A name with no usable PIN never matches (fail-closed). */
+function pinMatchesUser(submitted, user) {
+  const pin = Object.prototype.hasOwnProperty.call(USER_PINS, user) ? USER_PINS[user] : '';
+  return !!pin && checkPin(submitted, pin);
+}
+
+/* Does `submitted` equal ANY configured PIN? Only used for the name-less PIN stage (it reaches nothing but the
+ * name picker); the named login is always checked against the chosen name's own PIN. Every PIN is compared
+ * (no early exit) so timing does not reveal which one matched. */
+function pinMatchesAnyUser(submitted) {
+  let ok = false;
+  Object.keys(USER_PINS).forEach((u) => { if (checkPin(submitted, USER_PINS[u])) ok = true; });
+  return ok;
 }
 
 // --- PIN verification rate limiting ------------------------------------
@@ -531,7 +554,13 @@ app.post('/api/verify-pin', (req, res) => {
   }
 
   const submitted = req.body && req.body.pin;
-  if (checkPin(submitted, APP_PIN)) {
+  // Which PIN is required depends on the NAME being claimed: ורד -> APP_PIN, אורן / דנה -> their own personal PIN
+  // (APP_PIN does not sign in as them). No name yet (PIN stage) -> any configured PIN.
+  const claimedRaw = req.body && req.body.user;
+  const claimsUser = typeof claimedRaw === 'string' && claimedRaw.trim() !== '';
+  const claimedUser = claimsUser ? validateSessionUser(claimedRaw) : '';
+  const pinOk = claimedUser ? pinMatchesUser(submitted, claimedUser) : pinMatchesAnyUser(submitted);
+  if (pinOk) {
     pinAttempts.delete(ip);
     /* Mint the session cookie so subsequent data requests are authorized.
      * FAIL-CLOSED: without SESSION_SECRET no cookie can be minted, so the
@@ -548,9 +577,8 @@ app.post('/api/verify-pin', (req, res) => {
     // RETIRED name) is refused — it never silently degrades to a session. Every login gets a
     // fresh unique id (lib/session.js jti) and revokes the catalog-admin privilege of the session
     // that presented its cookie (account switch / re-login), server-side.
-    const rawUser = req.body && req.body.user;
-    const wantsUser = typeof rawUser === 'string' && rawUser.trim() !== '';
-    const user = wantsUser ? validateSessionUser(rawUser) : '';
+    const wantsUser = claimsUser;
+    const user = claimedUser;
     if (wantsUser && !user) {
       return res.status(403).json({ ok: false, error: 'user_not_allowed' });
     }

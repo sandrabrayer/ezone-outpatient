@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
+- Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).
+- אורן and דנה each sign in with their OWN PIN from Railway variables `USER_PIN_OREN` / `USER_PIN_DANA` (4–6 digits, distinct from `APP_PIN` and each other, fail-closed, names-only logging); ורד keeps `APP_PIN`. `APP_PIN` no longer signs in as אורן / דנה.
+- משוייך ל dropdown updated; editing an old lead assigned to a departed person keeps that name. SW v19 → v20. See `CHANGELOG-user-roster-oren-dana.md`.
+
 ### Preferred house (בית מועדף) on clients + createLead handoff (draft)
 - New append-only column `preferredHouse` at the END of `CLIENTS_HEADERS` (position 38), mirrored at the end of
   `CLIENTS_REMOVED_HEADERS`, `LEADS_HEADERS` and `REMOVED_LEADS_HEADERS`. Allowed: קיסריה עפרוני, קיסריה ריהאב,
