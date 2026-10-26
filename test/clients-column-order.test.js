@@ -61,22 +61,25 @@ const FROZEN_CLIENTS_HEADERS = [
   // APPEND-ONLY: planned discharge date (planned-exit-date PR). Physically
   // unwritten on the live sheet -> position 37, no migration. See
   // test/planned-exit-date.test.js.
-  'plannedExitDate'
+  'plannedExitDate',
+  // APPEND-ONLY: preferred house (בית מועדף). Physically unwritten on the live
+  // sheet -> position 38, no migration. See test/preferred-house.test.js.
+  'preferredHouse'
 ];
 
 test('CLIENTS_HEADERS equals the frozen physical order', () => {
   const H = namedArray('CLIENTS_HEADERS');
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
-  assert.equal(H.length, 37, 'Clients has 37 columns');
+  assert.equal(H.length, 38, 'Clients has 38 columns');
 });
 
 test('updatedAt/updatedBy are APPEND-ONLY: directly before plannedExitDate, everything before them unchanged', () => {
   const H = namedArray('CLIENTS_HEADERS');
-  assert.deepEqual(H.slice(-3, -1), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
-  assert.equal(H[H.length - 4], 'paymentAmountOverrides', 'the previous tail column is directly before them');
+  assert.deepEqual(H.slice(-4, -2), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
+  assert.equal(H[H.length - 5], 'paymentAmountOverrides', 'the previous tail column is directly before them');
   // every earlier column keeps the frozen pre-append order
-  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -3);
-  assert.deepEqual(H.slice(0, -3), PRE_APPEND);
+  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -4);
+  assert.deepEqual(H.slice(0, -4), PRE_APPEND);
   assert.equal(PRE_APPEND.length, 34, 'exactly two columns were appended (34 -> 36)');
 });
 

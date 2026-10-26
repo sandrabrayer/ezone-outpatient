@@ -449,9 +449,9 @@ test('editor helpers exist: preview logs the plan; apply logs before/after', () 
   assert.ok(/Logger\.log/.test(preview) && /Logger\.log/.test(apply));
 });
 
-test('CLIENTS_HEADERS: 37 append-only columns — paymentAmountOverrides, the who/when stamps, then plannedExitDate', () => {
+test('CLIENTS_HEADERS: 38 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, then preferredHouse', () => {
   assert.equal(CLIENTS_HEADERS[0], 'id');
-  assert.deepEqual(CLIENTS_HEADERS.slice(-4), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate']);
-  assert.equal(CLIENTS_HEADERS.length, 37);
+  assert.deepEqual(CLIENTS_HEADERS.slice(-5), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.equal(CLIENTS_HEADERS.length, 38);
   assert.ok(CLIENTS_HEADERS.includes('nextBillingDate'));
 });

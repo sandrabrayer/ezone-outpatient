@@ -29,7 +29,13 @@ var LEADS_HEADERS = [
   // session user, and carries the existing sheet stamps for an unchanged
   // echo — payload stamps are never trusted. Text-forced so the ISO stamp is
   // never Date-coerced. Old rows read back blank until first edited.
-  'updatedAt', 'updatedBy'
+  'updatedAt', 'updatedBy',
+  // APPEND-ONLY (בית מועדף): the preferred house the createLead handoff carried
+  // (validated against PREFERRED_HOUSES, blank = none). Set ONLY by createLead;
+  // _saveAll carries the on-sheet value for existing leads, so a browser
+  // snapshot can never change or blank it. Follows the lead onto the client on
+  // activation. Old rows read back blank.
+  'preferredHouse'
 ];
 
 /* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
@@ -134,7 +140,16 @@ var CLIENTS_HEADERS = [
   //     omits the key (a tab still running a pre-column app.js), so an old
   //     client can never blank it. getTreatmentPlans projects it for ACTIVE
   //     clients only. Old rows read back blank.
-  'plannedExitDate'
+  'plannedExitDate',
+  //   preferredHouse (בית מועדף): APPEND-ONLY, physically unwritten on the live
+  //     sheet so it lands at the very END (position 38) with no migration. One
+  //     of PREFERRED_HOUSES (exact Hebrew label) or blank = none. Written one
+  //     cell at a time by _writePreferredHouse (setPreferredHouse action, under
+  //     the script lock); _saveAll carries the on-sheet value for every existing
+  //     row (like paymentAmountOverrides) and only seeds a brand-new client from
+  //     its validated payload value (the lead's createLead value on activation).
+  //     Old rows read back blank.
+  'preferredHouse'
 ];
 
 /* Meta columns of the Clients sheet — identity, who/when audit, and the two
@@ -198,7 +213,9 @@ var CLIENTS_REMOVED_HEADERS = [
   'updatedAt', 'updatedBy',
   // APPEND-ONLY mirror of the Clients planned-discharge date (plannedExitDate)
   // so a tombstoned row keeps it and restoreRemovedClient copies it back.
-  'plannedExitDate'
+  'plannedExitDate',
+  // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
+  'preferredHouse'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -376,7 +393,9 @@ var REMOVED_LEADS_HEADERS = [
   // APPEND-ONLY mirror of the Leads who/when stamps (at the very END). A
   // removed lead carries now + the removing user, so the tombstone answers
   // "who removed this, when" alongside removedAt.
-  'updatedAt', 'updatedBy'
+  'updatedAt', 'updatedBy',
+  // APPEND-ONLY mirror of the Leads preferred house (preferredHouse).
+  'preferredHouse'
 ];
 
 /* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
@@ -1136,6 +1155,74 @@ function _writePaymentAmountOverride(clientsSh, clientId, paymentId, amount, use
   return false;
 }
 
+/* ===== Preferred house (בית מועדף) =========================================
+ * Closed set of exact Hebrew labels. Mirrors PREFERRED_HOUSES in public/app.js
+ * and the <option>s in public/index.html (a guard test pins all three). */
+var PREFERRED_HOUSES = ['קיסריה עפרוני', 'קיסריה ריהאב', 'רעננה אשר', 'רעננה הפרדס', 'רמות השבים'];
+var PREFERRED_HOUSE_MAX_LEN = 40;
+
+/* Validate a preferredHouse value at a write boundary. Returns the canonical
+ * value ('' = none) or null when it must be REJECTED. missing/null/'' -> ''.
+ * Anything that is not a string, longer than PREFERRED_HOUSE_MAX_LEN, carries a
+ * leading formula character (= + - @, defence in depth: no allowed label
+ * starts with one) or is not EXACTLY one of PREFERRED_HOUSES after trimming is
+ * rejected — never coerced to a near match. */
+function _preferredHouseOrNull(v) {
+  if (v === undefined || v === null) return '';
+  if (typeof v !== 'string' || v.length > PREFERRED_HOUSE_MAX_LEN) return null;
+  var s = v.trim();
+  if (s === '') return '';
+  if (/^[=+\-@]/.test(s)) return null;
+  return PREFERRED_HOUSES.indexOf(s) >= 0 ? s : null;
+}
+
+/* Persist ONE client's preferredHouse without rewriting the whole Clients
+ * sheet (the _writeCreditsOwed pattern): locate the row by its id column, write
+ * the single cell, stamp who/when. Fail-soft: no hit changes nothing. */
+function _writePreferredHouse(clientsSh, clientId, value, user) {
+  _finGuard([clientId]);
+  var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+  var phCol = CLIENTS_HEADERS.indexOf('preferredHouse') + 1;
+  var lastRow = clientsSh.getLastRow();
+  if (lastRow < 2 || idCol < 1 || phCol < 1 || !clientId) return false;
+  var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var r = 0; r < ids.length; r++) {
+    if (String(ids[r][0]) === String(clientId)) {
+      clientsSh.getRange(r + 2, phCol).setValue(value);
+      _stampClientRowAt(clientsSh, r + 2, user); // who/when
+      return true;
+    }
+  }
+  return false;
+}
+
+/* setPreferredHouse action: INTERNAL write (OUTPATIENT_PROXY_SECRET, posted
+ * same-origin through the Node proxy). Validates BEFORE taking the lock; a
+ * rejected value writes nothing. A client with an active financial operation is
+ * refused (its journal snapshot covers the whole row). */
+function _setPreferredHouse(payload) {
+  var clientId = String(payload && payload.clientId == null ? '' : payload.clientId).trim();
+  if (!clientId) return { ok: false, error: 'missing_clientId' };
+  var value = _preferredHouseOrNull(payload ? payload.preferredHouse : null);
+  if (value === null) return { ok: false, error: 'invalid_preferred_house' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var ok;
+    try {
+      ok = _writePreferredHouse(sh, clientId, value, _requestUser(payload));
+    } catch (err) {
+      if (String(err && err.message) === 'financial_operation_pending') return { ok: false, error: 'financial_operation_pending' };
+      throw err;
+    }
+    if (!ok) return { ok: false, error: 'client_not_found' };
+    return { ok: true, preferredHouse: value };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _isDayCenterBilling(billingType) {
   return String(billingType == null ? '' : billingType).trim() === DAY_CENTER_BILLING;
 }
@@ -1342,6 +1429,13 @@ function _saveAll(payload) {
       clients[i].plannedExitDate = (clients[i] && _hasOwn(clients[i], 'plannedExitDate'))
         ? _isoDateOrBlank(clients[i].plannedExitDate)
         : (existingRow ? _isoDateOrBlank(existingRow.plannedExitDate) : '');
+      // preferredHouse: written one cell at a time by setPreferredHouse, so a
+      // full save carries the on-sheet value for an existing row (never an
+      // edit). Only a brand-new client seeds it from its payload — validated;
+      // a rejected value is not stored (blank).
+      clients[i].preferredHouse = existingRow
+        ? (existingRow.preferredHouse == null ? '' : existingRow.preferredHouse)
+        : (_preferredHouseOrNull(clients[i].preferredHouse) || '');
       if (reservedClients[cid] && existingRow) {
         var pendingChanges = _clientDiffCols(clients[i], existingRow);
         if (pendingChanges.length) {
@@ -1497,6 +1591,13 @@ function _saveAll(payload) {
     for (var li = 0; li < leads.length; li++) {
       var lidIn = (leads[li] && leads[li].id != null) ? String(leads[li].id) : '';
       var existingLead = lidIn && _hasOwn(existingLeadsById, lidIn) ? existingLeadsById[lidIn] : null;
+      // preferredHouse is set only by createLead: carry the on-sheet value for
+      // an existing lead; a new browser-created lead gets a validated value.
+      if (leads[li] && typeof leads[li] === 'object') {
+        leads[li].preferredHouse = existingLead
+          ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
+          : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
+      }
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {
         conflicts.push(_conflictEntry('lead', leads[li], existingLead, leadConflictCols, user));
@@ -3843,6 +3944,15 @@ function _getMyStopAlerts() {
  * it is normalized through _recoverPhone and stored as-is when blank. note is
  * free text (source + notes combined) and may be empty. Clients is never
  * touched — this only creates a lead for Vered to work.
+ *
+ * preferredHouse (בית מועדף) is OPTIONAL. Absent/null/'' -> stored blank and the
+ * behaviour is exactly as before. Present -> it must be EXACTLY one of
+ * PREFERRED_HOUSES (_preferredHouseOrNull); any other value is rejected with
+ * { ok:false, error:'invalid_preferred_house' } and NO row is written. The
+ * auth check runs first in doPost, so a bad secret still fails closed before
+ * any field is looked at. There is no phone dedupe here: every authorized,
+ * valid call appends a new lead (the in-app duplicate-lead warning is a UI
+ * concern).
  */
 
 /* Known Dashboard houseId keys. Most are identical to the Outpatient
@@ -3897,6 +4007,8 @@ function _createLead(payload) {
   var phone = _recoverPhone(payload && payload.phone); // '' stays '' (valid)
   var note  = _sanitizeLeadText(payload && payload.note, 2000);
   var house = _mapLeadHouse(payload && payload.house);
+  var preferredHouse = _preferredHouseOrNull(payload ? payload.preferredHouse : null);
+  if (preferredHouse === null) return { ok: false, error: 'invalid_preferred_house' };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -3920,7 +4032,8 @@ function _createLead(payload) {
       introDateTime: '',
       house_of_origin: house,
       not_relevant_reason: '',
-      not_relevant_note: ''
+      not_relevant_note: '',
+      preferredHouse: preferredHouse
     };
     _stampRow(lead, ''); // who/when — cross-app (dashboard) receiver: WHEN only
     sh.appendRow(LEADS_HEADERS.map(function (h) {
@@ -5451,6 +5564,7 @@ var SOURCE_POST_AUTH = {
   getCredits: 'OUTPATIENT_PROXY_SECRET',
   saveCredit: 'OUTPATIENT_PROXY_SECRET',
   savePaymentAmountOverride: 'OUTPATIENT_PROXY_SECRET',
+  setPreferredHouse: 'OUTPATIENT_PROXY_SECRET',
   repairStaleNextBilling: 'OUTPATIENT_PROXY_SECRET',
   saveCharge: 'OUTPATIENT_PROXY_SECRET',
   updateCharge: 'OUTPATIENT_PROXY_SECRET',
@@ -5790,6 +5904,11 @@ function doPost(e) {
       // INTERNAL write (same trust level as savePayment) — the outpatient app posts
       // it same-origin through the Node proxy; no cross-app secret.
       return _json(_setPaymentAmountOverride(payload));
+    }
+    if (action === 'setPreferredHouse') {
+      // INTERNAL single-cell write (בית מועדף) — same trust level as
+      // savePaymentAmountOverride; validated in _setPreferredHouse.
+      return _json(_setPreferredHouse(payload));
     }
     if (action === 'repairStaleNextBilling') {
       // One-off stale nextBillingDate repair. INTERNAL (same trust level as

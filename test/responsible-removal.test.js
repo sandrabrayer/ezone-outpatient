@@ -94,7 +94,9 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
     // who/when stamps (session-who-when PR) — appended at the very END
     'updatedAt', 'updatedBy',
     // planned discharge date — appended after the stamps
-    'plannedExitDate'
+    'plannedExitDate',
+    // preferred house (בית מועדף) — appended last
+    'preferredHouse'
   ]);
 });
 

@@ -81,6 +81,22 @@ served without any session; now session-only, `no-store`, loaded after sign-in, 
 cached (SW v13). Browser + server tests. Details and limits (shared-PIN holders still see them):
 `CHANGELOG-protect-price-constants.md`. Release BEFORE the package-catalog PR; the later PR re-bumps the SW.
 
+## Outpatient: preferred house `preferredHouse` (בית מועדף) (Oct 26, 2026 — DRAFT, not released)
+
+- Branch `feat/preferred-house` (base `claude/youthful-volta-laarnk` @ `8b68cd7`, live SW v18 → **v19**).
+- Schema (append-only): `CLIENTS_HEADERS` gains `preferredHouse` at position **38**; also appended
+  last on `CLIENTS_REMOVED_HEADERS`, `LEADS_HEADERS`, `REMOVED_LEADS_HEADERS`. No migration; old rows blank.
+- Allowed values (exact): קיסריה עפרוני · קיסריה ריהאב · רעננה אשר · רעננה הפרדס · רמות השבים · or blank.
+- **Dashboard → Outpatient `createLead`** accepts one more OPTIONAL body field `preferredHouse`. Absent/blank:
+  unchanged behaviour. Any other value: `{ ok:false, error:'invalid_preferred_house' }`, no lead written.
+  Auth unchanged (`CREATE_LEAD_SECRET`, fail-closed, checked first). Still no phone dedupe. The value rides on
+  the lead and moves to the client on activation. The Dashboard does not send it yet — a Dashboard change
+  is needed to use it.
+- Edits: new internal action `setPreferredHouse` (proxy key, single-cell write under LockService, refused while
+  a financial operation is active). `saveAll` never changes it on an existing row.
+- Release: Node first, then dispatch **Deploy Apps Script** (`apps-script/**` changed). Details:
+  `CHANGELOG-preferred-house.md`.
+
 ## Outpatient → Therapists: `plannedExitDate` (Oct 18, 2026)
 
 - `getTreatmentPlans` gains one optional key: `plannedExitDate`. It is the

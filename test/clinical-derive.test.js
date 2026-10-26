@@ -166,14 +166,16 @@ test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)',
   // directly after `phone`; the volta-only columns (physically unwritten) append at
   // the END, followed by paymentAmountOverrides (also append-only). Verified against
   // the sheet itself; append-only from here.
-  assert.deepEqual(H.slice(-12), [
+  assert.deepEqual(H.slice(-13), [
     'phone',
     'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
     'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides',
     // who/when stamps (session-who-when PR) — appended last, physically unwritten
     'updatedAt', 'updatedBy',
     // planned discharge date — appended after the stamps, physically unwritten
-    'plannedExitDate'
+    'plannedExitDate',
+    // preferred house (בית מועדף) — appended last, physically unwritten
+    'preferredHouse'
   ]);
 });
 
