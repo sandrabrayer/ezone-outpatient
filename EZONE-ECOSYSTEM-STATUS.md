@@ -1,21 +1,33 @@
-# Outpatient current handoff — 2026-10-26
+# Outpatient current handoff — 2026-10-27
 
 OP-03 follow-up: a manual-tab policy verifier is implemented with a blank
 approval pin. Unknown tabs remain blocked. Synthetic tests exercise exact scope,
 typed grids, formulas, evidence and hold retention. All five isolated native
 Google phases passed on candidate 09a00ab5 on October 26; see
 docs/evidence/op03-google-drill-2026-10-26.md for private artifacts and timings.
-The successful manual-policy branch/repeated proof and a real evidence packet/pin
-remain unverified. See docs/manual-tab-recovery-policy.md.
+The five integrated phases subsequently passed on 3297311c, and four separate
+approved-policy phases passed once in the same existing test project on October 27.
+All nine executions are Completed; final policy state is verified/idle/not failed,
+with two successful proofs and the late native comparison before hold removal.
+See docs/evidence/op03-manual-tabs-2026-10-27-result.md. Do not rerun phases,
+reset state or create a replacement project. Real evidence/policy/pin and
+production approval remain open. See docs/manual-tab-recovery-policy.md.
 A fresh audit found the Oct22 body-parser high advisory; compatible dependency
 lockfile patches are included. Read exact-head validation in PR125. No release.
 
-Integrated Git base: `336c8ef9b19b40192f77d18ddd4a7bc18d2f8f11`, SW19 assets,
-branch `claude/youthful-volta-laarnk` (PR132 now merged). October26 read-only
+Integrated Git base: `b14db7991776f49fdcaee0a018dc0d67d371f8d2`, SW20 assets,
+branch `claude/youthful-volta-laarnk` (PR133 merged October 26 at 17:33:05 UTC).
+PR125's earlier metadata exposed336c8ef9 until a single close/reopen on October 27;
+the actual branch now independently resolves b14db799. Its roster/PIN runtime,
+browser behavior and tests are preserved, with two documentation conflicts
+resolved in the draft. No Apps Script or workflow file changed in PR133.
+This does not verify the currently served Node build or PIN configuration.
+October26 read-only
 /api/version reported336c8ef9 and /healthz returned ok; earlier source executions
-were99. Source deployment after132 was not verified in that inspection.
-The prior native Google drill at09a00ab5 is historical, not acceptance of this
-combined source. Refresh matching live evidence before release. #121/#123/#122/#126
+were99. Source deployment after PR132 was not verified in that inspection.
+The prior native Google drill at09a00ab5 remains historical; the separate
+October 27 integrated and approved-policy results above cover the unchanged
+Apps Script candidate. Refresh matching live evidence before release. #121/#123/#122/#126
 remain released. Therapists #105 merged to d38d85b1 and #107 advanced its deploy
 branch to a8a1afbc. Merges alone do not prove the latest live package flow.
 Never push merged branches or repeat releases. Source deployment remains an
@@ -27,20 +39,23 @@ Codex owns isolated OP-03 issue #124 implementation, branch
 session replay identity/payroll state and custom rates on whole-workbook recovery.
 Candidate extends the set and adds inventory, validation and recovery hold.
 See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
-real per-target evidence and approved-policy acceptance, combined native drill,
-release configuration, full independent coverage and separate final production
+real per-target evidence/policy, source-header readiness and a complete new v2
+set, release configuration, exact-head CI and separate final production
 approval remain open. October26 read-only evidence verifies the old nightly
 job's scheduling/latest success and private destination, not the candidate's
 runtime or alert delivery (PR comment6416538625).
 
-OP-03 now integrates base336c8ef9/PR132, retaining preferred house and all prior
-released features. Public assets/SW19 and server.js exactly match that base.
+OP-03 integrates preferred-house base 336c8ef9/PR132 and now the roster base
+b14db799/PR133, retaining both changes. Public assets/SW20, lib/users.js and
+server.js exactly match b14db799. Apps Script and test-support remain identical
+to dc09d5d3. The one local UTC integration run on Node 24.22.1 passes 1,787/fails 0/
+skips 38 of 1,825; exact-head CI and bounded review receipts are tracked in PR125.
 The new preferred-house writer rechecks hold under its lock before header or
 cell mutation. Eight new regressions cover write refusal, four-schema round-trip
 and old-width rejection. Full current header prefixes remain mandatory; require
 a fresh verified matching v2 set, never an automatic blank-tail migration.
-The generated unbound drill now includes preferred house and its hold refusal;
-its new hashes need new native evidence. Candidate09a00ab5 remains the historical
+The generated unbound drill includes preferred house and its hold refusal;
+the corresponding five native phases passed October 27. Candidate09a00ab5 remains the historical
 native-tested default-disabled manual-policy implementation. Its registry retains
 both package datasets; the package lock rechecks recovery hold after acquisition.
 A real catalog + approved request survives manifest-checked local restore and
@@ -64,7 +79,19 @@ Thirteen local runner tests are separate service-double evidence.
 Candidate 09a00ab5 CI40222990471 passed 1,723/0/38 (1,761 total), plus 32/0/0 browser
 tests; bounded Claude reviews and exact scope limits are recorded in PR125.
 Native execution times ranged 24.263–61.297s on the small fixture. No production
-volume, scheduled-job or successful manual-policy acceptance is claimed.
+volume or scheduled-job acceptance is claimed. Separate successful synthetic
+manual-policy acceptance was established October 27 as recorded above.
+
+Read-only readiness observations completedOctober 2717:24:47UTC identify one
+real header gap: removed-leads has18/21 headers in both source and that night's
+snapshot; S1:U1 lacks updatedAt/updatedBy/preferredHouse. Three other affected
+schema prefixes match. The proposed three-cell correction is unapplied and
+requires separately approved, freshly guarded execution. The new night's
+manifest still covers only10 legacy datasets, omits nine registered operational
+families and lacks v2 metadata. FinancialOps is present that night; the older
+October26 absent observation is historical. See
+docs/evidence/op03-release-readiness-2026-10-27.md for exact retained read scope,
+the formula-aware empty-tail observations and all remaining gates.
 
 Keep FinancialOps history/marker and both operation kinds. Never roll source
 back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and
@@ -78,6 +105,21 @@ workflow, logic, missing information/features, privacy, integrity/recovery,
 backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
+
+## Outpatient: roster and personal PINs (PR133 merged October26)
+
+The existing deployed-branch commit b14db799 changes login/assignee names to
+ורד / אורן / דנה; שירן, יעל and ירדן are retired for login and stale named
+sessions are refused. Historical assignees remain intact on edit. Vered uses
+APP_PIN, while Oren/Dana use their separately configured USER_PIN_OREN /
+USER_PIN_DANA; missing, malformed or overlapping personal PINs fail closed.
+No configured values were read, changed or retained in this integration.
+SW20 and all five runtime files are preserved exactly from the merged base.
+The inherited limitation remains: anyone retaining APP_PIN can still select
+Vered until the owner rotates APP_PIN and SESSION_SECRET. This observation
+does not authorize a rotation, re-release or new authentication policy.
+See CHANGELOG-user-roster-oren-dana.md. Live Node/version/configuration was
+not independently reverified in this draft-integration step.
 
 ## Outpatient: packages and pricing access (released #122 / #126; Oct 20, 2026)
 
@@ -125,7 +167,7 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
 
-## Outpatient: preferred house `preferredHouse` (בית מועדף) (Oct 26, 2026 — DRAFT, not released)
+## Outpatient: preferred house `preferredHouse` (בית מועדף) (PR132 merged Oct 26; original feature record)
 
 - Branch `feat/preferred-house` (base `claude/youthful-volta-laarnk` @ `8b68cd7`, live SW v18 → **v19**).
 - Schema (append-only): `CLIENTS_HEADERS` gains `preferredHouse` at position **38**; also appended

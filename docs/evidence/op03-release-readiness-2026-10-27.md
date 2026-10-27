@@ -112,51 +112,82 @@ have resumed and used them. Successful header correction closes only this
 schema-prefix gap, not the complete-backup, policy, runtime, alert or release
 gates. No production authorization is inferred from the synthetic success.
 
-## Current-head CI investigation
+## Current-head CI investigation and base reconciliation
 
-At the unchanged41678db0 checkpoint, PR125 is open/draft/unmerged. Test has an
-unfiltered `pull_request` trigger and a push trigger limited to the deployed
+### Initial observation
+
+At the unchanged `41678db0` checkpoint, PR125 was open/draft/unmerged. Test has
+an unfiltered `pull_request` trigger and a push trigger limited to the deployed
 branch. Validate Workflows filters workflow-file changes, which remain in the
 full PR diff. Neither CI workflow has manual dispatch or a draft exclusion.
-The separate deploy workflow has explicit dispatch only; the live healthcheck
-has schedule/dispatch. Their triggers do not match reopening a PR.
+The deploy workflow has explicit dispatch only; the live healthcheck has
+schedule/dispatch. Those triggers do not match reopening a PR.
 
-No exact-head runs/checks/statuses were observed. Both local and GitHub
-comparisons show the deployed base336c8ef9 as ancestor, ahead18/behind0, while
-the PR metadata reports dirty with no merge SHA. A fresh `git merge-tree
---write-tree` using those explicit base/head SHAs succeeds without conflicts and
-returns exactly the head tree `ffaaa99c6db3aafc18cce6f12ccb4fe3d3e1322a`.
-The authenticated PR UI nevertheless reports **Checks awaiting conflict
-resolution**, naming `CHANGELOG.md` and `EZONE-ECOSYSTEM-STATUS.md`; its required
-`test` check is waiting for a status. There is no observed approval or disabled
-workflow banner in that PR view. This is inconsistent evidence; the cause of
-the stale/conflicting mergeability signals is unproven. Do not infer an actual
-tree conflict or a particular
-credential class, reset a branch, fabricate an empty commit or rerun old-head
-jobs to claim current-head acceptance.
+No exact-head runs/checks/statuses were observed. PR metadata exposed base
+`336c8ef9`, and the corresponding local and GitHub comparisons showed that base
+as ancestor, ahead 18/behind 0. A fresh `git merge-tree --write-tree` using those
+explicit base/head SHAs succeeded without conflicts and returned exactly the
+head tree `ffaaa99c6db3aafc18cce6f12ccb4fe3d3e1322a`. The authenticated PR UI
+nevertheless reported **Checks awaiting conflict resolution**, naming
+`CHANGELOG.md` and `EZONE-ECOSYSTEM-STATUS.md`; the required `test` check was
+waiting for a status. No approval or disabled-workflow banner was observed in
+that PR view. The apparent inconsistency was preserved rather than treated as
+permission to reset the branch or fabricate an empty commit.
 
-Publish these substantive documentation observations to the existing branch
-first, then inspect the new head, mergeability and CI. If the contradictory
-state persists, a possible bounded recovery is one close-and-immediate-reopen
-of the same draft PR, with exact head/base/draft guards and a fresh conflict-free
-merge computation. This may request recomputation; it cannot guarantee a run
-while GitHub continues to consider the PR conflicting.
-GitHub documents `reopened` among the default PR trigger types in
-[Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
-Preserve the branch, title/body and all evidence; restoring the PR to open is the
-immediate priority if the second action fails. This is an event-recovery attempt,
-not a guaranteed fix. If no current-head run follows, do not loop; preserve the
-observed UI blocker and inspect any new explicit approval or workflow state.
-The actual attempt and resulting run IDs belong in
-the PR/plan, not as a prediction in this record.
+Claude's bounded static review in
+[comment6448750267](https://github.com/sandrabrayer/ezone-outpatient/pull/125#issuecomment-6448750267)
+supported the narrow header scope and cautioned that reopening cannot guarantee
+a run while GitHub considers the PR conflicting. It did not inspect the live
+workbook, execute tests or independently refresh GitHub's mergeability.
 
-Claude's bounded static review is recorded in
-[comment6448750267](https://github.com/sandrabrayer/ezone-outpatient/pull/125#issuecomment-6448750267).
-It supports the narrow header scope and cautions against assuming reopening
-will work while GitHub reports a conflict. The fresh identity/merge-tree and
-browser observations above were independently obtained by the implementation
-owner; Claude did not inspect the live workbook, run tests or mutate either
-Google or the repository in that review.
+### Newly exposed actual base
+
+The substantive readiness documentation was published first at `79b5f001`;
+CI still did not start. One state-only close-and-immediate-reopen of the same
+PR then completed. The PR returned to **open/draft/unmerged**, with head, branch,
+title and body unchanged. The after-read newly exposed base
+`b14db7991776f49fdcaee0a018dc0d67d371f8d2`, whereas the fresh before-read had
+reported `336c8ef9`. No base-branch retargeting parameter was sent. A separate
+read of the deployed branch's Git ref also returned `b14db799`.
+
+This is the existing [PR133](https://github.com/sandrabrayer/ezone-outpatient/pull/133)
+merge: GitHub records `merged_at` as **2026-10-26T17:33:05Z**, one day before the
+readiness inspection. Its parents are `336c8ef9` and roster feature `ce3ed339`.
+Thus the older PR-base response omitted a previously merged change. The exact
+branch-ref update history was not audited; do not claim the close/reopen created
+that merge or that a production deployment occurred during this inspection.
+
+A new read-only merge computation against the actual `b14db799` base reports
+exactly the two documentation conflicts named by the UI. The earlier clean
+computation was correct only for the older explicit pair. The conflict and
+missing-CI diagnosis is therefore reconciled without a speculative code change
+or any second close/reopen attempt.
+
+### Draft integration and validation
+
+Integrate the already merged PR133 base into the existing OP-03 draft. Preserve
+its Node authentication/roster logic, historical-assignee behavior, SW20 assets
+and updated tests exactly. Retain both changelog sections; move the new roster
+security note into current status rather than resurrecting superseded package
+sections labelled unreleased. This is a draft integration, not a production
+merge, a new CRM layout change or a repeat of PR133's release.
+
+The actual runtime files `lib/users.js`, `server.js`, `public/app.js`,
+`public/index.html` and `public/sw.js` match `b14db799` byte-for-byte. The complete
+`apps-script`, `test-support` and workflow paths, plus package/dependency files,
+remain identical to `dc09d5d3`. Code.gs remains 411,766 bytes with SHA256
+`bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014`.
+The frozen native-policy narrative, verifier identity and final-result record
+are unchanged. No Google phase, verifier rebuild or live-data write follows
+from this Node-only integration.
+
+One full local UTC integration run on **Node 24.22.1** passes **1,787**, fails **0**,
+and skips **38** of **1,825** tests. A fresh npm advisory read reports **zero
+vulnerabilities** against the unchanged lockfile. This is local evidence; the
+current-head remote test/browser result and bounded integration-review receipt
+belong to the actual published head in PR125 and the canonical plan. Historical
+`3297311c` results of 1,754 main tests plus 32 browser tests do not become the new
+head's CI results. No runtime PIN values, Railway settings or logs were accessed.
 
 ## Return point
 
@@ -164,5 +195,6 @@ Keep all nine completed Google executions and both frozen evidence checkpoints.
 The next steps are current-head CI, review of the exact header correction and
 real capture/target-policy plan, then the required production decision. The
 latest result and bounded review receipts are tracked in PR125 and the canonical
-ten-system plan. The separate CRM display owner is unchanged. No merge,
-deployment, new Google project, state reset or completed-phase rerun is authorized.
+ten-system plan. The separate CRM display owner is unchanged. No production
+merge or deployment, new Google project, state reset or completed-phase rerun
+is authorized.

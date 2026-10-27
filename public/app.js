@@ -5531,6 +5531,16 @@
       // Don't force backfill: optional when editing a historical lead that lacks a value.
       f.house_of_origin.required = !!lead.house_of_origin;
       if (f.assignedTo) {
+        // A lead assigned to someone who has since left keeps that historical name: offer it as a one-off option
+        // (textContent only) so editing the lead neither blanks nor forces a reassignment.
+        $$('option[data-legacy]', f.assignedTo).forEach(function (o) { o.remove(); });
+        var legacyAssignee = (lead.assignedTo || '').trim();
+        if (legacyAssignee && !Array.prototype.some.call(f.assignedTo.options, function (o) { return o.value === legacyAssignee; })) {
+          var legacyOpt = document.createElement('option');
+          legacyOpt.textContent = legacyAssignee;
+          legacyOpt.setAttribute('data-legacy', '1');
+          f.assignedTo.appendChild(legacyOpt);
+        }
         f.assignedTo.value = lead.assignedTo || '';
         // Same relax-on-edit rule: a historical lead without an assignee is not
         // blocked, but a new/already-assigned lead must keep one.
@@ -5540,7 +5550,10 @@
       f.created.value = today();
       f.house_of_origin.value = '';
       f.house_of_origin.required = true;
-      if (f.assignedTo) { f.assignedTo.value = ''; f.assignedTo.required = true; }
+      if (f.assignedTo) {
+        $$('option[data-legacy]', f.assignedTo).forEach(function (o) { o.remove(); });
+        f.assignedTo.value = ''; f.assignedTo.required = true;
+      }
     }
     updateLocationVisibility(f);
     m.hidden = false;

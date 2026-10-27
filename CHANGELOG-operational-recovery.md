@@ -1,5 +1,22 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Integrate the existing PR133 base — 2026-10-27 (draft only)
+
+A single state-only close/reopen refreshed PR125's previously exposed base 336
+to b14db799, the PR133 merge from October26. The head, title and body were
+preserved and the PR returned to open/draft/unmerged. The actual newer base
+has two documentation conflicts; resolve them while retaining both current
+OP-03 history and the merged roster/security change. Preserve PR133's Node
+runtime, public assets/SW20 and tests exactly. Do not repeat the already merged
+PR133 release or claim its live runtime/configuration was reverified here.
+
+Apps Script, test-support tooling, workflows and dependency files remain
+identical to dc09d5d3; frozen native evidence is unchanged. One full local UTC
+integration run on Node 24.22.1 passes 1,787/fails 0/skips 38 of 1,825 tests. Current
+remote CI and the bounded integration review are recorded against the actual
+published head in PR125; older results retain their original attribution.
+No live data/header correction, Google phase, deployment or production merge.
+
 ## Real-source readiness observation — 2026-10-27 (read-only)
 
 Record the current source and nightly-snapshot header comparison: three of the
@@ -94,7 +111,7 @@ production approval remain open.
 
 ## PR132 integration — 2026-10-26 (draft)
 
-- Integrate base336c8ef9 into PR125; preserve preferred-house business logic,
+- Integrate base 336c8ef9 into PR125; preserve preferred-house business logic,
   public assets/SW19, server and dependency ranges exactly as that base.
 - Add the post-lock recovery-hold check to `_setPreferredHouse` before
   `_ensureSheet`, so queued requests cannot extend headers or change cells.

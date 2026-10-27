@@ -2,11 +2,14 @@
 
 Issue: [#124](https://github.com/sandrabrayer/ezone-outpatient/issues/124).
 Integrated base: `claude/youthful-volta-laarnk` at
-`336c8ef9b19b40192f77d18ddd4a7bc18d2f8f11` (includes #132 preferred house and
-#122/#126/#127/#128/#129; base assets SW19). Node reported this SHA in the
-October26 read-only inspection; source99 was observed before132, and the source
-deployment after132 was not verified by that inspection. The current branch head is not
-itself proof of the live Node version; refresh live evidence before release.
+`b14db7991776f49fdcaee0a018dc0d67d371f8d2` (includes #133 roster/personal PINs,
+#132 preferred house and #122/#126/#127/#128/#129; base assets SW20).
+PR133 changes no Apps Script or workflow file; the integrated Apps Script and
+drill tooling remain byte-identical to dc09d5d3. The October 26 read-only Node
+inspection reported the earlier336c8ef9; source99 was observed before132, and
+the source deployment after132 was not verified by that inspection. Neither
+the current branch head nor the PR133 merge proves the live Node version or PIN
+configuration; refresh live evidence before release.
 This document describes a candidate, not a production release or completed
 production DR exercise. All five integrated native phases passed on October27
 at3297311c, followed by all four separate fixed-policy phases in the same test

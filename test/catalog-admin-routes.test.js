@@ -17,13 +17,14 @@ const path = require('node:path');
 const PORT = 31852;
 const APP_PIN = '424242';
 const ADMIN_PIN = '91372468';
+const OREN_PIN = '515151'; // throwaway fixture value for אורן's personal PIN
 const SESSION_SECRET = 'test-session-secret-catalog-admin-0123456789';
 const PROXY = 'fixture-proxy-key-with-at-least-32-characters';
 const ASSERT = 'catalog-admin-assertion-secret-0123456789-C';
 const CAT = 'package-catalog-secret-0123456789abcdef-A';
 const REQ = 'package-request-secret-0123456789abcdef-B';
 Object.assign(process.env, {
-  PORT: String(PORT), APP_PIN, SESSION_SECRET, OUTPATIENT_PROXY_SECRET: PROXY,
+  PORT: String(PORT), APP_PIN, USER_PIN_OREN: OREN_PIN, SESSION_SECRET, OUTPATIENT_PROXY_SECRET: PROXY,
   CATALOG_ADMIN_ASSERTION_SECRET: ASSERT,   // NO second code exists any more (owner decision 2026-10-19)
   SHEETS_URL: 'https://script.example.com/macros/s/AKfycbDUMMY/exec'
 });
@@ -84,7 +85,7 @@ const rpc = async (op, extra, cookie, headers) => request('POST', '/api/catalog-
 test('privilege: a session (any display name) is NOT admin; status reports admin:false until the admin login', async () => {
   await ready();
   assert.equal((await request('GET', '/api/catalog-admin/status')).status, 401);
-  for (const u of ['ורד', 'שירן', 'יעל']) {
+  for (const u of ['ורד', 'אורן', 'דנה']) {
     const s = await request('GET', '/api/catalog-admin/status', null, { Cookie: sess(u) });
     assert.deepEqual(s.json, { ok: true, configured: true, eligible: u === 'ורד', admin: false });
     const r = await rpc('catalog', {}, sess(u));
@@ -99,7 +100,7 @@ test('privilege: a session (any display name) is NOT admin; status reports admin
 
 test('login: needs a session; ONLY Vered\'s signed-in name mints the short-lived scoped HttpOnly cookie; no second code is asked or checked', async () => {
   assert.equal((await request('POST', '/api/catalog-admin/login', {}, freshIp())).status, 401, 'no session');
-  for (const u of ['שירן', 'יעל']) {
+  for (const u of ['אורן', 'דנה']) {
     const no = await request('POST', '/api/catalog-admin/login', {}, { Cookie: sess(u), ...freshIp() });
     assert.equal(no.status, 403, u + ' is not Vered'); assert.equal(no.json.error, 'vered_only');
     assert.equal(no.headers['set-cookie'], undefined, 'nothing minted');
@@ -118,14 +119,14 @@ test('login: needs a session; ONLY Vered\'s signed-in name mints the short-lived
   assert.equal(st.json.admin, true);
   admins['ורד'] = sess() + '; ' + tok;
   // a colleague replaying Vered's admin cookie on their own session is still not admin (bound to the base session + user)
-  const replay = await request('GET', '/api/catalog-admin/status', null, { Cookie: sess('שירן') + '; ' + tok });
+  const replay = await request('GET', '/api/catalog-admin/status', null, { Cookie: sess('אורן') + '; ' + tok });
   assert.equal(replay.json.admin, false);
 });
 
 test('the admin cookie expires with its 15 minutes of life but Vered simply re-opens: login is repeatable, no counters, no lock-out', async () => {
   for (let i = 0; i < 40; i++) assert.equal((await loginWith('ורד')).status, 200, 'attempt ' + i);
   // a colleague hammering the endpoint cannot lock Vered out: there is nothing to guess and no failure counter
-  for (let i = 0; i < 40; i++) assert.equal((await request('POST', '/api/catalog-admin/login', { pin: 'guess' + i }, { Cookie: sess('יעל'), 'x-forwarded-for': '10.9.9.9' })).status, 403);
+  for (let i = 0; i < 40; i++) assert.equal((await request('POST', '/api/catalog-admin/login', { pin: 'guess' + i }, { Cookie: sess('דנה'), 'x-forwarded-for': '10.9.9.9' })).status, 403);
   assert.equal((await request('POST', '/api/catalog-admin/login', {}, { Cookie: sess('ורד'), 'x-forwarded-for': '10.9.9.9' })).status, 200);
   admins['ורד'] = undefined;
 });
@@ -229,7 +230,7 @@ test('ordinary data / write routes refuse name-less, unknown-name, retired-name 
 test('PIN-stage session is short-lived (10 minutes) and the step-2 upgrade yields a fresh 7-day named session', async () => {
   const stage = await request('POST', '/api/verify-pin', { pin: APP_PIN }, freshIp());
   assert.match(stage.headers['set-cookie'][0], /Max-Age=600/);
-  const named = await request('POST', '/api/verify-pin', { pin: APP_PIN, user: 'שירן' }, { Cookie: stage.headers['set-cookie'][0].split(';')[0], ...freshIp() });
+  const named = await request('POST', '/api/verify-pin', { pin: OREN_PIN, user: 'אורן' }, { Cookie: stage.headers['set-cookie'][0].split(';')[0], ...freshIp() });
   assert.match(named.headers['set-cookie'][0], /Max-Age=604800/);
   const ck = named.headers['set-cookie'][0].split(';')[0];
   assert.notEqual((await request('GET', '/api/sheets?action=getSettings', null, { Cookie: ck })).status, 401, 'the gate passes (the stub upstream answers whatever)');
@@ -257,8 +258,8 @@ test('re-login / account switch revokes the previous catalog privilege server-si
   assert.equal((await request('GET', '/api/catalog-admin/status', null, { Cookie: oldPair })).json.admin, true);
   assert.equal((await rpc('catalog', {}, oldPair)).status, 200);
 
-  // the same browser switches account: it presents the old pair, signs in as שירן
-  const v2 = await request('POST', '/api/verify-pin', { pin: APP_PIN, user: 'שירן' }, { Cookie: oldPair, ...freshIp() });
+  // the same browser switches account: it presents the old pair, signs in as אורן
+  const v2 = await request('POST', '/api/verify-pin', { pin: OREN_PIN, user: 'אורן' }, { Cookie: oldPair, ...freshIp() });
   assert.equal(v2.status, 200);
   assert.ok(v2.headers['set-cookie'].some((c) => /^ezone_catalog_admin=;/.test(c) && /Max-Age=0/.test(c)), 'the admin cookie is cleared');
   const base2 = v2.headers['set-cookie'][0].split(';')[0];

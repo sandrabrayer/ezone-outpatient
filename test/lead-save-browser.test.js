@@ -33,9 +33,11 @@ async function fixture(t, initial) {
   const sb = sandbox(initial);
   const captured = [], errors = [];
   const oldFetch = global.fetch;
-  const keys = ['APP_PIN', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
+  const keys = ['APP_PIN', 'USER_PIN_OREN', 'USER_PIN_DANA', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
   const oldEnv = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   process.env.APP_PIN = '424242';
+  process.env.USER_PIN_OREN = '515151'; // personal PINs (2026-10-26) — throwaway fixture values
+  process.env.USER_PIN_DANA = '626262';
   process.env.SESSION_SECRET = 'fixture-session-secret-not-a-real-credential';
   process.env.SHEETS_URL = 'https://sheets.invalid/fixture';
   delete process.env.DASHBOARD_SHEETS_URL;
@@ -76,7 +78,7 @@ async function fixture(t, initial) {
     await page.goto(origin, { waitUntil: 'networkidle' });
     await page.waitForSelector('#pinScreen:not([hidden])');
     await page.locator('#pinNames .user-btn').getByText(user, { exact: true }).click();
-    await page.fill('#pinInput', '424242');
+    await page.fill('#pinInput', { 'אורן': '515151', 'דנה': '626262' }[user] || '424242');
     await page.click('#pinSubmit');
     await page.waitForSelector('#app:not([hidden])');
     await page.click('.tab[data-view="leads"]');
@@ -105,7 +107,7 @@ async function addLead(page) {
   await page.selectOption('#leadForm [name="location"]', B.location);
   await page.selectOption('#leadForm [name="house_of_origin"]', B.house_of_origin);
   await page.fill('#leadForm [name="created"]', B.created);
-  await page.selectOption('#leadForm [name="assignedTo"]', 'יעל');
+  await page.selectOption('#leadForm [name="assignedTo"]', 'דנה');
   await submit(page, '#leadFormSubmit');
   await card(page, B.name).waitFor();
 }
@@ -119,7 +121,7 @@ async function editLead(page, name) {
 test('browser: another user adds a lead, an older tab edits, both remain and the tab refreshes', skipOpt, async (t) => {
   const fx = await fixture(t, [A]); if (!fx) return;
   const first = await fx.login('ורד');
-  const second = await fx.login('יעל');
+  const second = await fx.login('דנה');
   await addLead(second);
   const added = fx.sb.rows('Leads').find((l) => l.name === B.name);
   const result = await editLead(first, A.name);
@@ -137,7 +139,7 @@ test('browser: another user adds a lead, an older tab edits, both remain and the
 test('browser: a removed lead stays absent when another user saves an old snapshot', skipOpt, async (t) => {
   const fx = await fixture(t, [A, B]); if (!fx) return;
   const first = await fx.login('ורד');
-  const second = await fx.login('יעל');
+  const second = await fx.login('דנה');
   await card(second, A.name).getByRole('button', { name: 'הסר', exact: true }).click();
   await submit(second, '#removeLeadForm button[type="submit"]', 'removeLead');
   await card(second, A.name).waitFor({ state: 'detached' });
@@ -153,7 +155,7 @@ test('browser: a removed lead stays absent when another user saves an old snapsh
 test('browser: conversion preserves an unseen lead and an old tab cannot resurrect the converted one', skipOpt, async (t) => {
   const fx = await fixture(t, [{ ...A, stage: 'תוכנית טיפול' }]); if (!fx) return;
   const first = await fx.login('ורד');
-  const second = await fx.login('יעל');
+  const second = await fx.login('דנה');
   await addLead(second);
   await card(first, A.name).getByRole('button', { name: '← הפוך למטופל פעיל', exact: true }).click();
   await first.locator('#activateForm [data-host="activateSessions"] input[type="number"]').first().fill('1');

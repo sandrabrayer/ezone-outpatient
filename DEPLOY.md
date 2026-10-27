@@ -114,7 +114,7 @@ Railway), `PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET` (each ≥ 32 chars,
 all pairwise distinct and distinct from `OUTPATIENT_PROXY_SECRET`). The two
 `PACKAGE_*` secrets are also set on the **therapists** service only. Missing or
 duplicate secrets fail closed. To revoke the retired user's shared-PIN knowledge,
-rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Full
+rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Personal PINs (2026-10-26): `USER_PIN_OREN` and `USER_PIN_DANA` are separate Railway variables (4–6 digits, distinct from `APP_PIN` and each other); rotate one by changing only its variable. Full
 detail and precise click-paths: `docs/package-release-checklist.md` (single checklist);
 background: `docs/package-catalog.md`. These are PREREQUISITES of enablement, not optional.
 

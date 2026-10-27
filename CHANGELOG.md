@@ -6,6 +6,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Integrate merged PR133 (`b14db799`) into this draft, preserving its roster,
+  personal-PIN authentication, historical assignees, SW20 and updated tests.
+  Resolve the two documentation conflicts without restoring obsolete release
+  labels. Apps Script, drill tooling and all retained native evidence are
+  unchanged. Record the newly exposed actual base and current integration gate.
 - Record a read-only release-readiness check of the existing source and latest
   nightly snapshots. Three affected header prefixes match; removed-leads still
   lacks its final three current headers. Retain the exact correction proposal
@@ -62,6 +67,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Nightly backup now includes session/rate/configuration and operational history,
   a complete inventory, and guarded recovery verification. Unknown tabs remain
   explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
+
+### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
+- Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).
+- אורן and דנה each sign in with their OWN PIN from Railway variables `USER_PIN_OREN` / `USER_PIN_DANA` (4–6 digits, distinct from `APP_PIN` and each other, fail-closed, names-only logging); ורד keeps `APP_PIN`. `APP_PIN` no longer signs in as אורן / דנה.
+- משוייך ל dropdown updated; editing an old lead assigned to a departed person keeps that name. SW v19 → v20. See `CHANGELOG-user-roster-oren-dana.md`.
 
 ### Preferred house (בית מועדף) on clients + createLead handoff (draft)
 - New append-only column `preferredHouse` at the END of `CLIENTS_HEADERS` (position 38), mirrored at the end of
