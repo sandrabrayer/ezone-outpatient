@@ -1,0 +1,15 @@
+{
+  "sourceCodeSHA256": "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+  "helperSHA256": "15cb194da60d42f9036faf4ecb61f74970b390abe4ef8430f84393d28b36c565",
+  "setupDefinitionSHA256": "5ecdd49e1146e1e811bde90e07f14e27b4319a38742eff2ee2e151504373cb8f",
+  "verifierDefinitionSHA256": "05bba7412842f176dcfcc512a87c2408c054bfa8359d6a599de3c27cdc5472d9",
+  "fileSHA256": "8ae5d5f1eb1e291db879071cca8ea0f82e677193a9c07f479877fed405abe268",
+  "bytes": 88752,
+  "policySHA256": "dc0421c1037802c784b14af9fe345def8bc731d299666c9dd3c58f8574422565",
+  "evidenceCommit": "9ed06ddf3e947f4700f51908194d64fab18e66ed",
+  "evidenceRecordSHA256": "4998ad6bf53a73f4e488ab3d9891bf2a8bbfed1ccbfa73252c3214bf61469fea",
+  "restoredStateSHA256": "ff4c153f75059181d25bee0aaea4b3597280a21facbe5d242c8927711faece94",
+  "externalProofSHA256": "69f8202cfad6ca593d1373067af295d221cfcdf261d7dc6306b9e728b5587e19",
+  "productionCertified": false,
+  "nativeRun": false
+}
