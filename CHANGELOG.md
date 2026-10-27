@@ -6,6 +6,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Record a read-only release-readiness check of the existing source and latest
+  nightly snapshots. Three affected header prefixes match; removed-leads still
+  lacks its final three current headers. Retain the exact correction proposal
+  and the legacy backup-coverage gap without changing production. Refresh the
+  main runbook to recognize the completed native acceptance.
 - Complete a separate synthetic approved-policy acceptance extension for the
   already completed test project: retained native evidence, isolated namespaces,
   immutable setup and fixed-policy verifier modules, and measured two-pass finish.

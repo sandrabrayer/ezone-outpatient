@@ -1,5 +1,18 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Real-source readiness observation — 2026-10-27 (read-only)
+
+Record the current source and nightly-snapshot header comparison: three of the
+four PR132-affected prefixes match; the removed-leads archive retains18 of21
+headers and lacks updatedAt/updatedBy/preferredHouse. Formula-aware reads found
+its proposed three-column tail empty. Prepare a guarded three-header correction
+proposal without changing production. Today's nightly manifest still covers
+the old ten datasets, not the complete v2 recovery contract. Correct the main
+runbook's stale native-acceptance status and retain a bounded current-head CI
+event-recovery plan. See the
+[readiness evidence and exact proposal](docs/evidence/op03-release-readiness-2026-10-27.md).
+No implementation, test fixture, production value, workflow or deployment changed.
+
 ## Separate synthetic policy acceptance — 2026-10-27 (all four native phases passed)
 
 Complete an extension in the existing isolated test project, preserving the

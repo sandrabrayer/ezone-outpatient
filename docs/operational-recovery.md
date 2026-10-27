@@ -8,8 +8,14 @@ October26 read-only inspection; source99 was observed before132, and the source
 deployment after132 was not verified by that inspection. The current branch head is not
 itself proof of the live Node version; refresh live evidence before release.
 This document describes a candidate, not a production release or completed
-production DR exercise. The isolated synthetic Google drill passed on October26 at09a00ab5, before
-this integration; the combined source/harness has no native acceptance yet.
+production DR exercise. All five integrated native phases passed on October27
+at3297311c, followed by all four separate fixed-policy phases in the same test
+project. See the [integrated evidence](evidence/op03-google-drill-2026-10-27.md)
+and [policy result](evidence/op03-manual-tabs-2026-10-27-result.md). Preserve all
+nine completed executions; do not repeat their bootstrap or phases. The
+[read-only release-readiness observation](evidence/op03-release-readiness-2026-10-27.md)
+records the remaining removed-leads header gap and the incomplete legacy
+nightly set. Earlier dated checkpoints below remain historical evidence.
 
 ## Why the eight-table set was insufficient
 
@@ -107,6 +113,16 @@ optional tables, so its date alone is not acceptance. If a fresh complete set
 cannot be demonstrated, retain the recovery-readiness gap explicitly. Legacy
 nightly sets and native safety copies remain inspection/containment evidence.
 
+On October27, direct header reads of the existing source and that day's
+snapshots found Clients38/38, Leads19/19 and Clients-removed41/41 matching the
+candidate. The removed-leads archive matched only the first18 of21 columns;
+updatedAt, updatedBy and preferredHouse were absent in both source and snapshot.
+The source's S1:U999 tail was empty in a formula-aware read. The exact narrow
+three-header correction is proposed in the readiness record, not performed;
+fresh identity, blank-tail and coordinated-write checks must precede any
+separately approved production configuration change. This observation does not
+certify the other schemas, row contents or a complete version-2 recovery set.
+
 The queued `setPreferredHouse` writer now checks the recovery hold immediately
 after acquiring ScriptLock, before `_ensureSheet` or any cell/stamp write.
 Its financial-operation guard and normal released behavior remain unchanged.
@@ -194,8 +210,12 @@ and approved request. Thirteen tests execute its exact generated helpers with
 service doubles, including identity/order/hash refusals and cache-failure hold.
 All five phases ran successfully in native Google on October 26 using
 candidate 09a00ab5. See [exact evidence and timing](evidence/op03-google-drill-2026-10-26.md).
-The manual phase proves preservation/refusal with a blank pin, not the
-successful manual-policy path or that path's repeated-proof duration.
+That earlier manual phase proves preservation/refusal with a blank pin, not the
+successful manual-policy path or that path's repeated-proof duration. The
+October27 integrated five-phase run and the separate four-phase policy run now
+supply their own native evidence. The policy result records two successful
+finish proofs, late native comparison, actual timing and hold-last removal,
+with a private synthetic pin only. Production policy approval remains absent.
 
 The new real-source tests perform snapshot -> manifest validation -> isolated
 restore -> event retry/correction, covering credit idempotency, payroll stamps,
@@ -267,10 +287,12 @@ A [default-disabled policy verifier](manual-tab-recovery-policy.md) is now
 implemented. Its approval pin is empty, so unknown tabs still block operational
 certification. Each eventual exception needs a contemporaneous evidence packet,
 the exact source/backup/day/target, recomputed grid/manifest/metadata hashes and
-a separate reviewed code pin. No real policy or evidence packet exists yet.
+a separate reviewed code pin. No approved production policy or complete
+contemporaneous real recovery-capture packet exists yet.
 Do not bypass checks by deleting tabs/manifest rows or clearing the hold manually.
 Recheck schema/content/formulas/native properties and the exact reviewed target
-during the private Google drill. Old observations cannot certify new snapshots.
+for the real recovery capture. Do not repeat the completed synthetic drill.
+Old observations cannot certify new snapshots.
 
 After approval: merge to the deployed branch, wait for matching healthy Node,
 then dispatch Deploy Apps Script with expected_commit = approved full merge SHA.
