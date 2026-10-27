@@ -136,5 +136,9 @@ See [operational recovery](operational-recovery.md) for release/rollback limits.
 The [separate synthetic policy-drill tooling](google-manual-policy-drill.md)
 prepares the missing approved-policy success and double-proof acceptance in the
 same completed project. Its new modules/state/artifacts are separate; the
-original five phases must not be rerun. Tooling preparation is not native
-acceptance or approval of the real archive.
+original five phases must not be rerun. Its native preparation, capture and
+restore passed once on October27; see the
+[frozen policy evidence](evidence/op03-manual-tabs-2026-10-27.md). The target hold
+remains set until a separately built and reviewed fixed verifier completes its
+actual two-pass finish. That final native acceptance and real-archive approval
+remain separate gates.

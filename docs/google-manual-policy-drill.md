@@ -1,11 +1,13 @@
 # Isolated native manual-policy drill tooling
 
-Status: **new local tooling; not run in Google**. The original five native phases
-at candidate `3297311c` have their own retained evidence. This extension neither
-repeats them nor certifies production. The Advanced Google Sheets service has
-**not been activated** by this tooling. Its service-dialog terms require the
-owner's separate action-time approval before activation. Do not edit the manifest
-as a way around that approval.
+Status: **native prepare/capture/restore passed once on 2026-10-27; the fixed
+verifier remains pending**. See the
+[frozen native evidence](evidence/op03-manual-tabs-2026-10-27.md).
+The original five native phases at candidate `3297311c` have separate retained
+evidence and were not repeated. Sandra explicitly approved the service-dialog
+terms; Google Sheets API v4 was added in the existing project, and the manifest
+was read back with the same sole Sheets scope, runtime and timezone. Activation
+approval does not authorize production work or a new project.
 
 Use the existing standalone test project only. Keep its original `Code.gs`,
 `OP03_DRILL_STATE`, fixture properties, workbooks and `_DrillReport` unchanged.

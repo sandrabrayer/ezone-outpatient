@@ -10,8 +10,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   already completed test project: retained native evidence, isolated namespaces,
   immutable setup and fixed-policy verifier modules, and measured two-pass finish.
   Read-only Advanced Sheets observations cover cell formatting and dimension
-  visibility; activation is pending the owner's Google API terms consent.
-  This tooling has not run in Google and does not enable the production pin.
+  visibility. After the owner's explicit Google API terms consent, activate
+  Sheets v4 in the existing project without changing its Sheets-only scope.
+  Native prepare/capture/restore each pass once (9.226/123.653/106.596s), with
+  exact packets, three owner-only permission checkpoints and committed evidence
+  binding. The target hold remains set for the separate fixed verifier, which
+  is still pending. The production pin stays blank.
 - Harden the acceptance tooling after bounded static review: require a generated
   evidence-binding block in the exact committed record, three chronological
   owner-only permission observations with stable identities and creation times,

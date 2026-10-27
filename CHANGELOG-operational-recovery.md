@@ -1,6 +1,6 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
-## Separate synthetic policy acceptance tooling — 2026-10-27 (not run natively)
+## Separate synthetic policy acceptance — 2026-10-27 (three native setup phases passed)
 
 Prepare an extension in the existing isolated test project, preserving the
 completed five-phase code, state, reports and workbooks. Its own namespaces and
@@ -32,12 +32,19 @@ already cleared, so diagnostics record its actual value. The retained fixture
 has 13 sheets and 26,748 allocated cells,
 so the 100,000-cell bound is unchanged.
 
-The same existing Sheets OAuth scope suffices. Google Sheets API v4 activation
-in the isolated project is pending Sandra's action-time consent to the terms
-shown by Google's Add a service dialog. The service has not been enabled, no
-new module has run in Google, and no new policy artifact or pin has been
-presented as native evidence. Independent review and test outcomes belong to
-this new tooling separately from the five passing native phases below.
+After Sandra's explicit action-time approval of the displayed terms, Google
+Sheets API v4 was activated in the same project. The saved manifest retained
+the sole existing Sheets scope, V8 and timezone. Original code/state and all
+five earlier results stayed unchanged. The new saved setup matched its complete
+78,920-byte local build before execution. Prepare, capture and restore each
+passed once, with Google durations 9.226/123.653/106.596s. Three chronological
+Drive observations confirmed owner-only files. Full native comparisons matched
+the original source, fresh native copy and restored target. The exact packets,
+states, external proof and generated binding are retained in the
+[frozen evidence record](docs/evidence/op03-manual-tabs-2026-10-27.md).
+The target hold remains set. Publication and independent review precede the
+separate fixed verifier; its native run and both finish proofs remain pending.
+This evidence does not approve the production pin or real archive recovery.
 
 Validation after review hardening: 25 dedicated service-double regressions
 passed. The full UTC suite on Node 24.22.1 passed 1,779 tests, failed 0 and skipped

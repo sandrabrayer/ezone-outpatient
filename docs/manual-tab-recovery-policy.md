@@ -136,10 +136,13 @@ No new Drive scopes, deployment, trigger, email or production write is introduce
 The [separate synthetic native acceptance procedure](google-manual-policy-drill.md)
 is prepared for the completed October27 test project. It requires actual
 Advanced Sheets read access for native formatting and dimension evidence under
-the existing Sheets scope. Service activation is pending consent to Google's
-displayed API terms. The extension has not run natively; its tests and generated
-modules do not approve any real recovery policy or change the blank production
-pin.
+the existing Sheets scope. Sandra approved Google's displayed API terms and
+Sheets v4 was activated without changing that scope. Native prepare, capture
+and restore each passed once; exact packets, three owner-only permission
+checkpoints and the retained hold are recorded in the
+[frozen evidence](evidence/op03-manual-tabs-2026-10-27.md). The separate fixed
+verifier and its two successful finish proofs remain pending. Synthetic results
+do not approve a real recovery policy or change the blank production pin.
 
 For this synthetic extension, the builder also requires a unique generated
 binding block in the committed evidence record and three chronological Drive

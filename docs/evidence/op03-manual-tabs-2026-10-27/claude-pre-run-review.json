@@ -1,0 +1,9 @@
+{
+  "id": 6446555065,
+  "url": "https://github.com/sandrabrayer/ezone-outpatient/pull/125#issuecomment-6446555065",
+  "head": "dc09d5d36faade0b995a85d9d16219ab57b5867f",
+  "scope": "Static read of docs/google-manual-policy-drill.md only",
+  "result": "No new blocking sequencing issue",
+  "testsRun": false,
+  "nativeRun": false
+}
