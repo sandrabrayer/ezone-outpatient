@@ -1,8 +1,8 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
-## Separate synthetic policy acceptance — 2026-10-27 (three native setup phases passed)
+## Separate synthetic policy acceptance — 2026-10-27 (all four native phases passed)
 
-Prepare an extension in the existing isolated test project, preserving the
+Complete an extension in the existing isolated test project, preserving the
 completed five-phase code, state, reports and workbooks. Its own namespaces and
 fixed project/baseline identity guard new backup, native-copy and empty-target
 artifacts. Original source access is read-only. A separate verifier binds a
@@ -42,9 +42,19 @@ Drive observations confirmed owner-only files. Full native comparisons matched
 the original source, fresh native copy and restored target. The exact packets,
 states, external proof and generated binding are retained in the
 [frozen evidence record](docs/evidence/op03-manual-tabs-2026-10-27.md).
-The target hold remains set. Publication and independent review precede the
-separate fixed verifier; its native run and both finish proofs remain pending.
-This evidence does not approve the production pin or real archive recovery.
+That record remains frozen at its pre-verifier checkpoint. After publication
+and independent review, the separately built fixed verifier passed once in
+104.427s. A changed policy was refused; both valid finish proofs passed. Their
+core durations were 10,296ms and 6,064ms, with a further 29,128ms native comparison
+inside the second proof before it returned. The valid script lock was held for
+46,104ms; the full finish took 46,347ms. The fixture hold was removed last, and
+the final state is `verified`, `running:false`, with no failure flag. Nine Google
+executions are Completed: the original five and the new four, with no repeated
+phase. Supplementary owner-only observations before and after final verification,
+the final packet/state/report and timing limits are retained in the separate
+[result addendum](docs/evidence/op03-manual-tabs-2026-10-27-result.md).
+This evidence does not approve the production pin, real archive recovery or
+production-scale timing.
 
 Validation after review hardening: 25 dedicated service-double regressions
 passed. The full UTC suite on Node 24.22.1 passed 1,779 tests, failed 0 and skipped
@@ -64,8 +74,10 @@ synthetic workbooks were owner-only before capture and after completion.
 Google durations were 35.615/55.475/39.284/45.727/81.587s. Retain
 [the report, raw evidence and exact return point](docs/evidence/op03-google-drill-2026-10-27.md).
 No old phase or project was repeated/reset, no production data/code changed and
-no merge/deploy occurred. Approved manual-policy native success and its double
-proof, real recovery evidence and separate production approval remain open.
+no merge/deploy occurred. At this five-phase checkpoint, approved manual-policy
+native success and its double proof were still open; the separate synthetic
+extension above later completed them. Real recovery evidence and separate
+production approval remain open.
 
 ## PR132 integration — 2026-10-26 (draft)
 

@@ -62,9 +62,9 @@ Supplying a manual policy for a set with no unknown tabs is an error.
 
 ## Evidence is an operator attestation
 
-No real evidence packet or pin has been produced. Oct20 observations are
-historical, not an attestation for a later or earlier snapshot. Ordinary nightly
-sets lack the contemporaneous evidence below and remain inspection-only when
+No production recovery evidence packet or pin has been approved. Oct20
+observations are historical, not an attestation for a later or earlier snapshot.
+Ordinary nightly sets lack the contemporaneous evidence below and remain inspection-only when
 they contain unknown tabs. A coordinated capture is a separate operator task;
 do not invoke the mail-triggering nightly job merely to obtain evidence.
 
@@ -120,29 +120,39 @@ If this late proof fails, the journal/source markers may already be persisted.
 They are retained for investigation; the hold prevents nightly work and a fully
 verified retry rewrites them. This deliberate ordering keeps proof closest to
 hold release. It does not promise transactional rollback of properties. Measure
-both full preflights and the lock's elapsed time in the first native policy drill:
+both full preflights and the lock's elapsed time for the actual recovery scale:
 the second pass rereads the complete backup/target and may reach Google quotas.
+The completed synthetic measurement below establishes only this fixture's timing.
 Successful inventory persistence includes the manual tabs, so deleting either
 later blocks a nightly capture until a reviewed retirement/migration exists.
 
-Tests inject synthetic pins only in a local VM and exercise real source functions
+Local tests inject synthetic pins in a VM and exercise real source functions
 with Google service doubles. They are neither native Google evidence nor approval
-of Sheet1/Copy of Clients. The unbound generated Google runner retains the blank
-pin and continues testing refusal. Remaining gates: real evidence packet, isolated
-Google restore, independent implementation and per-policy review, configuration /
-trigger / timezone / alert evidence, and Sandra's separate production approval.
+of production Sheet1/Copy of Clients. The unbound generated Google runner retains
+the blank pin and continues testing refusal. Separate native synthetic evidence
+is recorded below. Remaining gates include the real recovery evidence packet and
+exact target, independent review of that production policy, a fresh complete v2
+set with current headers, configuration / trigger / timezone / alert evidence,
+and Sandra's separate production approval.
 No new Drive scopes, deployment, trigger, email or production write is introduced.
 
 The [separate synthetic native acceptance procedure](google-manual-policy-drill.md)
-is prepared for the completed October27 test project. It requires actual
-Advanced Sheets read access for native formatting and dimension evidence under
-the existing Sheets scope. Sandra approved Google's displayed API terms and
-Sheets v4 was activated without changing that scope. Native prepare, capture
-and restore each passed once; exact packets, three owner-only permission
-checkpoints and the retained hold are recorded in the
+completed all four phases once in the existing October27 test project. Sandra
+approved Google's displayed API terms; Sheets v4 supplied native formatting and
+dimension evidence without changing the existing Sheets scope. Exact prepare,
+capture and restore packets, three owner-only permission checkpoints and the
+pre-verifier hold remain recorded in the immutable
 [frozen evidence](evidence/op03-manual-tabs-2026-10-27.md). The separate fixed
-verifier and its two successful finish proofs remain pending. Synthetic results
-do not approve a real recovery policy or change the blank production pin.
+verifier then refused a changed policy and passed both real finish proofs. Their
+core durations were 10,296ms and 6,064ms; the second proof included another
+29,128ms of native comparison before returning. The valid script lock was held
+for 46,104ms and full finish took 46,347ms. The hold was removed last, and the
+final state is `verified`, `running:false`, without a failure flag. See the
+separate [result addendum](evidence/op03-manual-tabs-2026-10-27-result.md), including
+supplementary owner-only observations before and after verification. These
+measurements cover 13 synthetic sheets and 26,748 allocated cells; they do not
+establish production-scale timing. Synthetic results do not approve a real
+recovery policy or change the blank production pin.
 
 For this synthetic extension, the builder also requires a unique generated
 binding block in the committed evidence record and three chronological Drive

@@ -1,13 +1,21 @@
 # Isolated native manual-policy drill tooling
 
-Status: **native prepare/capture/restore passed once on 2026-10-27; the fixed
-verifier remains pending**. See the
-[frozen native evidence](evidence/op03-manual-tabs-2026-10-27.md).
+Status: **native prepare/capture/restore/verify each passed once on 2026-10-27**.
+The final state is `verified`, `running:false`, with no failure flag; the fixture
+hold is absent after the real two-pass finish and late native comparison. See the
+[frozen pre-verifier evidence](evidence/op03-manual-tabs-2026-10-27.md) and the
+separate [result addendum](evidence/op03-manual-tabs-2026-10-27-result.md).
 The original five native phases at candidate `3297311c` have separate retained
 evidence and were not repeated. Sandra explicitly approved the service-dialog
 terms; Google Sheets API v4 was added in the existing project, and the manifest
 was read back with the same sole Sheets scope, runtime and timezone. Activation
 approval does not authorize production work or a new project.
+
+Google execution durations were 9.226/123.653/106.596/104.427s in phase order.
+The existing project now retains nine Completed executions, including the five
+original phases. The procedure below documents the completed acceptance path;
+do not run any phase again, reset its state or create a replacement project.
+This fixture's success does not certify production data, policy or capacity.
 
 Use the existing standalone test project only. Keep its original `Code.gs`,
 `OP03_DRILL_STATE`, fixture properties, workbooks and `_DrillReport` unchanged.
@@ -25,7 +33,7 @@ current candidate and original builder. Every native phase checks that raw text
 and its SHA256 again, and verifies all five original report rows.
 
 The only OAuth scope remains `https://www.googleapis.com/auth/spreadsheets`.
-After the required owner approval, the service dependency would be:
+After the recorded owner approval, the saved service dependency is:
 
 ```json
 {

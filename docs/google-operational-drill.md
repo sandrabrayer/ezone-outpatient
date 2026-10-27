@@ -6,9 +6,11 @@ See [current-candidate evidence and exact return point](evidence/op03-google-dri
 The existing test project prepared on October26 was reused after normal Google
 authorization; no replacement project, state reset or repeated phase was needed.
 The PR132 integration's nonempty preferred house and held-writer refusal passed.
-Preserve its completed Code.gs, state, report and three workbooks. Any approved
-manual-policy extension belongs in this same project with separate namespaces;
-do not rerun these five phases to obtain that different evidence.
+Preserve its completed Code.gs, state, report and three workbooks. The separate
+manual-policy extension also completed all four native phases once in this same
+project; see the [result addendum](evidence/op03-manual-tabs-2026-10-27-result.md).
+All nine executions are Completed. Preserve both namespaces and their evidence;
+do not rerun any phase.
 
 The [October26 evidence](evidence/op03-google-drill-2026-10-26.md) remains attributable
 only to historical candidate `09a00ab5e9d057c3d3c1913f93415fb949233860`.
@@ -20,9 +22,10 @@ replacement for the scheduled backup/configuration evidence.
 
 The instructions in this section and the original five-phase procedure below
 describe the initial bootstrap. They have already been completed for the current
-project and must not be repeated. Continue from the recorded final state using
-the [separate policy-drill procedure](google-manual-policy-drill.md); do not create
-another project or replace the retained source, report or target.
+project and must not be repeated. The
+[separate policy-drill procedure](google-manual-policy-drill.md) is also complete
+for this fixture. Retain the recorded final states; do not create another project
+or replace the retained source, reports or targets.
 
 Use a separately authorized, new **standalone Apps Script test project**, owned
 by the configuration owner. No application-bound project, existing deployment,
@@ -105,7 +108,8 @@ must remain safely below the runtime execution limit; split it if actual timing
 approaches that limit, preserving all evidence.
 The October27 execution-list durations were 35.615, 55.475, 39.284, 45.727 and
 81.587 seconds in phase order; this small fixture does not establish
-production-scale timing or the approved manual-policy branch's timing.
+production-scale timing. The approved-policy branch's separate synthetic timing
+is recorded in the policy result addendum.
 Execution logs contain phase status and the
 three synthetic workbook IDs. All successful results explicitly retain
 `productionCertified:false`. Retain execution timestamps, durations, workbook
@@ -134,11 +138,13 @@ evidence, review of any findings, and Sandra's separate production approval.
 See [operational recovery](operational-recovery.md) for release/rollback limits.
 
 The [separate synthetic policy-drill tooling](google-manual-policy-drill.md)
-prepares the missing approved-policy success and double-proof acceptance in the
-same completed project. Its new modules/state/artifacts are separate; the
-original five phases must not be rerun. Its native preparation, capture and
-restore passed once on October27; see the
-[frozen policy evidence](evidence/op03-manual-tabs-2026-10-27.md). The target hold
-remains set until a separately built and reviewed fixed verifier completes its
-actual two-pass finish. That final native acceptance and real-archive approval
-remain separate gates.
+completed approved-policy success and double-proof acceptance in the same
+project. Its modules/state/artifacts remain separate from the original five.
+Native preparation, capture, restore and final verification each passed once on
+October27, in 9.226/123.653/106.596/104.427s. The
+[frozen policy evidence](evidence/op03-manual-tabs-2026-10-27.md) remains unchanged;
+the [result addendum](evidence/op03-manual-tabs-2026-10-27-result.md) records the
+changed-policy refusal, both successful finish proofs, late native comparison
+and removal of the fixture hold last. Final state is verified and idle, without
+a failure flag. Synthetic acceptance leaves real-archive evidence, a reviewed
+production policy and the separate release gates open.

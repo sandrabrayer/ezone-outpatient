@@ -6,16 +6,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
-- Prepare a separate synthetic approved-policy acceptance extension for the
+- Complete a separate synthetic approved-policy acceptance extension for the
   already completed test project: retained native evidence, isolated namespaces,
   immutable setup and fixed-policy verifier modules, and measured two-pass finish.
   Read-only Advanced Sheets observations cover cell formatting and dimension
   visibility. After the owner's explicit Google API terms consent, activate
   Sheets v4 in the existing project without changing its Sheets-only scope.
-  Native prepare/capture/restore each pass once (9.226/123.653/106.596s), with
+  Native prepare/capture/restore/verify each pass once
+  (9.226/123.653/106.596/104.427s), with
   exact packets, three owner-only permission checkpoints and committed evidence
-  binding. The target hold remains set for the separate fixed verifier, which
-  is still pending. The production pin stays blank.
+  binding. The separate fixed verifier refuses a changed policy, passes both
+  finish proofs and the late native comparison, then removes the fixture hold
+  last. Final state is verified and idle; the original five results are unchanged.
+  See the [result addendum](docs/evidence/op03-manual-tabs-2026-10-27-result.md).
+  The production pin stays blank.
 - Harden the acceptance tooling after bounded static review: require a generated
   evidence-binding block in the exact committed record, three chronological
   owner-only permission observations with stable identities and creation times,
