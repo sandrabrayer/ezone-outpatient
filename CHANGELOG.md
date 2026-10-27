@@ -12,6 +12,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   Read-only Advanced Sheets observations cover cell formatting and dimension
   visibility; activation is pending the owner's Google API terms consent.
   This tooling has not run in Google and does not enable the production pin.
+- Harden the acceptance tooling after bounded static review: require a generated
+  evidence-binding block in the exact committed record, three chronological
+  owner-only permission observations with stable identities and creation times,
+  and a cooperative four-minute phase budget checked before hold deletion.
+  Preserve diagnostics on deadline refusal; a single in-flight Google call or
+  hard execution termination remains outside the cooperative guard.
 - Record all five native Google phases passing on integrated candidate 3297311c
   on October27, using the already prepared project. Verify owner-only files,
   preferred-house preservation, held-writer refusal and exact retries; preserve

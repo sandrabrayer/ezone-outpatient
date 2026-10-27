@@ -70,10 +70,16 @@ expected hashes. A duplicate, failed or running phase refuses. There is no reset
 or recovery-marker clearing function. A timeout can retain `running:true`; retain
 the artifact and investigate rather than retrying.
 
-After preparation, inspect source/backup/target sharing through the Drive
-connector before capture. After capture, verify native-copy sharing before
-restore. Require exact names/IDs and owner-only access. ScriptLock cannot prevent
-direct editor writes: keep the synthetic files under a coordinated write pause.
+Retain three permission checkpoints through the Drive connector: the original
+source plus new backup and target after prepare and before capture; those three
+plus the native copy after capture and before restore; and all four after restore
+and before constructing the verifier. Save the exact observed metadata and
+permission-record bytes at each checkpoint, including IDs, owner identities and
+creation times. The builder rejects missing checkpoints or inconsistent
+chronology. ScriptLock cannot prevent direct editor writes: keep the synthetic
+files under a coordinated write pause. These connector observations and that
+write pause remain operator responsibilities, not actions performed by the
+Sheets-only script.
 
 The native copy is created during the capture interval. The source inventories
 must match, and that interval must enclose the captured metadata timestamp.
@@ -103,7 +109,10 @@ observations, sheet visibility and frozen dimensions. The Advanced Sheets
 `includeGridData:true`, no field mask, and bounded full allocated ranges for every
 sheet, covering CellData formatting and row/column metadata. SpreadsheetApp is
 flushed before crossing into that separate read API. The total allocated-cell
-budget is 100,000 per workbook; exceeding it fails closed.
+budget is 100,000 per workbook; exceeding it fails closed. The retained original
+fixture has 13 sheets and 26,748 allocated cells: `Sheet1` is 1,000 × 26 and
+`Copy of Clients` is 2 × 2. See the actual allocated dimensions in
+`docs/evidence/op03-google-drill-2026-10-27.json`.
 
 The shared canonicalizer sorts object keys only. It preserves actual values,
 types, array/source order and all nonempty cell/dimension metadata. For comparing
@@ -113,9 +122,14 @@ entries represent native defaults inside the explicit allocated rectangle.
 Nonempty metadata is not discarded or coerced. The complete raw observations are
 also retained, so the comparison representation remains auditable.
 
-This bounded fixture requires formulas, validations, merges and protections to
-be absent; it reads and checks that absence. Unsupported nonempty features fail
-closed and require separate fixture work. Full native equality on this synthetic
+The explicit fixture preconditions reject non-GRID sheets, formulas, nonempty
+data validations, merges and protections. The script reads those properties and
+checks their absence. Nonempty features in that list require separate fixture
+work. Other native fields, including formatting, conditional formats, charts,
+named ranges, row/column metadata and hidden dimensions, are retained and compared
+as returned; retaining a field does not establish general restoration support.
+A copy whose native representation differs can fail comparison even when it
+passes the explicit absence checks. Full native equality on this synthetic
 fixture is not certification that all possible production formatting, formulas,
 protections or Google-native objects can be restored. No real patient rows belong
 in Git.
@@ -141,34 +155,83 @@ evidenceRecord.text              exact committed UTF-8 contents
 evidenceRecord.commit            exact 40-hex evidence commit
 ```
 
-The external proof has `version:1`,
-`schema:"op03-external-permission-proof-v1"`, an identified `operator`,
+The external proof has `version:2`,
+`schema:"op03-external-permission-proof-v2"`, an identified `operator`,
 `directWritesPaused:true`, millisecond UTC `captureStartedAt`/`captureEndedAt`,
-`targetCreatedAt`, `permissionRecordText`, its `permissionRecordSHA256`, and
-`permissions` entries for source/backup/target/nativeCopy with exact `id` and
-`ownerOnly:true`.
+`targetCreatedAt`, and exactly three entries under `permissionRecords`:
 
-The retained permission record is JSON with `version:1`,
-`schema:"op03-drive-permissions-v1"`, a millisecond UTC `observedAt`, and exactly
-four `files`. Each has its `role`, `id`, observed `createdTime`, `shared:false`,
-and the observed `permissions` array. That array must contain exactly one
-`{type:"user",role:"owner"}` entry, retaining either its observed `emailAddress`
-or a SHA256 of the trimmed lowercase address under `emailAddressSHA256`. All
-four owners must match. These are retained connector observations, not booleans
-invented from a successful copy. Target creation must match the actual record
-and precede the initial-empty observation. The operator's write-pause attestation
-and the authenticity of supplied observations still require review.
+```json
+{
+  "beforeCapture": { "text": "EXACT_RETAINED_JSON", "sha256": "SHA256_OF_THOSE_UTF8_BYTES" },
+  "beforeRestore": { "text": "EXACT_RETAINED_JSON", "sha256": "SHA256_OF_THOSE_UTF8_BYTES" },
+  "beforeVerifier": { "text": "EXACT_RETAINED_JSON", "sha256": "SHA256_OF_THOSE_UTF8_BYTES" }
+}
+```
+
+Each retained record is JSON with `version:2`,
+`schema:"op03-drive-permissions-v2"`, its matching `checkpoint`, a millisecond UTC
+`observedAt`, and `files`. `beforeCapture` contains exactly source/backup/target;
+the two later records contain those three plus nativeCopy. Each file has its
+`role`, `id`, observed `createdTime`, `shared:false`, and observed `permissions`
+array. That array must contain exactly one `{type:"user",role:"owner"}` entry,
+retaining either its observed `emailAddress` or a SHA256 of the trimmed lowercase
+address under `emailAddressSHA256`. All owners must match. A role's ID, owner and
+creation time must remain identical across observations.
+
+The v2 prepare/capture/restore packets retain `phaseStartedAt` and their actual
+observation timestamps. The builder requires the following chronology:
+
+| Observation | Earliest permitted time | Latest permitted time |
+| --- | --- | --- |
+| `beforeCapture` | Prepare initial-empty observation | Capture phase start |
+| `beforeRestore` | End of capture | Restore phase start |
+| `beforeVerifier` | Restore target observation | Local verifier build; also checked against the actual native verifier start |
+| Backup/target creation | Prepare phase start | Prepare initial-empty observation |
+| Native-copy creation | Start of capture interval | End of capture interval |
+
+Every file must already exist at its observation time. The original source must
+predate preparation, and `targetCreatedAt` must equal the observed target creation
+time. The capture interval must enclose the metadata capture time. All times are
+validated exact ISO UTC strings, not approximate dates. These are retained
+connector observations, not booleans inferred from a successful copy. Consistent
+recorded timestamps do not independently prove an operator's observations or
+write pause; those claims still require review.
 
 The builder verifies packet bytes and provenance, recomputes every full native
 comparison, source/manual grid and manifest/metadata binding, checks capture
-times, and hashes the exact permission record. It reads the evidence path from
-the supplied local commit with `git show` and requires byte-for-byte equality.
+times, and hashes all three exact permission records. It also requires one unique
+machine-readable binding block in the committed Markdown, derived from these
+actual inputs. The block binds both states, project/workbook identities, tags,
+code definitions, retained packets, inventory/manifest/metadata/manual-tab
+digests, external proof, permission records and checkpoint times. An arbitrary
+committed narrative without this exact block is insufficient. The builder reads
+the evidence path from the supplied local commit with `git show` and requires
+byte-for-byte equality.
 The dedicated unit suite injects an explicitly local commit-reader double; the
 CLI always uses actual Git. Publishing that commit and independently reviewing
 its evidence remain separate workflow gates: the runtime does not discover Git
 history or prove that an operator observed what they recorded.
 
-Only then build:
+Construct the evidence and verifier in this order:
+
+1. After the real phases and three permission checkpoints, assemble the
+   configuration from exact retained inputs. Leave `evidenceRecord` out initially.
+2. Generate the binding block with the same builder and those actual inputs:
+
+   ```sh
+   node test-support/build-google-manual-policy-drill.cjs binding CONFIG_JSON NEW_BINDING_MD
+   ```
+
+3. Include the complete generated block exactly once in the dated evidence
+   Markdown, alongside the reviewed narrative. Preserve its marker lines,
+   formatting and JSON bytes. The binding command runs the same input checks as
+   verifier construction; it has no skip-verification option.
+4. Commit that exact evidence file. Publish the reviewed evidence commit through
+   the separate authorized workflow before using the final verifier. Then add
+   `evidenceRecord.path`, its exact `text`, and the exact local commit to the same
+   configuration. No other inputs may change without regenerating the block and
+   committing the updated evidence.
+5. Build the final verifier:
 
 ```sh
 node test-support/build-google-manual-policy-drill.cjs verify CONFIG_JSON OUTPUT_GS
@@ -179,7 +242,10 @@ The builder calls the actual candidate `_integrityManualPolicyRows` and
 generated `OP03PolicyVerify.gs` contains the fixed policy, evidence and pin.
 No cell, property or caller argument can enable a different policy. Production
 and original-harness approval constants remain blank. Record the subsequent
-pin/verifier commit separately to avoid a circular evidence hash.
+pin/verifier commit separately. The evidence binding deliberately excludes the
+Markdown's own hash, evidence commit and final policy pin, avoiding circular
+dependence. The final verifier separately fixes the exact Markdown hash, evidence
+commit and pin after the evidence exists.
 
 ## Real proof timing and failure behavior
 
@@ -202,9 +268,27 @@ Late proof failures preserve the hold and any already persisted markers. Failure
 packets retain timings and event order where evidence storage is available. A
 later reporting/storage failure after a successful finish may occur after hold
 release; read the actual state/properties and preserve both facts. Never infer
-rollback or clear markers to retry. Compare actual total execution and lock times
-against the native runtime budget; local-double times establish no Google timing
-or production-scale capacity.
+rollback or clear markers to retry.
+
+Each phase has a fixed **240,000 ms (four-minute) cooperative elapsed-time
+budget**, leaving reporting headroom below Google's documented
+[six-minute Apps Script execution limit](https://developers.google.com/apps-script/guides/services/quotas).
+Checks surround expensive inventory, copy, snapshot and proof work, check before
+returning the late native proof, and check immediately in the namespaced hold
+deletion path. A deletion event is recorded only after that last check passes.
+Elapsed-time failure retains the hold if it has not already been released;
+already-created workbook IDs are saved before post-copy checks. Failed/running
+states, partial work and diagnostics are retained without reset or blind retry.
+
+The budget is cooperative, not a guaranteed four-minute maximum: a single Google
+call, an untouched production helper call or a hard platform timeout cannot be
+interrupted by this wrapper. A hard timeout may leave `running:true`. Failure
+state, diagnostic-packet writes and lock cleanup are deliberately best-effort and
+unguarded so that elapsed-time checks do not prevent reporting during the
+remaining headroom. A call after successful hold deletion can still fail, so
+diagnostics retain the actual hold value rather than claiming rollback. Compare
+actual native execution and lock times against the budget; local-double timings
+establish no Google timing or production-scale capacity.
 
 Native runs, activation approval, real fixed evidence, independent review and
 production release remain distinct gates. This tooling completes none of them by

@@ -16,7 +16,13 @@ Do not relabel or alter the older report or its separate project/workbooks.
 This is acceptance tooling for PR125, not a deployment, a live restore, or a
 replacement for the scheduled backup/configuration evidence.
 
-## Isolation and access prerequisite
+## Original bootstrap prerequisite (already completed)
+
+The instructions in this section and the original five-phase procedure below
+describe the initial bootstrap. They have already been completed for the current
+project and must not be repeated. Continue from the recorded final state using
+the [separate policy-drill procedure](google-manual-policy-drill.md); do not create
+another project or replace the retained source, report or target.
 
 Use a separately authorized, new **standalone Apps Script test project**, owned
 by the configuration owner. No application-bound project, existing deployment,

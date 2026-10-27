@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSetup, buildVerifier: realBuildVerifier, helperClosure, sha, typedFingerprint } = require('../test-support/build-google-manual-policy-drill.cjs');
+const { buildSetup, buildEvidenceBinding, buildVerifier: realBuildVerifier, helperClosure, sha, typedFingerprint } = require('../test-support/build-google-manual-policy-drill.cjs');
 const { world, projectId } = require('../test-support/google-manual-policy-drill-sandbox.cjs');
 // Only the local tests supply a commit reader double. CLI/native binding uses
 // git show and compares exact committed UTF-8 bytes before emitting a verifier.
@@ -16,8 +16,14 @@ function setup() {
 }
 function restored() {
   const f = setup();
-  f.r.ctx.prepareManualPolicyDrill(); f.r.ctx.captureManualPolicyDrill(); f.r.ctx.restoreManualPolicyDrill();
+  f.r.ctx.prepareManualPolicyDrill(); f.r.observePermissions('beforeCapture');
+  f.r.ctx.captureManualPolicyDrill(); f.r.observePermissions('beforeRestore');
+  f.r.ctx.restoreManualPolicyDrill(); f.r.observePermissions('beforeVerifier');
   return f;
+}
+function changePermission(options, checkpoint, change) {
+  const entry = options.externalProof.permissionRecords[checkpoint], record = JSON.parse(entry.text);
+  change(record); entry.text = JSON.stringify(record); entry.sha256 = sha(entry.text);
 }
 
 test('unbound tooling refuses before native access and its helper closure keeps production approval blank', () => {
@@ -107,16 +113,15 @@ test('a changed source cell-format property is observed and cannot be inferred f
 test('builder refuses incomplete packets, missing native observations and unverified permissions', () => {
   const { r, baselineStateRaw } = restored(), options = r.verifierOptions(baselineStateRaw);
   assert.throws(() => buildVerifier({ ...options, packets: { ...options.packets, capture: options.packets.capture + ' ' } }), /packet bytes/);
-  const missing = JSON.parse(JSON.stringify(options)); missing.externalProof.permissions.nativeCopy.ownerOnly = false;
+  const missing = JSON.parse(JSON.stringify(options)); changePermission(missing, 'beforeVerifier', record => { record.files[3].shared = true; });
   assert.throws(() => buildVerifier(missing), /owner-only/);
   const missingRecord = JSON.parse(JSON.stringify(options)); missingRecord.evidenceRecord.commit = '';
   assert.throws(() => buildVerifier(missingRecord), /Committed exact evidence/);
   const changedWindow = JSON.parse(JSON.stringify(options)); changedWindow.externalProof.captureStartedAt = '2099-01-01T00:00:00.000Z';
   assert.throws(() => buildVerifier(changedWindow), /capture window/);
   assert.throws(() => buildVerifier(options, { committedEvidenceReader: () => 'different committed bytes' }), /git commit/);
-  const metadata = JSON.parse(JSON.stringify(options)), record = JSON.parse(metadata.externalProof.permissionRecordText);
-  record.files[0].permissions.push({ type: 'anyone', role: 'reader' });
-  metadata.externalProof.permissionRecordText = JSON.stringify(record); metadata.externalProof.permissionRecordSHA256 = sha(metadata.externalProof.permissionRecordText);
+  const metadata = JSON.parse(JSON.stringify(options));
+  changePermission(metadata, 'beforeVerifier', record => record.files[0].permissions.push({ type: 'anyone', role: 'reader' }));
   assert.throws(() => buildVerifier(metadata), /owner-only metadata/);
 });
 test('builder recomputes native/manual packet bindings and metadata timing instead of trusting cached claims', () => {
@@ -191,5 +196,108 @@ test('late formatting-only drift is refused by added native proof before the rea
   const failure = JSON.parse(r.packets()['failure-verify']);
   const proofs = failure.timings.filter(timing => timing.kind === 'proof' && timing.attempt === 'valid-finish');
   assert.equal(proofs.length, 2); assert.equal(proofs[1].coreOK, true); assert.equal(proofs[1].ok, false);
+  assert.ok(failure.events.every(event => event.event !== 'delete:OUTPATIENT_RECOVERY_HOLD'));
+});
+
+test('committed prose must contain one exact generated binding to the actual packets and operator proof', () => {
+  const { r, baselineStateRaw } = restored(), original = r.verifierOptions(baselineStateRaw), block = buildEvidenceBinding(original).output;
+  assert.ok(original.evidenceRecord.text.includes(block));
+  assert.equal(buildVerifier(original).approval.evidenceBinding.policySetup.stateSHA256, sha(original.setupStateRaw));
+  for (const text of ['# Arbitrary committed prose\n', block + '\n' + block,
+    original.evidenceRecord.text.replace('"manifestSHA256": "', '"manifestSHA256": "tampered-')]) {
+    const options = JSON.parse(JSON.stringify(original)); options.evidenceRecord.text = text;
+    assert.throws(() => buildVerifier(options), /exactly one|binding differs/);
+  }
+  const changedOperator = JSON.parse(JSON.stringify(original)); changedOperator.externalProof.operator += ' changed';
+  assert.throws(() => buildVerifier(changedOperator), /binding differs/);
+  changedOperator.evidenceRecord.text = '# Reviewed narrative\n\n' + buildEvidenceBinding(changedOperator).output;
+  assert.ok(buildVerifier(changedOperator).pin);
+});
+test('three permission checkpoints must actually straddle capture and restore', () => {
+  const { r, baselineStateRaw } = restored(), original = r.verifierOptions(baselineStateRaw);
+  const capture = JSON.parse(original.packets.capture), restore = JSON.parse(original.packets.restore);
+  const missing = JSON.parse(JSON.stringify(original)); delete missing.externalProof.permissionRecords.beforeRestore;
+  assert.throws(() => buildVerifier(missing), /Three exact permission/);
+  for (const [checkpoint, observedAt] of [
+    ['beforeCapture', new Date(Date.parse(capture.phaseStartedAt) + 1).toISOString()],
+    ['beforeRestore', new Date(Date.parse(restore.phaseStartedAt) + 1).toISOString()],
+    ['beforeVerifier', new Date(Date.parse(restore.observedAt) - 1).toISOString()]
+  ]) {
+    const options = JSON.parse(JSON.stringify(original)); changePermission(options, checkpoint, record => { record.observedAt = observedAt; });
+    assert.throws(() => buildVerifier(options), /checkpoint chronology/);
+  }
+});
+test('permission owner and creation identities cannot change between checkpoints or place the copy outside capture', () => {
+  const { r, baselineStateRaw } = restored(), original = r.verifierOptions(baselineStateRaw), capture = JSON.parse(original.packets.capture);
+  const owner = JSON.parse(JSON.stringify(original));
+  changePermission(owner, 'beforeVerifier', record => { record.files[0].permissions[0].emailAddress = 'another@example.invalid'; });
+  assert.throws(() => buildVerifier(owner), /identity or creation time changed/);
+  const created = JSON.parse(JSON.stringify(original));
+  changePermission(created, 'beforeVerifier', record => { record.files[1].createdTime = new Date(Date.parse(record.files[1].createdTime) + 1).toISOString(); });
+  assert.throws(() => buildVerifier(created), /identity or creation time changed/);
+  const copy = JSON.parse(JSON.stringify(original));
+  for (const checkpoint of ['beforeRestore', 'beforeVerifier']) changePermission(copy, checkpoint, record => {
+    record.files.find(file => file.role === 'nativeCopy').createdTime = new Date(Date.parse(capture.captureStartedAt) - 1).toISOString();
+  });
+  assert.throws(() => buildVerifier(copy), /Native-copy creation time/);
+});
+test('native verifier refuses a final permission observation later than its own start without changing state', () => {
+  const { r, baselineStateRaw } = restored(), options = r.verifierOptions(baselineStateRaw), compiled = buildVerifier(options);
+  r.load(compiled.output);
+  const raw = r.props.OP03_POLICY_DRILL_STATE;
+  r.installClock(Date.parse(compiled.approval.permissionCheckpoints.beforeVerifier) - 1);
+  assert.throws(() => r.ctx.verifyManualPolicyDrill(), /later than verification start/);
+  assert.equal(r.props.OP03_POLICY_DRILL_STATE, raw);
+});
+test('elapsed native-inventory call is stopped on return and preserves a failed checkpoint without a copy', () => {
+  const { r, baselineStateRaw } = setup(); r.ctx.prepareManualPolicyDrill(); r.installClock();
+  r.faults.nativeResponse = ({ id }) => { if (id === r.policyState().ids.source) r.clock.advance(240001); };
+  assert.throws(() => r.ctx.captureManualPolicyDrill(), /elapsed-time budget exceeded/);
+  assert.equal(r.policyState().failed, true); assert.equal(r.policyState().running, false); assert.equal(r.policyState().ids.nativeCopy, undefined);
+  assert.equal(r.props.OP03_DRILL_STATE, baselineStateRaw);
+  const failure = JSON.parse(r.packets()['failure-capture']);
+  assert.ok(failure.events.some(event => event.checkpoint === 'native-inventory-after' && event.elapsedMs >= 240000));
+  assert.throws(() => r.ctx.captureManualPolicyDrill(), /phase order/);
+});
+test('elapsed native copy retains its new artifact ID and aborts before snapshot publication', () => {
+  const { r } = setup(); r.ctx.prepareManualPolicyDrill(); r.installClock();
+  const source = r.books[r.policyState().ids.source], copy = source.copy;
+  source.copy = title => { const result = copy(title); r.clock.advance(240001); return result; };
+  assert.throws(() => r.ctx.captureManualPolicyDrill(), /elapsed-time budget exceeded/);
+  const state = r.policyState();
+  assert.ok(state.ids.nativeCopy && r.books[state.ids.nativeCopy]); assert.equal(state.failed, true); assert.equal(state.phase, 'prepared');
+  assert.equal(r.books[state.ids.backup].getSheetByName('outpatient-manifest-' + state.day), null);
+});
+test('elapsed work between the real finish proofs retains hold and already-written markers', () => {
+  const { r, baselineStateRaw } = restored(), compiled = buildVerifier(r.verifierOptions(baselineStateRaw)); r.load(compiled.output); r.installClock();
+  const getCache = r.ctx.CacheService.getScriptCache;
+  r.ctx.CacheService.getScriptCache = () => {
+    const cache = getCache(); return { ...cache, remove(key) { cache.remove(key); if (key === 'OP03_POLICY_CACHE_therapistRates_v1') r.clock.advance(240001); } };
+  };
+  assert.throws(() => r.ctx.verifyManualPolicyDrill(), /elapsed-time budget exceeded/);
+  assert.equal(r.props.OP03_POLICY_FIXTURE_OUTPATIENT_RECOVERY_HOLD, '1');
+  assert.ok(JSON.parse(r.props.OP03_POLICY_FIXTURE_INTEGRITY_REQUIRED_SOURCES).includes('Sheet1'));
+  assert.equal(r.policyState().failed, true);
+  assert.ok(JSON.parse(r.packets()['failure-verify']).events.every(event => event.event !== 'delete:OUTPATIENT_RECOVERY_HOLD'));
+});
+test('budget expiry after the second proof still stops immediately before hold deletion', () => {
+  const { r, baselineStateRaw } = restored(), compiled = buildVerifier(r.verifierOptions(baselineStateRaw)); r.load(compiled.output); r.installClock();
+  let cacheRemoved = false, armed = false, clockCalls = 0;
+  const getCache = r.ctx.CacheService.getScriptCache;
+  r.ctx.CacheService.getScriptCache = () => {
+    const cache = getCache(); return { ...cache, remove(key) { cache.remove(key); if (key === 'OP03_POLICY_CACHE_therapistRates_v1') cacheRemoved = true; } };
+  };
+  const report = r.books[JSON.parse(baselineStateRaw).ids.backup].getSheetByName('_DrillReport'), getRange = report.getDataRange;
+  report.getDataRange = () => {
+    const range = getRange(); return { ...range, getValues() {
+      const values = range.getValues();
+      if (cacheRemoved && !armed) { armed = true; r.clock.onNow = () => { if (++clockCalls === 2) r.clock.advance(240001); }; }
+      return values;
+    } };
+  };
+  assert.throws(() => r.ctx.verifyManualPolicyDrill(), /budget exceeded at before-hold-delete/);
+  assert.equal(r.props.OP03_POLICY_FIXTURE_OUTPATIENT_RECOVERY_HOLD, '1');
+  const failure = JSON.parse(r.packets()['failure-verify']);
+  assert.equal(failure.timings.filter(timing => timing.kind === 'proof' && timing.attempt === 'valid-finish' && timing.ok).length, 2);
   assert.ok(failure.events.every(event => event.event !== 'delete:OUTPATIENT_RECOVERY_HOLD'));
 });

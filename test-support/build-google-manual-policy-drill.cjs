@@ -18,7 +18,7 @@ const entries = ['_integrityCaptureData', '_integrityWriteSnapshot', '_integrity
 
 function requireValue(ok, message) { if (!ok) throw Error(message); }
 function hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
-function instant(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)); }
+function instant(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function typedFingerprint(rows) {
   return sha(JSON.stringify(rows.map(row => row.map(value => value instanceof Date ? ['date', value.toISOString()] : [typeof value, value]))));
 }
@@ -93,8 +93,9 @@ function buildSetup({ scriptId = PLACEHOLDER, baselineStateRaw } = {}) {
 function readCommittedEvidence(commit, recordPath) {
   return execFileSync('git', ['show', commit + ':' + recordPath], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
-function buildVerifier({ scriptId, baselineStateRaw, setupStateRaw, packets, externalProof, evidenceRecord } = {},
-  { committedEvidenceReader = readCommittedEvidence } = {}) {
+const BINDING_START = '<!-- OP03_POLICY_BINDING_V1_BEGIN -->';
+const BINDING_END = '<!-- OP03_POLICY_BINDING_V1_END -->';
+function validateVerifierInputs({ scriptId, baselineStateRaw, setupStateRaw, packets, externalProof } = {}) {
   const setup = buildSetup({ scriptId, baselineStateRaw }), h = helperClosure(), p = parts();
   requireValue(scriptId !== PLACEHOLDER && typeof setupStateRaw === 'string', 'Bound restored setup state is required');
   const state = JSON.parse(setupStateRaw), config = setup.config;
@@ -107,6 +108,12 @@ function buildVerifier({ scriptId, baselineStateRaw, setupStateRaw, packets, ext
   requireValue(packets && ['prepare', 'capture', 'restore'].every(name => typeof packets[name] === 'string' &&
     sha(packets[name]) === state.packetHashes[name]), 'Exact retained packet bytes are required');
   const prepared = JSON.parse(packets.prepare), capture = JSON.parse(packets.capture), restored = JSON.parse(packets.restore);
+  requireValue(prepared.schema === 'op03-policy-prepare-v2' && capture.schema === 'op03-policy-capture-v2' && restored.schema === 'op03-policy-restore-v2',
+    'Versioned phase chronology is required');
+  const phaseTimes = [prepared.phaseStartedAt, prepared.observedAt, capture.phaseStartedAt, capture.captureStartedAt,
+    capture.captureEndedAt, restored.phaseStartedAt, restored.observedAt];
+  requireValue(phaseTimes.every(instant) && phaseTimes.every((value, i) => !i || Date.parse(phaseTimes[i - 1]) <= Date.parse(value)),
+    'Native phase chronology is inconsistent');
   for (const [inventory, id] of [[prepared.target, state.ids.target], [capture.before, state.ids.source],
     [capture.after, state.ids.source], [capture.nativeCopy, state.ids.nativeCopy], [restored.target, state.ids.target]]) {
     requireValue(inventory && inventory.spreadsheetId === id && inventory.native && inventory.native.spreadsheetId === id,
@@ -160,39 +167,97 @@ function buildVerifier({ scriptId, baselineStateRaw, setupStateRaw, packets, ext
   }
   requireValue(capture.before.schema === 'op03-native-inventory-v2' && capture.before.native && capture.after.native &&
     capture.nativeCopy.native && restored.target.native, 'Complete saved native Sheets API observations are required');
-  requireValue(externalProof && externalProof.version === 1 && externalProof.schema === 'op03-external-permission-proof-v1' &&
+  requireValue(externalProof && externalProof.version === 2 && externalProof.schema === 'op03-external-permission-proof-v2' &&
     typeof externalProof.operator === 'string' && externalProof.operator.trim(), 'External native proof record is required');
   requireValue(externalProof.directWritesPaused === true && instant(externalProof.captureStartedAt) && instant(externalProof.captureEndedAt) &&
     Date.parse(externalProof.captureStartedAt) <= Date.parse(capture.captureStartedAt) &&
     Date.parse(externalProof.captureEndedAt) >= Date.parse(capture.captureEndedAt), 'Coordinated capture window is incomplete');
-  requireValue(hash(externalProof.permissionRecordSHA256) && externalProof.permissions &&
-    ['source', 'backup', 'target', 'nativeCopy'].every(role => externalProof.permissions[role] &&
-      externalProof.permissions[role].id === state.ids[role] && externalProof.permissions[role].ownerOnly === true),
-    'Exact owner-only permission observations are required');
-  requireValue(typeof externalProof.permissionRecordText === 'string' && sha(externalProof.permissionRecordText) === externalProof.permissionRecordSHA256,
-    'Exact retained permission record bytes are required');
-  const permissions = JSON.parse(externalProof.permissionRecordText);
-  requireValue(permissions.version === 1 && permissions.schema === 'op03-drive-permissions-v1' && instant(permissions.observedAt) &&
-    Array.isArray(permissions.files) && permissions.files.length === 4, 'Invalid permission evidence schema');
-  const ownerKeys = [];
-  for (const role of ['source', 'backup', 'target', 'nativeCopy']) {
-    const matches = permissions.files.filter(file => file.role === role), file = matches[0];
-    requireValue(matches.length === 1 && file.id === state.ids[role] && file.shared === false &&
-      Array.isArray(file.permissions) && file.permissions.length === 1 && file.permissions[0].type === 'user' &&
-      file.permissions[0].role === 'owner' && instant(file.createdTime), 'Permission record is not exact owner-only metadata');
-    const owner = file.permissions[0];
-    const ownerKey = typeof owner.emailAddress === 'string' && owner.emailAddress.trim() ? sha(owner.emailAddress.trim().toLowerCase()) : owner.emailAddressSHA256;
-    requireValue(hash(ownerKey), 'Permission record must retain or hash the observed owner identity'); ownerKeys.push(ownerKey);
-    if (role === 'target') requireValue(externalProof.targetCreatedAt === file.createdTime, 'Target creation time differs from Drive metadata');
+  const checkpoints = ['beforeCapture', 'beforeRestore', 'beforeVerifier'];
+  requireValue(externalProof.permissionRecords && JSON.stringify(Object.keys(externalProof.permissionRecords).sort()) === JSON.stringify(checkpoints.slice().sort()),
+    'Three exact permission checkpoints are required');
+  const permissionCheckpoints = {}, identities = {}, ownerKeys = [];
+  for (const checkpoint of checkpoints) {
+    const record = externalProof.permissionRecords[checkpoint];
+    requireValue(record && typeof record.text === 'string' && hash(record.sha256) && sha(record.text) === record.sha256,
+      'Exact retained permission record bytes are required');
+    const permissions = JSON.parse(record.text), roles = checkpoint === 'beforeCapture' ? ['source', 'backup', 'target'] : ['source', 'backup', 'target', 'nativeCopy'];
+    requireValue(permissions.version === 2 && permissions.schema === 'op03-drive-permissions-v2' && permissions.checkpoint === checkpoint &&
+      instant(permissions.observedAt) && Array.isArray(permissions.files) && permissions.files.length === roles.length, 'Invalid permission evidence schema');
+    permissionCheckpoints[checkpoint] = permissions.observedAt;
+    for (const role of roles) {
+      const matches = permissions.files.filter(file => file.role === role), file = matches[0];
+      requireValue(matches.length === 1 && file.id === state.ids[role] && file.shared === false &&
+        Array.isArray(file.permissions) && file.permissions.length === 1 && file.permissions[0].type === 'user' &&
+        file.permissions[0].role === 'owner' && instant(file.createdTime) && Date.parse(file.createdTime) <= Date.parse(permissions.observedAt),
+        'Permission record is not exact owner-only metadata');
+      const owner = file.permissions[0];
+      const ownerKey = typeof owner.emailAddress === 'string' && owner.emailAddress.trim() ? sha(owner.emailAddress.trim().toLowerCase()) : owner.emailAddressSHA256;
+      requireValue(hash(ownerKey), 'Permission record must retain or hash the observed owner identity'); ownerKeys.push(ownerKey);
+      const identity = JSON.stringify([file.id, ownerKey, file.createdTime]);
+      requireValue(!identities[role] || identities[role] === identity, 'Permission checkpoint identity or creation time changed'); identities[role] = identity;
+      if (role === 'target') requireValue(externalProof.targetCreatedAt === file.createdTime, 'Target creation time differs from Drive metadata');
+      if (role === 'nativeCopy') requireValue(Date.parse(file.createdTime) >= Date.parse(capture.captureStartedAt) && Date.parse(file.createdTime) <= Date.parse(capture.captureEndedAt),
+        'Native-copy creation time is outside the captured interval');
+      if (role === 'backup' || role === 'target') requireValue(Date.parse(file.createdTime) >= Date.parse(prepared.phaseStartedAt) && Date.parse(file.createdTime) <= Date.parse(prepared.observedAt),
+        'Policy artifact creation time is outside preparation');
+      if (role === 'source') requireValue(Date.parse(file.createdTime) <= Date.parse(prepared.phaseStartedAt), 'Original source creation time is inconsistent');
+    }
   }
   requireValue(new Set(ownerKeys).size === 1, 'Synthetic workbook owners differ');
+  requireValue(Date.parse(permissionCheckpoints.beforeCapture) >= Date.parse(prepared.observedAt) &&
+    Date.parse(permissionCheckpoints.beforeCapture) <= Date.parse(capture.phaseStartedAt) &&
+    Date.parse(permissionCheckpoints.beforeRestore) >= Date.parse(capture.captureEndedAt) &&
+    Date.parse(permissionCheckpoints.beforeRestore) <= Date.parse(restored.phaseStartedAt) &&
+    Date.parse(permissionCheckpoints.beforeVerifier) >= Date.parse(restored.observedAt) &&
+    Date.parse(permissionCheckpoints.beforeVerifier) <= Date.now(), 'Permission checkpoint chronology is inconsistent');
   requireValue(instant(externalProof.targetCreatedAt) && Date.parse(externalProof.targetCreatedAt) <= Date.parse(prepared.observedAt),
     'Target creation time must precede its initial-empty observation');
+  return { setup, h, p, state, config, prepared, capture, restored, externalProof, permissionCheckpoints,
+    scriptId, baselineStateRaw, setupStateRaw, packets };
+}
+
+function bindingFromValidated(v) {
+  return canonicalizer.canonical({ schema: 'op03-policy-evidence-binding-v1', version: 1,
+    scriptId: v.scriptId, originalDrill: { stateSHA256: sha(v.baselineStateRaw), tag: v.config.baseline.tag,
+      ids: v.config.baseline.ids, sourceSHA256: v.config.baseline.sourceHash, helperSHA256: v.config.baseline.helperHash,
+      definitionSHA256: v.config.baseline.drillHash },
+    policySetup: { stateSHA256: sha(v.setupStateRaw), tag: v.state.tag, day: v.state.day, ids: v.state.ids,
+      sourceSHA256: v.setup.metadata.sourceCodeSHA256, helperSHA256: v.setup.metadata.helperSHA256,
+      definitionSHA256: v.setup.metadata.setupDefinitionSHA256 },
+    packetSHA256: Object.fromEntries(['prepare', 'capture', 'restore'].map(name => [name, sha(v.packets[name])])),
+    inventory: { beforeSHA256: v.capture.beforeSHA256, afterSHA256: v.capture.afterSHA256,
+      comparableSHA256: v.capture.comparableSHA256, manifestSHA256: v.capture.manifestSHA256,
+      metadataSHA256: v.capture.metadataSHA256, manualTabsSHA256: sha(JSON.stringify(v.capture.manualTabs)) },
+    chronology: { prepareStartedAt: v.prepared.phaseStartedAt, prepareObservedAt: v.prepared.observedAt,
+      capturePhaseStartedAt: v.capture.phaseStartedAt, captureStartedAt: v.capture.captureStartedAt,
+      metadataCapturedAt: v.capture.metadataCapturedAt, captureEndedAt: v.capture.captureEndedAt,
+      restoreStartedAt: v.restored.phaseStartedAt, restoreObservedAt: v.restored.observedAt,
+      permissions: v.permissionCheckpoints, targetCreatedAt: v.externalProof.targetCreatedAt },
+    externalProofSHA256: sha(JSON.stringify(v.externalProof)),
+    permissionRecordSHA256: Object.fromEntries(['beforeCapture', 'beforeRestore', 'beforeVerifier'].map(name =>
+      [name, sha(v.externalProof.permissionRecords[name].text)])), productionCertified: false });
+}
+function bindingMarkdown(binding) {
+  return BINDING_START + '\n```json\n' + JSON.stringify(binding, null, 2) + '\n```\n' + BINDING_END;
+}
+function buildEvidenceBinding(options = {}) {
+  const validated = validateVerifierInputs(options), binding = bindingFromValidated(validated);
+  return { output: bindingMarkdown(binding) + '\n', binding, metadata: validated.setup.metadata };
+}
+function buildVerifier(options = {}, { committedEvidenceReader = readCommittedEvidence } = {}) {
+  const validated = validateVerifierInputs(options);
+  const { setup, h, p, state, config, capture, externalProof, permissionCheckpoints, setupStateRaw } = validated;
+  const evidenceRecord = options.evidenceRecord;
   requireValue(evidenceRecord && /^docs\/evidence\/op03-manual-tabs-\d{4}-\d{2}-\d{2}(?:-[a-z0-9-]+)?\.md$/.test(evidenceRecord.path) &&
     typeof evidenceRecord.text === 'string' && evidenceRecord.text.trim() && /^[a-f0-9]{40}$/.test(evidenceRecord.commit),
     'Committed exact evidence record is required');
   requireValue(committedEvidenceReader(evidenceRecord.commit, evidenceRecord.path) === evidenceRecord.text,
     'Evidence record bytes differ from the exact git commit');
+  const binding = bindingFromValidated(validated), block = bindingMarkdown(binding);
+  requireValue(evidenceRecord.text.split(BINDING_START).length === 2 && evidenceRecord.text.split(BINDING_END).length === 2,
+    'Evidence record must contain exactly one machine-readable binding block');
+  const begin = evidenceRecord.text.indexOf(BINDING_START), end = evidenceRecord.text.indexOf(BINDING_END) + BINDING_END.length;
+  requireValue(evidenceRecord.text.slice(begin, end) === block, 'Committed evidence binding differs from actual retained inputs; regenerate the binding block');
   const policy = { version: 1, sourceId: state.ids.source, backupId: state.ids.backup, day: state.day, targetId: state.ids.target,
     manifestSha256: capture.manifestSHA256, metadataSha256: capture.metadataSHA256,
     evidence: { recordPath: evidenceRecord.path, sha256: sha(evidenceRecord.text), operator: externalProof.operator,
@@ -204,7 +269,8 @@ function buildVerifier({ scriptId, baselineStateRaw, setupStateRaw, packets, ext
     policy.tabs.some(t => t.source === 'Copy of Clients' && t.role === 'retained-archive'), 'Unexpected manual tab classification');
   const rows = h.ctx._integrityManualPolicyRows(policy), pin = h.ctx._integrityFingerprint(rows);
   requireValue(pin === typedFingerprint(rows), 'Typed canonical fingerprint drift');
-  const approval = { policy, pin, externalProof, externalProofSHA256: sha(JSON.stringify(externalProof)),
+  const approval = { policy, pin, externalProof, externalProofSHA256: sha(JSON.stringify(externalProof)), permissionCheckpoints,
+    evidenceBinding: binding, evidenceBindingSHA256: sha(JSON.stringify(binding)),
     evidenceCommit: evidenceRecord.commit, restoredStateRaw: setupStateRaw, restoredStateSHA256: sha(setupStateRaw) };
   const metadata = { ...setup.metadata, verifierDefinitionSHA256: sha(JSON.stringify([p.verify, p.common, h.helpers, config, approval])) };
   const output = render(p.verify, { __OP03_CONFIG__: JSON.stringify(config), __OP03_METADATA__: JSON.stringify(metadata),
@@ -214,14 +280,14 @@ function buildVerifier({ scriptId, baselineStateRaw, setupStateRaw, packets, ext
 
 if (require.main === module) {
   const [mode, configPath, outputPath, ...rest] = process.argv.slice(2);
-  requireValue(['setup', 'verify'].includes(mode) && configPath && outputPath && !rest.length,
-    'Usage: node test-support/build-google-manual-policy-drill.cjs setup|verify CONFIG_JSON OUTPUT_GS');
+  requireValue(['setup', 'binding', 'verify'].includes(mode) && configPath && outputPath && !rest.length,
+    'Usage: node test-support/build-google-manual-policy-drill.cjs setup|binding|verify CONFIG_JSON NEW_OUTPUT_FILE');
   const options = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  const result = mode === 'setup' ? buildSetup(options) : buildVerifier(options);
+  const result = mode === 'setup' ? buildSetup(options) : mode === 'binding' ? buildEvidenceBinding(options) : buildVerifier(options);
   requireValue(path.resolve(outputPath) !== path.join(__dirname, 'google-operational-drill.gs') &&
     path.resolve(outputPath) !== path.join(root, 'apps-script/Code.gs'), 'Never overwrite original runners or production source');
   fs.writeFileSync(outputPath, result.output, { flag: 'wx' });
   console.log(JSON.stringify({ ...result.metadata, bytes: Buffer.byteLength(result.output), fileSHA256: sha(result.output),
     policySHA256: result.pin || null, productionCertified: false }));
 }
-module.exports = { buildSetup, buildVerifier, helperClosure, sha, typedFingerprint, PLACEHOLDER };
+module.exports = { buildSetup, buildEvidenceBinding, buildVerifier, helperClosure, sha, typedFingerprint, PLACEHOLDER };

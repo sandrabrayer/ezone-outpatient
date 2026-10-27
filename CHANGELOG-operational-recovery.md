@@ -18,6 +18,20 @@ Missing service access, inconsistent evidence or phase failure refuse progress
 without resetting or automatically retrying. See
 [the separate policy-drill procedure](docs/google-manual-policy-drill.md).
 
+Follow-up to Claude's bounded static review of 136ec453 binds the committed
+evidence narrative to a unique generated machine-readable block containing the
+actual state, packet, inventory, permission and manifest/metadata digests. Three
+permission checkpoints bind stable file/owner identities and creation times to
+the preparation, capture, restore and verifier chronology. Native-copy creation
+must fall inside the observed capture interval. A fixed four-minute cooperative
+budget is checked around expensive work, proof completion and immediately before
+hold deletion. A deadline refusal before hold removal preserves the hold and
+best-effort diagnostics. An in-flight Google call or hard execution termination
+cannot be interrupted; a failure after successful finish can leave the hold
+already cleared, so diagnostics record its actual value. The retained fixture
+has 13 sheets and 26,748 allocated cells,
+so the 100,000-cell bound is unchanged.
+
 The same existing Sheets OAuth scope suffices. Google Sheets API v4 activation
 in the isolated project is pending Sandra's action-time consent to the terms
 shown by Google's Add a service dialog. The service has not been enabled, no
@@ -25,9 +39,10 @@ new module has run in Google, and no new policy artifact or pin has been
 presented as native evidence. Independent review and test outcomes belong to
 this new tooling separately from the five passing native phases below.
 
-Validation: 17 dedicated service-double regressions passed. The full UTC suite
-on Node 24.22.1 passed 1,771 tests, failed 0 and skipped 38 (1,809 total). Fresh
-npm audit reported 0 vulnerabilities. Independent local static review found no
+Validation after review hardening: 25 dedicated service-double regressions
+passed. The full UTC suite on Node 24.22.1 passed 1,779 tests, failed 0 and skipped
+38 (1,817 total). The fresh dependency audit reported 0 vulnerabilities; its
+lockfile is unchanged. Independent local static review found no
 remaining concrete blocker in its inspected scope after the noted hardening.
 CI/browser and Claude review outcomes are recorded separately on the final
 draft commit; none of these local checks is a new Google execution.

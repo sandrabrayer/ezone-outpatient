@@ -3,7 +3,7 @@
 const vm = require('node:vm');
 const { runtime } = require('./google-drill-sandbox.cjs');
 const { build } = require('./build-google-operational-drill.cjs');
-const { sha } = require('./build-google-manual-policy-drill.cjs');
+const { sha, buildEvidenceBinding } = require('./build-google-manual-policy-drill.cjs');
 const projectId = 'isolated-synthetic-project-0123456789';
 const old = build({ scriptId: projectId });
 
@@ -81,6 +81,14 @@ function world() {
       properties: { title: ss.getName(), locale: ss.getSpreadsheetLocale(), timeZone: ss.getSpreadsheetTimeZone() }, sheets };
   } } };
   r.load = output => vm.runInContext(output, r.ctx);
+  r.installClock = (epoch = Date.now()) => {
+    let now = epoch;
+    const clock = { advance: ms => { now += ms; }, onNow: null };
+    function Clock(...args) { return new Date(...(args.length ? args : [now])); }
+    Object.setPrototypeOf(Clock, Date); Clock.prototype = Date.prototype;
+    Clock.now = () => { if (clock.onNow) clock.onNow(); return now; };
+    r.ctx.Date = Clock; r.clock = clock; return clock;
+  };
   r.completeOriginal = () => {
     r.ctx.prepareOperationalDrill(); r.ctx.captureOperationalDrill(); r.ctx.restoreOperationalDrill();
     r.ctx.verifyOperationalDrill(); r.ctx.verifyManualTabDrill(); return r.props.OP03_DRILL_STATE;
@@ -92,19 +100,25 @@ function world() {
     for (const name of Object.keys(state.packetHashes)) packets[name] = rows.filter(row => row[0] === name).map(row => row[4]).join('');
     return packets;
   };
+  r.permissionRecords = {};
+  r.observePermissions = checkpoint => {
+    const state = r.policyState(), roles = checkpoint === 'beforeCapture' ? ['source', 'backup', 'target'] : ['source', 'backup', 'target', 'nativeCopy'];
+    const text = JSON.stringify({ version: 2, schema: 'op03-drive-permissions-v2', checkpoint, observedAt: new Date().toISOString(),
+      files: roles.map(role => ({ role, id: state.ids[role], shared: false, createdTime: r.books[state.ids[role]].policyCreatedAt,
+        permissions: [{ type: 'user', role: 'owner', emailAddress: 'synthetic-owner@example.invalid' }] })) });
+    r.permissionRecords[checkpoint] = { text, sha256: sha(text) };
+  };
   r.verifierOptions = baselineStateRaw => {
     const state = r.policyState(), packets = r.packets(), capture = JSON.parse(packets.capture), prepare = JSON.parse(packets.prepare);
-    const permissionRecordText = JSON.stringify({ version: 1, schema: 'op03-drive-permissions-v1', observedAt: new Date().toISOString(),
-      files: Object.entries(state.ids).map(([role, id]) => ({ role, id, shared: false, createdTime: r.books[id].policyCreatedAt,
-        permissions: [{ type: 'user', role: 'owner', emailAddress: 'synthetic-owner@example.invalid' }] })) });
-    return { scriptId: projectId, baselineStateRaw, setupStateRaw: r.props.OP03_POLICY_DRILL_STATE, packets,
-      externalProof: { version: 1, schema: 'op03-external-permission-proof-v1', operator: 'local service double; not native evidence',
+    const options = { scriptId: projectId, baselineStateRaw, setupStateRaw: r.props.OP03_POLICY_DRILL_STATE, packets,
+      externalProof: { version: 2, schema: 'op03-external-permission-proof-v2', operator: 'local service double; not native evidence',
         directWritesPaused: true, captureStartedAt: capture.captureStartedAt, captureEndedAt: capture.captureEndedAt,
-        permissionRecordSHA256: sha(permissionRecordText), permissionRecordText,
-        permissions: Object.fromEntries(Object.entries(state.ids).map(([role, id]) => [role, { id, ownerOnly: true }])),
+        permissionRecords: JSON.parse(JSON.stringify(r.permissionRecords)),
         targetCreatedAt: r.books[state.ids.target].policyCreatedAt },
       evidenceRecord: { path: 'docs/evidence/op03-manual-tabs-2099-01-01-local-test.md',
         text: '# LOCAL SERVICE DOUBLE ONLY\nNot native evidence.\n', commit: 'a'.repeat(40) } };
+    options.evidenceRecord.text += '\n' + buildEvidenceBinding(options).output;
+    return options;
   };
   return r;
 }

@@ -16,6 +16,7 @@ __OP03_HELPERS__
       check(comparableHash(before) === restored.comparableSHA256, 'Restored target changed before verification');
       check(sha(JSON.stringify(inventory(books.source))) === capture.afterSHA256, 'Original source changed before verification');
       check(sha(JSON.stringify(approval.externalProof)) === approval.externalProofSHA256, 'Fixed external proof digest mismatch');
+      check(sha(JSON.stringify(approval.evidenceBinding)) === approval.evidenceBindingSHA256, 'Fixed evidence binding digest mismatch');
       check(_integrityFingerprint(_integrityManualPolicyRows(approval.policy)) === approval.pin, 'Fixed policy pin mismatch');
       var props = PropertiesService.getScriptProperties(), baselineProps = {};
       nativeProps.getKeys().filter(function (key) { return key.indexOf(propertyPrefix) === 0; }).sort().forEach(function (key) {
@@ -26,7 +27,9 @@ __OP03_HELPERS__
         var started = Date.now(), ok = false, coreEnded = null, coreOK = false;
         events.push({ event: 'proof-start', at: started, attempt: attempt });
         try {
+          guardBudget('proof-before:' + attempt);
           var result = proof.apply(null, arguments); coreEnded = Date.now(); coreOK = true;
+          guardBudget('proof-after:' + attempt);
           if (attempt === 'valid-finish' && ++validProofs === 2) {
             // Additional native attestation, distinctly timed from the exact core
             // proof, still under its real lock and before finish can release hold.
@@ -34,7 +37,11 @@ __OP03_HELPERS__
             check(sha(JSON.stringify(inventory(books.source))) === capture.afterSHA256, 'Late original source properties changed');
             assertOriginal(); check(originalReport() === state.originalReportSHA256, 'Late original report changed');
           }
+          guardBudget('proof-return:' + attempt);
           ok = true; return result;
+        } catch (error) {
+          if (error.code !== 'OP03_PHASE_BUDGET_EXCEEDED') guardBudget('proof-error:' + attempt);
+          throw error;
         }
         finally {
           var ended = Date.now(); timings.push({ kind: 'proof', attempt: attempt, ok: ok, coreOK: coreOK,
@@ -51,7 +58,7 @@ __OP03_HELPERS__
       var changed = clone(approval.policy); changed.targetId += '-changed';
       var refused = null;
       try { finishOutpatientRecovery(state.ids.backup, state.day, true, changed); }
-      catch (error) { refused = String(error); }
+      catch (error) { if (error.code === 'OP03_PHASE_BUDGET_EXCEEDED') throw error; refused = String(error); }
       check(refused && /Manual recovery policy digest mismatch/.test(refused), 'Changed fixed policy was not refused');
       check(props.getProperty('OUTPATIENT_RECOVERY_HOLD') === '1', 'Refusal released the hold');
       var afterRefusalProps = {};
@@ -64,9 +71,11 @@ __OP03_HELPERS__
         'Refusal reached a side effect');
       attempt = 'valid-finish';
       CacheService.getScriptCache().put('therapistRates_v1', 'policy-drill-cache-sentinel', 600);
+      guardBudget('valid-finish-before');
       var finishStartedAt = Date.now();
       check(finishOutpatientRecovery(state.ids.backup, state.day, true, approval.policy).ok === true, 'Fixed policy finish failed');
       var finishMs = Date.now() - finishStartedAt;
+      guardBudget('valid-finish-after');
       instrument = false;
       var successful = timings.filter(function (timing) { return timing.kind === 'proof' && timing.attempt === 'valid-finish'; });
       check(successful.length === 2 && successful.every(function (timing) { return timing.ok; }), 'Finish did not execute two successful full proofs');
@@ -82,8 +91,10 @@ __OP03_HELPERS__
       check(required.indexOf('Sheet1') >= 0 && required.indexOf('Copy of Clients') >= 0, 'Manual sheets omitted from source history');
       state.verifierDefinitionSHA256 = metadata.verifierDefinitionSHA256;
       state.policySHA256 = approval.pin;
-      writePacket('verify', { schema: 'op03-policy-verification-v1', observedAt: new Date().toISOString(),
+      writePacket('verify', { schema: 'op03-policy-verification-v2', phaseStartedAt: new Date(phaseStartedAt).toISOString(),
+        phaseBudgetMs: phaseBudgetMs, observedAt: new Date().toISOString(),
         policy: approval.policy, policySHA256: approval.pin, evidenceCommit: approval.evidenceCommit,
+        evidenceBinding: approval.evidenceBinding, evidenceBindingSHA256: approval.evidenceBindingSHA256,
         externalProof: approval.externalProof, externalProofSHA256: approval.externalProofSHA256,
         rejectedPolicy: refused, events: events, timings: timings, finishMs: finishMs,
         targetUnchanged: true, originalSourceUnchanged: true, holdReleasedLast: true, productionCertified: false });

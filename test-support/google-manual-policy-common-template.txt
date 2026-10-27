@@ -1,7 +1,16 @@
     var stateKey = 'OP03_POLICY_DRILL_STATE', propertyPrefix = 'OP03_POLICY_FIXTURE_', cachePrefix = 'OP03_POLICY_CACHE_';
     var nativeProps = nativeProperties.getScriptProperties(), state = null, books = {}, currentBook = null;
     var events = [], timings = [], instrument = false, attempt = '', phaseStartedAt = Date.now();
+    var phaseBudgetMs = 240000;
     function check(ok, reason) { if (!ok) throw new Error(reason); }
+    function guardBudget(checkpoint) {
+      var now = Date.now(), elapsed = now - phaseStartedAt;
+      if (elapsed < 0 || elapsed >= phaseBudgetMs) {
+        events.push({ event: 'budget-exceeded', checkpoint: checkpoint, at: now, elapsedMs: elapsed, budgetMs: phaseBudgetMs, attempt: attempt });
+        var error = new Error('Policy phase elapsed-time budget exceeded at ' + checkpoint);
+        error.code = 'OP03_PHASE_BUDGET_EXCEEDED'; throw error;
+      }
+    }
     function sha(text) {
       return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
         .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
@@ -62,6 +71,7 @@
       return result;
     }
     function nativeSnapshot(ss, sheets) {
+      guardBudget('native-inventory-before');
       check(Object.keys(state.ids).some(function (role) { return state.ids[role] === ss.getId(); }), 'Native API workbook outside policy fixture');
       var ranges = sheets.map(function (sheet) {
         return "'" + sheet.name.replace(/'/g, "''") + "'!A1:" + columnLetters(sheet.allocatedColumns) + sheet.allocatedRows;
@@ -69,6 +79,7 @@
       // No field mask: retain every native sheet/cell/dimension property returned.
       nativeSheets.flush(); // SpreadsheetApp batches must be visible to the separate read API.
       var snapshot = nativeSheetsApi.Spreadsheets.get(ss.getId(), { includeGridData: true, ranges: ranges });
+      guardBudget('native-inventory-after');
       check(snapshot && snapshot.spreadsheetId === ss.getId() && Array.isArray(snapshot.sheets) && snapshot.sheets.length === sheets.length,
         'Incomplete native spreadsheet response');
       snapshot.sheets.forEach(function (sheet, i) {
@@ -82,8 +93,10 @@
     // canonical only for stable serialization; it never sorts rows or cells.
 __OP03_CANONICAL__
     function inventory(ss) {
+      guardBudget('inventory-before');
       var allocatedCells = 0;
       var sheets = ss.getSheets().map(function (sh, index) {
+        guardBudget('inventory-sheet-before:' + index);
         var rows = sh.getMaxRows(), columns = sh.getMaxColumns();
         allocatedCells += rows * columns;
         check(allocatedCells <= 100000, 'Synthetic native inventory exceeds its total bounded cell budget');
@@ -99,20 +112,23 @@ __OP03_CANONICAL__
           'Merged or protected cells require a separately supported native fixture');
         var formulas = data.getFormulas();
         check(formulas.every(function (r) { return r.every(function (v) { return v === ''; }); }), 'Source or target contains formulas');
-        return { name: sh.getName(), sheetId: sh.getSheetId(), order: index,
+        var observed = { name: sh.getName(), sheetId: sh.getSheetId(), order: index,
           allocatedRows: rows, allocatedColumns: columns, lastRow: sh.getLastRow(), lastColumn: sh.getLastColumn(),
           grid: typed(data.getValues()), formulas: formulas, numberFormats: all.getNumberFormats(),
           validations: validations, merges: merges, sheetProtections: [], rangeProtections: [],
           hidden: sh.isSheetHidden(), frozenRows: sh.getFrozenRows(), frozenColumns: sh.getFrozenColumns() };
+        guardBudget('inventory-sheet-after:' + index); return observed;
       });
-      return { schema: 'op03-native-inventory-v2', spreadsheetId: ss.getId(), locale: ss.getSpreadsheetLocale(),
+      var observed = { schema: 'op03-native-inventory-v2', spreadsheetId: ss.getId(), locale: ss.getSpreadsheetLocale(),
         timeZone: ss.getSpreadsheetTimeZone(), sheets: sheets, native: nativeSnapshot(ss, sheets) };
+      guardBudget('inventory-after'); return observed;
     }
     function comparableHash(inv) { return sha(JSON.stringify(comparable(inv))); }
     function ensureRows(sheet, total) {
       if (sheet.getMaxRows() < total) sheet.insertRowsAfter(sheet.getMaxRows(), total - sheet.getMaxRows());
     }
-    function writePacket(name, value) {
+    function writePacket(name, value, diagnostic) {
+      if (!diagnostic) guardBudget('packet-write-before:' + name);
       var text = JSON.stringify(value), digest = sha(text), chunks = [], width = 30000;
       for (var offset = 0; offset < text.length;) {
         var end = Math.min(offset + width, text.length), last = text.charCodeAt(end - 1), next = text.charCodeAt(end);
@@ -129,16 +145,19 @@ __OP03_CANONICAL__
       var readback = sheet.getRange(start, 1, rows.length, 5).getValues();
       check(readback.every(function (row, i) { return row[0] === name && row[1] === String(i + 1) && row[2] === String(rows.length) && row[3] === digest; }) &&
         sha(readback.map(function (row) { return row[4]; }).join('')) === digest, 'Evidence packet readback mismatch');
-      state.packetHashes[name] = digest; saveState(); return digest;
+      state.packetHashes[name] = digest; saveState();
+      if (!diagnostic) guardBudget('packet-write-after:' + name); return digest;
     }
     function readPacket(name) {
+      guardBudget('packet-read-before:' + name);
       var sheet = books.backup.getSheetByName('_PolicyEvidence'); check(!!sheet, 'Policy evidence sheet missing');
       var rows = sheet.getDataRange().getValues().slice(1).filter(function (row) { return row[0] === name; });
       check(rows.length > 0 && rows.every(function (row, i) {
         return row[1] === String(i + 1) && row[2] === String(rows.length) && row[3] === state.packetHashes[name];
       }), 'Evidence packet chunks are missing, duplicated or reordered');
       var text = rows.map(function (row) { return row[4]; }).join('');
-      check(sha(text) === state.packetHashes[name], 'Evidence packet digest changed'); return JSON.parse(text);
+      check(sha(text) === state.packetHashes[name], 'Evidence packet digest changed');
+      guardBudget('packet-read-after:' + name); return JSON.parse(text);
     }
     function report(phase, result, detail) {
       if (!books.backup) return;
@@ -156,8 +175,10 @@ __OP03_CANONICAL__
         if (phase === 'prepare') {
           check(!state, 'Policy drill already exists; preserve its evidence');
           check(!nativeProps.getKeys().some(function (key) { return key.indexOf(propertyPrefix) === 0; }), 'Policy fixture properties already exist');
+          guardBudget('service-probe-before');
           var probe = nativeSheetsApi.Spreadsheets.get(config.baseline.ids.source,
             { includeGridData: false, fields: 'spreadsheetId,properties(title)' });
+          guardBudget('service-probe-after');
           check(probe && probe.spreadsheetId === config.baseline.ids.source && probe.properties && probe.properties.title === originalName('source'),
             'Advanced Sheets probe did not confirm the original synthetic source');
           state = { tag: Utilities.getUuid(), phase: '', running: true, ids: { source: config.baseline.ids.source },
@@ -166,17 +187,24 @@ __OP03_CANONICAL__
             day: new Date().toISOString().slice(0, 10) };
         } else {
           assertIdentity(); check(state.running === false && !state.failed && state.phase === previous, 'Policy phase order or running/failure state mismatch');
-          if (phase === 'verify') check(raw === approval.restoredStateRaw && sha(raw) === approval.restoredStateSHA256, 'Fixed restored state changed');
+          if (phase === 'verify') {
+            check(raw === approval.restoredStateRaw && sha(raw) === approval.restoredStateSHA256, 'Fixed restored state changed');
+            check(Date.parse(approval.permissionCheckpoints.beforeVerifier) <= phaseStartedAt, 'Final permission observation is later than verification start');
+          }
           state.running = true;
         }
+        state.activePhase = phase; state.phaseStartedAt = new Date(phaseStartedAt).toISOString(); state.phaseBudgetMs = phaseBudgetMs;
         saveState();
       } finally { lock.releaseLock(); }
       try {
         var baselineReport = originalReport();
         if (phase === 'prepare') { state.originalReportSHA256 = baselineReport; saveState(); }
         else { check(baselineReport === state.originalReportSHA256, 'Original report changed'); loadBooks(); }
+        guardBudget('phase-work-before');
         var result = body();
+        guardBudget('phase-work-after');
         assertOriginal(); check(originalReport() === state.originalReportSHA256, 'Original report changed during phase');
+        guardBudget('phase-success-before');
         state.phase = result.stage; report(phase, 'PASS', result.detail); saveState();
         Logger.log(JSON.stringify({ phase: phase, result: 'PASS', stage: state.phase, detail: result.detail, workbookIds: state.ids,
           sourceCodeSHA256: metadata.sourceCodeSHA256, helperSHA256: metadata.helperSHA256,
@@ -188,7 +216,9 @@ __OP03_CANONICAL__
         try {
           saveState();
           if (books.backup && books.backup.getSheetByName('_PolicyEvidence')) writePacket('failure-' + phase,
-            { error: String(error), at: new Date().toISOString(), phase: phase, events: events, timings: timings, productionCertified: false });
+            { error: String(error), at: new Date().toISOString(), phase: phase, phaseStartedAt: new Date(phaseStartedAt).toISOString(),
+              phaseBudgetMs: phaseBudgetMs, holdValue: nativeProps.getProperty(propertyPrefix + 'OUTPATIENT_RECOVERY_HOLD'),
+              events: events, timings: timings, productionCertified: false }, true);
           report(phase, 'FAIL', String(error).slice(0, 500));
         }
         catch (reportError) { Logger.log('Policy evidence write failed: ' + String(reportError).slice(0, 200)); }
@@ -210,6 +240,7 @@ __OP03_CANONICAL__
         nativeProps.setProperty(propertyPrefix + key, String(value));
       },
       deleteProperty: function (key) {
+        if (key === 'OUTPATIENT_RECOVERY_HOLD') guardBudget('before-hold-delete');
         if (instrument) events.push({ event: 'delete:' + key, at: Date.now(), attempt: attempt });
         nativeProps.deleteProperty(propertyPrefix + key);
       }

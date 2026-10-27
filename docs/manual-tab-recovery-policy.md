@@ -140,3 +140,11 @@ the existing Sheets scope. Service activation is pending consent to Google's
 displayed API terms. The extension has not run natively; its tests and generated
 modules do not approve any real recovery policy or change the blank production
 pin.
+
+For this synthetic extension, the builder also requires a unique generated
+binding block in the committed evidence record and three chronological Drive
+permission observations. Those checks bind retained observations to the actual
+phase packets; they do not establish that permissions stayed unchanged between
+observations or that an operator's pause attestation is true. Its four-minute
+cooperative phase budget checks immediately before hold deletion, while leaving
+an in-flight service call or hard Google termination outside its control.
