@@ -1,0 +1,93 @@
+// SYNTHETIC FIXED-POLICY VERIFIER. Add beside the immutable setup and original Code.gs.
+// No property/cell/caller can provide the pin. No production source is enabled.
+function verifyManualPolicyDrill() {
+  return (function (nativeSheets, nativeProperties, nativeLocks, nativeCache, nativeSheetsApi) {
+    var config = __OP03_CONFIG__;
+    var metadata = __OP03_METADATA__;
+    var approval = __OP03_APPROVAL__;
+__OP03_COMMON__
+    // Candidate function bodies are verbatim; only the private test constant is overridden below.
+__OP03_HELPERS__
+    INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = approval.pin;
+    return run('verify', 'restored', function () {
+      currentBook = books.target;
+      var capture = readPacket('capture'), restored = readPacket('restore');
+      var before = inventory(books.target);
+      check(comparableHash(before) === restored.comparableSHA256, 'Restored target changed before verification');
+      check(sha(JSON.stringify(inventory(books.source))) === capture.afterSHA256, 'Original source changed before verification');
+      check(sha(JSON.stringify(approval.externalProof)) === approval.externalProofSHA256, 'Fixed external proof digest mismatch');
+      check(_integrityFingerprint(_integrityManualPolicyRows(approval.policy)) === approval.pin, 'Fixed policy pin mismatch');
+      var props = PropertiesService.getScriptProperties(), baselineProps = {};
+      nativeProps.getKeys().filter(function (key) { return key.indexOf(propertyPrefix) === 0; }).sort().forEach(function (key) {
+        baselineProps[key] = nativeProps.getProperty(key);
+      });
+      var proof = _integrityVerifyRecoveredWorkbook, journal = _finJournal, validProofs = 0;
+      _integrityVerifyRecoveredWorkbook = function () {
+        var started = Date.now(), ok = false, coreEnded = null, coreOK = false;
+        events.push({ event: 'proof-start', at: started, attempt: attempt });
+        try {
+          var result = proof.apply(null, arguments); coreEnded = Date.now(); coreOK = true;
+          if (attempt === 'valid-finish' && ++validProofs === 2) {
+            // Additional native attestation, distinctly timed from the exact core
+            // proof, still under its real lock and before finish can release hold.
+            check(sha(JSON.stringify(inventory(books.target))) === sha(JSON.stringify(before)), 'Late native target properties changed');
+            check(sha(JSON.stringify(inventory(books.source))) === capture.afterSHA256, 'Late original source properties changed');
+            assertOriginal(); check(originalReport() === state.originalReportSHA256, 'Late original report changed');
+          }
+          ok = true; return result;
+        }
+        finally {
+          var ended = Date.now(); timings.push({ kind: 'proof', attempt: attempt, ok: ok, coreOK: coreOK,
+            coreDurationMs: (coreEnded === null ? ended : coreEnded) - started,
+            nativeVerificationMs: coreEnded === null ? 0 : ended - coreEnded, durationMs: ended - started });
+          events.push({ event: ok ? 'proof-pass' : 'proof-refused', at: ended, attempt: attempt });
+        }
+      };
+      _finJournal = function () {
+        var result = journal.apply(null, arguments);
+        events.push({ event: 'journal-validated', at: Date.now(), attempt: attempt, operations: result.ops.length }); return result;
+      };
+      instrument = true; attempt = 'changed-policy';
+      var changed = clone(approval.policy); changed.targetId += '-changed';
+      var refused = null;
+      try { finishOutpatientRecovery(state.ids.backup, state.day, true, changed); }
+      catch (error) { refused = String(error); }
+      check(refused && /Manual recovery policy digest mismatch/.test(refused), 'Changed fixed policy was not refused');
+      check(props.getProperty('OUTPATIENT_RECOVERY_HOLD') === '1', 'Refusal released the hold');
+      var afterRefusalProps = {};
+      nativeProps.getKeys().filter(function (key) { return key.indexOf(propertyPrefix) === 0; }).sort().forEach(function (key) {
+        afterRefusalProps[key] = nativeProps.getProperty(key);
+      });
+      check(JSON.stringify(afterRefusalProps) === JSON.stringify(baselineProps), 'Refusal changed fixture properties');
+      check(sha(JSON.stringify(inventory(books.target))) === sha(JSON.stringify(before)), 'Refusal changed the target');
+      check(!events.some(function (event) { return event.attempt === 'changed-policy' && /^(set:|delete:|cache:|journal-validated)/.test(event.event); }),
+        'Refusal reached a side effect');
+      attempt = 'valid-finish';
+      CacheService.getScriptCache().put('therapistRates_v1', 'policy-drill-cache-sentinel', 600);
+      var finishStartedAt = Date.now();
+      check(finishOutpatientRecovery(state.ids.backup, state.day, true, approval.policy).ok === true, 'Fixed policy finish failed');
+      var finishMs = Date.now() - finishStartedAt;
+      instrument = false;
+      var successful = timings.filter(function (timing) { return timing.kind === 'proof' && timing.attempt === 'valid-finish'; });
+      check(successful.length === 2 && successful.every(function (timing) { return timing.ok; }), 'Finish did not execute two successful full proofs');
+      var ordered = events.filter(function (event) { return event.attempt === 'valid-finish'; }).map(function (event) { return event.event; });
+      check(JSON.stringify(ordered) === JSON.stringify(['lock-acquired', 'proof-start', 'proof-pass', 'journal-validated',
+        'cache:therapistRates_v1', 'set:FINANCIAL_OPS_CREATED', 'set:INTEGRITY_REQUIRED_SOURCES', 'proof-start', 'proof-pass',
+        'delete:OUTPATIENT_RECOVERY_HOLD', 'lock-released']), 'Finish side-effect/proof/hold ordering changed');
+      check(props.getProperty('OUTPATIENT_RECOVERY_HOLD') === null && props.getProperty('FINANCIAL_OPS_CREATED') === '1', 'Finish properties are incomplete');
+      check(CacheService.getScriptCache().get('therapistRates_v1') === null, 'Real namespaced cache was not invalidated');
+      var required = JSON.parse(props.getProperty('INTEGRITY_REQUIRED_SOURCES') || 'null');
+      check(JSON.stringify(required) === JSON.stringify(books.target.getSheets().map(function (sheet) { return sheet.getName(); })),
+        'Persisted source inventory differs from target');
+      check(required.indexOf('Sheet1') >= 0 && required.indexOf('Copy of Clients') >= 0, 'Manual sheets omitted from source history');
+      state.verifierDefinitionSHA256 = metadata.verifierDefinitionSHA256;
+      state.policySHA256 = approval.pin;
+      writePacket('verify', { schema: 'op03-policy-verification-v1', observedAt: new Date().toISOString(),
+        policy: approval.policy, policySHA256: approval.pin, evidenceCommit: approval.evidenceCommit,
+        externalProof: approval.externalProof, externalProofSHA256: approval.externalProofSHA256,
+        rejectedPolicy: refused, events: events, timings: timings, finishMs: finishMs,
+        targetUnchanged: true, originalSourceUnchanged: true, holdReleasedLast: true, productionCertified: false });
+      return { stage: 'verified', detail: 'Fixed synthetic policy refused tampering and passed both native finish proofs; hold cleared last; not production certification' };
+    });
+  })(SpreadsheetApp, PropertiesService, LockService, CacheService, typeof Sheets === 'undefined' ? null : Sheets);
+}

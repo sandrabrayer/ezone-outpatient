@@ -1,0 +1,1202 @@
+{
+  "schemaVersion": 1,
+  "candidate": "3297311c4706cf650dbcbeb66b23c586dbc40d1c",
+  "productionCertified": false,
+  "isolatedScriptId": "1zZkII4vZXE-VJfSeWmYBjiobIf8CfLrrio6S1RGiZFq0qkn2VGwK4S8B",
+  "tag": "e341511c-fa72-40ed-928d-206e4a75b826",
+  "workbookIds": {
+    "source": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+    "backup": "1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ",
+    "target": "1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI"
+  },
+  "report": {
+    "range": "'_DrillReport'!A1:H10",
+    "majorDimension": "ROWS",
+    "values": [
+      [
+        "at",
+        "phase",
+        "result",
+        "detail",
+        "sourceSHA256",
+        "helperSHA256",
+        "drillSHA256",
+        "durationMs"
+      ],
+      [
+        "2026-10-27T13:22:17.127Z",
+        "prepare",
+        "PASS",
+        "Synthetic sessions, both journal kinds, approved quote and typed audit values seeded",
+        "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+        "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+        "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+        "33792"
+      ],
+      [
+        "2026-10-27T13:24:37.780Z",
+        "capture",
+        "PASS",
+        "20 manifest entries fingerprint-verified in native Sheets",
+        "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+        "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+        "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+        "53601"
+      ],
+      [
+        "2026-10-27T13:26:12.416Z",
+        "restore",
+        "PASS",
+        "Native copy into separate target; every restored grid matched",
+        "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+        "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+        "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+        "36877"
+      ],
+      [
+        "2026-10-27T13:27:59.006Z",
+        "verify",
+        "PASS",
+        "Native round-trip and exact retries passed; not production certification",
+        "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+        "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+        "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+        "43697"
+      ],
+      [
+        "2026-10-27T13:30:20.246Z",
+        "manual",
+        "PASS",
+        "Empty Sheet1 and synthetic archive preserved; certification correctly refused",
+        "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+        "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+        "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+        "79834"
+      ]
+    ]
+  },
+  "loggerDurationMs": {
+    "prepare": 34060,
+    "capture": 54085,
+    "restore": 37029,
+    "verify": 43868,
+    "manual": 80050
+  },
+  "scriptTimeZone": "America/Los_Angeles",
+  "scriptRuntime": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets"
+  ],
+  "initialPermissions": [
+    {
+      "role": "source",
+      "file": {
+        "id": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 source",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:45.970Z",
+        "modified_time": "2026-10-27T13:21:46.451Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "backup",
+      "file": {
+        "id": "1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 backup",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:47.095Z",
+        "modified_time": "2026-10-27T13:21:47.681Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "target",
+      "file": {
+        "id": "1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 target",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:48.298Z",
+        "modified_time": "2026-10-27T13:21:48.711Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    }
+  ],
+  "loadedFile": {
+    "characters": 119399,
+    "utf8Bytes": 121088,
+    "sha256": "1ddb8de07a08d5b427f0ca06e914d3da0f5394af5c17363f8c4844aeb173f773",
+    "entireSavedEditorReadbackEqualToRetainedBoundBuild": true
+  },
+  "privacyNote": "Owner identity verified during connector reads; personal email addresses redacted in this copy.",
+  "status": "all_five_phases_passed",
+  "executionDurationSeconds": {
+    "prepare": 35.615,
+    "capture": 55.475,
+    "restore": 39.284,
+    "verify": 45.727,
+    "manual": 81.587
+  },
+  "executionStartDisplayedPacific": {
+    "prepare": "2026-10-27 06:21:42",
+    "capture": "2026-10-27 06:23:43",
+    "restore": "2026-10-27 06:25:34",
+    "verify": "2026-10-27 06:27:14",
+    "manual": "2026-10-27 06:28:59"
+  },
+  "sourceAndTargetTimeZone": "America/Los_Angeles",
+  "finalPermissions": [
+    {
+      "role": "source",
+      "file": {
+        "id": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 source",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:45.970Z",
+        "modified_time": "2026-10-27T13:29:02.109Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "backup",
+      "file": {
+        "id": "1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 backup",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:47.095Z",
+        "modified_time": "2026-10-27T13:30:20.816Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    },
+    {
+      "role": "target",
+      "file": {
+        "id": "1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI",
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 target",
+        "mime_type": "application/vnd.google-apps.spreadsheet",
+        "size": null,
+        "url": "https://docs.google.com/spreadsheets/d/1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI/edit?usp=drivesdk",
+        "display_url": "https://docs.google.com/spreadsheets/d/1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI/edit?usp=drivesdk",
+        "file_or_folder": "file",
+        "created_time": "2026-10-27T13:21:48.298Z",
+        "modified_time": "2026-10-27T13:27:52.084Z",
+        "parent_ids": null,
+        "drive_id": null,
+        "current_user_can_share": null,
+        "has_augmented_permissions": null,
+        "shared": false,
+        "permissions": [
+          {
+            "type": "user",
+            "role": "owner",
+            "emailAddress": "[redacted]",
+            "domain": null,
+            "displayName": null,
+            "allowFileDiscovery": null
+          }
+        ],
+        "source_visibility_status": "permission_metadata_available"
+      }
+    }
+  ],
+  "finalStateRaw": "{\"tag\":\"e341511c-fa72-40ed-928d-206e4a75b826\",\"phase\":\"manual_block_verified\",\"ids\":{\"source\":\"1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE\",\"backup\":\"1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ\",\"target\":\"1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI\"},\"running\":false,\"sourceHash\":\"bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014\",\"helperHash\":\"f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63\",\"drillHash\":\"4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91\",\"day\":\"2026-10-27\"}",
+  "finalStateRawSHA256": "47ac4ce4c4372b9bfa85fb6d254f6c008c73a46e9a67db6eff422f28ba25e55f",
+  "finalState": {
+    "tag": "e341511c-fa72-40ed-928d-206e4a75b826",
+    "phase": "manual_block_verified",
+    "ids": {
+      "source": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+      "backup": "1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ",
+      "target": "1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI"
+    },
+    "running": false,
+    "sourceHash": "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+    "helperHash": "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+    "drillHash": "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+    "day": "2026-10-27"
+  },
+  "finalFixtureProperties": {
+    "OP03_DRILL_FIXTURE_FINANCIAL_OPS_CREATED": "1",
+    "OP03_DRILL_FIXTURE_INTEGRITY_REQUIRED_SOURCES": "[\"Clients\",\"Leads\",\"Payments\",\"ClientCharges\",\"FinancialOps\",\"SessionLog\",\"TherapistRates\",\"Settings\",\"AuditLog\",\"PackageCatalog\",\"PackageRequests\"]",
+    "OP03_DRILL_FIXTURE_SESSION_OUTCOME_SECRET": "synthetic-drill-session-secret-not-a-credential"
+  },
+  "authorization": {
+    "existingProjectReused": true,
+    "newProjectCreated": false,
+    "initialExecutions": 0,
+    "initialScriptProperties": 0,
+    "actualConsentText": "See, edit, create, and delete all your Google Sheets spreadsheets.",
+    "scopeReviewedBeforeGrant": true,
+    "grantCompletedAfterSandraContinue": true,
+    "initialAuthorizationAttemptDidNotExecute": true,
+    "successfulEditorExecutions": 5,
+    "repeatedPhases": 0
+  },
+  "finalInventories": [
+    {
+      "role": "source",
+      "spreadsheetId": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+      "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE/edit",
+      "properties": {
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 source",
+        "locale": "en_US",
+        "timeZone": "America/Los_Angeles"
+      },
+      "sheets": [
+        {
+          "properties": {
+            "sheetId": 1128433131,
+            "title": "Leads",
+            "index": 0,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 19
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 344019297,
+            "title": "Sheet1",
+            "index": 1,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1000,
+              "columnCount": 26
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1463281386,
+            "title": "Copy of Clients",
+            "index": 2,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1756126611,
+            "title": "Clients",
+            "index": 3,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 38
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 450378359,
+            "title": "FinancialOps",
+            "index": 4,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2100647194,
+            "title": "Payments",
+            "index": 5,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 15
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 397695064,
+            "title": "ClientCharges",
+            "index": 6,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1572612771,
+            "title": "Settings",
+            "index": 7,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1211202696,
+            "title": "TherapistRates",
+            "index": 8,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 715539826,
+            "title": "SessionLog",
+            "index": 9,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 16
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 56025720,
+            "title": "PackageCatalog",
+            "index": 10,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 16,
+              "columnCount": 23
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2123996821,
+            "title": "PackageRequests",
+            "index": 11,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 28
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 539595464,
+            "title": "AuditLog",
+            "index": 12,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 11
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "backup",
+      "spreadsheetId": "1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ",
+      "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1UWQkFMe7U3i4A9KVnEvw09qd83xIZyhNy9nRCXsagbQ/edit",
+      "properties": {
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 backup",
+        "locale": "en_US",
+        "timeZone": "America/Los_Angeles"
+      },
+      "sheets": [
+        {
+          "properties": {
+            "sheetId": 0,
+            "title": "_DrillReport",
+            "index": 0,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1000,
+              "columnCount": 26
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1734336622,
+            "title": "outpatient-2099-12-31",
+            "index": 1,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 38
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1501954934,
+            "title": "outpatient-leads-2099-12-31",
+            "index": 2,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 19
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1685002693,
+            "title": "outpatient-leads-removed-2099-12-31",
+            "index": 3,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 21
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 491557559,
+            "title": "outpatient-clients-removed-2099-12-31",
+            "index": 4,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 41
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1526066737,
+            "title": "outpatient-payments-2099-12-31",
+            "index": 5,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 15
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 432172021,
+            "title": "outpatient-charges-2099-12-31",
+            "index": 6,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 602245620,
+            "title": "outpatient-credits-2099-12-31",
+            "index": 7,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 21
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 904808062,
+            "title": "outpatient-financial-ops-2099-12-31",
+            "index": 8,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2100716545,
+            "title": "outpatient-session-log-2099-12-31",
+            "index": 9,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 16
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1462092010,
+            "title": "outpatient-therapist-rates-2099-12-31",
+            "index": 10,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1312642830,
+            "title": "outpatient-settings-2099-12-31",
+            "index": 11,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 994941237,
+            "title": "outpatient-stop-flags-2099-12-31",
+            "index": 12,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 10
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1099415882,
+            "title": "outpatient-extra-sessions-2099-12-31",
+            "index": 13,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 14
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 735300676,
+            "title": "outpatient-continuation-2099-12-31",
+            "index": 14,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 9
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1749932284,
+            "title": "outpatient-stop-alerts-2099-12-31",
+            "index": 15,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 11
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1270162410,
+            "title": "outpatient-audit-log-2099-12-31",
+            "index": 16,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 11
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 856340972,
+            "title": "outpatient-repair-plan-2099-12-31",
+            "index": 17,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 8
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 244744632,
+            "title": "outpatient-package-catalog-2099-12-31",
+            "index": 18,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 16,
+              "columnCount": 23
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1332245790,
+            "title": "outpatient-package-requests-2099-12-31",
+            "index": 19,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 28
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1336341827,
+            "title": "outpatient-other-1889c7466938d256bd10e8d42f165b5b04422df0558332fbf48b4d58ad912abe-2099-12-31",
+            "index": 20,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 147420739,
+            "title": "outpatient-other-574f57e2e39b133ab7ea3a43704e140926584c3cd76261950be827522c41cd82-2099-12-31",
+            "index": 21,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 825368049,
+            "title": "outpatient-recovery-meta-2099-12-31",
+            "index": 22,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 8,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1795817930,
+            "title": "outpatient-manifest-2099-12-31",
+            "index": 23,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 23,
+              "columnCount": 5
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1863420412,
+            "title": "outpatient-2026-10-27",
+            "index": 24,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 38
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 326794900,
+            "title": "outpatient-leads-2026-10-27",
+            "index": 25,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 19
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 794944909,
+            "title": "outpatient-leads-removed-2026-10-27",
+            "index": 26,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 21
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1703304243,
+            "title": "outpatient-clients-removed-2026-10-27",
+            "index": 27,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 41
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 158073742,
+            "title": "outpatient-payments-2026-10-27",
+            "index": 28,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 15
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1571548147,
+            "title": "outpatient-charges-2026-10-27",
+            "index": 29,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 271517769,
+            "title": "outpatient-credits-2026-10-27",
+            "index": 30,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 21
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2044669777,
+            "title": "outpatient-financial-ops-2026-10-27",
+            "index": 31,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1378110987,
+            "title": "outpatient-session-log-2026-10-27",
+            "index": 32,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 16
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 128503398,
+            "title": "outpatient-therapist-rates-2026-10-27",
+            "index": 33,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 520508886,
+            "title": "outpatient-settings-2026-10-27",
+            "index": 34,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1595732480,
+            "title": "outpatient-stop-flags-2026-10-27",
+            "index": 35,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 10
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 779413062,
+            "title": "outpatient-extra-sessions-2026-10-27",
+            "index": 36,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 14
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2093083860,
+            "title": "outpatient-continuation-2026-10-27",
+            "index": 37,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 9
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 2036994417,
+            "title": "outpatient-stop-alerts-2026-10-27",
+            "index": 38,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 11
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1309399668,
+            "title": "outpatient-audit-log-2026-10-27",
+            "index": 39,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 11
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 620725993,
+            "title": "outpatient-repair-plan-2026-10-27",
+            "index": 40,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 8
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1998072975,
+            "title": "outpatient-package-catalog-2026-10-27",
+            "index": 41,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 16,
+              "columnCount": 23
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1454704982,
+            "title": "outpatient-package-requests-2026-10-27",
+            "index": 42,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 28
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 494912924,
+            "title": "outpatient-recovery-meta-2026-10-27",
+            "index": 43,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 8,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 623188270,
+            "title": "outpatient-manifest-2026-10-27",
+            "index": 44,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 21,
+              "columnCount": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "target",
+      "spreadsheetId": "1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI",
+      "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1ogZ_2oWxkoSIVwJqWvjLi_3vlr8J_U31RmqBqLaDRkI/edit",
+      "properties": {
+        "title": "OP03 SYNTHETIC NOT PRODUCTION e341511c-fa72-40ed-928d-206e4a75b826 target",
+        "locale": "en_US",
+        "timeZone": "America/Los_Angeles"
+      },
+      "sheets": [
+        {
+          "properties": {
+            "sheetId": 1021697272,
+            "title": "Clients",
+            "index": 0,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 38
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 55745028,
+            "title": "Leads",
+            "index": 1,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 1,
+              "columnCount": 19
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 823418691,
+            "title": "Payments",
+            "index": 2,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 15
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 682184903,
+            "title": "ClientCharges",
+            "index": 3,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 990767460,
+            "title": "FinancialOps",
+            "index": 4,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 12
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1487407206,
+            "title": "SessionLog",
+            "index": 5,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 3,
+              "columnCount": 16
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 398365054,
+            "title": "TherapistRates",
+            "index": 6,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 681589530,
+            "title": "Settings",
+            "index": 7,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1716866768,
+            "title": "AuditLog",
+            "index": 8,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 11
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 422005194,
+            "title": "PackageCatalog",
+            "index": 9,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 16,
+              "columnCount": 23
+            }
+          }
+        },
+        {
+          "properties": {
+            "sheetId": 1708371115,
+            "title": "PackageRequests",
+            "index": 10,
+            "sheetType": "GRID",
+            "gridProperties": {
+              "rowCount": 2,
+              "columnCount": 28
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Synthetic fixture only; no production restore or deployment",
+    "The approved manual-policy branch and its repeated proof are not included in these five phases; blank production and original harness pins retained",
+    "No scheduled nightly admission/drain/retention/mail, configuration restoration or production-scale quota proof",
+    "Original source unchanged assertion applies to verify; manual intentionally added the two synthetic unknown tabs"
+  ]
+}

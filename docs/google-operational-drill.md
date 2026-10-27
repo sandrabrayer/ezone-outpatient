@@ -1,13 +1,18 @@
 # Isolated Google operational recovery drill
 
-Historical status: **all five phases passed natively on 2026-10-26**, using candidate
-`09a00ab5e9d057c3d3c1913f93415fb949233860` and private synthetic workbooks.
-See [retained evidence and limits](evidence/op03-google-drill-2026-10-26.md).
-The PR132 integration has regenerated the harness with new source/helper hashes,
-a nonempty preferred-house fixture and refusal of that writer while held.
-It has local service-double coverage, but **has not run natively yet**. Preserve
-the completed project's files/state; use a separate fresh project and new
-workbooks for combined-code acceptance. Do not relabel the older report.
+Current status: **all five phases passed natively on 2026-10-27**, using integrated
+candidate `3297311c4706cf650dbcbeb66b23c586dbc40d1c` and private synthetic workbooks.
+See [current-candidate evidence and exact return point](evidence/op03-google-drill-2026-10-27.md).
+The existing test project prepared on October26 was reused after normal Google
+authorization; no replacement project, state reset or repeated phase was needed.
+The PR132 integration's nonempty preferred house and held-writer refusal passed.
+Preserve its completed Code.gs, state, report and three workbooks. Any approved
+manual-policy extension belongs in this same project with separate namespaces;
+do not rerun these five phases to obtain that different evidence.
+
+The [October26 evidence](evidence/op03-google-drill-2026-10-26.md) remains attributable
+only to historical candidate `09a00ab5e9d057c3d3c1913f93415fb949233860`.
+Do not relabel or alter the older report or its separate project/workbooks.
 This is acceptance tooling for PR125, not a deployment, a live restore, or a
 replacement for the scheduled backup/configuration evidence.
 
@@ -92,8 +97,8 @@ including source/helper/definition hashes and elapsed milliseconds. A secondary
 report failure is logged without masking the original phase error. The phase
 must remain safely below the runtime execution limit; split it if actual timing
 approaches that limit, preserving all evidence.
-The October 26 execution-list durations were 24.263, 42.091, 34.744, 48.542 and
-61.297 seconds in phase order; this small fixture does not establish
+The October27 execution-list durations were 35.615, 55.475, 39.284, 45.727 and
+81.587 seconds in phase order; this small fixture does not establish
 production-scale timing or the approved manual-policy branch's timing.
 Execution logs contain phase status and the
 three synthetic workbook IDs. All successful results explicitly retain
@@ -104,8 +109,8 @@ no mail, external fetch, deployment or trigger scope is needed by this harness.
 
 The financial fixtures are terminal history and the sessions already recorded.
 Their retries must remain valid after their original dates. A local regression
-moves verification to June2031. The native October26 run verified retries after
-the original fixture dates, about a week later; the far-future clock remains
+moves verification to June2031. The native October26 and October27 runs verified
+retries after the original fixture dates, about a week later; the far-future clock remains
 local-double coverage only. Only the audit fixture includes an explicit Date scalar; date columns
 represented by the app as ISO strings are kept as strings.
 
@@ -121,3 +126,9 @@ plan and its target evidence are accepted. Do not erase manifest entries to pass
 After this drill, still require scheduled backup/timezone/alert/configuration
 evidence, review of any findings, and Sandra's separate production approval.
 See [operational recovery](operational-recovery.md) for release/rollback limits.
+
+The [separate synthetic policy-drill tooling](google-manual-policy-drill.md)
+prepares the missing approved-policy success and double-proof acceptance in the
+same completed project. Its new modules/state/artifacts are separate; the
+original five phases must not be rerun. Tooling preparation is not native
+acceptance or approval of the real archive.

@@ -132,3 +132,11 @@ pin and continues testing refusal. Remaining gates: real evidence packet, isolat
 Google restore, independent implementation and per-policy review, configuration /
 trigger / timezone / alert evidence, and Sandra's separate production approval.
 No new Drive scopes, deployment, trigger, email or production write is introduced.
+
+The [separate synthetic native acceptance procedure](google-manual-policy-drill.md)
+is prepared for the completed October27 test project. It requires actual
+Advanced Sheets read access for native formatting and dimension evidence under
+the existing Sheets scope. Service activation is pending consent to Google's
+displayed API terms. The extension has not run natively; its tests and generated
+modules do not approve any real recovery policy or change the blank production
+pin.

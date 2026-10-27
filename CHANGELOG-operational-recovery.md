@@ -1,5 +1,50 @@
 # OP-03 operational recovery coverage — draft, 2026-10-19
 
+## Separate synthetic policy acceptance tooling — 2026-10-27 (not run natively)
+
+Prepare an extension in the existing isolated test project, preserving the
+completed five-phase code, state, reports and workbooks. Its own namespaces and
+fixed project/baseline identity guard new backup, native-copy and empty-target
+artifacts. Original source access is read-only. A separate verifier binds a
+synthetic policy to retained native packets, observed owner-only permissions
+and exact committed evidence bytes; the production approval pin stays blank.
+
+Native Sheets API observations include cell formatting and row/column metadata;
+source/copy/target comparisons and a final native comparison before hold release
+prevent a successful copy alone from being treated as preservation evidence.
+The real finish function remains verbatim, with wrappers measuring its two
+internal proofs, native verification, cache/property order and lock timing.
+Missing service access, inconsistent evidence or phase failure refuse progress
+without resetting or automatically retrying. See
+[the separate policy-drill procedure](docs/google-manual-policy-drill.md).
+
+The same existing Sheets OAuth scope suffices. Google Sheets API v4 activation
+in the isolated project is pending Sandra's action-time consent to the terms
+shown by Google's Add a service dialog. The service has not been enabled, no
+new module has run in Google, and no new policy artifact or pin has been
+presented as native evidence. Independent review and test outcomes belong to
+this new tooling separately from the five passing native phases below.
+
+Validation: 17 dedicated service-double regressions passed. The full UTC suite
+on Node 24.22.1 passed 1,771 tests, failed 0 and skipped 38 (1,809 total). Fresh
+npm audit reported 0 vulnerabilities. Independent local static review found no
+remaining concrete blocker in its inspected scope after the noted hardening.
+CI/browser and Claude review outcomes are recorded separately on the final
+draft commit; none of these local checks is a new Google execution.
+
+## Integrated native Google acceptance — 2026-10-27
+
+All five phases passed on candidate 3297311c in the already prepared isolated
+project, after exact code/consent inspection and fresh zero-execution/state
+checks. Preferred-house preservation and held-writer refusal passed alongside
+the financial/session retry and manual-tab refusal checks. The three new
+synthetic workbooks were owner-only before capture and after completion.
+Google durations were 35.615/55.475/39.284/45.727/81.587s. Retain
+[the report, raw evidence and exact return point](docs/evidence/op03-google-drill-2026-10-27.md).
+No old phase or project was repeated/reset, no production data/code changed and
+no merge/deploy occurred. Approved manual-policy native success and its double
+proof, real recovery evidence and separate production approval remain open.
+
 ## PR132 integration — 2026-10-26 (draft)
 
 - Integrate base336c8ef9 into PR125; preserve preferred-house business logic,
@@ -13,7 +58,7 @@
 - Regenerate the unbound drill. Its fixture sets a preferred house through the
   real writer; verification checks restored value and refusal while held.
   Source/helper/definition hashes change. Native evidence below remains valid
-  only for09a00ab5; the combined harness has not run in Google yet.
+  only for09a00ab5; the combined harness had not run in Google at that checkpoint.
 - Keep exact schema validation and the blank manual-policy pin. Require a fresh
   verified v2 set with all current headers before certifying recovery; deployment
   alone or the first subsequent night does not establish this condition.

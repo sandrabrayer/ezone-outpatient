@@ -1,0 +1,243 @@
+    var stateKey = 'OP03_POLICY_DRILL_STATE', propertyPrefix = 'OP03_POLICY_FIXTURE_', cachePrefix = 'OP03_POLICY_CACHE_';
+    var nativeProps = nativeProperties.getScriptProperties(), state = null, books = {}, currentBook = null;
+    var events = [], timings = [], instrument = false, attempt = '', phaseStartedAt = Date.now();
+    function check(ok, reason) { if (!ok) throw new Error(reason); }
+    function sha(text) {
+      return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
+        .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+    }
+    function clone(value) { return JSON.parse(JSON.stringify(value)); }
+    function saveState() { nativeProps.setProperty(stateKey, JSON.stringify(state)); }
+    function originalName(role) { return 'OP03 SYNTHETIC NOT PRODUCTION ' + config.baseline.tag + ' ' + role; }
+    function policyName(role) { return 'OP03 POLICY SYNTHETIC NOT PRODUCTION ' + state.tag + ' ' + role; }
+    function assertOriginal() {
+      check(config.scriptId !== 'ISOLATED_SCRIPT_ID_REQUIRED' && ScriptApp.getScriptId() === config.scriptId, 'Wrong isolated script project');
+      check(!nativeSheets.getActiveSpreadsheet(), 'Standalone test project required');
+      check(nativeSheetsApi && nativeSheetsApi.Spreadsheets && typeof nativeSheetsApi.Spreadsheets.get === 'function',
+        'Read-only Advanced Google Sheets service is required before policy preparation');
+      var raw = nativeProps.getProperty('OP03_DRILL_STATE');
+      check(raw === config.baselineStateRaw && sha(raw) === config.baselineStateSHA256, 'Original completed drill changed');
+      var baseline = JSON.parse(raw);
+      check(baseline.phase === 'manual_block_verified' && baseline.running === false && !baseline.failed &&
+        baseline.sourceHash === metadata.sourceCodeSHA256, 'Original drill is not complete and idle');
+    }
+    function assertIdentity() {
+      check(state && state.baselineStateSHA256 === config.baselineStateSHA256 &&
+        state.sourceCodeSHA256 === metadata.sourceCodeSHA256 && state.helperSHA256 === metadata.helperSHA256 &&
+        state.setupDefinitionSHA256 === metadata.setupDefinitionSHA256, 'Policy setup identity mismatch');
+    }
+    function originalReport() {
+      var ss = nativeSheets.openById(config.baseline.ids.backup);
+      check(ss.getName() === originalName('backup'), 'Original backup name changed');
+      var report = ss.getSheetByName('_DrillReport'); check(!!report, 'Original report missing');
+      var rows = report.getDataRange().getValues(), phases = ['prepare', 'capture', 'restore', 'verify', 'manual'];
+      check(rows.length === 6 && phases.every(function (phase, i) {
+        return rows[i + 1][1] === phase && rows[i + 1][2] === 'PASS' &&
+          rows[i + 1][4] === config.baseline.sourceHash && rows[i + 1][5] === config.baseline.helperHash &&
+          rows[i + 1][6] === config.baseline.drillHash;
+      }), 'Original report does not prove all five phases');
+      return _integrityFingerprint(rows);
+    }
+    function loadBooks() {
+      var roles = ['source', 'backup', 'target'].concat(state.ids.nativeCopy ? ['nativeCopy'] : []), seen = {};
+      roles.forEach(function (role) {
+        var id = state.ids[role];
+        check(typeof id === 'string' && id && !seen[id], 'Policy workbook IDs are not distinct'); seen[id] = true;
+        if (role === 'source') check(id === config.baseline.ids.source, 'Original synthetic source changed');
+        else check(Object.keys(config.baseline.ids).every(function (key) { return config.baseline.ids[key] !== id; }), 'Policy workbook aliases original evidence');
+      });
+      roles.forEach(function (role) {
+        var book = nativeSheets.openById(state.ids[role]);
+        check(book.getName() === (role === 'source' ? originalName('source') : policyName(role)), 'Policy workbook name mismatch');
+        books[role] = book;
+      });
+    }
+    function typed(grid) {
+      return grid.map(function (row) { return row.map(function (value) {
+        return value instanceof Date ? ['date', value.toISOString()] : [typeof value, value];
+      }); });
+    }
+    function columnLetters(column) {
+      var result = ''; for (; column > 0; column = Math.floor((column - 1) / 26)) result = String.fromCharCode(65 + (column - 1) % 26) + result;
+      return result;
+    }
+    function nativeSnapshot(ss, sheets) {
+      check(Object.keys(state.ids).some(function (role) { return state.ids[role] === ss.getId(); }), 'Native API workbook outside policy fixture');
+      var ranges = sheets.map(function (sheet) {
+        return "'" + sheet.name.replace(/'/g, "''") + "'!A1:" + columnLetters(sheet.allocatedColumns) + sheet.allocatedRows;
+      });
+      // No field mask: retain every native sheet/cell/dimension property returned.
+      nativeSheets.flush(); // SpreadsheetApp batches must be visible to the separate read API.
+      var snapshot = nativeSheetsApi.Spreadsheets.get(ss.getId(), { includeGridData: true, ranges: ranges });
+      check(snapshot && snapshot.spreadsheetId === ss.getId() && Array.isArray(snapshot.sheets) && snapshot.sheets.length === sheets.length,
+        'Incomplete native spreadsheet response');
+      snapshot.sheets.forEach(function (sheet, i) {
+        check(sheet.properties && sheet.properties.sheetId === sheets[i].sheetId && sheet.properties.title === sheets[i].name &&
+          sheet.properties.gridProperties && sheet.properties.gridProperties.rowCount === sheets[i].allocatedRows &&
+          sheet.properties.gridProperties.columnCount === sheets[i].allocatedColumns, 'Native sheet order or allocation mismatch');
+      });
+      return canonical(snapshot);
+    }
+    // Arrays preserve source order and actual cell values. Object key order is
+    // canonical only for stable serialization; it never sorts rows or cells.
+__OP03_CANONICAL__
+    function inventory(ss) {
+      var allocatedCells = 0;
+      var sheets = ss.getSheets().map(function (sh, index) {
+        var rows = sh.getMaxRows(), columns = sh.getMaxColumns();
+        allocatedCells += rows * columns;
+        check(allocatedCells <= 100000, 'Synthetic native inventory exceeds its total bounded cell budget');
+        check(String(sh.getType()) === 'GRID', 'Unsupported non-grid synthetic sheet');
+        var data = sh.getDataRange(), all = sh.getRange(1, 1, rows, columns);
+        var validations = all.getDataValidations();
+        check(validations.every(function (r) { return r.every(function (v) { return v === null; }); }),
+          'Nonempty validation requires a separately supported native fixture');
+        var merges = all.getMergedRanges().map(function (r) { return r.getA1Notation(); });
+        var sheetProtections = sh.getProtections(nativeSheets.ProtectionType.SHEET);
+        var rangeProtections = sh.getProtections(nativeSheets.ProtectionType.RANGE);
+        check(!merges.length && !sheetProtections.length && !rangeProtections.length,
+          'Merged or protected cells require a separately supported native fixture');
+        var formulas = data.getFormulas();
+        check(formulas.every(function (r) { return r.every(function (v) { return v === ''; }); }), 'Source or target contains formulas');
+        return { name: sh.getName(), sheetId: sh.getSheetId(), order: index,
+          allocatedRows: rows, allocatedColumns: columns, lastRow: sh.getLastRow(), lastColumn: sh.getLastColumn(),
+          grid: typed(data.getValues()), formulas: formulas, numberFormats: all.getNumberFormats(),
+          validations: validations, merges: merges, sheetProtections: [], rangeProtections: [],
+          hidden: sh.isSheetHidden(), frozenRows: sh.getFrozenRows(), frozenColumns: sh.getFrozenColumns() };
+      });
+      return { schema: 'op03-native-inventory-v2', spreadsheetId: ss.getId(), locale: ss.getSpreadsheetLocale(),
+        timeZone: ss.getSpreadsheetTimeZone(), sheets: sheets, native: nativeSnapshot(ss, sheets) };
+    }
+    function comparableHash(inv) { return sha(JSON.stringify(comparable(inv))); }
+    function ensureRows(sheet, total) {
+      if (sheet.getMaxRows() < total) sheet.insertRowsAfter(sheet.getMaxRows(), total - sheet.getMaxRows());
+    }
+    function writePacket(name, value) {
+      var text = JSON.stringify(value), digest = sha(text), chunks = [], width = 30000;
+      for (var offset = 0; offset < text.length;) {
+        var end = Math.min(offset + width, text.length), last = text.charCodeAt(end - 1), next = text.charCodeAt(end);
+        if (last >= 0xD800 && last <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end--;
+        chunks.push(text.slice(offset, end)); offset = end;
+      }
+      var sheet = books.backup.getSheetByName('_PolicyEvidence'); check(!!sheet, 'Policy evidence sheet missing');
+      var start = sheet.getLastRow() + 1; ensureRows(sheet, start + chunks.length - 1);
+      var rows = chunks.map(function (chunk, i) { return [name, String(i + 1), String(chunks.length), digest, chunk]; });
+      sheet.getRange(start, 1, rows.length, 5).setNumberFormat('@').setValues(rows.map(function (row) {
+        return row.map(function (cell) { return "'" + cell; });
+      }));
+      nativeSheets.flush();
+      var readback = sheet.getRange(start, 1, rows.length, 5).getValues();
+      check(readback.every(function (row, i) { return row[0] === name && row[1] === String(i + 1) && row[2] === String(rows.length) && row[3] === digest; }) &&
+        sha(readback.map(function (row) { return row[4]; }).join('')) === digest, 'Evidence packet readback mismatch');
+      state.packetHashes[name] = digest; saveState(); return digest;
+    }
+    function readPacket(name) {
+      var sheet = books.backup.getSheetByName('_PolicyEvidence'); check(!!sheet, 'Policy evidence sheet missing');
+      var rows = sheet.getDataRange().getValues().slice(1).filter(function (row) { return row[0] === name; });
+      check(rows.length > 0 && rows.every(function (row, i) {
+        return row[1] === String(i + 1) && row[2] === String(rows.length) && row[3] === state.packetHashes[name];
+      }), 'Evidence packet chunks are missing, duplicated or reordered');
+      var text = rows.map(function (row) { return row[4]; }).join('');
+      check(sha(text) === state.packetHashes[name], 'Evidence packet digest changed'); return JSON.parse(text);
+    }
+    function report(phase, result, detail) {
+      if (!books.backup) return;
+      var sheet = books.backup.getSheetByName('_PolicyDrillReport'); check(!!sheet, 'Policy report missing');
+      var row = [new Date().toISOString(), phase, result, detail, metadata.sourceCodeSHA256,
+        metadata.helperSHA256, metadata.setupDefinitionSHA256, metadata.verifierDefinitionSHA256 || '', String(Date.now() - phaseStartedAt)];
+      var line = sheet.getLastRow() + 1; ensureRows(sheet, line);
+      sheet.getRange(line, 1, 1, row.length).setNumberFormat('@').setValues([row.map(function (value) { return "'" + value; })]);
+    }
+    function run(phase, previous, body) {
+      assertOriginal();
+      var lock = nativeLocks.getScriptLock(); lock.waitLock(30000);
+      try {
+        var raw = nativeProps.getProperty(stateKey); state = raw ? JSON.parse(raw) : null;
+        if (phase === 'prepare') {
+          check(!state, 'Policy drill already exists; preserve its evidence');
+          check(!nativeProps.getKeys().some(function (key) { return key.indexOf(propertyPrefix) === 0; }), 'Policy fixture properties already exist');
+          var probe = nativeSheetsApi.Spreadsheets.get(config.baseline.ids.source,
+            { includeGridData: false, fields: 'spreadsheetId,properties(title)' });
+          check(probe && probe.spreadsheetId === config.baseline.ids.source && probe.properties && probe.properties.title === originalName('source'),
+            'Advanced Sheets probe did not confirm the original synthetic source');
+          state = { tag: Utilities.getUuid(), phase: '', running: true, ids: { source: config.baseline.ids.source },
+            baselineStateSHA256: config.baselineStateSHA256, sourceCodeSHA256: metadata.sourceCodeSHA256,
+            helperSHA256: metadata.helperSHA256, setupDefinitionSHA256: metadata.setupDefinitionSHA256, packetHashes: {},
+            day: new Date().toISOString().slice(0, 10) };
+        } else {
+          assertIdentity(); check(state.running === false && !state.failed && state.phase === previous, 'Policy phase order or running/failure state mismatch');
+          if (phase === 'verify') check(raw === approval.restoredStateRaw && sha(raw) === approval.restoredStateSHA256, 'Fixed restored state changed');
+          state.running = true;
+        }
+        saveState();
+      } finally { lock.releaseLock(); }
+      try {
+        var baselineReport = originalReport();
+        if (phase === 'prepare') { state.originalReportSHA256 = baselineReport; saveState(); }
+        else { check(baselineReport === state.originalReportSHA256, 'Original report changed'); loadBooks(); }
+        var result = body();
+        assertOriginal(); check(originalReport() === state.originalReportSHA256, 'Original report changed during phase');
+        state.phase = result.stage; report(phase, 'PASS', result.detail); saveState();
+        Logger.log(JSON.stringify({ phase: phase, result: 'PASS', stage: state.phase, detail: result.detail, workbookIds: state.ids,
+          sourceCodeSHA256: metadata.sourceCodeSHA256, helperSHA256: metadata.helperSHA256,
+          setupDefinitionSHA256: metadata.setupDefinitionSHA256, verifierDefinitionSHA256: metadata.verifierDefinitionSHA256 || null,
+          packetHashes: state.packetHashes, durationMs: Date.now() - phaseStartedAt, productionCertified: false }));
+        return { ok: true, phase: state.phase, workbookIds: state.ids, packetHashes: state.packetHashes, productionCertified: false };
+      } catch (error) {
+        state.failed = true;
+        try {
+          saveState();
+          if (books.backup && books.backup.getSheetByName('_PolicyEvidence')) writePacket('failure-' + phase,
+            { error: String(error), at: new Date().toISOString(), phase: phase, events: events, timings: timings, productionCertified: false });
+          report(phase, 'FAIL', String(error).slice(0, 500));
+        }
+        catch (reportError) { Logger.log('Policy evidence write failed: ' + String(reportError).slice(0, 200)); }
+        throw error;
+      } finally {
+        lock.waitLock(30000);
+        try { state.running = false; saveState(); } finally { lock.releaseLock(); }
+      }
+    }
+    var SpreadsheetApp = { getActiveSpreadsheet: function () { return currentBook; },
+      openById: function (id) {
+        var role = Object.keys(books).filter(function (key) { return books[key].getId() === id; })[0];
+        check(!!role, 'Workbook outside policy fixture'); return books[role];
+      }, flush: function () { nativeSheets.flush(); } };
+    var PropertiesService = { getScriptProperties: function () { return {
+      getProperty: function (key) { return nativeProps.getProperty(propertyPrefix + key); },
+      setProperty: function (key, value) {
+        if (instrument) events.push({ event: 'set:' + key, at: Date.now(), attempt: attempt });
+        nativeProps.setProperty(propertyPrefix + key, String(value));
+      },
+      deleteProperty: function (key) {
+        if (instrument) events.push({ event: 'delete:' + key, at: Date.now(), attempt: attempt });
+        nativeProps.deleteProperty(propertyPrefix + key);
+      }
+    }; } };
+    var CacheService = { getScriptCache: function () {
+      var cache = nativeCache.getScriptCache(); return {
+        get: function (key) { return cache.get(cachePrefix + key); },
+        put: function (key, value, seconds) { return cache.put(cachePrefix + key, value, seconds); },
+        remove: function (key) {
+          if (instrument) events.push({ event: 'cache:' + key, at: Date.now(), attempt: attempt });
+          return cache.remove(cachePrefix + key);
+        }
+      };
+    } };
+    var LockService = { getUserLock: function () { return nativeLocks.getUserLock(); }, getScriptLock: function () {
+      var lock = nativeLocks.getScriptLock(), acquiredAt = null, waitedAt = null;
+      return { waitLock: function (timeout) {
+        waitedAt = Date.now(); lock.waitLock(timeout); acquiredAt = Date.now();
+        if (instrument) events.push({ event: 'lock-acquired', at: acquiredAt, attempt: attempt });
+      }, tryLock: function (timeout) {
+        waitedAt = Date.now(); var ok = lock.tryLock(timeout); if (ok) acquiredAt = Date.now(); return ok;
+      }, releaseLock: function () {
+        var releasedAt = Date.now();
+        try { lock.releaseLock(); } finally {
+          if (instrument && acquiredAt !== null) {
+            timings.push({ kind: 'script-lock', attempt: attempt, waitMs: acquiredAt - waitedAt, heldMs: releasedAt - acquiredAt });
+            events.push({ event: 'lock-released', at: releasedAt, attempt: attempt });
+          }
+        }
+      } };
+    } };

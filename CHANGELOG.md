@@ -6,6 +6,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Prepare a separate synthetic approved-policy acceptance extension for the
+  already completed test project: retained native evidence, isolated namespaces,
+  immutable setup and fixed-policy verifier modules, and measured two-pass finish.
+  Read-only Advanced Sheets observations cover cell formatting and dimension
+  visibility; activation is pending the owner's Google API terms consent.
+  This tooling has not run in Google and does not enable the production pin.
+- Record all five native Google phases passing on integrated candidate 3297311c
+  on October27, using the already prepared project. Verify owner-only files,
+  preferred-house preservation, held-writer refusal and exact retries; preserve
+  original state/artifacts without reruns. Retain separate candidate evidence
+  and measured 35.615/55.475/39.284/45.727/81.587s execution durations.
 - Integrate released PR132 (336c8ef9), keeping its preferred-house UI/SW19.
   The new writer rechecks recovery hold after acquiring its lock, before even
   extending headers. Add queued-write and four-schema recovery regressions;
