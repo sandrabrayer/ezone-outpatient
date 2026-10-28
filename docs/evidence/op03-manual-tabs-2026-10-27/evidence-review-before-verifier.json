@@ -1,0 +1,28 @@
+{
+  "reviewedCommit": "9ed06ddf3e947f4700f51908194d64fab18e66ed",
+  "claudeCommentId": 6446953785,
+  "claudeReviewURL": "https://github.com/sandrabrayer/ezone-outpatient/pull/125#issuecomment-6446953785",
+  "claudeScope": "Read-only narrative/state/file hashes/permission chronology; no inconsistency found within inspected scope",
+  "claudeNotRecomputed": [
+    "binding generation",
+    "full native comparable inventories",
+    "manifest/metadata/manual-tab digests",
+    "packet index"
+  ],
+  "claudeNodeApproval": "Node commands were refused for approval in Claude's environment; no full recomputation claimed",
+  "independentLocalEvidenceReview": {
+    "passed": true,
+    "bindingBytes": 3539,
+    "bindingSHA256": "b79416201efe3c8a98c9b91f9148216d32955dcaefe010b47573308db6b4a291",
+    "nativeComparableSHA256": "322b522b35245d0e791c7e61a1f8af4169f4cff07f3e6748b6eabe7057c4a972",
+    "packetChunks": {
+      "prepare": 23,
+      "capture": 127,
+      "restore": 43
+    },
+    "plainTextEmailsFound": 0,
+    "googleAccess": false,
+    "testsRun": false
+  },
+  "productionCertified": false
+}

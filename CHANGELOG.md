@@ -5,6 +5,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 operational recovery (draft)
+- Add two regressions and runbook clarifications for the uninstalled,
+  default-disabled removed-leads S1:U1 header helper (see
+  `CHANGELOG-removed-leads-header-correction.md`). Tests and documentation only;
+  the helper, runtime and frozen evidence are unchanged. The original
+  three-cell consent remains conditional, there is no new production approval,
+  and the nine native Google runs remain completed and are not rerun.
+- Integrate merged PR133 (`b14db799`) into this draft, preserving its roster,
+  personal-PIN authentication, historical assignees, SW20 and updated tests.
+  Resolve the two documentation conflicts without restoring obsolete release
+  labels. Apps Script, drill tooling and all retained native evidence are
+  unchanged. Record the newly exposed actual base and current integration gate.
+- Record a read-only release-readiness check of the existing source and latest
+  nightly snapshots. Three affected header prefixes match; removed-leads still
+  lacks its final three current headers. Retain the exact correction proposal
+  and the legacy backup-coverage gap without changing production. Refresh the
+  main runbook to recognize the completed native acceptance.
+- Complete a separate synthetic approved-policy acceptance extension for the
+  already completed test project: retained native evidence, isolated namespaces,
+  immutable setup and fixed-policy verifier modules, and measured two-pass finish.
+  Read-only Advanced Sheets observations cover cell formatting and dimension
+  visibility. After the owner's explicit Google API terms consent, activate
+  Sheets v4 in the existing project without changing its Sheets-only scope.
+  Native prepare/capture/restore/verify each pass once
+  (9.226/123.653/106.596/104.427s), with
+  exact packets, three owner-only permission checkpoints and committed evidence
+  binding. The separate fixed verifier refuses a changed policy, passes both
+  finish proofs and the late native comparison, then removes the fixture hold
+  last. Final state is verified and idle; the original five results are unchanged.
+  See the [result addendum](docs/evidence/op03-manual-tabs-2026-10-27-result.md).
+  The production pin stays blank.
+- Harden the acceptance tooling after bounded static review: require a generated
+  evidence-binding block in the exact committed record, three chronological
+  owner-only permission observations with stable identities and creation times,
+  and a cooperative four-minute phase budget checked before hold deletion.
+  Preserve diagnostics on deadline refusal; a single in-flight Google call or
+  hard execution termination remains outside the cooperative guard.
+- Record all five native Google phases passing on integrated candidate 3297311c
+  on October27, using the already prepared project. Verify owner-only files,
+  preferred-house preservation, held-writer refusal and exact retries; preserve
+  original state/artifacts without reruns. Retain separate candidate evidence
+  and measured 35.615/55.475/39.284/45.727/81.587s execution durations.
+- Integrate released PR132 (336c8ef9), keeping its preferred-house UI/SW19.
+  The new writer rechecks recovery hold after acquiring its lock, before even
+  extending headers. Add queued-write and four-schema recovery regressions;
+  regenerate the isolated drill with a nonempty preferred house and hold refusal.
+  Older-width snapshots remain inspection-only; no automatic schema migration.
+  Earlier native evidence stays attributable to 09a00ab5, not this integration.
+- Record five passing native Google drill phases on candidate 09a00ab5 with
+  private synthetic workbooks, exact saved-code comparison and measured timings.
+  Add retained evidence and narrow test-project consent to Sheets only. This is
+  documentation-only; production and approved manual-policy gates remain open.
+- Add a default-disabled, evidence-pinned manual-tab recovery verifier, retaining
+  all known-table/journal/configuration checks and hold-last ordering. Synthetic
+  tests cover exact scope, changed grids/types, formulas, missing evidence and
+  late target edits. No approved real policy yet; the isolated native drill
+  passed on October 26 (see the evidence document).
+- Refresh compatible Express/body-parser/qs lockfile patches after the current
+  audit found GHSA-27r3-jxmh-p828 (body-parser denial of service). See the OP-03
+  changelog for validation; application routes and dependency ranges unchanged.
+- Integrate released base 8b68cd75 without changing its public assets; add an
+  isolated phased Google acceptance runner with explicit project binding,
+  synthetic mixed journals/sessions/packages and local failure-path tests.
+- Integrate released packages and gate recovery completion on whole-run backup
+  drainage; retain marker on uncatchable termination for operator review.
+- Nightly backup now includes session/rate/configuration and operational history,
+  a complete inventory, and guarded recovery verification. Unknown tabs remain
+  explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
+
 ### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
 - Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).
 - אורן and דנה each sign in with their OWN PIN from Railway variables `USER_PIN_OREN` / `USER_PIN_DANA` (4–6 digits, distinct from `APP_PIN` and each other, fail-closed, names-only logging); ורד keeps `APP_PIN`. `APP_PIN` no longer signs in as אורן / דנה.

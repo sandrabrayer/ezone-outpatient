@@ -1208,6 +1208,7 @@ function _setPreferredHouse(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var ok;
     try {
@@ -1374,6 +1375,7 @@ function _saveAll(payload) {
     return { ok: false, error: 'Could not acquire lock (another save in progress) — try again' };
   }
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
     var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var leads = (payload && payload.leads) || [];
@@ -1666,6 +1668,7 @@ function _restoreRemovedClient(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([id]);
     var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var clients = _readAll(clientsSh, CLIENTS_HEADERS);
@@ -1940,6 +1943,7 @@ function _upsertCredit(credit, user) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureCreditsSheet();
     var idIdx = CREDIT_COLUMNS.indexOf('id');
     var lastRow = sh.getLastRow();
@@ -2125,6 +2129,7 @@ function _upsertPayment(payment) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([payment.clientId, _finPaymentOwner(payment.id)]);
     var sh = _ensurePaymentsSheet();
     var idIdx = PAYMENTS_HEADERS.indexOf('id');
@@ -2179,6 +2184,7 @@ function _setPaymentAmountOverride(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var ok = _writePaymentAmountOverride(sh, clientId, paymentId, amount, _requestUser(payload));
     return ok ? { ok: true } : { ok: false, error: 'client_not_found' };
@@ -2337,6 +2343,7 @@ function _repairStaleNextBilling(apply, todayIso, user) {
     if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   }
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var plan = _planStaleNextBillingRepair(
@@ -2396,6 +2403,7 @@ function _upsertCharge(charge) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([charge.clientId]);
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var idIdx = CHARGES_HEADERS.indexOf('id');
@@ -2432,6 +2440,7 @@ function _removeCharge(chargeId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -2461,6 +2470,7 @@ function _removeChargesForClient(clientId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([cid]);
     var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);
     var lastRow = sh.getLastRow();
@@ -2497,6 +2507,7 @@ function _removePaymentsForClient(clientId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([cid]);
     var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var lastRow = sh.getLastRow();
@@ -2524,6 +2535,7 @@ function _removePayment(paymentId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([_finPaymentOwner(paymentId)]);
     var sh = _ensureSheet('Payments', PAYMENTS_HEADERS);
     var lastRow = sh.getLastRow();
@@ -2550,6 +2562,7 @@ function _removeLead(lead, user) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var ss = _ss();
     var sheet = ss.getSheetByName('Leads');
     if (!sheet) return { ok: false, error: 'not_found' };
@@ -2608,15 +2621,20 @@ function _getSettings() {
 }
 
 function _saveSettings(settings) {
-  var sh = _ensureSheet('Settings', SETTINGS_HEADERS);
-  var rows = [];
-  if (settings && typeof settings === 'object') {
-    Object.keys(settings).forEach(function (k) {
-      rows.push({ key: k, value: settings[k] == null ? '' : String(settings[k]) });
-    });
-  }
-  _writeAll(sh, SETTINGS_HEADERS, rows);
-  return { ok: true };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var sh = _ensureSheet('Settings', SETTINGS_HEADERS);
+    var rows = [];
+    if (settings && typeof settings === 'object') {
+      Object.keys(settings).forEach(function (k) {
+        rows.push({ key: k, value: settings[k] == null ? '' : String(settings[k]) });
+      });
+    }
+    _writeAll(sh, SETTINGS_HEADERS, rows);
+    return { ok: true };
+  } finally { lock.releaseLock(); }
 }
 
 function _json(obj) {
@@ -2994,6 +3012,7 @@ function _flagStop(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
     var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
     var flag = {
@@ -3076,6 +3095,7 @@ function _setClinicalType(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var clients = _readAll(sh, CLIENTS_HEADERS);
 
@@ -3239,6 +3259,7 @@ function _recordSessionOutcome(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     // Optional client match for enrichment — never gates the log (keyed by session).
     // A SINGLE phone hit also unlocks the credit engine (we can read+write that
     // client's creditsOwed); 0 or >1 hits leave the patient balance untouched.
@@ -3466,6 +3487,7 @@ function _markForwarded(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
     var rows = _readAll(sh, SESSION_LOG_HEADERS);
     var forwarded = 0;
@@ -3489,6 +3511,7 @@ function _resolveStopFlag(id, resolvedBy) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -3530,6 +3553,7 @@ function _resolveStopFlagByPhone(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, resolved: 0 };
@@ -3594,6 +3618,7 @@ function _deactivateClient(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('Clients', CLIENTS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, deactivated: 0 }; // orphan-safe: no rows
@@ -3642,6 +3667,7 @@ function _requestExtraSession(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('ExtraSessionRequests', EXTRA_SESSION_HEADERS);
     var id = 'esr_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1000);
     var row = EXTRA_SESSION_HEADERS.map(function (h) {
@@ -3680,6 +3706,7 @@ function _approveExtraSession(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('ExtraSessionRequests', EXTRA_SESSION_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -3737,6 +3764,7 @@ function _createStopAlert(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
     var alert = {
       id: 'stop-' + Utilities.getUuid(),
@@ -3788,6 +3816,7 @@ function _markStopAlertRead(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -3820,6 +3849,7 @@ function _markStopAlertUnread(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'not_found' };
@@ -3860,6 +3890,7 @@ function _resumeTreatmentAlert(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet(STOP_ALERTS_SHEET, STOP_ALERTS_HEADERS);
     var clientIdIdx = STOP_ALERTS_HEADERS.indexOf('clientId');
     var statusIdx = STOP_ALERTS_HEADERS.indexOf('status');
@@ -4013,6 +4044,7 @@ function _createLead(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     // _ensureSheet applies the '@' plain-text format to the phone column for
     // the grid rows, so the appended phone keeps its leading zero.
     var sh = _ensureSheet('Leads', LEADS_HEADERS);
@@ -4078,6 +4110,7 @@ function _mergeClients(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     _finGuard([survivorId].concat(dupIds));
     var clientsSh  = _ensureSheet('Clients', CLIENTS_HEADERS);
     var paymentsSh = _ensureSheet('Payments', PAYMENTS_HEADERS);
@@ -4196,6 +4229,7 @@ function _saveContinuation(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, reason: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet(CONTINUATION_SHEET, CONTINUATION_HEADERS);
     var rows = _readAll(sh, CONTINUATION_HEADERS);
     var found = false;
@@ -4421,6 +4455,7 @@ function _getRenewalState(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var id = String(payload.clientId || ''), journal = _finJournal();
     var active = journal.ops.filter(function (op) { return op.clientId === id && _finActive(op); });
     // Even if the client was manually deleted, its pending intent is discoverable.
@@ -4439,6 +4474,7 @@ function _reserveRenewal(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
     if (same.length) {
       if (same[0].intent !== canonical) return { ok: false, error: 'operation_payload_mismatch' };
@@ -4467,6 +4503,7 @@ function _applyRenewal(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
     if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
@@ -4542,6 +4579,7 @@ function _resolveRenewalReview(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
     if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
@@ -4558,6 +4596,7 @@ function _finishRenewal(payload, cancel) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
     if (JSON.parse(op.intent).kind) return { ok: false, error: 'operation_kind_mismatch' };
@@ -4811,6 +4850,10 @@ function _pkgActiveRowByKey(rows, key) {
 function _pkgLock(ms) {
   var lock = LockService.getScriptLock();
   try { lock.waitLock(ms); } catch (e) { return null; }
+  if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) {
+    lock.releaseLock();
+    return null;
+  }
   return lock;
 }
 function _pkgUnlock(lock) { try { if (lock) lock.releaseLock(); } catch (_) {} }
@@ -5397,6 +5440,7 @@ function _getExtraChargeState(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var id = String(payload.clientId || ''), active = _finJournal().ops.filter(function (op) { return op.clientId === id && _finActive(op); });
     if (active.length) {
       if (JSON.parse(active[0].intent).kind !== 'extra_charge') return { ok: false, error: 'renewal_pending' };
@@ -5413,6 +5457,7 @@ function _reserveExtraCharge(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
     if (same.length) return same[0].intent === canonical ? { ok: true, operation: _finSummary(same[0]) } : { ok: false, error: 'operation_payload_mismatch' };
     // Only first reservation uses today's source day. Existing intent above
@@ -5439,6 +5484,7 @@ function _applyExtraCharge(payload) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
     var i = JSON.parse(op.intent), user = _requestUser(payload);
@@ -5474,6 +5520,7 @@ function _finishExtraCharge(payload, cancel, manual) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), op = journal.ops.filter(function (r) { return r.id === String(payload.opId || ''); })[0];
     if (!op) return { ok: false, error: 'operation_not_found' };
     if (JSON.parse(op.intent).kind !== 'extra_charge') return { ok: false, error: 'operation_kind_mismatch' };
@@ -5617,6 +5664,7 @@ function _sourceAuthOk(action, method, params, payload) {
 
 function doGet(e) {
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _json({ ok: false, error: 'recovery_pending' });
     var action = (e && e.parameter && e.parameter.action) || 'getData';
     if (!_sourceAuthOk(action, 'GET', e && e.parameter, null)) {
       return _json({ ok: false, error: 'unauthorized' });
@@ -5683,6 +5731,7 @@ function doGet(e) {
 
 function doPost(e) {
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _json({ ok: false, error: 'recovery_pending' });
     var action = (e && e.parameter && e.parameter.action) || 'saveAll';
     var payload = {};
     if (e && e.postData && e.postData.contents) {
@@ -6007,7 +6056,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|package-catalog|package-requests|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -6121,36 +6170,88 @@ function _integrityLookupNames(snapshotSheet, ids) {
  * saves, then release it BEFORE any backup write. Missing live sheets or a
  * failed read abort the set. Archives need not exist before the first removal;
  * record that explicitly instead of creating/relabeling a live sheet. */
+// Single registry for capture and restore. Append-only schemas stay owned by
+// their business modules. Package schemas are picked up when #122 is integrated.
+function _integritySourceSpecs() {
+  var specs = [
+    { source: 'Clients', prefix: '', key: 'id', headers: CLIENTS_HEADERS, required: true },
+    { source: 'Leads', prefix: 'leads-', key: 'id', headers: LEADS_HEADERS, required: true },
+    { source: 'לידים שהוסרו', prefix: 'leads-removed-', key: 'id', headers: REMOVED_LEADS_HEADERS },
+    { source: 'Clients-removed', prefix: 'clients-removed-', key: 'id', headers: CLIENTS_REMOVED_HEADERS },
+    { source: 'Payments', prefix: 'payments-', key: 'id', headers: PAYMENTS_HEADERS },
+    { source: 'ClientCharges', prefix: 'charges-', key: 'id', headers: CHARGES_HEADERS },
+    { source: 'Credits', prefix: 'credits-', key: 'id', headers: CREDIT_COLUMNS },
+    { source: 'FinancialOps', prefix: 'financial-ops-', key: 'id', headers: FINANCIAL_OP_HEADERS },
+    { source: 'SessionLog', prefix: 'session-log-', key: 'sessionId', headers: SESSION_LOG_HEADERS },
+    { source: 'TherapistRates', prefix: 'therapist-rates-', key: 'name', headers: THERAPIST_RATES_HEADERS },
+    { source: 'Settings', prefix: 'settings-', key: 'key', headers: SETTINGS_HEADERS },
+    { source: 'StopFlags', prefix: 'stop-flags-', key: 'id', headers: STOP_FLAGS_HEADERS },
+    { source: 'ExtraSessionRequests', prefix: 'extra-sessions-', key: 'id', headers: EXTRA_SESSION_HEADERS },
+    { source: CONTINUATION_SHEET, prefix: 'continuation-', key: 'key', headers: CONTINUATION_HEADERS },
+    { source: STOP_ALERTS_SHEET, prefix: 'stop-alerts-', key: 'id', headers: STOP_ALERTS_HEADERS },
+    { source: AUDIT_LOG_SHEET, prefix: 'audit-log-', headers: AUDIT_LOG_HEADERS },
+    { source: REPAIR_PLAN_SHEET, prefix: 'repair-plan-', headers: REPAIR_PLAN_HEADERS }
+  ];
+  if (typeof PACKAGE_CATALOG_HEADERS !== 'undefined' && typeof PACKAGE_REQUEST_HEADERS !== 'undefined') {
+    specs.push({ source: 'PackageCatalog', prefix: 'package-catalog-', key: 'id', headers: PACKAGE_CATALOG_HEADERS });
+    specs.push({ source: 'PackageRequests', prefix: 'package-requests-', key: 'id', headers: PACKAGE_REQUEST_HEADERS });
+  }
+  return specs;
+}
+
+function _integrityOtherPrefix(source) {
+  return 'other-' + _integrityFingerprint([[source]]) + '-';
+}
+
 function _integrityCaptureData(sourceSs) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) throw new Error('Backup capture lock unavailable');
   try {
-    var specs = [
-      { source: 'Clients', prefix: '', required: true },
-      { source: 'Leads', prefix: 'leads-', required: true },
-      { source: 'לידים שהוסרו', prefix: 'leads-removed-', headers: REMOVED_LEADS_HEADERS },
-      { source: 'Clients-removed', prefix: 'clients-removed-', headers: CLIENTS_REMOVED_HEADERS },
-      { source: 'Payments', prefix: 'payments-', headers: PAYMENTS_HEADERS },
-      { source: 'ClientCharges', prefix: 'charges-', headers: CHARGES_HEADERS },
-      { source: 'Credits', prefix: 'credits-', headers: CREDIT_COLUMNS },
-      { source: 'FinancialOps', prefix: 'financial-ops-', headers: FINANCIAL_OP_HEADERS,
-        required: !!PropertiesService.getScriptProperties().getProperty('FINANCIAL_OPS_CREATED') },
-      // Quotation sheets (OP-PKG): optional until first used; recorded as
-      // absent in the manifest rather than created just for the backup.
-      { source: PACKAGE_CATALOG_SHEET, prefix: 'package-catalog-', headers: PACKAGE_CATALOG_HEADERS },
-      { source: PACKAGE_REQUESTS_SHEET, prefix: 'package-requests-', headers: PACKAGE_REQUEST_HEADERS }
-    ];
-    return specs.map(function (spec) {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var specs = _integritySourceSpecs(), known = Object.create(null);
+    var journalRequired = !!props.getProperty('FINANCIAL_OPS_CREATED');
+    var previouslyPresent = JSON.parse(props.getProperty('INTEGRITY_REQUIRED_SOURCES') || '[]');
+    if (!Array.isArray(previouslyPresent)) throw new Error('Invalid backup source history');
+    previouslyPresent.forEach(function (name) {
+      if (typeof name !== 'string' || !sourceSs.getSheetByName(name)) throw new Error('Previously captured source missing: ' + name);
+    });
+    var captured = specs.map(function (spec) {
+      known[spec.source] = true;
       var sh = sourceSs.getSheetByName(spec.source);
-      if (!sh && spec.required) throw new Error('Missing backup source: ' + spec.source);
+      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired))) {
+        throw new Error('Missing backup source: ' + spec.source);
+      }
       var range = sh ? sh.getDataRange() : null;
       var grid = range ? range.getValues() : [spec.headers.slice()];
-      if (!grid.length || grid[0].indexOf('id') === -1) {
+      // Capture damaged/legacy data faithfully; strict operational schema and
+      // duplicate-key checks belong to the recovery gate, not data destruction.
+      if (!grid.length || !grid[0].length || (spec.key && grid[0].indexOf(spec.key) === -1)) {
         throw new Error('Invalid backup headers: ' + spec.source);
       }
       return { source: spec.source, prefix: spec.prefix, absent: !sh,
         grid: grid, formats: range ? range.getNumberFormats() : null };
     });
+    var unknown = [];
+    sourceSs.getSheets().forEach(function (sh) {
+      var name = sh.getName();
+      if (_hasOwn(known, name)) return;
+      if (name === '__RecoveryMetadata') throw new Error('Reserved backup source name');
+      unknown.push(name);
+      var range = sh.getDataRange();
+      captured.push({ source: name, prefix: _integrityOtherPrefix(name), absent: false,
+        grid: range.getValues(), formats: range.getNumberFormats() });
+    });
+    // No credentials, auth secrets or PINs are copied from Script Properties.
+    // Inventory is hashed along with the datasets and published last in manifest.
+    var meta = [['key', 'value'], ['schemaVersion', '2'],
+      ['sourceSpreadsheetId', sourceSs.getId()], ['capturedAt', new Date().toISOString()],
+      ['financialOpsCreated', journalRequired ? '1' : '0'],
+      ['inventory', JSON.stringify(captured.map(function (x) { return [x.source, x.prefix, x.absent ? '1' : '0']; }))],
+      ['knownSources', JSON.stringify(specs.map(function (x) { return x.source; }))],
+      ['unclassifiedSources', JSON.stringify(unknown)]];
+    captured.push({ source: '__RecoveryMetadata', prefix: 'recovery-meta-', absent: false, grid: meta, formats: null });
+    return captured;
   } finally { lock.releaseLock(); }
 }
 
@@ -6172,30 +6273,242 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
   if (!sh) throw new Error('Restore manifest missing');
   var rows = sh.getDataRange().getValues();
-  var prefixes = { Clients: '', Leads: 'leads-', 'לידים שהוסרו': 'leads-removed-',
-    'Clients-removed': 'clients-removed-', Payments: 'payments-', ClientCharges: 'charges-',
-    Credits: 'credits-', FinancialOps: 'financial-ops-',
-    PackageCatalog: 'package-catalog-', PackageRequests: 'package-requests-' };
-  if (JSON.stringify(rows[0]) !== JSON.stringify(['id', 'source', 'snapshot', 'absent', 'sha256']) || (rows.length !== 9 && rows.length !== 11)) {
-    // 9 = legacy 8-sheet manifests written before the package sheets existed (still restorable); 11 = current.
+  if (JSON.stringify(rows[0]) !== JSON.stringify(['id', 'source', 'snapshot', 'absent', 'sha256'])) {
     throw new Error('Invalid restore manifest');
   }
-  var seen = {};
-  return rows.slice(1).map(function (row) {
-    var source = String(row[1]);
-    if (!_hasOwn(prefixes, source) || seen[source] || row[0] !== source ||
-        row[2] !== INTEGRITY_SNAPSHOT_PREFIX + prefixes[source] + day || ['0', '1'].indexOf(String(row[3])) < 0) {
-      throw new Error('Invalid restore manifest entry');
-    }
+  var prefixes = Object.create(null), seen = Object.create(null), isCurrent = rows.some(function (r) { return r[1] === '__RecoveryMetadata'; });
+  _integritySourceSpecs().forEach(function (x) { prefixes[x.source] = x.prefix; });
+  // Inspect legacy package sets even before their business module is deployed.
+  prefixes.PackageCatalog = 'package-catalog-'; prefixes.PackageRequests = 'package-requests-';
+  prefixes.__RecoveryMetadata = 'recovery-meta-';
+  var result = rows.slice(1).map(function (row) {
+    var source = String(row[1]), prefix = _hasOwn(prefixes, source) ? prefixes[source] : _integrityOtherPrefix(source);
+    if (isCurrent && !_integritySourceSpecs().some(function (x) { return x.source === source; }) && row[2] === INTEGRITY_SNAPSHOT_PREFIX + _integrityOtherPrefix(source) + day) prefix = _integrityOtherPrefix(source);
+    if (!source || seen[source] || row[0] !== source || row.length !== 5 ||
+        row[2] !== INTEGRITY_SNAPSHOT_PREFIX + prefix + day || ['0', '1'].indexOf(String(row[3])) < 0 ||
+        !/^[a-f0-9]{64}$/.test(String(row[4]))) throw new Error('Invalid restore manifest entry');
     seen[source] = true;
     var data = backupSs.getSheetByName(String(row[2]));
     if (!data) throw new Error('Restore snapshot missing: ' + source);
     var grid = data.getDataRange().getValues();
     if (_integrityFingerprint(grid) !== row[4]) throw new Error('Restore snapshot mismatch: ' + source);
+    if (String(row[3]) === '1' && grid.length !== 1) throw new Error('Absent restore snapshot contains rows');
     if (source === 'FinancialOps' && requireJournal && (String(row[3]) === '1' ||
-        JSON.stringify(grid[0]) !== JSON.stringify(FINANCIAL_OP_HEADERS))) throw new Error('Restore journal required');
-    return { source: source, absent: String(row[3]) === '1', grid: grid };
+        JSON.stringify(grid[0].slice(0, FINANCIAL_OP_HEADERS.length)) !== JSON.stringify(FINANCIAL_OP_HEADERS))) {
+      throw new Error('Restore journal required');
+    }
+    return { source: source, prefix: prefix, absent: String(row[3]) === '1', grid: grid };
   });
+  var legacy = ['Clients', 'Leads', 'לידים שהוסרו', 'Clients-removed', 'Payments', 'ClientCharges', 'Credits', 'FinancialOps'];
+  if (!isCurrent) {
+    var allowed = legacy.concat(result.length === 10 ? ['PackageCatalog', 'PackageRequests'] : []);
+    if (result.length !== allowed.length || allowed.some(function (n) { return !seen[n]; })) throw new Error('Invalid restore manifest');
+    return result; // inspection only; never passes the operational recovery gate
+  }
+  var meta = _integrityRecoveryMetadata(result), inventory = JSON.parse(meta.inventory);
+  var known = JSON.parse(meta.knownSources), unknown = JSON.parse(meta.unclassifiedSources);
+  var required = _integritySourceSpecs().map(function (x) { return x.source; });
+  // A package-aware artifact must retain both datasets, even in an older runtime.
+  if (known.indexOf('PackageCatalog') >= 0 || known.indexOf('PackageRequests') >= 0) {
+    ['PackageCatalog', 'PackageRequests'].forEach(function (n) { if (required.indexOf(n) < 0) required.push(n); });
+  }
+  if (JSON.stringify(known.slice().sort()) !== JSON.stringify(required.slice().sort()) ||
+      inventory.length !== result.length - 1 || inventory.length !== known.length + unknown.length) throw new Error('Incomplete recovery inventory');
+  var indexed = Object.create(null);
+  inventory.forEach(function (row) {
+    var item = result.filter(function (x) { return x.source === row[0]; })[0];
+    if (!item || item.source === '__RecoveryMetadata' || indexed[item.source] || row.length !== 3 ||
+        item.prefix !== row[1] || (item.absent ? '1' : '0') !== row[2]) throw new Error('Recovery inventory mismatch');
+    indexed[item.source] = true;
+  });
+  if (known.some(function (n) { return !indexed[n]; }) || unknown.some(function (n, i) {
+    return known.indexOf(n) >= 0 || unknown.indexOf(n) !== i || !indexed[n];
+  })) throw new Error('Incomplete recovery inventory');
+  if (meta.financialOpsCreated === '1' && result.some(function (x) { return x.source === 'FinancialOps' && x.absent; })) {
+    throw new Error('Restore journal required');
+  }
+  return result;
+}
+
+function _integrityRecoveryMetadata(captured) {
+  var item = captured.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
+  if (!item || item.absent) throw new Error('Legacy backup is not a full operational recovery set');
+  var grid = item.grid, meta = {};
+  var fields = ['schemaVersion', 'sourceSpreadsheetId', 'capturedAt', 'financialOpsCreated', 'inventory', 'knownSources', 'unclassifiedSources'];
+  if (JSON.stringify(grid[0]) !== JSON.stringify(['key', 'value']) || grid.length !== fields.length + 1) throw new Error('Invalid recovery metadata');
+  grid.slice(1).forEach(function (r) {
+    if (r.length !== 2 || fields.indexOf(r[0]) < 0 || _hasOwn(meta, r[0]) || typeof r[1] !== 'string') throw new Error('Invalid recovery metadata');
+    meta[r[0]] = r[1];
+  });
+  if (meta.schemaVersion !== '2' || !meta.sourceSpreadsheetId || !isFinite(Date.parse(meta.capturedAt)) ||
+      ['0', '1'].indexOf(meta.financialOpsCreated) < 0 ||
+      !Array.isArray(JSON.parse(meta.inventory)) || !Array.isArray(JSON.parse(meta.knownSources)) ||
+      !Array.isArray(JSON.parse(meta.unclassifiedSources))) throw new Error('Invalid recovery metadata');
+  return meta;
+}
+
+// Editor-only recovery protocol. No route can clear this hold. Begin BEFORE
+// changing/restoring the configured workbook; pause editor jobs as well.
+function beginOutpatientRecovery() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('OUTPATIENT_RECOVERY_HOLD', '1');
+    // Freeze new admissions now, but do not authorize cutover while a job
+    // admitted before this hold can still publish or update its sentinels.
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
+    return { ok: true, state: 'recovery_pending' };
+  } finally { lock.releaseLock(); }
+}
+
+// Intentionally disabled. A recovery-specific reviewed commit may pin ONE
+// evidence-backed policy. Never populate this from properties, cells or input.
+var INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = '';
+
+// Canonical fixed-field rows, domain separated, hashed by the existing typed
+// fingerprint. Only tab entries are sorted; captured cells are never normalized.
+function _integrityManualPolicyRows(policy) {
+  function fields(value, keys) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(keys.slice().sort())) {
+      throw new Error('Invalid manual recovery policy fields');
+    }
+    return keys.map(function (key) { return value[key]; });
+  }
+  var keys = ['version', 'sourceId', 'backupId', 'day', 'targetId', 'manifestSha256', 'metadataSha256', 'evidence', 'tabs'];
+  fields(policy, keys);
+  var evidenceKeys = ['recordPath', 'sha256', 'operator', 'captureStartedAt', 'captureEndedAt',
+    'beforeInventorySha256', 'afterInventorySha256', 'nativeCopyId', 'directWritesPaused',
+    'formulasAbsent', 'nativePropertiesVerified', 'targetCreatedAt', 'targetInitiallyEmpty', 'targetOwnerOnly'];
+  var tabKeys = ['source', 'sheetId', 'prefix', 'absent', 'role', 'sha256', 'rows', 'columns', 'allocatedRows', 'allocatedColumns'];
+  if (!Array.isArray(policy.tabs)) throw new Error('Invalid manual recovery policy tabs');
+  var tabs = policy.tabs.map(function (tab) { return fields(tab, tabKeys); });
+  tabs.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+  return [['outpatient-manual-recovery-policy-v1'], keys.slice(0, 7).map(function (key) { return policy[key]; }),
+    fields(policy.evidence, evidenceKeys)].concat(tabs);
+}
+
+function _integrityVerifyManualPolicy(backupSs, day, targetSs, captured, meta, policy) {
+  var pin = INTEGRITY_APPROVED_MANUAL_POLICY_SHA256;
+  if (typeof pin !== 'string' || !/^[a-f0-9]{64}$/.test(pin)) {
+    throw new Error('Unclassified sheets require a separately reviewed recovery plan');
+  }
+  if (_integrityFingerprint(_integrityManualPolicyRows(policy)) !== pin) throw new Error('Manual recovery policy digest mismatch');
+  function hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
+  function text(value) { return typeof value === 'string' && value.trim().length > 0; }
+  function instant(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && isFinite(Date.parse(value)); }
+  var metadata = captured.filter(function (item) { return item.source === '__RecoveryMetadata'; })[0];
+  var manifest = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day).getDataRange().getValues();
+  if (policy.version !== 1 || policy.sourceId !== meta.sourceSpreadsheetId || policy.backupId !== backupSs.getId() ||
+      policy.day !== day || policy.targetId !== targetSs.getId() ||
+      policy.manifestSha256 !== _integrityFingerprint(manifest) || policy.metadataSha256 !== _integrityFingerprint(metadata.grid)) {
+    throw new Error('Manual recovery policy scope mismatch');
+  }
+  // These are reviewed operator attestations, NOT facts proved by v2 snapshots.
+  // Their evidence digest is pinned; no Drive access or new scopes are implied.
+  var e = policy.evidence;
+  if (typeof e.recordPath !== 'string' || !/^docs\/evidence\/op03-manual-tabs-\d{4}-\d{2}-\d{2}(?:-[a-z0-9-]+)?\.md$/.test(e.recordPath) ||
+      !hash(e.sha256) || !text(e.operator) || !instant(e.captureStartedAt) || !instant(e.captureEndedAt) ||
+      Date.parse(e.captureStartedAt) > Date.parse(meta.capturedAt) || Date.parse(e.captureEndedAt) < Date.parse(meta.capturedAt) ||
+      !hash(e.beforeInventorySha256) || e.beforeInventorySha256 !== e.afterInventorySha256 ||
+      !text(e.nativeCopyId) || [policy.sourceId, policy.backupId, policy.targetId].indexOf(e.nativeCopyId) >= 0 ||
+      e.directWritesPaused !== true || e.formulasAbsent !== true || e.nativePropertiesVerified !== true ||
+      !instant(e.targetCreatedAt) || e.targetInitiallyEmpty !== true || e.targetOwnerOnly !== true) {
+    throw new Error('Manual recovery evidence incomplete');
+  }
+  var unknown = JSON.parse(meta.unclassifiedSources), seen = Object.create(null), ids = Object.create(null);
+  if (policy.tabs.length !== unknown.length) throw new Error('Manual recovery tab set mismatch');
+  policy.tabs.forEach(function (tab) {
+    var item = captured.filter(function (x) { return x.source === tab.source; })[0];
+    if (unknown.indexOf(tab.source) < 0 || _hasOwn(seen, tab.source) || !item || item.absent || tab.absent !== false ||
+        tab.prefix !== item.prefix || tab.sha256 !== _integrityFingerprint(item.grid) ||
+        !Number.isInteger(tab.sheetId) || tab.sheetId < 0 || _hasOwn(ids, tab.sheetId) ||
+        ['structural-empty', 'retained-archive'].indexOf(tab.role) < 0 ||
+        tab.rows !== item.grid.length || tab.columns !== item.grid[0].length ||
+        !Number.isInteger(tab.allocatedRows) || tab.allocatedRows < tab.rows ||
+        !Number.isInteger(tab.allocatedColumns) || tab.allocatedColumns < tab.columns) {
+      throw new Error('Manual recovery tab mismatch');
+    }
+    if (tab.role === 'structural-empty' && item.grid.some(function (row) { return row.some(function (v) { return v !== ''; }); })) {
+      throw new Error('Manual recovery structural tab is not empty');
+    }
+    seen[tab.source] = true; ids[tab.sheetId] = true;
+  });
+  return policy.tabs;
+}
+
+function _integrityVerifyManualTarget(item, target, tab) {
+  if (!target || target.getMaxRows() !== tab.allocatedRows || target.getMaxColumns() !== tab.allocatedColumns) {
+    throw new Error('Manual recovery target bounds mismatch');
+  }
+  _integrityVerifyGrid(item.grid, target.getDataRange().getValues());
+  if (target.getDataRange().getFormulas().some(function (row) { return row.some(function (v) { return v !== ''; }); })) {
+    throw new Error('Manual recovery target contains formulas');
+  }
+}
+
+// Read-only proof for an isolated target. Credentials/triggers are NOT in the
+// backup: the operator must separately verify configuration before release.
+function _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy) {
+  if (configVerified !== true) throw new Error('Recovery configuration verification required');
+  var captured = _integrityValidateRestoreSet(backupSs, day, false), meta = _integrityRecoveryMetadata(captured);
+  if (targetSs.getId() === backupSs.getId() || targetSs.getId() === meta.sourceSpreadsheetId) throw new Error('Recovery requires an isolated target');
+  var unknown = JSON.parse(meta.unclassifiedSources);
+  if (!unknown.length && manualPolicy != null) throw new Error('Manual recovery policy supplied without unclassified sheets');
+  var manualTabs = unknown.length ? _integrityVerifyManualPolicy(backupSs, day, targetSs, captured, meta, manualPolicy) : [];
+  var specs = _integritySourceSpecs(), names = Object.create(null);
+  captured.forEach(function (item) {
+    if (item.source === '__RecoveryMetadata') return;
+    names[item.source] = true;
+    var target = targetSs.getSheetByName(item.source);
+    if (item.absent) { if (target) throw new Error('Absent source recreated: ' + item.source); return; }
+    if (!target) throw new Error('Recovered sheet missing: ' + item.source);
+    if (unknown.indexOf(item.source) >= 0) {
+      _integrityVerifyManualTarget(item, target, manualTabs.filter(function (tab) { return tab.source === item.source; })[0]);
+      return; // Unknown tabs never enter a known business schema or billing path.
+    }
+    _integrityVerifyGrid(item.grid, target.getDataRange().getValues());
+    var spec = specs.filter(function (x) { return x.source === item.source; })[0];
+    if (!spec || JSON.stringify(item.grid[0].slice(0, spec.headers.length)) !== JSON.stringify(spec.headers)) throw new Error('Recovery schema mismatch: ' + item.source);
+    if (spec.key) {
+      var keys = Object.create(null), col = item.grid[0].indexOf(spec.key);
+      item.grid.slice(1).forEach(function (row) {
+        if (!row.some(function (v) { return v !== ''; })) return;
+        var key = String(row[col]);
+        if (!key || _hasOwn(keys, key)) throw new Error('Recovery key invalid: ' + item.source);
+        keys[key] = true;
+      });
+    }
+  });
+  ['Clients', 'Leads', 'SessionLog', 'TherapistRates', 'Settings'].forEach(function (name) {
+    if (!targetSs.getSheetByName(name)) throw new Error('Operational recovery state missing: ' + name);
+    if (name === 'TherapistRates' && targetSs.getSheetByName(name).getLastRow() < 2) throw new Error('Operational recovery rates empty');
+  });
+  if (targetSs.getSheets().some(function (sh) { return !names[sh.getName()]; })) throw new Error('Unexpected recovered sheet');
+  var journal = captured.filter(function (x) { return x.source === 'FinancialOps'; })[0];
+  return { ok: true, journalRequired: !journal.absent || meta.financialOpsCreated === '1' };
+}
+
+function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('Recovery backup still running');
+    var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
+    var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
+    if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
+    try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
+    if (result.journalRequired) props.setProperty('FINANCIAL_OPS_CREATED', '1');
+    else if (props.getProperty('FINANCIAL_OPS_CREATED')) throw new Error('Restore journal required');
+    props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(_ss().getSheets().map(function (sh) { return sh.getName(); })));
+    // Repeat the proof after journal/cache/property work, as late as possible.
+    // ScriptLock does not stop direct editors: the coordinated pause is required.
+    if (manualPolicy) _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
+    // Clear LAST, only after all reads, schema checks and marker persistence.
+    props.deleteProperty('OUTPATIENT_RECOVERY_HOLD');
+    return { ok: true, state: 'verified' };
+  } finally { lock.releaseLock(); }
 }
 
 function _integrityVerifyGrid(expected, actual) {
@@ -6244,6 +6557,8 @@ function _integrityWriteSnapshot(backupSs, snapName, grid, formats) {
     for (var r = 0; r < formulas.length; r++) {
       if (formulas[r].some(function (formula) { return !!formula; })) throw new Error('Backup contains a formula');
     }
+    if (sh.getMaxRows() > grid.length) sh.deleteRows(grid.length + 1, sh.getMaxRows() - grid.length);
+    if (sh.getMaxColumns() > grid[0].length) sh.deleteColumns(grid[0].length + 1, sh.getMaxColumns() - grid[0].length);
     old = backupSs.getSheetByName(snapName);
     if (old) { old.setName('outpatient-previous-' + token); renamedOld = true; }
     sh.setName(snapName);
@@ -6331,6 +6646,28 @@ function _integritySendAlert(body) {
  * failure never silences the others; internal errors join the alert. */
 function nightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
+  var admission = LockService.getScriptLock();
+  if (!admission.tryLock(5000)) {
+    _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
+    return { ok: false, error: 'backup_busy' };
+  }
+  var runMarker = '', admissionError = '';
+  try {
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
+    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) admissionError = 'backup_busy';
+    else {
+      runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
+      props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
+    }
+  } finally { admission.releaseLock(); }
+  if (admissionError) {
+    if (admissionError === 'backup_busy') _integritySendAlert('Backup not started: another backup is active or its execution marker requires operator review.');
+    return { ok: false, error: admissionError };
+  }
+  // This marker spans the WHOLE run, including publication, retention, alerts
+  // and sentinel writes. It uses Script Properties/ScriptLock across users;
+  // the short per-sheet UserLock is not a recovery/cutover barrier.
+  try {
   var errors = [];
 
   // ---- read-only reads of the live data (getSheetByName, NEVER _ensureSheet:
@@ -6443,6 +6780,11 @@ function nightlyIntegrityJob() {
       });
       _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
       _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
+      // Once observed, disappearing operational/manual tables are a backup
+      // failure, not a new legitimate empty baseline that ages out good history.
+      props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
+        return !x.absent && x.source !== '__RecoveryMetadata';
+      }).map(function (x) { return x.source; })));
       // Retention runs only after every data snapshot and the manifest verify.
       var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
       if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
@@ -6469,6 +6811,19 @@ function nightlyIntegrityJob() {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+  }
+  } finally {
+    var completion = LockService.getScriptLock();
+    try { completion.waitLock(30000); }
+    catch (err) {
+      Logger.log('nightlyIntegrityJob: marker stranded; completion lock unavailable. INTEGRITY_ACTIVE_BACKUP requires operator investigation.');
+      throw err;
+    }
+    try {
+      // Never clear a different execution's marker. An uncatchable runtime
+      // termination leaves this marker fail-closed for operator investigation.
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') === runMarker) props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    } finally { completion.releaseLock(); }
   }
 }
 
@@ -7269,6 +7624,7 @@ function applyCorruptedRowRepairsNow() {
     return { ok: false, error: 'busy', applied: 0, skipped: 0 };
   }
   try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var ss = _ss();
     var planSh = ss.getSheetByName(REPAIR_PLAN_SHEET);
     if (!planSh) {

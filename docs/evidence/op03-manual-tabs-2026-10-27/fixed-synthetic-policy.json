@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "sourceId": "1ksrByHl88PMGkKI8RjpGvQoX8zUPZFjcvy0t36c6FLE",
+  "backupId": "1erik1amGnhmPNC9u8gTnrzqxwNv1aP4R1iuxwFx_Nxc",
+  "day": "2026-10-27",
+  "targetId": "1F6yDJIqpoq8kwopkL20-ew1HYOGozfnfLtGYy4h9nKg",
+  "manifestSha256": "ca0c02fa5c2445fa54c7cd2991a310834a540944dbce9537fa497afc9cc0565d",
+  "metadataSha256": "9c15b957c95cc59b23775a7eecddcfb1901348bd4754771034cd36d48f05de22",
+  "evidence": {
+    "recordPath": "docs/evidence/op03-manual-tabs-2026-10-27.md",
+    "sha256": "4998ad6bf53a73f4e488ab3d9891bf2a8bbfed1ccbfa73252c3214bf61469fea",
+    "operator": "ChatGPT Codex, sole operator of the Sandra-authorized isolated OP03 synthetic drill",
+    "captureStartedAt": "2026-10-27T15:53:22.460Z",
+    "captureEndedAt": "2026-10-27T15:55:17.706Z",
+    "beforeInventorySha256": "683537b0db8633a19cdaa0ad5c39db23dca5182043ec6ad9bfdbd6adcdcdecab",
+    "afterInventorySha256": "683537b0db8633a19cdaa0ad5c39db23dca5182043ec6ad9bfdbd6adcdcdecab",
+    "nativeCopyId": "1w4B2JWZl6fz30gyW2OY_G2I3Oqfr9X1bhGEUFQZQahI",
+    "directWritesPaused": true,
+    "formulasAbsent": true,
+    "nativePropertiesVerified": true,
+    "targetCreatedAt": "2026-10-27T15:50:46.787Z",
+    "targetInitiallyEmpty": true,
+    "targetOwnerOnly": true
+  },
+  "tabs": [
+    {
+      "source": "Copy of Clients",
+      "sheetId": 1463281386,
+      "prefix": "other-574f57e2e39b133ab7ea3a43704e140926584c3cd76261950be827522c41cd82-",
+      "absent": false,
+      "role": "retained-archive",
+      "sha256": "69932334b6af301b4b3dd1bf8e9d950165f0e72fa064f2e1a6ce321f9eb3db4a",
+      "rows": 2,
+      "columns": 2,
+      "allocatedRows": 2,
+      "allocatedColumns": 2
+    },
+    {
+      "source": "Sheet1",
+      "sheetId": 344019297,
+      "prefix": "other-1889c7466938d256bd10e8d42f165b5b04422df0558332fbf48b4d58ad912abe-",
+      "absent": false,
+      "role": "structural-empty",
+      "sha256": "369c3e9797b40050c51ee0fe30667671fb9ba14a157a4bb80d94b91e90957e6b",
+      "rows": 1,
+      "columns": 1,
+      "allocatedRows": 1000,
+      "allocatedColumns": 26
+    }
+  ]
+}
