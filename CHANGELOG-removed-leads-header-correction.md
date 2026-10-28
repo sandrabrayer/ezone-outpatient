@@ -44,3 +44,24 @@ real target/manual-tab policy, release/alert evidence and production approval
 remain separate OP-03 gates. CRM display stays with its separate chat; the
 full ten-system integrity, security, performance, control and finance program
 remains in scope.
+
+## 2026-10-28 hardening and documentation integration
+
+Tests and documentation only; `ops/removed-leads-header-correction.gs` and all
+runtime and frozen-evidence files are unchanged. This follow-up supersedes the
+"four new files only" and "integration remains a follow-up" statements above for
+documentation: small additive notes now exist in the root changelog, README,
+DEPLOY and ecosystem status. The helper stays uninstalled and default-disabled.
+Sandra's three-cell consent remains conditional; no new production approval
+exists. The nine native Google executions remain completed and are not rerun.
+
+- Two regressions: `releaseLock` throwing after a read-only preview and after a
+  verified write. Both require a sanitized error, `lockReleased:false`, exactly
+  one release attempt and no retry or rollback; the simulated lock stays
+  `held=true` (unresolved). Their author could not execute them (command
+  denied); read results from CI.
+- Runbook clarifications: the pinned hash covers existing `Code.gs` only and
+  needs a full file inventory before and after installation; preview takes the
+  lock and scans cells so it belongs inside the pause; the legacy backup must be
+  independently drained and the 02:00-03:00 hour alone is not proof; formats and
+  native metadata are not fingerprinted; clock skew causes safe refusal.

@@ -1,6 +1,7 @@
 # E-ZONE Outpatient Dashboard
 
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> Uninstalled, default-disabled removed-leads header helper: [runbook](docs/removed-leads-header-correction.md).
 > The older eight-table evidence below proves only that subset, not full recovery.
 > The candidate is not deployed; Google round-trip/manual-tab review remain required.
 > A phased [isolated Google drill](docs/google-operational-drill.md) is prepared;

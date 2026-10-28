@@ -1,6 +1,7 @@
 # Deploy — E-ZONE Outpatient
 
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> `ops/removed-leads-header-correction.gs` is not part of the deployment root and must not be installed or run without separate authorization: [runbook](docs/removed-leads-header-correction.md).
 > The older eight-table evidence below proves only that subset, not full recovery.
 > The candidate is not deployed; Google round-trip/manual-tab review remain required.
 > Use the [isolated Google drill](docs/google-operational-drill.md) for runtime

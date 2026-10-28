@@ -31,7 +31,13 @@ The expected source hash is the saved editor source observed on October 27,
 385,042 UTF-8 bytes, matching the existing `336c8ef9` and `b14db799` source.
 The active deployment was Version 100, described as `336c8ef9`. Refresh these
 observations before execution; the helper does **not** read or hash its own
-project source or certify the deployed version. The canonical
+project source or certify the deployed version. The pinned hash describes the
+**existing `Code.gs` file only**, not the aggregate project source: installing the
+helper necessarily adds a file, so no whole-project hash can match it. The
+operator must read and hash every original project file (complete file
+inventory and exact bytes) **before** installation, and after adding only the
+separately approved helper must re-read the inventory and confirm that every
+original file is byte-unchanged and that the helper is the sole addition. The canonical
 `REMOVED_LEADS_HEADERS` array is checked at runtime. Existing `Code.gs`, the
 synthetic project, frozen evidence, existing rows/formats and old backups stay
 unchanged by this correction.
@@ -54,7 +60,33 @@ lock, or the whole legacy backup job. In the
 
 Establish a coordinated pause covering **application requests including polling,
 direct editors, integrations, and scheduled/manual jobs**, and confirm that the
-legacy backup has drained. Keep that pause through result inspection. A recent
+legacy backup has drained. Keep that pause through result inspection.
+
+**Preview is inside the pause too.** `previewRemovedLeadsHeaderCorrection()`
+takes the ScriptLock and scans the allocated cells (values and formulas). It
+writes nothing, but read-only is not impact-free: it can delay cooperating
+writers and its observation is only meaningful while writers are paused. Run it
+only after the pause is established, never as a casual early check.
+
+**Backup window.** The legacy nightly job was observed running between 02:00 and
+03:00 Asia/Jerusalem. Scheduling the window outside that hour is necessary but
+not sufficient: `atHour` is not an exact firing time, a run can overrun, and
+manual executions or triggers owned by other accounts are not visible in one
+account's listing. The backup must be independently shown to be drained (no
+execution in progress, none starting) and any other-account or manual job must
+be accounted for. Do not delete/recreate triggers to obtain a window.
+
+**Clock skew.** Approval windows and the preview age are checked against Apps
+Script's clock. Skew between the operator's clock and Apps Script causes a safe
+refusal. Re-establish evidence with a fresh preview; do not widen or bypass the
+window.
+
+**Formats and native metadata.** The preservation hash does not fingerprint
+number formats, notes, colors or other native metadata. Do not auto-format the
+new headers, do not claim full native preservation, and do not broaden the
+helper to write or compare formatting. A pre-existing number format on S1:U1
+could affect how the strings are stored; record it in the pause evidence if
+observed. A recent
 execution list, a successful lock acquisition, and absent properties are each
 bounded observations, not proof that future requests cannot start.
 
@@ -188,7 +220,10 @@ A failed write may receive one flush attempt; it is not a second `setValues`
 call. Post-write verification continues if the window expires after the write
 starts. Errors do not cause an automatic retry, header clearing, rollback,
 property reset or business action. A lock-release failure is also a failure,
-even if readback had succeeded.
+even if readback had succeeded: the receipt then has `lockReleased:false`, there
+is exactly one release attempt and no retry, and a verified write is reported as
+`needs_operator_check` with `writeVerified:true`. Treat the lock as unresolved
+(it expires on its own, or inspect it) and keep the pause until reviewed.
 
 Receipts contain identifiers, status, operator references and hashes, not row
 payloads, formulas or raw service exceptions. Keep them with the approval and

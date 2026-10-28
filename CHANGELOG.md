@@ -6,6 +6,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### OP-03 operational recovery (draft)
+- Add two regressions and runbook clarifications for the uninstalled,
+  default-disabled removed-leads S1:U1 header helper (see
+  `CHANGELOG-removed-leads-header-correction.md`). Tests and documentation only;
+  the helper, runtime and frozen evidence are unchanged. The original
+  three-cell consent remains conditional, there is no new production approval,
+  and the nine native Google runs remain completed and are not rerun.
 - Integrate merged PR133 (`b14db799`) into this draft, preserving its roster,
   personal-PIN authentication, historical assignees, SW20 and updated tests.
   Resolve the two documentation conflicts without restoring obsolete release

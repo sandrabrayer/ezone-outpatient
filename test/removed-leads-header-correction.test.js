@@ -531,3 +531,53 @@ test('receipt logger failure after verified mutation reports the outcome without
   assert.deepEqual(w.grid[0].slice(18, 21), TAIL);
   assert.equal(w.held, false);
 });
+
+// The simulated lock service throws BEFORE clearing `held`, so these cases keep
+// held=true as an explicitly unresolved lock. They never claim a release succeeded.
+test('releaseLock failure after a read-only preview is sanitized, unretried and leaves the lock unresolved', () => {
+  const w = fixture(), before = w.protectedState();
+  w.failures.set('releaseLock', 'private release detail');
+  assert.throws(() => w.preview(), error => {
+    assert.match(error.message, /OP03 header correction: lock_release_failed; no write attempted/);
+    assert.doesNotMatch(error.message, /private release detail/);
+    return true;
+  });
+  const receipt = w.receipt();
+  assert.equal(receipt.status, 'refused');
+  assert.equal(receipt.error, 'lock_release_failed');
+  assert.equal(receipt.mode, 'preview');
+  assert.equal(receipt.lockReleased, false);
+  assert.equal(receipt.writeAttempted, false);
+  assert.equal(receipt.writeVerified, false);
+  assert.equal(w.events.filter(e => e.type === 'releaseLock').length, 1, 'no retry of the release');
+  assert.equal(w.writes.length, 0);
+  assert.equal(w.events.some(e => e.type === 'setValues'), false);
+  assert.deepEqual(w.protectedState(), before, 'all cells and surrounding state are preserved');
+  assert.equal(w.held, true, 'the simulated lock is unresolved, not released');
+  assert.equal(w.logs.some(s => s.includes('private release detail') || s.includes('PRIVATE SERVICE ERROR')), false);
+});
+
+test('releaseLock failure after a verified write reports needs_operator_check with no retry or rollback', () => {
+  const w = fixture(); w.approve();
+  const expected = w.protectedState();
+  expected.grid[0].splice(18, 3, ...TAIL);
+  w.failures.set('releaseLock', 'private release detail');
+  assert.throws(() => w.apply(), error => {
+    assert.match(error.message, /OP03 header correction: lock_release_failed; write attempted; inspect before any further action/);
+    assert.doesNotMatch(error.message, /private release detail/);
+    return true;
+  });
+  const receipt = w.receipt();
+  assert.equal(receipt.status, 'needs_operator_check');
+  assert.equal(receipt.error, 'lock_release_failed');
+  assert.equal(receipt.lockReleased, false);
+  assert.equal(receipt.writeAttempted, true);
+  assert.equal(receipt.writeVerified, true);
+  assert.equal(w.events.filter(e => e.type === 'releaseLock').length, 1, 'no retry of the release');
+  assert.equal(w.events.filter(e => e.type === 'setValues').length, 1);
+  assert.equal(w.events.filter(e => e.type === 'flush').length, 1);
+  assert.deepEqual(w.writes, [{ rectangle: [1, 19, 1, 3], values: [TAIL] }]);
+  assert.deepEqual(w.protectedState(), expected, 'only the approved cells changed; no rollback');
+  assert.equal(w.held, true, 'the simulated lock is unresolved, not released');
+  assert.equal(w.logs.some(s => s.includes('private release detail') || s.includes('PRIVATE SERVICE ERROR')), false);
+});

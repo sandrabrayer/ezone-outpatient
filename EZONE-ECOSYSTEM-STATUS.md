@@ -15,6 +15,13 @@ production approval remain open. See docs/manual-tab-recovery-policy.md.
 A fresh audit found the Oct22 body-parser high advisory; compatible dependency
 lockfile patches are included. Read exact-head validation in PR125. No release.
 
+OP-03 current note (2026-10-28): the removed-leads S1:U1 header helper
+`ops/removed-leads-header-correction.gs` is uninstalled and default-disabled;
+nothing has been run in Google. Sandra's three-cell consent remains conditional
+and no new production approval exists. The nine native executions remain
+completed and are not rerun. Preview takes the lock and scans cells, so it
+belongs inside the coordinated pause. See docs/removed-leads-header-correction.md.
+
 Integrated Git base: `b14db7991776f49fdcaee0a018dc0d67d371f8d2`, SW20 assets,
 branch `claude/youthful-volta-laarnk` (PR133 merged October 26 at 17:33:05 UTC).
 PR125's earlier metadata exposed336c8ef9 until a single close/reopen on October 27;
