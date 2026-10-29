@@ -6,8 +6,13 @@ through an Apps Script Web App.
 
 ## Screens
 
-1. **Dashboard** – active clients, monthly revenue, breakdowns by service type,
-   location, and lead pipeline.
+1. **«היום שלי»** (tab id `dashboard`) – the CRM opening screen: summary
+   cards, an urgent band and work lists by domain (leads/intros, plans to
+   activate, renewals & collection, pending approvals, continuation), each row
+   with one direct action; built by the pure `public/my-day.js`
+   (`CHANGELOG-my-day.md`). Money lists are hidden for דנה (display rule). The
+   old KPIs / breakdowns sit below in a collapsed «📊 מדדים ופילוחים» panel.
+   CRM roadmap and handoff gaps: `docs/crm/OUTPATIENT-STAGE0.md`.
 2. **Leads CRM** – kanban with 4 forward stages
    (`ליד חדש → שיחת היכרות → הסכם נחתם → מטופל פעיל`) plus a side-exit
    `לא רלוונטי` button per card. Moving to `מטופל פעיל` opens the activation

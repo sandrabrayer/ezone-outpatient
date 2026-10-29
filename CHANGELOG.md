@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
+- The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
+
 ### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
 - Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).
 - אורן and דנה each sign in with their OWN PIN from Railway variables `USER_PIN_OREN` / `USER_PIN_DANA` (4–6 digits, distinct from `APP_PIN` and each other, fail-closed, names-only logging); ורד keeps `APP_PIN`. `APP_PIN` no longer signs in as אורן / דנה.

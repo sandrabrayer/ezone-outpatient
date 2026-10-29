@@ -1218,3 +1218,41 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .pkg-chip { white-space: normal; }
 .chip.warn { background: #3a2f12; color: var(--amber); border-color: #6b5a2a; }
 .pkg-root .muted { color: var(--muted); }
+
+/* ---- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md) ---- */
+.my-day { margin-bottom: 16px; }
+.md-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
+.md-head h2 { margin: 0; font-size: 22px; }
+.md-head .sub, .md-row .sub, .md-empty { color: var(--muted); font-size: 13px; }
+.md-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.md-card { text-align: start; background: var(--panel); border: 1px solid var(--border); border-top: 4px solid var(--acc, var(--border)); border-radius: 10px; padding: 10px 12px; cursor: pointer; color: var(--text); font: inherit; }
+.md-card:hover { background: var(--panel-2); }
+.md-card[aria-pressed="true"] { background: var(--panel-2); border-color: var(--green); }
+.md-card .v { display: block; font-size: 28px; font-weight: 800; line-height: 1.1; }
+.md-card .v.na { color: var(--muted); }
+.md-card .l { display: block; font-weight: 600; margin-top: 2px; }
+.md-card .l2 { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.acc-leads { --acc: #579BFC; } .acc-intros { --acc: #A25DDC; } .acc-plans { --acc: #00C875; } .acc-renewals { --acc: #FDAB3D; } .acc-approvals { --acc: #E2445C; } .acc-continuity { --acc: #0073EA; }
+.md-urgent { border: 1px solid #a33; background: rgba(226, 68, 92, 0.12); border-radius: 10px; padding: 4px 12px 10px; margin-bottom: 12px; }
+.md-domain { margin-bottom: 14px; }
+.md-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 15px; }
+.md-domain .md-title strong { border-inline-start: 4px solid var(--acc, var(--green)); padding-inline-start: 8px; }
+.md-n { display: inline-flex; min-width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0 6px; border-radius: 999px; background: var(--panel-2); font-size: 12px; font-weight: 700; }
+.md-rows { display: flex; flex-direction: column; gap: 6px; }
+.md-row { display: grid; grid-template-columns: 1.2fr 1.9fr 1fr 0.7fr auto; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.md-row.h { background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; padding-top: 0; padding-bottom: 0; }
+.md-row.is-exception { border-color: #a33; }
+.md-row .name { font-weight: 700; }
+.md-chip { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #fff; background: #6b7f78; margin-top: 2px; }
+.md-chip.st-exception, .md-chip.st-late { background: #E2445C; }
+.md-chip.st-today { background: #FDAB3D; color: #1b1b1b; }
+.md-chip.st-wait, .md-chip.st-undated { background: #6b7f78; }
+.md-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.btn-sm { padding: 4px 10px; font-size: 13px; }
+.my-day-metrics summary { cursor: pointer; }
+@media (max-width: 760px) {
+  .md-row { grid-template-columns: 1fr 1fr; }
+  .md-row.h { display: none; }
+  .md-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .md-cards { grid-template-columns: repeat(2, 1fr); }
+}
