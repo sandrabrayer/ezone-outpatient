@@ -6,6 +6,10 @@ through an Apps Script Web App.
 
 ## Screens
 
+Light theme since OP-CRM-4 (`CHANGELOG-crm-theme.md`): the Dashboard CRM's format (right-side menu on desktop, white
+surfaces, red = exception / amber = waiting / green = done — always with a word) on this app's own sage/forest palette.
+Tokens live in `public/style.css` `:root`; mobile keeps the top tab strip.
+
 1. **«היום שלי»** (tab id `dashboard`) – the CRM opening screen: summary
    cards, an urgent band and work lists by domain (leads/intros, plans to
    activate, renewals & collection, pending approvals, continuation), each row

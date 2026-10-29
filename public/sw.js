@@ -72,7 +72,8 @@
  *   option in app.js). Bumped from the deploy-branch value v19 (HEAD 336c8ef); re-check the LIVE /sw.js before release.
  */
 // v21 (2026-10-29): «היום שלי» CRM opening tab — index.html shell changed (CHANGELOG-my-day.md).
-var CACHE = 'ezone-outpatient-v21';
+// v22 (2026-10-29): light CRM theme — index.html + manifest changed (CHANGELOG-crm-theme.md).
+var CACHE = 'ezone-outpatient-v22';
 var SHELL = [
   './',
   './index.html',
