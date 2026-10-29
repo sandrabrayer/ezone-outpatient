@@ -71,7 +71,8 @@
  * - v20 (2026-10-26): login roster אורן / דנה replace שירן / יעל (משוייך ל dropdown in index.html + a legacy-assignee
  *   option in app.js). Bumped from the deploy-branch value v19 (HEAD 336c8ef); re-check the LIVE /sw.js before release.
  */
-var CACHE = 'ezone-outpatient-v20';
+// v21 (2026-10-29): «היום שלי» CRM opening tab — index.html shell changed (CHANGELOG-my-day.md).
+var CACHE = 'ezone-outpatient-v21';
 var SHELL = [
   './',
   './index.html',
