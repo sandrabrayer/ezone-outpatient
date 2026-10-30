@@ -47,24 +47,24 @@ const base = (over) => Object.assign({
 
 /* ================================ A. schema ================================ */
 
-test('A: preferredHouse is the ONE new column, appended LAST on Clients (position 38)', () => {
+test('A: preferredHouse keeps physical position 38; OP-ID-1 appends identity after it', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
-  assert.equal(H.length, 38);
+  assert.equal(H.length, 41);
   assert.equal(H[37], 'preferredHouse');
   assert.equal(H.indexOf('preferredHouse'), H.lastIndexOf('preferredHouse'), 'exactly once');
-  assert.deepEqual(H.slice(-2), ['plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(H.slice(-5), ['plannedExitDate', 'preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
 
-test('A: mirrored at the END of the tombstone, Leads and removed-leads literals', () => {
+test('A: preferredHouse stays once in every mirror; OP-ID-1 appends identity only to owned schemas', () => {
   const { ctx } = sandbox();
   for (const name of ['CLIENTS_REMOVED_HEADERS', 'LEADS_HEADERS', 'REMOVED_LEADS_HEADERS']) {
-    const H = plain(ctx[name]);
-    assert.equal(H[H.length - 1], 'preferredHouse', name);
-    assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
+    const H = plain(ctx[name]); assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
-  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(plain(ctx.CLIENTS_REMOVED_HEADERS).slice(-4), ['preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId']);
+  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-6), ['preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey']);
+  assert.equal(plain(ctx.REMOVED_LEADS_HEADERS).slice(-1)[0], 'preferredHouse');
 });
 
 test('A: allowed list is identical in Code.gs, app.js and index.html', () => {
