@@ -288,13 +288,13 @@ test('F: lead card shows the handoff value as an escaped chip', () => {
 });
 
 test('F: app.js loads, prefills, edits via the single-cell action, and carries lead -> client', () => {
-  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(row\.preferredHouse\)\n\s*\};/, 'read from sheet');
+  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(row\.preferredHouse\),/, 'read from sheet');
   assert.match(APP, /form\.preferredHouse\.value = preferredHouseOrBlank\(client\.preferredHouse\)/, 'prefilled');
   assert.match(APP, /apiPostAction\('setPreferredHouse', \{/, 'single-cell action');
   assert.match(APP, /if \(!preferredHouseChanged\) return null;\n\s*return persistPreferredHouse\(client\.id, client\.preferredHouse\)/, 'only when changed');
   assert.match(APP, /client\.preferredHouse = prevPreferredHouse;/, 'rollback on failure');
   assert.match(APP, /preferredHouse: preferredHouseOrBlank\(fd\.get\('preferredHouse'\)\)/, 'direct add');
-  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(lead\.preferredHouse\)/, 'activation carries the lead value');
+  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(lead\.preferredHouse\),/, 'activation carries the lead value');
 });
 
 test('F: Hebrew UI stays RTL', () => {
