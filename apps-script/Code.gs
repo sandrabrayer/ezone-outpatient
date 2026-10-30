@@ -4210,6 +4210,13 @@ function _createLead(payload) {
 
     // Phone+name is ONLY a duplicate warning, never an identity link.
     var possible = _carePossibleDuplicates(leads, clients, phone, name);
+    // A request carrying a stable Dashboard identity with no exact id match must
+    // not create beside an open/active PII collision: fail closed, write nothing.
+    // Legacy callers (no stable identity) keep the warning-only behaviour.
+    var hasStableIdentity = !!(ids.dashboardPatientId || ids.dashboardPersonId || ids.dashboardLeadId);
+    if (hasStableIdentity && possible.length) {
+      return { ok: false, error: 'possible_duplicate', possibleDuplicateOf: possible };
+    }
     var lead = {
       id: _leadUid(),
       name: name,

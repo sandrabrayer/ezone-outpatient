@@ -112,6 +112,39 @@ test('phone + name is duplicate detection only: it never silently auto-links', (
   assert.equal(sb.rows('Leads').length, 2);
 });
 
+test('stable identity + open PII collision but no exact id match fails closed and writes nothing', () => {
+  const sb = sandbox([lead({ id: 'L-existing', dashboardPatientId: '' })],
+    [client({ id: 'C-existing' })]);
+  const res = createLead(sb, {
+    name: 'דנה כהן', phone: '050-123-4567', dashboardPatientId: 'id-stay-9'
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'possible_duplicate');
+  assert.deepEqual(res.possibleDuplicateOf, ['lead:L-existing', 'client:C-existing']);
+  assert.equal(sb.rows('Leads').length, 1);
+  assert.equal(sb.rows('Clients').length, 1);
+});
+
+test('stable identity fails closed on PII collision for personId-only and leadId-only requests too', () => {
+  for (const ident of [{ dashboardPersonId: 'id-root-9' }, { dashboardLeadId: 'id-lead-9' }]) {
+    const sb = sandbox([lead({ id: 'L-existing' })], []);
+    const res = createLead(sb, Object.assign({ name: 'דנה כהן', phone: '0501234567' }, ident));
+    assert.equal(res.error, 'possible_duplicate');
+    assert.equal(sb.rows('Leads').length, 1);
+  }
+});
+
+test('exact stable-id match still wins over a PII collision (no possible_duplicate)', () => {
+  const sb = sandbox([
+    lead({ id: 'L-pii' }),
+    lead({ id: 'L-exact', phone: '0509999999', name: 'אחר', dashboardPatientId: 'id-stay-1' })
+  ], []);
+  const res = createLead(sb, { name: 'דנה כהן', phone: '0501234567', dashboardPatientId: 'id-stay-1' });
+  assert.equal(res.ok, true);
+  assert.equal(res.id, 'L-exact');
+  assert.equal(res.matched, true);
+});
+
 test('two open records claiming the same stable id fail closed instead of creating a third', () => {
   const sb = sandbox([
     lead({ id: 'L1', dashboardPatientId: 'id-stay-1' }),

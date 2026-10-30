@@ -7,7 +7,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Care-continuum identity foundation (OP-ID-1, draft 2026-10-30)
 - Adds append-only, server-owned Dashboard identity/provenance fields to active Leads and Clients (and Clients-removed): `dashboardPatientId`, `dashboardPersonId`, `dashboardLeadId`, `handoffSource`, `continuationKey`.
-- `createLead` becomes fail-closed link-or-create by stable ids: stay id → Dashboard lead id → person key (`dashboardPersonId || dashboardPatientId`). Phone+name is warning-only and never silently links records.
+- `createLead` becomes fail-closed link-or-create by stable ids: stay id → Dashboard lead id → person key (`dashboardPersonId || dashboardPatientId`). Phone+name is warning-only and never silently links records; with a stable id present, a PII collision fails closed (`possible_duplicate`, nothing written).
 - Existing browser `saveAll` cannot overwrite these server-owned fields. Closed historical leads/clients are not overwritten; a new episode may be created.
 - Backward-compatible callers with no identity still create a lead as before. No production release is authorized by this draft.
 

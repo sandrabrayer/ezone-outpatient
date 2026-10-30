@@ -22,7 +22,7 @@ Cross-stay person key is derived as `dashboardPersonId || dashboardPatientId`.
 2. `dashboardLeadId`
 3. derived person key
 
-Only open Leads and active Clients participate. More than one exact hit fails closed with `identity_conflict`. Phone + normalized name never auto-links; it only returns `possibleDuplicateOf`.
+Only open Leads and active Clients participate. More than one exact hit fails closed with `identity_conflict`. Phone + normalized name never auto-links. Legacy callers with no stable Dashboard identity keep the backward-compatible create and may receive `possibleDuplicateOf`. A request that carries any stable id (`dashboardPatientId` / `dashboardPersonId` / `dashboardLeadId`) with no exact match but an open/active PII collision fails closed with `possible_duplicate` + `possibleDuplicateOf` and writes nothing.
 
 A closed historical episode is not overwritten.
 
