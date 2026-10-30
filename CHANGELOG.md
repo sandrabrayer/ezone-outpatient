@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Care-continuum identity + idempotent link-or-create (OP-ID-1, 2026-10-30 — DRAFT)
+- Append-only Dashboard identity fields on Leads/Clients let pre-discharge continuity and the later discharge handoff resolve to the same OPEN Outpatient episode. Exact ids only can auto-link; phone+name only raises `needsReview`. Closed history is never overwritten. Browser full saves cannot forge/blank source-owned identity, and activation derives identity from the on-sheet source lead. Legacy `createLead` payloads remain valid. No merge/deploy authorized. See `CHANGELOG-care-continuum-identity.md` and `docs/crm/OUTPATIENT-STAGE0.md`.
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 
