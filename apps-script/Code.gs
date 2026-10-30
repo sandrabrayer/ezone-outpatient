@@ -437,8 +437,23 @@ var EXTRA_SESSION_HEADERS = [
 var CONTINUATION_SHEET = 'מסלול המשך';
 var CONTINUATION_HEADERS = [
   'key', 'name', 'house', 'entryDate',
-  'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+  'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt',
+  // APPEND-ONLY care-continuum identity (OP-ID-2). dashboardPatientId /
+  // dashboardPersonId = the Dashboard's stable stay / person ids, resolved by the
+  // Node proxy from the server-held admitted roster (never from the browser).
+  // outpatientId / outpatientEntity = the lead ('lead') or active client
+  // ('client') this row was linked to by createContinuationLead. When
+  // dashboardPatientId is present it WINS over the legacy name|house|entryDate
+  // key for matching; a legacy row with the same old key upgrades in place.
+  'dashboardPatientId', 'dashboardPersonId', 'outpatientId', 'outpatientEntity'
 ];
+var CONTINUATION_LINK_ENTITIES = { lead: true, client: true };
+/* Dashboard houseId -> outpatient house_of_origin key for leads created from the
+ * continuation track. Mirrors HOUSE_TO_ORIGIN in public/continuation-logic.js
+ * (the browser no longer builds that lead; the server does). Unmapped -> ''. */
+var CONTINUATION_HOUSE_TO_ORIGIN = {
+  arfoni: 'efroni', asher: 'raanana', pardes: 'raanana_pardes', ramot: 'ramot', rehab: 'rehab'
+};
 var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
 
 /* Stop-treatment alerts (התראות עצירת טיפול). The OUTPATIENT app CREATES an alert
@@ -1552,6 +1567,18 @@ function _saveAll(payload) {
     for (var el = 0; el < existingLeads.length; el++) {
       var lid = (existingLeads[el] && existingLeads[el].id != null) ? String(existingLeads[el].id) : '';
       if (lid) existingLeadsById[lid] = existingLeads[el];
+    }
+    // OP-ID-2: a BRAND-NEW client activated from an existing lead inherits the
+    // lead's cross-app identity from the ON-SHEET lead row (the same Leads
+    // snapshot read above — no extra Sheets read). Browser-sent identity on the
+    // client was already blanked by _carePreserveExisting; existing clients keep
+    // their on-sheet identity untouched.
+    for (var ac = 0; ac < clients.length; ac++) {
+      var acId = (clients[ac] && clients[ac].id != null) ? String(clients[ac].id) : '';
+      if (!acId || _hasOwn(existingById, acId)) continue;
+      var acFrom = clients[ac].fromLead == null ? '' : String(clients[ac].fromLead);
+      var srcLead = acFrom && _hasOwn(existingLeadsById, acFrom) ? existingLeadsById[acFrom] : null;
+      if (srcLead) _carePreserveExisting(clients[ac], srcLead);
     }
     // removeLead already archives intentional removals. Read only its id
     // column; do not create/mutate the archive or load its other fields.
@@ -4373,10 +4400,26 @@ function _isContinuationDate(v) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-/* Single-row UPSERT by `key`: update the matching row in place, else append.
- * Wrapped in a 30s lock like every other write. Validates fail-closed BEFORE
- * touching the sheet: a missing key, an out-of-whitelist outcome, or a malformed
- * date writes nothing. Strings are trimmed; updatedAt is server-stamped. */
+/* Single-row UPSERT. Match order (OP-ID-2):
+ *   1. a row whose dashboardPatientId equals the payload's (stable id wins);
+ *   2. else the legacy `key` (name|house|entryDate) — a legacy row with no
+ *      stable id upgrades in place and receives the id; a legacy row that
+ *      carries a DIFFERENT stable id is a conflict (write nothing);
+ *   3. else append.
+ * Two rows sharing one dashboardPatientId is a conflict (write nothing).
+ * Identity (dashboardPatientId / dashboardPersonId, name / house / entryDate /
+ * key) is server-owned: the Node proxy resolves it from the server-held
+ * admitted roster and overwrites whatever the browser sent, so by the time a
+ * payload reaches here it is trusted. Link fields (outpatientId /
+ * outpatientEntity) are written only when the payload carries VALID values
+ * (the Node orchestration after createContinuationLead; the proxy strips them
+ * from browser saves) — otherwise the on-sheet link is preserved.
+ * outcomeDate is SERVER-stamped (Asia/Jerusalem today) when an outcome is set
+ * or changed; a payload value is ignored. Wrapped in a 30s lock like every
+ * other write. Validates fail-closed BEFORE touching the sheet. */
+function _continuationToday_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+}
 function _saveContinuation(payload) {
   var key = String((payload && payload.key) || '').trim();
   if (!key) return { ok: false, reason: 'missing_key' };
@@ -4386,10 +4429,21 @@ function _saveContinuation(payload) {
     return { ok: false, reason: 'invalid_outcome' };
   }
   var meetingDate = String((payload && payload.meetingDate) || '').trim();
-  var outcomeDate = String((payload && payload.outcomeDate) || '').trim();
-  if (!_isContinuationDate(meetingDate) || !_isContinuationDate(outcomeDate)) {
+  if (!_isContinuationDate(meetingDate)) {
     return { ok: false, reason: 'invalid_date' };
   }
+  // A PRESENT malformed stable id is refused, never silently dropped.
+  var dashboardPatientId = _careId(payload && payload.dashboardPatientId);
+  var dashboardPersonId = _careId(payload && payload.dashboardPersonId);
+  if (dashboardPatientId === null || dashboardPersonId === null) {
+    return { ok: false, reason: 'invalid_identity' };
+  }
+  var linkId = _careId(payload && payload.outpatientId);
+  var linkEntity = String((payload && payload.outpatientEntity) || '').trim();
+  if (linkId === null || (linkEntity && !CONTINUATION_LINK_ENTITIES[linkEntity])) {
+    return { ok: false, reason: 'invalid_link' };
+  }
+  var hasLink = !!(linkId && linkEntity);
 
   var row = {
     key: key,
@@ -4398,9 +4452,13 @@ function _saveContinuation(payload) {
     entryDate: String((payload && payload.entryDate) || '').trim(),
     meetingDate: meetingDate,
     outcome: outcome,
-    outcomeDate: outcomeDate,
+    outcomeDate: '',
     note: String((payload && payload.note) || '').trim(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    dashboardPatientId: dashboardPatientId || '',
+    dashboardPersonId: dashboardPersonId || '',
+    outpatientId: '',
+    outpatientEntity: ''
   };
 
   var lock = LockService.getScriptLock();
@@ -4408,20 +4466,83 @@ function _saveContinuation(payload) {
   try {
     var sh = _ensureSheet(CONTINUATION_SHEET, CONTINUATION_HEADERS);
     var rows = _readAll(sh, CONTINUATION_HEADERS);
-    var found = false;
-    for (var i = 0; i < rows.length; i++) {
-      if (String(rows[i].key || '').trim() === key) {
-        rows[i] = row;
-        found = true;
+    var idx = -1, i;
+    if (dashboardPatientId) {
+      var byId = [];
+      for (i = 0; i < rows.length; i++) {
+        if (String(rows[i].dashboardPatientId || '').trim() === dashboardPatientId) byId.push(i);
+      }
+      if (byId.length > 1) return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'dashboardPatientId' };
+      if (byId.length === 1) idx = byId[0];
+    }
+    if (idx === -1) {
+      for (i = 0; i < rows.length; i++) {
+        if (String(rows[i].key || '').trim() !== key) continue;
+        var rowId = String(rows[i].dashboardPatientId || '').trim();
+        if (dashboardPatientId && rowId && rowId !== dashboardPatientId) {
+          return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'key' };
+        }
+        idx = i;
         break;
       }
     }
-    if (!found) rows.push(row);
+    var existing = idx === -1 ? null : rows[idx];
+    if (existing) {
+      // Never downgrade: a legacy (id-less) save over an id-bearing row keeps the id.
+      if (!row.dashboardPatientId) row.dashboardPatientId = String(existing.dashboardPatientId || '');
+      if (!row.dashboardPersonId) row.dashboardPersonId = String(existing.dashboardPersonId || '');
+      row.outpatientId = String(existing.outpatientId || '');
+      row.outpatientEntity = String(existing.outpatientEntity || '');
+    }
+    if (hasLink) { row.outpatientId = linkId; row.outpatientEntity = linkEntity; }
+    if (outcome) {
+      row.outcomeDate = (existing && String(existing.outcome || '') === outcome && String(existing.outcomeDate || '').trim())
+        ? String(existing.outcomeDate).trim()
+        : _continuationToday_();
+    }
+    if (existing) rows[idx] = row; else rows.push(row);
     _writeAll(sh, CONTINUATION_HEADERS, rows);
-    return { ok: true, row: row, created: !found };
+    return { ok: true, row: row, created: !existing, matchedBy: existing ? (dashboardPatientId && String(existing.dashboardPatientId || '').trim() === dashboardPatientId ? 'dashboardPatientId' : 'key') : '' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+/* createContinuationLead (OP-ID-2) — INTERNAL (OUTPATIENT_PROXY_SECRET only):
+ * the Node proxy calls it after resolving the patient against the server-held
+ * admitted roster, so name / phone / house / entryDate / ids here are trusted.
+ * Builds the handoff exactly as the old browser path did (note text, mapped
+ * house_of_origin, raw house kept in the note when unmapped), then FORCES
+ * source='continuation' and assignedTo=the session user, and delegates to the
+ * existing _createLead rules: exact stable-id precedence, fail-closed
+ * possible_duplicate, idempotent replays. Writes nothing itself. */
+function _createContinuationLead(payload) {
+  var dashboardPatientId = _careId(payload && payload.dashboardPatientId);
+  if (!dashboardPatientId) return { ok: false, error: 'invalid_identity' };
+  var name = _sanitizeLeadText(payload && payload.name, 200);
+  if (!name) return { ok: false, error: 'missing_name' };
+  var house = String((payload && payload.house) || '').trim();
+  var entryDate = String((payload && payload.entryDate) || '').trim();
+  var meetingDate = String((payload && payload.meetingDate) || '').trim();
+  if (!_isContinuationDate(meetingDate)) return { ok: false, error: 'invalid_date' };
+  var origin = CONTINUATION_HOUSE_TO_ORIGIN[house] || '';
+  var note = 'מקור: מסלול המשך | פגישה: ' + (meetingDate || '—');
+  if (!origin && house) note += ' | בית: ' + house;
+  var extra = _sanitizeLeadText(payload && payload.note, 1000);
+  if (extra) note += ' | ' + extra;
+  var result = _createLead({
+    name: name,
+    phone: payload && payload.phone,
+    house: origin,
+    note: note,
+    dashboardPatientId: dashboardPatientId,
+    dashboardPersonId: payload && payload.dashboardPersonId,
+    source: 'continuation',
+    continuationKey: name + '|' + house + '|' + entryDate,
+    assignedTo: _requestUser(payload)
+  });
+  if (result && result.ok && !result.entity) result.entity = 'lead';
+  return result;
 }
 
 /* ===== Source authentication boundary (OP-01) =============================
@@ -5764,6 +5885,7 @@ var SOURCE_POST_AUTH = {
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   saveContinuation: 'OUTPATIENT_PROXY_SECRET',
+  createContinuationLead: 'OUTPATIENT_PROXY_SECRET',
   resolveStopFlag: 'resolveStopFlag',
   mergeClients: 'OUTPATIENT_PROXY_SECRET',
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
@@ -6079,6 +6201,7 @@ function doPost(e) {
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
+    if (action === 'createContinuationLead') return _json(_createContinuationLead(payload));
     if (action === 'resolveStopFlag') {
       // A request carrying a secret is the secured therapists-app receiver
       // (resolve by canonical phone, fail-closed). Without a secret it is the

@@ -104,5 +104,7 @@ Sandra approved: continuity starts before discharge. The identity contract reuse
 - cross-stay person key = `dashboardPersonId || dashboardPatientId`
 - Dashboard lead id = `dashboardLeadId` when known
 
+OP-ID-2 (draft, stacked) wires מסלול המשך to the stable id: rows store `dashboardPatientId`, the Node proxy resolves saves by exact roster id, and to_outpatient creates-or-links the lead server-side through `createContinuationLead` → `_createLead`, then links the row (`outpatientId`/`outpatientEntity`); activation copies identity onto the client. Gap D1 (continuation + discharge = two leads) closes once D-ID-1 + OP-ID-2 + D-ID-2 are live. See `CHANGELOG-care-continuum-continuation.md`.
+
 OP-ID-1 adds the storage/link-or-create foundation in Outpatient. Exact stable ids may link one open Lead / active Client; phone+name is duplicate-warning only and never auto-links. OP-ID-2 will add the continuation-row linkage and activation copy. Dashboard feedback follows after identity is stable. See `CHANGELOG-care-continuum-identity.md`.
 

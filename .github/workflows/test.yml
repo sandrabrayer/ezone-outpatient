@@ -66,4 +66,4 @@ jobs:
         env:
           NODE_PATH: /tmp/ezone-browser-tools/node_modules
           EZONE_REQUIRE_BROWSER_TESTS: '1'
-        run: node --test --test-concurrency=1 test/lead-save-browser.test.js test/financial-save-browser.test.js test/protected-price-browser.test.js
+        run: node --test --test-concurrency=1 test/lead-save-browser.test.js test/financial-save-browser.test.js test/protected-price-browser.test.js test/continuation-browser.test.js
