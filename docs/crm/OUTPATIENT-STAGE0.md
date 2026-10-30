@@ -96,3 +96,13 @@ money for דנה but the clients tab does not.
 1. After OP-CRM-1 is live: as דנה, open the app — «היום שלי» shows no «חידושים וגבייה» card; as ורד it does.
 2. Discharge a **test** patient from the Dashboard to outpatient only if a sandbox sheet is configured; otherwise skip — the handoff path is covered by `test/create-lead.test.js`.
 3. `curl -s https://ezone-outpatient.up.railway.app/sw.js | grep -o 'ezone-outpatient-v[0-9]*'` → `v21`.
+## 7. Care-continuum identity checkpoint (2026-10-30)
+
+Sandra approved: continuity starts before discharge. The identity contract reuses Dashboard identity rather than inventing a new id:
+
+- stay/admission = `dashboardPatientId = Patients.id`
+- cross-stay person key = `dashboardPersonId || dashboardPatientId`
+- Dashboard lead id = `dashboardLeadId` when known
+
+OP-ID-1 adds the storage/link-or-create foundation in Outpatient. Exact stable ids may link one open Lead / active Client; phone+name is duplicate-warning only and never auto-links. OP-ID-2 will add the continuation-row linkage and activation copy. Dashboard feedback follows after identity is stable. See `CHANGELOG-care-continuum-identity.md`.
+

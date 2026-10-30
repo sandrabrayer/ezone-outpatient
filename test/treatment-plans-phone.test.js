@@ -407,8 +407,9 @@ test('E: CLIENTS_HEADERS has no phoneIssue column — it is derived, never store
   assert.ok(m);
   assert.doesNotMatch(m[1], /phoneIssue/);
   const { ctx } = sandbox([]);
-  // 38 = the 36 frozen columns + plannedExitDate + preferredHouse (later, separate appends).
-  assert.equal(ctx.CLIENTS_HEADERS.length, 38, 'the 36 frozen columns + plannedExitDate + preferredHouse');
+  // The original 38 physical columns stay fixed; OP-ID-1 appends five server-owned identity fields.
+  assert.equal(ctx.CLIENTS_HEADERS.length, 43, '38 frozen columns + 5 care-continuum identity fields');
+  assert.deepEqual(plain(ctx.CLIENTS_HEADERS).slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
   assert.ok(!ctx.CLIENTS_HEADERS.includes('phoneIssue'));
 });
 

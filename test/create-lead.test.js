@@ -77,7 +77,9 @@ const LEADS_HEADERS = [
   'updatedAt', 'updatedBy',
   // preferredHouse (בית מועדף): optional createLead field, validated against
   // PREFERRED_HOUSES — real-handler coverage in test/preferred-house.test.js.
-  'preferredHouse'
+  'preferredHouse',
+  // OP-ID-1 care-continuum identity/provenance (server-owned).
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
 ];
 
 function createLead(sheet, expectedSecret, payload, today) {

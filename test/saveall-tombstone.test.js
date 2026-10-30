@@ -130,8 +130,14 @@ test('CLIENTS_REMOVED_HEADERS = every CLIENTS_HEADERS column + removedAt/removed
   // and preferredHouse after it the same way.
   const STAMPS = ['updatedAt', 'updatedBy'];
   const AFTER_STAMPS = ['plannedExitDate', 'preferredHouse'];
-  assert.deepEqual(clients.slice(-4), STAMPS.concat(AFTER_STAMPS));
-  assert.deepEqual(removed, clients.slice(0, -4).concat(['removedAt', 'removedVia', 'restoredAt']).concat(STAMPS).concat(AFTER_STAMPS));
+  const CARE = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
+  assert.deepEqual(clients.slice(-9), STAMPS.concat(AFTER_STAMPS).concat(CARE));
+  assert.deepEqual(removed,
+    clients.slice(0, -9)
+      .concat(['removedAt', 'removedVia', 'restoredAt'])
+      .concat(STAMPS)
+      .concat(AFTER_STAMPS)
+      .concat(CARE));
   // Decoupling guard: the tombstone array must be a full literal, never
   // derived from CLIENTS_HEADERS at runtime (a concat would let a future
   // Clients append shift the meta columns under existing tombstone rows).

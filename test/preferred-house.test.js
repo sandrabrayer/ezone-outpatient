@@ -47,24 +47,26 @@ const base = (over) => Object.assign({
 
 /* ================================ A. schema ================================ */
 
-test('A: preferredHouse is the ONE new column, appended LAST on Clients (position 38)', () => {
+test('A: preferredHouse keeps physical position 38; OP-ID-1 appends identity fields after it', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
-  assert.equal(H.length, 38);
+  assert.equal(H.length, 43);
   assert.equal(H[37], 'preferredHouse');
   assert.equal(H.indexOf('preferredHouse'), H.lastIndexOf('preferredHouse'), 'exactly once');
-  assert.deepEqual(H.slice(-2), ['plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(H.slice(-6), ['preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
 
-test('A: mirrored at the END of the tombstone, Leads and removed-leads literals', () => {
+test('A: OP-ID-1 identity mirrors Clients tombstones + active Leads; removed-leads archive stays untouched', () => {
   const { ctx } = sandbox();
+  const tail = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
+  assert.deepEqual(plain(ctx.CLIENTS_REMOVED_HEADERS).slice(-5), tail);
+  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-5), tail);
+  assert.deepEqual(plain(ctx.REMOVED_LEADS_HEADERS).slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
   for (const name of ['CLIENTS_REMOVED_HEADERS', 'LEADS_HEADERS', 'REMOVED_LEADS_HEADERS']) {
     const H = plain(ctx[name]);
-    assert.equal(H[H.length - 1], 'preferredHouse', name);
     assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
-  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
 });
 
 test('A: allowed list is identical in Code.gs, app.js and index.html', () => {
