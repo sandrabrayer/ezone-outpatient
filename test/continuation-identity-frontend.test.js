@@ -47,7 +47,8 @@ test('VM: carries roster id/personId and joins persisted rows by dashboardPatien
   const render = fn('renderContinuation');
   assert.match(render, /var dashboardPatientId = String\(p\.id \|\| ''\)\.trim\(\);/);
   assert.match(render, /dashboardPersonId: String\(p\.personId \|\| ''\)\.trim\(\)/);
-  assert.match(render, /\(dashboardPatientId && byId\[dashboardPatientId\]\) \|\| byKey\[key\] \|\| \{\}/);
+  assert.match(render, /var row = \(dashboardPatientId && byId\[dashboardPatientId\]\) \|\| safeLegacy;/);
+  assert.match(render, /legacyId === dashboardPatientId/);
   assert.match(render, /CL\.buildKey\(name, house, entryDate\)/, 'legacy key still computed for id-less rows');
   // the two key builders agree byte-for-byte
   assert.equal(CL.buildKey(' דנה כהן ', 'ramot', '2026-10-01 '), CI.buildKey(' דנה כהן ', 'ramot', '2026-10-01 '));

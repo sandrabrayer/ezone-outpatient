@@ -100,6 +100,40 @@ test('saveContinuation: identity conflicts write nothing', () => {
   assert.equal(sb.rows(sb.ctx.CONTINUATION_SHEET).length, 0);
 });
 
+test('saveContinuation: conflicting stable-id and legacy-key rows refuse all writes', () => {
+  let sb = sandbox();
+  seedCont(sb, [cont({ key: 'שם קודם|ramot|2026-10-01', dashboardPatientId: 'id-stay-1' }), cont()]);
+  let res = save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outcome: 'continuing' });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'continuation_identity_conflict');
+  assert.equal(sb.rows(sb.ctx.CONTINUATION_SHEET).length, 2);
+  assert.equal(sb.rows(sb.ctx.CONTINUATION_SHEET)[0].outcome, '');
+  sb = sandbox();
+  seedCont(sb, [cont(), cont()]);
+  res = save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outcome: 'continuing' });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'continuation_identity_conflict');
+});
+
+test('saveContinuation: Israel-local outcome date never depends on project timezone', () => {
+  const sb = sandbox();
+  let zone = '';
+  const format = sb.ctx.Utilities.formatDate;
+  sb.ctx.Session.getScriptTimeZone = () => 'America/Los_Angeles';
+  sb.ctx.Utilities.formatDate = (d, z, f) => { zone = z; return format(d, z, f); };
+  assert.equal(save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outcome: 'continuing' }).ok, true);
+  assert.equal(zone, 'Asia/Jerusalem');
+});
+
+test('saveContinuation: to_outpatient cannot be saved without a complete link pair', () => {
+  const sb = sandbox();
+  assert.equal(save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outcome: 'to_outpatient' }).reason, 'invalid_link');
+  assert.equal(save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outpatientId: 'L1' }).reason, 'invalid_link');
+  assert.equal(save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outpatientEntity: 'lead' }).reason, 'invalid_link');
+  assert.equal(sb.rows(sb.ctx.CONTINUATION_SHEET).length, 0);
+  assert.equal(save(sb, { key: KEY, dashboardPatientId: 'id-stay-1', outcome: 'to_outpatient', outpatientId: 'L1', outpatientEntity: 'lead' }).ok, true);
+});
+
 test('saveContinuation: link fields are written only when a VALID pair is supplied; otherwise the on-sheet link is preserved', () => {
   const sb = sandbox();
   seedCont(sb, [cont({ dashboardPatientId: 'id-stay-1', outpatientId: 'id_lead_1', outpatientEntity: 'lead' })]);

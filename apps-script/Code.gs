@@ -4418,7 +4418,7 @@ function _isContinuationDate(v) {
  * or changed; a payload value is ignored. Wrapped in a 30s lock like every
  * other write. Validates fail-closed BEFORE touching the sheet. */
 function _continuationToday_() {
-  return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM-dd');
 }
 function _saveContinuation(payload) {
   var key = String((payload && payload.key) || '').trim();
@@ -4440,7 +4440,7 @@ function _saveContinuation(payload) {
   }
   var linkId = _careId(payload && payload.outpatientId);
   var linkEntity = String((payload && payload.outpatientEntity) || '').trim();
-  if (linkId === null || (linkEntity && !CONTINUATION_LINK_ENTITIES[linkEntity])) {
+  if (linkId === null || (linkEntity && !CONTINUATION_LINK_ENTITIES[linkEntity]) || (!!linkId !== !!linkEntity)) {
     return { ok: false, reason: 'invalid_link' };
   }
   var hasLink = !!(linkId && linkEntity);
@@ -4466,24 +4466,25 @@ function _saveContinuation(payload) {
   try {
     var sh = _ensureSheet(CONTINUATION_SHEET, CONTINUATION_HEADERS);
     var rows = _readAll(sh, CONTINUATION_HEADERS);
-    var idx = -1, i;
-    if (dashboardPatientId) {
-      var byId = [];
-      for (i = 0; i < rows.length; i++) {
-        if (String(rows[i].dashboardPatientId || '').trim() === dashboardPatientId) byId.push(i);
-      }
-      if (byId.length > 1) return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'dashboardPatientId' };
-      if (byId.length === 1) idx = byId[0];
+    // Validate both stable identity and legacy key before writing.
+    var idx = -1, i, byId = [], byKey = [];
+    for (i = 0; i < rows.length; i++) {
+      if (dashboardPatientId && String(rows[i].dashboardPatientId || '').trim() === dashboardPatientId) byId.push(i);
+      if (String(rows[i].key || '').trim() === key) byKey.push(i);
     }
-    if (idx === -1) {
-      for (i = 0; i < rows.length; i++) {
-        if (String(rows[i].key || '').trim() !== key) continue;
-        var rowId = String(rows[i].dashboardPatientId || '').trim();
-        if (dashboardPatientId && rowId && rowId !== dashboardPatientId) {
-          return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'key' };
-        }
-        idx = i;
-        break;
+    if (byId.length > 1 || byKey.length > 1) {
+      return { ok: false, reason: 'continuation_identity_conflict', matchedBy: byId.length > 1 ? 'dashboardPatientId' : 'key' };
+    }
+    if (byId.length === 1) {
+      idx = byId[0];
+      if (byKey.length && byKey[0] !== idx) {
+        return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'key' };
+      }
+    } else if (byKey.length === 1) {
+      idx = byKey[0];
+      var rowId = String(rows[idx].dashboardPatientId || '').trim();
+      if (dashboardPatientId && rowId && rowId !== dashboardPatientId) {
+        return { ok: false, reason: 'continuation_identity_conflict', matchedBy: 'key' };
       }
     }
     var existing = idx === -1 ? null : rows[idx];
@@ -4495,6 +4496,9 @@ function _saveContinuation(payload) {
       row.outpatientEntity = String(existing.outpatientEntity || '');
     }
     if (hasLink) { row.outpatientId = linkId; row.outpatientEntity = linkEntity; }
+    if (outcome === 'to_outpatient' && (!row.outpatientId || !CONTINUATION_LINK_ENTITIES[row.outpatientEntity])) {
+      return { ok: false, reason: 'invalid_link' };
+    }
     if (outcome) {
       row.outcomeDate = (existing && String(existing.outcome || '') === outcome && String(existing.outcomeDate || '').trim())
         ? String(existing.outcomeDate).trim()

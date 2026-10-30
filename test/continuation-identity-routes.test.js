@@ -185,6 +185,27 @@ test('routes: /api/continuation/to-outpatient — resolve -> createContinuationL
   assert.equal(res.json.row.outpatientId, 'id_new_lead');
 });
 
+test('routes: invalid downstream create or link-save reply cannot report success', async () => {
+  for (const response of [
+    { ok: true, entity: 'lead' }, { ok: true, id: 'bad id', entity: 'lead' },
+    { ok: true, id: 'L1', entity: 'other' }
+  ]) {
+    reset();
+    sheetsReply = () => ({ status: 200, body: response });
+    const res = await request('POST', '/api/continuation/to-outpatient', { dashboardPatientId: 'id-stay-1' }, H());
+    assert.equal(res.status, 502);
+    assert.equal(res.json.error, 'continuation_link_create_invalid');
+    assert.equal(calls.length, 1);
+  }
+  reset();
+  sheetsReply = (body) => body.action === 'createContinuationLead'
+    ? { status: 200, body: { ok: true, id: 'L1', entity: 'lead' } }
+    : { status: 200, body: { ok: true, row: Object.assign({}, body, { outpatientId: '' }) } };
+  const res = await request('POST', '/api/continuation/to-outpatient', { dashboardPatientId: 'id-stay-1' }, H());
+  assert.equal(res.status, 502);
+  assert.equal(res.json.error, 'continuation_link_save_failed');
+});
+
 test('routes: to-outpatient — possible_duplicate / identity_conflict from createLead rules save NO outcome (409)', async () => {
   reset();
   sheetsReply = () => ({ status: 200, body: { ok: false, error: 'possible_duplicate', possibleDuplicateOf: ['lead:L-old'] } });

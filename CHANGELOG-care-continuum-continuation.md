@@ -35,6 +35,14 @@ Date: 2026-10-30. Stacked draft on OP-ID-1 (PR #137). No merge, no Apps Script o
 - **Ordering dependency:** ordinary continuation saves and to_outpatient require the Dashboard roster to carry `id` (D-ID-1, Dashboard PR #329). Until that is live, the tab still renders and legacy rows still show, but saves fail visibly with `continuation_identity_unavailable`. Release OP-ID-2 only after D-ID-1 is deployed.
 - Apps Script change → explicit second-phase release after a separately approved merge (repo rule 4). Not authorized here.
 
+## Independent review hardening — October 30, 2026
+- Reject collisions between stable identity and legacy key, including duplicate legacy keys, without modifying rows.
+- Always stamp outcomeDate in Asia/Jerusalem; no dependency on project time zone.
+- Reject partial downstream link pairs and to_outpatient without a valid link.
+- Validate the created id/entity and the saved row before returning success.
+- Restrict browser legacy-key fallback to rows with no stable id or the identical id.
+- Added focused regression tests. Draft only; no merge or deployment authorized.
+
 ## Tests
 - `test/continuation-identity-gs.test.js` (11): schema/auth table, stable-id upsert, legacy-key upgrade, no downgrade, identity conflicts write nothing, server-owned link fields, createContinuationLead auth/forcing/mapping/idempotency/fail-closed duplicate, activation copies from the on-sheet lead and never from the browser.
 - `test/continuation-identity-routes.test.js` (10): pure resolver (exact id only, 0/>1/no-id feed), builders strip browser fields, saveContinuation overwrite + drop list + cookie user, fail-closed statuses with no upstream write, forbidden pass-through, two-step orchestration with observed link, duplicate saves no outcome, link-save failure + safe retry, session required, roster route unchanged.

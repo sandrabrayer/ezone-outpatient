@@ -4424,7 +4424,11 @@
     var rid = String(row.dashboardPatientId || '').trim();
     var i = -1;
     if (rid) i = state.continuationRows.findIndex(function (r) { return r && String(r.dashboardPatientId || '').trim() === rid; });
-    if (i === -1) i = state.continuationRows.findIndex(function (r) { return r && String(r.key || '').trim() === key; });
+    if (i === -1) i = state.continuationRows.findIndex(function (r) {
+      if (!r || String(r.key || '').trim() !== key) return false;
+      var oldId = String(r.dashboardPatientId || '').trim();
+      return !oldId || (rid && oldId === rid);
+    });
     if (i === -1) state.continuationRows.push(row);
     else state.continuationRows[i] = row;
   }
@@ -4564,7 +4568,10 @@
       var entryDate = String(p.entryDate || '').trim();
       var key = CL.buildKey(name, house, entryDate);
       var dashboardPatientId = String(p.id || '').trim();
-      var row = (dashboardPatientId && byId[dashboardPatientId]) || byKey[key] || {};
+      var legacyRow = byKey[key];
+      var legacyId = String((legacyRow && legacyRow.dashboardPatientId) || '').trim();
+      var safeLegacy = legacyRow && (!legacyId || (dashboardPatientId && legacyId === dashboardPatientId)) ? legacyRow : {};
+      var row = (dashboardPatientId && byId[dashboardPatientId]) || safeLegacy;
       var months = CL.monthsSince(entryDate, todayISO);
       var vm = {
         key: key, name: name, phone: String(p.phone || '').trim(),
@@ -4654,6 +4661,7 @@
     continuation_patient_not_admitted: 'המטופל/ת כבר לא ברשימת המאושפזים',
     continuation_identity_conflict: 'נמצאו שתי רשומות לאותו מזהה — נדרש בירור',
     continuation_link_save_failed: 'הליד נוצר אך קישור השורה נכשל — נסו שוב (לא ייווצר כפל)',
+    continuation_link_create_invalid: 'לא התקבל מזהה ליד תקין — לא נשמרה העברה לטיפולי חוץ',
     possible_duplicate: 'קיים כבר ליד/מטופל פעיל עם אותו שם וטלפון — לא נוצר ליד',
     identity_conflict: 'אותו מזהה מקושר ליותר מרשומה אחת — נדרש בירור',
     continuation_roster_not_configured: 'חיבור הרוסטר לא מוגדר בשרת'

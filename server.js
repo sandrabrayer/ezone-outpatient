@@ -630,7 +630,12 @@ app.post('/api/continuation/to-outpatient', requireSession, async (req, res) => 
       return res.status(status).json(Object.assign({ ok: false, error: err }, r1.data && r1.data.possibleDuplicateOf ? { possibleDuplicateOf: r1.data.possibleDuplicateOf } : {}));
     }
     invalidateCache();
-    const link = { outpatientId: r1.data.id, outpatientEntity: r1.data.entity || 'lead' };
+    const downstreamId = continuationIdentity.careId(r1.data.id);
+    const downstreamEntity = r1.data.entity;
+    if (!downstreamId || (downstreamEntity !== 'lead' && downstreamEntity !== 'client')) {
+      return res.status(502).json({ ok: false, error: 'continuation_link_create_invalid' });
+    }
+    const link = { outpatientId: downstreamId, outpatientEntity: downstreamEntity };
     const save = Object.assign(
       continuationIdentity.buildSavePayload({ meetingDate: body.meetingDate, outcome: 'to_outpatient', note: body.note }, identity, link),
       { user, proxySecret: OUTPATIENT_PROXY_SECRET }
@@ -638,7 +643,12 @@ app.post('/api/continuation/to-outpatient', requireSession, async (req, res) => 
     let r2;
     try { r2 = await postToSheets(save); }
     catch (_) { r2 = null; }
-    if (!r2 || !(r2.status >= 200 && r2.status < 300) || !r2.data || r2.data.ok === false) {
+    const confirmed = r2 && r2.data && r2.data.row;
+    if (!r2 || !(r2.status >= 200 && r2.status < 300) || !r2.data || r2.data.ok === false ||
+        !confirmed || String(confirmed.dashboardPatientId || '') !== identity.dashboardPatientId ||
+        confirmed.outcome !== 'to_outpatient' ||
+        String(confirmed.outpatientId || '') !== link.outpatientId ||
+        confirmed.outpatientEntity !== link.outpatientEntity) {
       return res.status(502).json({
         ok: false, error: 'continuation_link_save_failed',
         reason: r2 && r2.data ? (r2.data.reason || r2.data.error || '') : 'upstream_unavailable',
