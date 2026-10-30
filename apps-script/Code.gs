@@ -35,12 +35,16 @@ var LEADS_HEADERS = [
   // _saveAll carries the on-sheet value for existing leads, so a browser
   // snapshot can never change or blank it. Follows the lead onto the client on
   // activation. Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  // Care-continuum identity/provenance (OP-ID-1), APPEND-ONLY. Browser full
+  // saves may echo these source-owned fields but never change or blank them.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey'
 ];
 
 /* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
  * _leadDiffCols ignores them so an echoed stale stamp never reads as an edit. */
-var LEADS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy'];
+var LEADS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy',
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey'];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,
  * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
@@ -149,7 +153,10 @@ var CLIENTS_HEADERS = [
   //     row (like paymentAmountOverrides) and only seeds a brand-new client from
   //     its validated payload value (the lead's createLead value on activation).
   //     Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  // Care-continuum identity (OP-ID-1), copied SERVER-SIDE from the originating
+  // lead on activation. Browser full saves cannot change or blank these.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId'
 ];
 
 /* Meta columns of the Clients sheet — identity, who/when audit, and the two
@@ -157,7 +164,8 @@ var CLIENTS_HEADERS = [
  * preserved by id on every save, so a payload echo of them is never an edit).
  * _clientDiffCols ignores all five: two rows differing only in these are the
  * same client content-wise, and an echoed stale stamp never re-stamps. */
-var CLIENTS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides'];
+var CLIENTS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides',
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId'];
 
 /* Columns whose cells hold who/when stamps. Forced to plain-text ('@') on
  * ensure/write (same mechanism as PHONE_COLUMNS) so Sheets never coerces the
@@ -215,7 +223,10 @@ var CLIENTS_REMOVED_HEADERS = [
   // so a tombstoned row keeps it and restoreRemovedClient copies it back.
   'plannedExitDate',
   // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
-  'preferredHouse'
+  'preferredHouse',
+  // APPEND-ONLY care-continuum identity mirror. Kept after the established
+  // tombstone tail; restore maps by header NAME and copies these back to Clients.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -1401,6 +1412,7 @@ function _saveAll(payload) {
         existingById[eid] = existing[e];
       }
     }
+    var sourceLeadIdentityById = null;
     var stampedClients = 0;
     // Stale-save conflict refusal (PR 2): rows another person changed after
     // this tab loaded them are refused ONE BY ONE — the sheet row is written
@@ -1436,6 +1448,16 @@ function _saveAll(payload) {
       clients[i].preferredHouse = existingRow
         ? (existingRow.preferredHouse == null ? '' : existingRow.preferredHouse)
         : (_preferredHouseOrNull(clients[i].preferredHouse) || '');
+      var identityFields = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId'];
+      if (existingRow) identityFields.forEach(function (field) { clients[i][field] = existingRow[field] == null ? '' : existingRow[field]; });
+      else {
+        if (sourceLeadIdentityById === null) {
+          sourceLeadIdentityById = Object.create(null);
+          _readAll(leadsSh, LEADS_HEADERS).forEach(function (srcLead) { var sid = String(srcLead && srcLead.id == null ? '' : srcLead.id); if (sid) sourceLeadIdentityById[sid] = srcLead; });
+        }
+        var sourceLead = sourceLeadIdentityById[String(clients[i].fromLead == null ? '' : clients[i].fromLead)] || null;
+        identityFields.forEach(function (field) { clients[i][field] = sourceLead && sourceLead[field] != null ? sourceLead[field] : ''; });
+      }
       if (reservedClients[cid] && existingRow) {
         var pendingChanges = _clientDiffCols(clients[i], existingRow);
         if (pendingChanges.length) {
@@ -1598,6 +1620,10 @@ function _saveAll(payload) {
           ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
           : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
       }
+      var leadHandoffFields = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey'];
+      if (leads[li] && typeof leads[li] === 'object') leadHandoffFields.forEach(function (field) {
+        leads[li][field] = existingLead && existingLead[field] != null ? existingLead[field] : '';
+      });
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {
         conflicts.push(_conflictEntry('lead', leads[li], existingLead, leadConflictCols, user));
@@ -3994,6 +4020,99 @@ function _leadUid() {
   return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+/* ===== Care-continuum identity (OP-ID-1) =================================
+ * Existing Dashboard identifiers only — no new person id is minted here.
+ * Exact IDs may link an OPEN Outpatient episode. Phone+name is only a
+ * duplicate-warning signal and never silently links medical records. */
+var HANDOFF_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+var OUTPATIENT_ASSIGNEES = ['ורד', 'אורן', 'דנה'];
+
+function _handoffIdOrNull(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return '';
+  var s = String(v).trim();
+  return HANDOFF_ID_RE.test(s) ? s : null;
+}
+
+function _handoffSafeText(v, maxLen) {
+  var s = _sanitizeLeadText(v, maxLen);
+  return s.replace(/^[=+\-@\s]+/, '');
+}
+
+function _handoffPersonKey(row) {
+  if (!row) return '';
+  var person = _handoffIdOrNull(row.dashboardPersonId);
+  if (person) return person;
+  var stay = _handoffIdOrNull(row.dashboardPatientId);
+  return stay || '';
+}
+function _handoffNameKey(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function _handoffOpenLead(row) {
+  var st = String(row && row.stage == null ? '' : row.stage).trim();
+  return st !== 'not_relevant' && st !== 'לא רלוונטי';
+}
+function _handoffOpenClient(row) { return !!row && _isActiveClientStatus(row.status); }
+function _handoffExactCandidates(leads, clients, field, value, personKeyMode) {
+  if (!value) return [];
+  var out = [];
+  (leads || []).forEach(function (row) {
+    if (!_handoffOpenLead(row)) return;
+    var got = personKeyMode ? _handoffPersonKey(row) : String(row[field] == null ? '' : row[field]).trim();
+    if (got === value) out.push({ type: 'lead', row: row });
+  });
+  (clients || []).forEach(function (row) {
+    if (!_handoffOpenClient(row)) return;
+    var got = personKeyMode ? _handoffPersonKey(row) : String(row[field] == null ? '' : row[field]).trim();
+    if (got === value) out.push({ type: 'client', row: row });
+  });
+  return out;
+}
+function _handoffDuplicateRefs(leads, clients, name, phone) {
+  var nk = _handoffNameKey(name), ph = _recoverPhone(phone);
+  if (!nk || !ph) return [];
+  var out = [];
+  function add(type, row) {
+    if (_recoverPhone(row.phone) !== ph || _handoffNameKey(row.name) !== nk) return;
+    out.push({ type: type, id: String(row.id == null ? '' : row.id) });
+  }
+  (leads || []).forEach(function (row) { if (_handoffOpenLead(row)) add('lead', row); });
+  (clients || []).forEach(function (row) { if (_handoffOpenClient(row)) add('client', row); });
+  return out;
+}
+function _handoffRowNumberById(sh, headers, id) {
+  var idCol = headers.indexOf('id') + 1, last = sh.getLastRow();
+  if (!id || idCol < 1 || last < 2) return 0;
+  var ids = sh.getRange(2, idCol, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
+  return 0;
+}
+function _handoffFillBlankFields(sh, headers, row, incoming, fields, stampClient) {
+  var rowNum = _handoffRowNumberById(sh, headers, row && row.id);
+  if (!rowNum) return false;
+  var changed = false;
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i], oldVal = row[field] == null ? '' : String(row[field]);
+    var newVal = incoming[field] == null ? '' : String(incoming[field]);
+    if (oldVal.trim() !== '' || newVal === '') continue;
+    var col = headers.indexOf(field) + 1;
+    if (col < 1) continue;
+    sh.getRange(rowNum, col).setValue(newVal); row[field] = newVal; changed = true;
+  }
+  if (changed) {
+    if (stampClient) _stampClientRowAt(sh, rowNum, '');
+    else {
+      _stampRow(row, '');
+      sh.getRange(rowNum, headers.indexOf('updatedAt') + 1).setValue(row.updatedAt);
+      sh.getRange(rowNum, headers.indexOf('updatedBy') + 1).setValue('');
+    }
+  }
+  return changed;
+}
+function _handoffMatchResult(candidate, matchedBy, ownerUnmapped) {
+  var id = String(candidate.row.id == null ? '' : candidate.row.id);
+  var out = { ok: true, id: id, entityType: candidate.type, matched: true, matchedBy: matchedBy, ownerUnmapped: !!ownerUnmapped };
+  if (candidate.type === 'lead') out.leadId = id; else out.clientId = id;
+  return out;
+}
 function _createLeadAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('CREATE_LEAD_SECRET');
   if (!expected) return false; // fail-closed: not configured -> reject
@@ -4004,47 +4123,67 @@ function _createLeadAuthOk(params) {
 function _createLead(payload) {
   var name = _sanitizeLeadText(payload && payload.name, 200);
   if (!name) return { ok: false, error: 'missing_name' };
-  var phone = _recoverPhone(payload && payload.phone); // '' stays '' (valid)
-  var note  = _sanitizeLeadText(payload && payload.note, 2000);
+  var phone = _recoverPhone(payload && payload.phone);
+  var note = _sanitizeLeadText(payload && payload.note, 2000);
   var house = _mapLeadHouse(payload && payload.house);
   var preferredHouse = _preferredHouseOrNull(payload ? payload.preferredHouse : null);
   if (preferredHouse === null) return { ok: false, error: 'invalid_preferred_house' };
-
+  var dashboardPatientId = _handoffIdOrNull(payload && payload.dashboardPatientId);
+  var dashboardPersonId = _handoffIdOrNull(payload && payload.dashboardPersonId);
+  var dashboardLeadId = _handoffIdOrNull(payload && payload.dashboardLeadId);
+  if (dashboardPatientId === null) return { ok: false, error: 'invalid_dashboardPatientId' };
+  if (dashboardPersonId === null) return { ok: false, error: 'invalid_dashboardPersonId' };
+  if (dashboardLeadId === null) return { ok: false, error: 'invalid_dashboardLeadId' };
+  var source = _handoffSafeText(payload && payload.source, 60);
+  var continuationKey = _handoffSafeText(payload && payload.continuationKey, 500);
+  var ownerRaw = _sanitizeLeadText(payload && payload.assignedTo, 40);
+  var assignedTo = OUTPATIENT_ASSIGNEES.indexOf(ownerRaw) >= 0 ? ownerRaw : '';
+  var ownerUnmapped = !!ownerRaw && !assignedTo;
+  var personKey = dashboardPersonId || dashboardPatientId || '';
+  var incoming = { dashboardPatientId: dashboardPatientId, dashboardPersonId: dashboardPersonId,
+    dashboardLeadId: dashboardLeadId, source: source, continuationKey: continuationKey, phone: phone,
+    house_of_origin: house, note: note, preferredHouse: preferredHouse, assignedTo: assignedTo };
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    // _ensureSheet applies the '@' plain-text format to the phone column for
-    // the grid rows, so the appended phone keeps its leading zero.
-    var sh = _ensureSheet('Leads', LEADS_HEADERS);
-    var lead = {
-      id: _leadUid(),
-      name: name,
-      phone: phone,
-      serviceType: '',
-      location: '',
-      note: note,
-      stage: 'new',
-      sessionsPerWeek: '',
-      pricePerSession: '',
-      startDate: '',
-      created: Utilities.formatDate(
-        new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd'),
-      introDateTime: '',
-      house_of_origin: house,
-      not_relevant_reason: '',
-      not_relevant_note: '',
-      preferredHouse: preferredHouse
-    };
-    _stampRow(lead, ''); // who/when — cross-app (dashboard) receiver: WHEN only
-    sh.appendRow(LEADS_HEADERS.map(function (h) {
-      return lead[h] == null ? '' : lead[h];
-    }));
-    return { ok: true, id: lead.id };
-  } finally {
-    try { lock.releaseLock(); } catch (_) {}
-  }
+    var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var leads = _readAll(leadsSh, LEADS_HEADERS), clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    var stages = [
+      { by: 'dashboardPatientId', field: 'dashboardPatientId', value: dashboardPatientId, person: false },
+      { by: 'dashboardLeadId', field: 'dashboardLeadId', value: dashboardLeadId, person: false },
+      { by: 'dashboardPersonKey', field: '', value: personKey, person: true }
+    ];
+    for (var m = 0; m < stages.length; m++) {
+      if (!stages[m].value) continue;
+      var hits = _handoffExactCandidates(leads, clients, stages[m].field, stages[m].value, stages[m].person);
+      if (hits.length > 1) return { ok: false, error: 'identity_ambiguous', matchedBy: stages[m].by, matches: hits.length };
+      if (hits.length === 1) {
+        var hit = hits[0];
+        if (hit.type === 'lead') _handoffFillBlankFields(leadsSh, LEADS_HEADERS, hit.row, incoming,
+          ['dashboardPatientId','dashboardPersonId','dashboardLeadId','source','continuationKey','phone','house_of_origin','note','preferredHouse','assignedTo'], false);
+        else {
+          _finGuard([String(hit.row.id || '')]);
+          _handoffFillBlankFields(clientsSh, CLIENTS_HEADERS, hit.row, incoming,
+            ['dashboardPatientId','dashboardPersonId','dashboardLeadId','assignedTo'], true);
+        }
+        return _handoffMatchResult(hit, stages[m].by, ownerUnmapped);
+      }
+    }
+    var possibleDuplicateOf = _handoffDuplicateRefs(leads, clients, name, phone);
+    var lead = { id: _leadUid(), name: name, phone: phone, serviceType: '', location: '', note: note, stage: 'new',
+      sessionsPerWeek: '', pricePerSession: '', startDate: '',
+      created: Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd'),
+      introDateTime: '', house_of_origin: house, not_relevant_reason: '', not_relevant_note: '',
+      assignedTo: assignedTo, preferredHouse: preferredHouse, dashboardPatientId: dashboardPatientId,
+      dashboardPersonId: dashboardPersonId, dashboardLeadId: dashboardLeadId, source: source, continuationKey: continuationKey };
+    _stampRow(lead, '');
+    leadsSh.appendRow(LEADS_HEADERS.map(function (h) { return lead[h] == null ? '' : lead[h]; }));
+    var result = { ok: true, id: lead.id, leadId: lead.id, entityType: 'lead', matched: false, ownerUnmapped: ownerUnmapped };
+    if (possibleDuplicateOf.length) { result.needsReview = true; result.possibleDuplicateOf = possibleDuplicateOf; }
+    return result;
+  } finally { try { lock.releaseLock(); } catch (_) {} }
 }
-
 /* ===== Merge duplicate clients =====
  *
  * Internal dashboard action (dedicated proxy credential, like saveAll). Merges one or
