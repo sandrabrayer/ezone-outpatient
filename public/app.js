@@ -599,7 +599,9 @@
       updatedBy: row.updatedBy || '',
       // בית מועדף from the createLead handoff (read-only here; follows the lead
       // onto the client on activation).
-      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse),
+      dashboardPatientId: row.dashboardPatientId || '', dashboardPersonId: row.dashboardPersonId || '',
+      dashboardLeadId: row.dashboardLeadId || '', source: row.source || '', continuationKey: row.continuationKey || ''
     };
   }
   function normalizeClientFromSheet(row) {
@@ -656,7 +658,8 @@
       // the edit modal. Distinct from exitDate (the ACTUAL discharge date).
       plannedExitDate: fmtDate(row.plannedExitDate),
       // בית מועדף ('' = none). Edited via the single-cell setPreferredHouse action.
-      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse),
+      dashboardPatientId: row.dashboardPatientId || '', dashboardPersonId: row.dashboardPersonId || '', dashboardLeadId: row.dashboardLeadId || ''
     };
   }
 
@@ -705,7 +708,8 @@
       updatedBy: l.updatedBy || '',
       // Column alignment only: the server keeps the on-sheet value for an
       // existing lead (createLead is the only writer).
-      preferredHouse: l.preferredHouse || ''
+      preferredHouse: l.preferredHouse || '', dashboardPatientId: l.dashboardPatientId || '', dashboardPersonId: l.dashboardPersonId || '',
+      dashboardLeadId: l.dashboardLeadId || '', source: l.source || '', continuationKey: l.continuationKey || ''
     };
   }
   function clientForSheet(c) {
@@ -766,7 +770,8 @@
       plannedExitDate: c.plannedExitDate || '',
       // בית מועדף: seeds a brand-new client only; for an existing row the server
       // keeps its on-sheet value (edits go through setPreferredHouse).
-      preferredHouse: c.preferredHouse || ''
+      preferredHouse: c.preferredHouse || '', dashboardPatientId: c.dashboardPatientId || '',
+      dashboardPersonId: c.dashboardPersonId || '', dashboardLeadId: c.dashboardLeadId || ''
     };
   }
 
@@ -7033,7 +7038,8 @@
         // משוייך ל: the assignee follows the person from lead to patient.
         assignedTo: lead.assignedTo || '',
         // בית מועדף (createLead handoff) follows the person too.
-        preferredHouse: preferredHouseOrBlank(lead.preferredHouse)
+        preferredHouse: preferredHouseOrBlank(lead.preferredHouse), dashboardPatientId: lead.dashboardPatientId || '',
+        dashboardPersonId: lead.dashboardPersonId || '', dashboardLeadId: lead.dashboardLeadId || ''
       };
       state.clients.push(client);
       var intakePaymentToPersist = null;

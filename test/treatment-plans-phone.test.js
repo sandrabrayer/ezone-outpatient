@@ -407,8 +407,8 @@ test('E: CLIENTS_HEADERS has no phoneIssue column — it is derived, never store
   assert.ok(m);
   assert.doesNotMatch(m[1], /phoneIssue/);
   const { ctx } = sandbox([]);
-  // 38 = the 36 frozen columns + plannedExitDate + preferredHouse (later, separate appends).
-  assert.equal(ctx.CLIENTS_HEADERS.length, 38, 'the 36 frozen columns + plannedExitDate + preferredHouse');
+  // The established 38 columns stay in place; OP-ID-1 appends three identity fields.
+  assert.equal(ctx.CLIENTS_HEADERS.length, 41, '38 established columns + 3 continuum identity columns');
   assert.ok(!ctx.CLIENTS_HEADERS.includes('phoneIssue'));
 });
 

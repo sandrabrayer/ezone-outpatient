@@ -96,3 +96,12 @@ money for דנה but the clients tab does not.
 1. After OP-CRM-1 is live: as דנה, open the app — «היום שלי» shows no «חידושים וגבייה» card; as ורד it does.
 2. Discharge a **test** patient from the Dashboard to outpatient only if a sandbox sheet is configured; otherwise skip — the handoff path is covered by `test/create-lead.test.js`.
 3. `curl -s https://ezone-outpatient.up.railway.app/sw.js | grep -o 'ezone-outpatient-v[0-9]*'` → `v21`.
+
+
+## 7. Care-continuum identity checkpoint (2026-10-30, OP-ID-1 draft)
+
+Continuity begins **before discharge**. No new person id is minted: `dashboardPatientId` is one Dashboard stay, `dashboardPersonId` is the root first-stay id for a returning person, and `personKey = dashboardPersonId || dashboardPatientId`.
+
+`createLead` stays backward-compatible. Identity-aware payloads link only by exact ids to one OPEN lead / ACTIVE client. Phone+normalized-name is warning-only (`needsReview` / `possibleDuplicateOf`). Closed leads/clients remain history and are never overwritten. Browser `saveAll` cannot change source-owned identity; a new client inherits ids server-side from its current on-sheet `fromLead` row.
+
+Append-only fields: Leads += `dashboardPatientId,dashboardPersonId,dashboardLeadId,source,continuationKey`; Clients and Clients-removed += the three Dashboard ids. `REMOVED_LEADS_HEADERS` is intentionally unchanged while OP-03 / PR #125 owns that area. Follow-ups remain separate: OP-ID-2 continuation wiring, Dashboard D-ID-2 handoff/storage, OP-ROLE-1 Dana money separation, and OP-FB-1/D-FB-1 status feedback.

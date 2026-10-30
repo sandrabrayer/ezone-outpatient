@@ -407,24 +407,16 @@ function baseLeads(ctx) {
 
 /* ================= C. schema ================= */
 
-test('C: CLIENTS_HEADERS, LEADS_HEADERS and both tombstone mirrors END with updatedAt, updatedBy (append-only)', () => {
+test('C: stamp columns keep their physical positions after continuum identity is appended', () => {
   const { ctx } = makeSandbox();
-  for (const name of ['CLIENTS_HEADERS', 'LEADS_HEADERS', 'CLIENTS_REMOVED_HEADERS', 'REMOVED_LEADS_HEADERS']) {
-    // Clients + its tombstone later appended plannedExitDate after the stamps;
-    // all four then appended preferredHouse (בית מועדף) last.
-    const H = headersOf(ctx, name);
-    const tail = /^CLIENTS/.test(name) ? H.slice(-4, -2) : H.slice(-3, -1);
-    assert.deepEqual(tail, ['updatedAt', 'updatedBy'], name);
-  }
-  assert.equal(ctx.CLIENTS_HEADERS.length, 38);
-  assert.equal(ctx.CLIENTS_HEADERS[36], 'plannedExitDate');
-  assert.equal(ctx.CLIENTS_HEADERS[37], 'preferredHouse');
-  assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides', 'everything before the stamps unchanged');
-  assert.equal(ctx.LEADS_HEADERS[ctx.LEADS_HEADERS.length - 4], 'assignedTo');
-  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides']);
-  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy']);
+  assert.equal(ctx.CLIENTS_HEADERS.length, 41);
+  assert.deepEqual(plain(ctx.CLIENTS_HEADERS).slice(34, 41), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId']);
+  assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides');
+  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-9), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey']);
+  assert.deepEqual(plain(ctx.REMOVED_LEADS_HEADERS).slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId']);
+  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey']);
 });
-
 test('C: _ensureSheet adds the headers to a legacy sheet and text-forces the two stamp columns; _writeAll text-forces them too', () => {
   const { ctx, sheets, log } = makeSandbox();
   const H = ctx.CLIENTS_HEADERS;

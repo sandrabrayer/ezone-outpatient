@@ -77,7 +77,8 @@ const LEADS_HEADERS = [
   'updatedAt', 'updatedBy',
   // preferredHouse (בית מועדף): optional createLead field, validated against
   // PREFERRED_HOUSES — real-handler coverage in test/preferred-house.test.js.
-  'preferredHouse'
+  'preferredHouse',
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'source', 'continuationKey'
 ];
 
 function createLead(sheet, expectedSecret, payload, today) {
@@ -224,9 +225,10 @@ test('source: auth is fail-closed and reads CREATE_LEAD_SECRET from Script Prope
 });
 
 test('source: the new lead uses stage "new" and created = today', () => {
-  const m = SRC.match(/function _createLead\(payload\)\s*\{[\s\S]*?\n\}/);
-  assert.ok(m, '_createLead not found');
-  const fn = m[0];
+  const start = SRC.indexOf('function _createLead(payload)');
+  const end = SRC.indexOf('/* ===== Merge duplicate clients', start);
+  assert.ok(start >= 0 && end > start, '_createLead not found');
+  const fn = SRC.slice(start, end);
   assert.match(fn, /stage: 'new'/);
   assert.match(fn, /created: Utilities\.formatDate\(/);
   assert.match(fn, /appendRow/, 'must append a single row, not rewrite the sheet');

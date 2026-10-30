@@ -46,6 +46,12 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient: care-continuum identity (OP-ID-1, Oct 30, 2026 — DRAFT, not released)
+
+- Append-only Dashboard identity on Leads/Clients; exact-id link-or-create for one open episode; PII collisions are warning-only; closed history stays separate.
+- Browser full saves preserve source-owned identity and activation derives it from the on-sheet source lead. Legacy payloads work. `REMOVED_LEADS_HEADERS` remains untouched while OP-03 / PR #125 is separate.
+- No production merge/deploy authorized. Continuation wiring is the next separate concern (OP-ID-2).
+
 ## Outpatient: «היום שלי» CRM opening screen (OP-CRM-1, Oct 29, 2026 — DRAFT, not released)
 
 - First tab of ezone-outpatient becomes the CRM opening screen on the Dashboard CRM model (`public/my-day.js`, pure UMD,
