@@ -4421,7 +4421,14 @@
 
   function upsertContinuationLocal(row) {
     var key = String(row.key || '').trim();
-    var i = state.continuationRows.findIndex(function (r) { return String(r.key || '').trim() === key; });
+    var rid = String(row.dashboardPatientId || '').trim();
+    var i = -1;
+    if (rid) i = state.continuationRows.findIndex(function (r) { return r && String(r.dashboardPatientId || '').trim() === rid; });
+    if (i === -1) i = state.continuationRows.findIndex(function (r) {
+      if (!r || String(r.key || '').trim() !== key) return false;
+      var oldId = String(r.dashboardPatientId || '').trim();
+      return !oldId || (rid && oldId === rid);
+    });
     if (i === -1) state.continuationRows.push(row);
     else state.continuationRows[i] = row;
   }
@@ -4543,9 +4550,15 @@
     var q = (state.continuationSearch || '').trim().toLowerCase();
     var todayISO = today();
 
-    var byKey = {};
+    // OP-ID-2: join the persisted workflow row by the Dashboard's stable stay id
+    // first (dashboardPatientId, from the roster since D-ID-1); legacy rows
+    // without one still join by name|house|entryDate.
+    var byKey = {}, byId = {};
     state.continuationRows.forEach(function (row) {
-      if (row && row.key != null) byKey[String(row.key).trim()] = row;
+      if (!row) return;
+      if (row.key != null) byKey[String(row.key).trim()] = row;
+      var rid = String(row.dashboardPatientId || '').trim();
+      if (rid) byId[rid] = row;
     });
 
     continuationVM = {};
@@ -4554,15 +4567,23 @@
       var house = String(p.house || '').trim();
       var entryDate = String(p.entryDate || '').trim();
       var key = CL.buildKey(name, house, entryDate);
-      var row = byKey[key] || {};
+      var dashboardPatientId = String(p.id || '').trim();
+      var legacyRow = byKey[key];
+      var legacyId = String((legacyRow && legacyRow.dashboardPatientId) || '').trim();
+      var safeLegacy = legacyRow && (!legacyId || (dashboardPatientId && legacyId === dashboardPatientId)) ? legacyRow : {};
+      var row = (dashboardPatientId && byId[dashboardPatientId]) || safeLegacy;
       var months = CL.monthsSince(entryDate, todayISO);
       var vm = {
         key: key, name: name, phone: String(p.phone || '').trim(),
         house: house, entryDate: entryDate,
+        dashboardPatientId: dashboardPatientId,
+        dashboardPersonId: String(p.personId || '').trim(),
         months: months, bucket: CL.bucketOf(months),
         meetingDate: row.meetingDate || '',
         outcome: CL.isValidOutcome(row.outcome) ? row.outcome : '',
-        note: row.note || ''
+        note: row.note || '',
+        outpatientId: row.outpatientId || '',
+        outpatientEntity: row.outpatientEntity || ''
       };
       continuationVM[key] = vm;
       return vm;
@@ -4591,71 +4612,93 @@
     });
   }
 
-  // Persist one workflow row (optimistic + rollback). outcomeDate is stamped
-  // server-relative today whenever an outcome is set.
+  // OP-ID-2: no Dashboard stable id on the roster row = nothing can be saved or
+  // created for it (the server resolves every patient by that id and never by
+  // name/phone). Fail visibly instead of falling back to PII.
+  function continuationIdentityMissing(vm) {
+    if (vm && vm.dashboardPatientId) return false;
+    toast('חסר מזהה מטופל מהדשבורד (D-ID-1) — לא ניתן לשמור את השורה', true);
+    return true;
+  }
+
+  // Persist one workflow row (optimistic + rollback). The browser sends ONLY the
+  // stable id + the three workflow fields; the server fills name / house /
+  // entryDate / key from its own roster and stamps outcomeDate.
   function saveContinuationRow(key, patch) {
     var vm = continuationVM[key];
     if (!vm) return;
+    if (continuationIdentityMissing(vm)) { renderContinuation(); return; }
     var outcome = CONTINUATION_OUTCOME_LABELS[patch.outcome] !== undefined ? patch.outcome : '';
     var row = {
       key: key,
-      name: vm.name, house: vm.house, entryDate: vm.entryDate,
+      dashboardPatientId: vm.dashboardPatientId,
       meetingDate: patch.meetingDate || '',
       outcome: outcome,
-      outcomeDate: outcome ? today() : '',
       note: patch.note || ''
     };
     var prevRows = state.continuationRows.slice();
-    upsertContinuationLocal(row);
+    upsertContinuationLocal(Object.assign({
+      name: vm.name, house: vm.house, entryDate: vm.entryDate,
+      dashboardPersonId: vm.dashboardPersonId, outcomeDate: outcome ? today() : '',
+      outpatientId: vm.outpatientId, outpatientEntity: vm.outpatientEntity
+    }, row));
     renderContinuation();
     persistContinuationRow(row)
-      .then(function () { toast('נשמר'); })
+      .then(function (res) {
+        if (res && res.row) upsertContinuationLocal(res.row);
+        toast('נשמר');
+      })
       .catch(function (err) {
         state.continuationRows = prevRows;
         renderContinuation();
-        toast('שמירה נכשלה: ' + err.message, true);
+        toast('שמירה נכשלה: ' + continuationErrorText(err), true);
       });
   }
 
-  // to_outpatient: create a lead through the EXACT manual add-lead path (so the
-  // duplicate-phone soft warning + _writeAll semantics apply), then — only if the
-  // lead was actually created — save the outcome row.
-  function continuationCreateLead(vm, meetingDate, done) {
-    var phone = normalizePhone(vm.phone || '');
-    var CL = (typeof window !== 'undefined' && window.ContinuationLogic) || null;
-    // Map the dashboard houseId to the outpatient house_of_origin key. An
-    // unmapped id (e.g. 'sde') → house_of_origin '' and the raw id kept in the
-    // note so the provenance isn't lost.
-    var origin = CL ? CL.houseToOrigin(vm.house) : '';
-    var note = 'מקור: מסלול המשך | פגישה: ' + (meetingDate || '—');
-    if (!origin && vm.house) note += ' | בית: ' + vm.house;
-    var lead = {
-      id: uid(), name: vm.name, phone: phone,
-      serviceType: '', location: '',
-      note: note,
-      stage: 'new', sessionsPerWeek: '', pricePerSession: '',
-      startDate: '', created: today(), introDateTime: '',
-      paymentStatus: '', paymentDate: '', nextBillingDate: '',
-      house_of_origin: origin,
-      source: 'מסלול המשך',
-      assignedTo: ''
-    };
-    function doAdd() {
-      state.leads.push(lead);
-      persist()
-        .then(function () { toast('נוצר ליד חדש'); done(true); })
-        .catch(function (err) {
-          state.leads = state.leads.filter(function (l) { return l.id !== lead.id; });
-          toast('יצירת הליד נכשלה: ' + err.message, true);
-          done(false);
-        });
-    }
-    var existing = phone ? state.leads.find(function (l) {
-      if (!l || l.stage === 'removed') return false;
-      return normalizePhone(l.phone || '') === phone;
-    }) : null;
-    if (existing) openDuplicateLeadModal(existing, doAdd);
-    else doAdd();
+  var CONTINUATION_ERROR_TEXT = {
+    continuation_identity_required: 'חסר מזהה מטופל מהדשבורד',
+    continuation_identity_unavailable: 'הדשבורד עדיין לא שולח מזהי מטופלים (D-ID-1)',
+    continuation_patient_not_admitted: 'המטופל/ת כבר לא ברשימת המאושפזים',
+    continuation_identity_conflict: 'נמצאו שתי רשומות לאותו מזהה — נדרש בירור',
+    continuation_link_save_failed: 'הליד נוצר אך קישור השורה נכשל — נסו שוב (לא ייווצר כפל)',
+    continuation_link_create_invalid: 'לא התקבל מזהה ליד תקין — לא נשמרה העברה לטיפולי חוץ',
+    possible_duplicate: 'קיים כבר ליד/מטופל פעיל עם אותו שם וטלפון — לא נוצר ליד',
+    identity_conflict: 'אותו מזהה מקושר ליותר מרשומה אחת — נדרש בירור',
+    continuation_roster_not_configured: 'חיבור הרוסטר לא מוגדר בשרת'
+  };
+  function continuationErrorText(err) {
+    var code = err && err.message ? String(err.message) : String(err || '');
+    return CONTINUATION_ERROR_TEXT[code] || code;
+  }
+
+  // to_outpatient (OP-ID-2): the SERVER creates-or-links the lead
+  // (/api/continuation/to-outpatient → createContinuationLead → _createLead
+  // rules, then saveContinuation with the observed link). The browser never
+  // builds a lead from roster PII any more; after success it reloads core
+  // Leads/Clients so the new lead shows up in the לידים tab.
+  async function apiContinuationToOutpatient(vm, meetingDate, note) {
+    var r = await apiFetch('/api/continuation/to-outpatient', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboardPatientId: vm.dashboardPatientId, meetingDate: meetingDate || '', note: note || '' })
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+  }
+  function continuationToOutpatient(vm, meetingDate, note) {
+    if (continuationIdentityMissing(vm)) return;
+    apiContinuationToOutpatient(vm, meetingDate, note)
+      .then(function (data) {
+        if (data.row) upsertContinuationLocal(data.row);
+        renderContinuation();
+        toast(data.lead && data.lead.matched ? 'קושר לרשומה קיימת' : 'נוצר ליד חדש');
+        return loadAll().catch(function (e) { console.warn('[ezone] continuation reload failed:', e.message); });
+      })
+      .catch(function (err) {
+        renderContinuation();
+        toast('העברה לטיפולי חוץ נכשלה: ' + continuationErrorText(err), true);
+      });
   }
 
   var pendingContinuationLead = null;
@@ -6637,10 +6680,7 @@
       closeContinuationToOutpatientModal();
       var vm = continuationVM[p.key];
       if (!vm) return;
-      continuationCreateLead(vm, p.meetingDate, function (ok) {
-        if (!ok) return; // lead not created (failed) → do not record the outcome
-        saveContinuationRow(p.key, { meetingDate: p.meetingDate, outcome: 'to_outpatient', note: p.note });
-      });
+      continuationToOutpatient(vm, p.meetingDate, p.note);
     });
     on('#addClientBtn', 'click', function () { openDirectClientModal(); });
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });

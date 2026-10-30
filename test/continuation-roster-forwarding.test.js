@@ -46,15 +46,21 @@ test('the roster route guards on config before doing anything', () => {
   const route = m[0];
   assert.ok(/if \(!requireContinuationConfig\(res\)\) return;/.test(route),
     'route does not fail closed via requireContinuationConfig first');
-  assert.ok(/action=getAdmittedRoster/.test(route), 'route does not call getAdmittedRoster');
-  assert.ok(/secret=' \+ encodeURIComponent\(OCCUPANCY_SECRET\)/.test(route),
-    'route does not forward the secret');
+  assert.ok(/fetchAdmittedRoster\(forceFresh\)/.test(route), 'route does not use the shared server-held fetch');
+  // OP-ID-2: the fetch itself (shared with identity resolution) still calls
+  // getAdmittedRoster with the server-held secret.
+  const f = SRV.match(/async function fetchAdmittedRoster\(forceFresh\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(f, 'fetchAdmittedRoster missing');
+  assert.ok(/action=getAdmittedRoster/.test(f[1]), 'fetch does not call getAdmittedRoster');
+  assert.ok(/secret=' \+ encodeURIComponent\(OCCUPANCY_SECRET\)/.test(f[1]),
+    'fetch does not forward the secret');
 });
 
 test('non-JSON upstream surfaces as a 502 with a clear roster error', () => {
   const m = SRV.match(/app\.get\('\/api\/continuation-roster',[\s\S]*?\n\}\);/);
   const route = m[0];
-  assert.ok(/Non-JSON from dashboard roster: /.test(route), 'missing non-JSON error text');
+  const f = SRV.match(/async function fetchAdmittedRoster\(forceFresh\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(/Non-JSON from dashboard roster: /.test(f[1]), 'missing non-JSON error text');
   assert.ok(/status\(502\)/.test(route), 'upstream failure is not a 502');
 });
 

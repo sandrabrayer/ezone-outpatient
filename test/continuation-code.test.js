@@ -35,10 +35,11 @@ test('CONTINUATION_SHEET is named מסלול המשך', () => {
   assert.match(GS, /var CONTINUATION_SHEET = 'מסלול המשך';/);
 });
 
-test('CONTINUATION_HEADERS has the exact order', () => {
+test('CONTINUATION_HEADERS has the exact order (append-only: OP-ID-2 identity/link tail)', () => {
   assert.deepEqual(headers('CONTINUATION_HEADERS'), [
     'key', 'name', 'house', 'entryDate',
-    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt',
+    'dashboardPatientId', 'dashboardPersonId', 'outpatientId', 'outpatientEntity'
   ]);
 });
 

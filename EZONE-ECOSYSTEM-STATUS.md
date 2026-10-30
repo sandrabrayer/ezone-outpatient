@@ -2,6 +2,7 @@
 
 ## Care-continuum identity foundation — October 30, 2026 (draft, no release)
 
+- OP-ID-2 (stacked draft on OP-ID-1) wires the pre-discharge continuation track to that identity: continuation rows store `dashboardPatientId`/`dashboardPersonId` + the linked `outpatientId`/`outpatientEntity`; the Node proxy resolves every continuation save by exact id against the server-held roster (no PII trust, no phone/name lookup); to_outpatient is a server orchestration (`createContinuationLead`, proxy-key only) through the `_createLead` rules, so the discharge handoff later links instead of duplicating; activation copies identity onto the new client server-side. Depends on D-ID-1 (Dashboard #329) being live. See `CHANGELOG-care-continuum-continuation.md`.
 - OP-ID-1 accepts the existing Dashboard stay/person identity on `createLead`, persists it append-only, links only by stable ids, flags phone+name duplicates without auto-linking, and makes the fields server-owned against browser `saveAll`. This is the identity foundation for pre-discharge continuation. Dashboard D-ID-1 is the paired feed change. See `CHANGELOG-care-continuum-identity.md`.
 - PR #125 / OP-03 and PR #135 remain separate and untouched. No production deployment is authorized.
 

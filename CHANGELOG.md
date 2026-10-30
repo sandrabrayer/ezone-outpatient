@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Pre-discharge continuation wiring (OP-ID-2, draft 2026-10-30, stacked on OP-ID-1)
+- מסלול המשך rows carry the Dashboard stable stay/person id (append-only `dashboardPatientId, dashboardPersonId, outpatientId, outpatientEntity`); stable id wins over the legacy key, legacy rows upgrade in place. The Node proxy resolves every continuation save by exact id against the server-held admitted roster and overwrites all PII; browser link/owner/source fields are dropped. to_outpatient now runs server-side (`/api/continuation/to-outpatient` → internal `createContinuationLead` → `_createLead` rules → link the row); the browser no longer mints a lead. Activation copies identity from the on-sheet lead. Requires D-ID-1 live. See `CHANGELOG-care-continuum-continuation.md`.
+
 ### Care-continuum identity foundation (OP-ID-1, draft 2026-10-30)
 - Adds append-only, server-owned Dashboard identity/provenance fields to active Leads and Clients (and Clients-removed): `dashboardPatientId`, `dashboardPersonId`, `dashboardLeadId`, `handoffSource`, `continuationKey`.
 - `createLead` becomes fail-closed link-or-create by stable ids: stay id → Dashboard lead id → person key (`dashboardPersonId || dashboardPatientId`). Phone+name is warning-only and never silently links records; with a stable id present, a PII collision fails closed (`possible_duplicate`, nothing written).

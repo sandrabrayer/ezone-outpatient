@@ -6,6 +6,7 @@ const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } 
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
 const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
+const continuationIdentity = require('./lib/continuation-identity');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -472,6 +473,23 @@ app.post('/api/sheets', requireSession, async (req, res) => {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
       body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
     }
+    // OP-ID-2: createContinuationLead is reachable ONLY through the
+    // server-side orchestration (/api/continuation/to-outpatient), which
+    // resolves the patient from the server-held roster. A browser cannot name
+    // a patient by PII here.
+    if (body.action === 'createContinuationLead') {
+      return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
+    // OP-ID-2: a continuation save names the patient ONLY by dashboardPatientId.
+    // Identity / PII / link / owner / source fields are overwritten from the
+    // server-held roster or dropped — never forwarded from the browser.
+    if (body.action === 'saveContinuation') {
+      if (!requireContinuationConfig(res)) return;
+      const resolved = await resolveContinuationIdentity(body.dashboardPatientId);
+      if (!resolved.ok) return res.status(resolved.status || 400).json({ ok: false, error: resolved.error });
+      for (const k of continuationIdentity.BROWSER_STRIPPED_FIELDS) delete body[k];
+      Object.assign(body, continuationIdentity.buildSavePayload(req.body, resolved.identity, null));
+    }
     // Who/when stamping: the `user` the Apps Script writes into updatedBy
     // comes ONLY from the signed session cookie. ALWAYS overwritten — a
     // client-supplied body.user is never trusted; '' (legacy user-less
@@ -503,6 +521,69 @@ app.post('/api/sheets', requireSession, async (req, res) => {
   }
 });
 
+// Server-held Dashboard admitted-roster fetch (cached <=60s; `fresh` bypasses).
+// Shared by GET /api/continuation-roster and by the OP-ID-2 identity resolution
+// (saveContinuation / createContinuationLead), which must never trust browser
+// patient details. Returns { status, data } or throws.
+async function fetchAdmittedRoster(forceFresh) {
+  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
+    return { status: rosterCache.status || 200, data: rosterCache.data, cache: 'HIT' };
+  }
+  const url = DASHBOARD_SHEETS_URL
+    + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
+    + 'action=getAdmittedRoster'
+    + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
+  const r = await fetch(url, { redirect: 'follow' });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
+  if (r.status >= 200 && r.status < 300 && data.ok !== false) {
+    rosterCache.data = data;
+    rosterCache.status = r.status;
+    rosterCache.timestamp = Date.now();
+  }
+  return { status: r.status, data, cache: 'MISS' };
+}
+
+// Resolve exactly one admitted patient by the Dashboard's stable id. Tries the
+// cached roster first and re-fetches once (fresh) before failing closed, so a
+// patient admitted in the last minute still resolves. Never looks up by
+// phone / name. Returns { ok:true, identity } or { ok:false, status, error }.
+async function resolveContinuationIdentity(requestedId) {
+  if (!DASHBOARD_SHEETS_URL || !OCCUPANCY_SECRET) {
+    return { ok: false, status: 500, error: 'continuation_roster_not_configured' };
+  }
+  const id = continuationIdentity.careId(requestedId);
+  if (!id) return { ok: false, status: 400, error: 'continuation_identity_required' };
+  let roster;
+  try { roster = await fetchAdmittedRoster(false); }
+  catch (_) { return { ok: false, status: 502, error: 'continuation_roster_unavailable' }; }
+  let patients = roster && roster.data && Array.isArray(roster.data.patients) ? roster.data.patients : [];
+  let res = continuationIdentity.resolveIdentity(patients, id);
+  if (!res.ok && res.error !== 'continuation_identity_conflict' && roster.cache === 'HIT') {
+    try { roster = await fetchAdmittedRoster(true); }
+    catch (_) { return { ok: false, status: 502, error: 'continuation_roster_unavailable' }; }
+    patients = roster && roster.data && Array.isArray(roster.data.patients) ? roster.data.patients : [];
+    res = continuationIdentity.resolveIdentity(patients, id);
+  }
+  return res;
+}
+
+async function postToSheets(body) {
+  const r = await fetch(SHEETS_URL, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (_) { throw new Error('upstream_unavailable'); }
+  return { status: r.status, data };
+}
+
 // GET /api/continuation-roster — proxy the dashboard's getAdmittedRoster behind
 // the server-held secret. The continuation WORKFLOW rows themselves go through
 // the existing /api/sheets path (getContinuation / saveContinuation), NOT here.
@@ -510,32 +591,77 @@ app.get('/api/continuation-roster', requireSession, async (req, res) => {
   if (!requireContinuationConfig(res)) return;
 
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
-  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
-    res.set('X-Cache', 'HIT');
-    return res.status(rosterCache.status || 200).json(rosterCache.data);
-  }
-
   try {
-    const url = DASHBOARD_SHEETS_URL
-      + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
-      + 'action=getAdmittedRoster'
-      + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
-    const r = await fetch(url, { redirect: 'follow' });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
-
-    if (r.status >= 200 && r.status < 300 && data.ok !== false) {
-      rosterCache.data = data;
-      rosterCache.status = r.status;
-      rosterCache.timestamp = Date.now();
-    }
-
-    res.set('X-Cache', 'MISS');
-    res.status(r.status).json(data);
+    const out = await fetchAdmittedRoster(forceFresh);
+    res.set('X-Cache', out.cache);
+    res.status(out.status).json(out.data);
   } catch (err) {
     res.status(502).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// POST /api/continuation/to-outpatient — OP-ID-2 orchestration for the
+// to_outpatient decision. Body: { dashboardPatientId, meetingDate, note }.
+//   1. resolve the patient from the server-held roster by exact id (fail closed);
+//   2. Apps Script createContinuationLead (internal, proxy key): link-or-create
+//      with the existing _createLead rules — a possible_duplicate /
+//      identity_conflict creates nothing and NO outcome is saved;
+//   3. only after success, saveContinuation outcome=to_outpatient with the
+//      observed downstream id/entity. If that second write fails the lead
+//      exists but the row is not linked: continuation_link_save_failed — a
+//      retry is safe because step 2 is idempotent by stable identity.
+app.post('/api/continuation/to-outpatient', requireSession, async (req, res) => {
+  if (!requireSheetsUrl(res)) return;
+  if (!requireContinuationConfig(res)) return;
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+  if (!body) return res.status(400).json({ ok: false, error: 'invalid_payload' });
+  const resolved = await resolveContinuationIdentity(body.dashboardPatientId);
+  if (!resolved.ok) return res.status(resolved.status || 400).json({ ok: false, error: resolved.error });
+  const identity = resolved.identity;
+  const user = sessionUserFromRequest(req);
+  try {
+    const create = Object.assign(continuationIdentity.buildCreatePayload(body, identity), {
+      user, proxySecret: OUTPATIENT_PROXY_SECRET
+    });
+    const r1 = await postToSheets(create);
+    if (!(r1.status >= 200 && r1.status < 300) || !r1.data || r1.data.ok === false) {
+      const err = (r1.data && r1.data.error) || 'upstream_error';
+      const status = (err === 'possible_duplicate' || err === 'identity_conflict') ? 409 : (r1.status >= 400 ? r1.status : 502);
+      return res.status(status).json(Object.assign({ ok: false, error: err }, r1.data && r1.data.possibleDuplicateOf ? { possibleDuplicateOf: r1.data.possibleDuplicateOf } : {}));
+    }
+    invalidateCache();
+    const downstreamId = continuationIdentity.careId(r1.data.id);
+    const downstreamEntity = r1.data.entity;
+    if (!downstreamId || (downstreamEntity !== 'lead' && downstreamEntity !== 'client')) {
+      return res.status(502).json({ ok: false, error: 'continuation_link_create_invalid' });
+    }
+    const link = { outpatientId: downstreamId, outpatientEntity: downstreamEntity };
+    const save = Object.assign(
+      continuationIdentity.buildSavePayload({ meetingDate: body.meetingDate, outcome: 'to_outpatient', note: body.note }, identity, link),
+      { user, proxySecret: OUTPATIENT_PROXY_SECRET }
+    );
+    let r2;
+    try { r2 = await postToSheets(save); }
+    catch (_) { r2 = null; }
+    const confirmed = r2 && r2.data && r2.data.row;
+    if (!r2 || !(r2.status >= 200 && r2.status < 300) || !r2.data || r2.data.ok === false ||
+        !confirmed || String(confirmed.dashboardPatientId || '') !== identity.dashboardPatientId ||
+        confirmed.outcome !== 'to_outpatient' ||
+        String(confirmed.outpatientId || '') !== link.outpatientId ||
+        confirmed.outpatientEntity !== link.outpatientEntity) {
+      return res.status(502).json({
+        ok: false, error: 'continuation_link_save_failed',
+        reason: r2 && r2.data ? (r2.data.reason || r2.data.error || '') : 'upstream_unavailable',
+        lead: { id: link.outpatientId, entity: link.outpatientEntity, matched: !!r1.data.matched }
+      });
+    }
+    return res.status(200).json({
+      ok: true,
+      lead: { id: link.outpatientId, entity: link.outpatientEntity, matched: !!r1.data.matched, matchedBy: r1.data.matchedBy || '', ownerUnmapped: !!r1.data.ownerUnmapped },
+      row: r2.data.row || null
+    });
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
 });
 

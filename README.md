@@ -258,6 +258,17 @@ checkout ever drifts back.
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
 - `GET /api/continuation-roster` — session-gated.
+- `POST /api/continuation/to-outpatient` `{ dashboardPatientId, meetingDate, note }` —
+  session-gated (OP-ID-2). The server resolves the patient from its own copy of
+  the Dashboard admitted roster by exact id (never by name/phone), runs the
+  internal Apps Script `createContinuationLead` (proxy key only; `_createLead`
+  link-or-create rules, fail-closed `possible_duplicate`), and only then saves
+  the continuation row with `outcome: 'to_outpatient'` and the observed link.
+  `saveContinuation` through `/api/sheets` is validated the same way: the
+  browser names the patient by `dashboardPatientId` only; identity/PII fields
+  are overwritten from the roster and link/owner/source fields are dropped.
+  `createContinuationLead` is refused (403) on the `/api/sheets` pass-through.
+  See `CHANGELOG-care-continuum-continuation.md`.
 - The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
   (write) are Apps Script actions the client reaches through the two
   session-gated `/api/sheets` calls above. On `saveCredit` the proxy's
