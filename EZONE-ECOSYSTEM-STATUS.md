@@ -1,5 +1,10 @@
 # Outpatient local update — 2026-10-18
 
+## Care-continuum identity foundation — October 30, 2026 (draft, no release)
+
+- OP-ID-1 accepts the existing Dashboard stay/person identity on `createLead`, persists it append-only, links only by stable ids, flags phone+name duplicates without auto-linking, and makes the fields server-owned against browser `saveAll`. This is the identity foundation for pre-discharge continuation. Dashboard D-ID-1 is the paired feed change. See `CHANGELOG-care-continuum-identity.md`.
+- PR #125 / OP-03 and PR #135 remain separate and untouched. No production deployment is authorized.
+
 OP-01 #115, release-order #116, OP-02a #117, OP-02b1 #118 and renewal #120 are
 released. Production baseline: 535dc659cae2807987f68002c20ac2ddb4fcc6c4, SW v11,
 source @97 (run 39117376211). #119 planned-exit fields remain included. Keep

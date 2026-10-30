@@ -64,23 +64,24 @@ const FROZEN_CLIENTS_HEADERS = [
   'plannedExitDate',
   // APPEND-ONLY: preferred house (בית מועדף). Physically unwritten on the live
   // sheet -> position 38, no migration. See test/preferred-house.test.js.
-  'preferredHouse'
+  'preferredHouse',
+  // OP-ID-1 care-continuum identity/provenance. All append-only after the frozen
+  // operational tail; server-owned and intentionally absent on legacy rows.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
 ];
 
 test('CLIENTS_HEADERS equals the frozen physical order', () => {
   const H = namedArray('CLIENTS_HEADERS');
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
-  assert.equal(H.length, 38, 'Clients has 38 columns');
+  assert.equal(H.length, 43, 'Clients has 43 columns after five OP-ID-1 appends');
 });
 
-test('updatedAt/updatedBy are APPEND-ONLY: directly before plannedExitDate, everything before them unchanged', () => {
+test('OP-ID-1 appends five identity fields after the old frozen tail; earlier positions stay unchanged', () => {
   const H = namedArray('CLIENTS_HEADERS');
-  assert.deepEqual(H.slice(-4, -2), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
-  assert.equal(H[H.length - 5], 'paymentAmountOverrides', 'the previous tail column is directly before them');
-  // every earlier column keeps the frozen pre-append order
-  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -4);
-  assert.deepEqual(H.slice(0, -4), PRE_APPEND);
-  assert.equal(PRE_APPEND.length, 34, 'exactly two columns were appended (34 -> 36)');
+  assert.deepEqual(H.slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
+  assert.deepEqual(H.slice(34, 38), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.equal(H[33], 'paymentAmountOverrides');
+  assert.deepEqual(H.slice(0, 38), FROZEN_CLIENTS_HEADERS.slice(0, 38), 'pre-OP-ID-1 order unchanged');
 });
 
 test('phone (join key) stays at physical column 26 (index 25)', () => {

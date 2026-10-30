@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Care-continuum identity foundation (OP-ID-1, draft 2026-10-30)
+- Adds append-only, server-owned Dashboard identity/provenance fields to active Leads and Clients (and Clients-removed): `dashboardPatientId`, `dashboardPersonId`, `dashboardLeadId`, `handoffSource`, `continuationKey`.
+- `createLead` becomes fail-closed link-or-create by stable ids: stay id → Dashboard lead id → person key (`dashboardPersonId || dashboardPatientId`). Phone+name is warning-only and never silently links records.
+- Existing browser `saveAll` cannot overwrite these server-owned fields. Closed historical leads/clients are not overwritten; a new episode may be created.
+- Backward-compatible callers with no identity still create a lead as before. No production release is authorized by this draft.
+
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 
