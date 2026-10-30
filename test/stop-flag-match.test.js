@@ -150,10 +150,11 @@ test('schema guard: Clients headers mirror the frozen physical order (2026-07-06
   // unwritten on the live sheet — followed by the appended paymentAmountOverrides
   // are the trailing columns now.
   assert.deepEqual(
-    cols.slice(-8),
+    cols.slice(30, 38),
     ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse'],
-    'volta-only + paymentAmountOverrides must be the trailing (physically-unwritten) columns'
+    'the pre-OP-ID-1 physical tail must remain frozen'
   );
+  assert.deepEqual(cols.slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
   // The payment tail sits directly after `phone`, matching the live physical sheet.
   const pi = cols.indexOf('phone');
   assert.deepEqual(

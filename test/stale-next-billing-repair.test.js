@@ -451,7 +451,8 @@ test('editor helpers exist: preview logs the plan; apply logs before/after', () 
 
 test('CLIENTS_HEADERS: 38 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, then preferredHouse', () => {
   assert.equal(CLIENTS_HEADERS[0], 'id');
-  assert.deepEqual(CLIENTS_HEADERS.slice(-5), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
-  assert.equal(CLIENTS_HEADERS.length, 38);
+  assert.deepEqual(CLIENTS_HEADERS.slice(33, 38), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(CLIENTS_HEADERS.slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
+  assert.equal(CLIENTS_HEADERS.length, 43);
   assert.ok(CLIENTS_HEADERS.includes('nextBillingDate'));
 });

@@ -344,8 +344,9 @@ test('Script Property keys are pinned', () => {
 test('CLIENTS_HEADERS: append-only tail — paymentAmountOverrides then the who/when stamps', () => {
   const headers = gsHeaders('CLIENTS_HEADERS');
   assert.equal(headers[0], 'id');
-  assert.deepEqual(headers.slice(-5), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
-  assert.equal(headers.length, 38);
+  assert.deepEqual(headers.slice(33, 38), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(headers.slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
+  assert.equal(headers.length, 43);
 });
 
 test('project timezone is Asia/Jerusalem (atHour(2) + snapshot date rolls depend on it)', () => {
