@@ -299,7 +299,7 @@ test('Clients.creditsOwed round-trips positionally (frozen physical order: last 
   // phone, immediately before the physically-unwritten volta-only columns.
   assert.equal(CLIENTS_H[CLIENTS_H.indexOf('nextBillingDate') + 1], 'creditsOwed');
   assert.equal(CLIENTS_H[CLIENTS_H.indexOf('creditsOwed') + 1], 'clinicalTreatmentType');
-  assert.deepEqual(CLIENTS_H.slice(-8), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(CLIENTS_H.slice(-11), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId']);
   const row = writeRow(CLIENTS_H, { id: 'c1', phone: '0501234567', clinicalTreatmentType: 'פרטני CBT', creditsOwed: 3 });
   assert.equal(row[CLIENTS_H.indexOf('creditsOwed')], 3);
   assert.equal(row[CLIENTS_H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // not shifted
