@@ -80,7 +80,8 @@ test('identity missing: visible Hebrew failure, no PII fallback', () => {
 test('local upsert matches by dashboardPatientId first, key second (legacy rows keep rendering)', () => {
   const up = fn('upsertContinuationLocal');
   assert.match(up, /String\(r\.dashboardPatientId \|\| ''\)\.trim\(\) === rid/);
-  assert.match(up, /String\(r\.key \|\| ''\)\.trim\(\) === key/);
+  assert.match(up, /String\(r\.key \|\| ''\)\.trim\(\) !== key/);
+  assert.match(up, /oldId === rid/, 'cannot overwrite another patient with the same legacy key');
 });
 
 test('outside continuation: the manual add-lead path and duplicate modal are untouched', () => {
