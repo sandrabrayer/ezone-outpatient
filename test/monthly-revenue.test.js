@@ -759,7 +759,7 @@ function startStub() {
       if (p === '/api/users') return json({ ok: true, users: ['ורד', 'אורן', 'דנה'] }); // public, like the real server
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false }); }
-      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
+      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu), moneyScope: 'full' }); // OP-CRM-3A: the real server reports the scope
       if (p === '/api/users') return json({ ok: true, users: ['ורד', 'אורן', 'דנה'] });
       if (p === '/api/sheets') {
         if (req.method === 'GET') {

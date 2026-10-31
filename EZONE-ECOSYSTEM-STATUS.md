@@ -46,6 +46,13 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient CRM program (issue #141) — Phase A: server-side money scope (OP-CRM-3A, Oct 31, 2026 — DRAFT)
+
+- Closes gap G3: `lib/money-scope.js` + `server.js` enforce that דנה's session never receives or writes money (403 on money
+  actions, deep strip on every answer incl. cache/stale, pay constants refused, `moneyScope` stamped on writes, Code.gs
+  `_saveAll` preserves stored money for `ops`). Fail-closed for unknown/retired names. Code.gs change → Apps Script release
+  phase after an approved merge. `CHANGELOG-crm-money-scope.md`.
+
 ## Outpatient: «היום שלי» CRM opening screen (OP-CRM-1, Oct 29, 2026 — DRAFT, not released)
 
 - First tab of ezone-outpatient becomes the CRM opening screen on the Dashboard CRM model (`public/my-day.js`, pure UMD,
