@@ -277,6 +277,11 @@ checkout ever drifts back.
 
 ### Cross-app read endpoints (shared-secret, read-only)
 
+- `getHandoffStatus` (`HANDOFF_STATUS_SECRET`, OP-CRM-2 / G2): `?outpatientIds=a,b` and/or
+  `?dashboardPatientIds=…` → `{ results:[{ outpatientId, entity, dashboardPatientId, state, stateDate,
+  assignedTo, nextAction, nextActionDate, lastActionDate, updatedAt }] }`. Exact ids only, no money /
+  clinical / phone. See `CHANGELOG-crm-handoff-status.md`.
+
 - `GET /api/sheets?action=getWinbackSource&secret=<WINBACK_SECRET>` → lost
   leads + discharged clients for the win-back call list. No billing data.
 - `GET /api/sheets?action=getDebtStatus&secret=<DEBT_STATUS_SECRET>` →

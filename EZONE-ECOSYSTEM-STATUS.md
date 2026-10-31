@@ -46,6 +46,12 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient CRM program (issue #141) — Phase D: `getHandoffStatus` for the Dashboard (Oct 31, 2026 — DRAFT, stacked on C)
+
+- Read-only, exact-id, fail-closed (`HANDOFF_STATUS_SECRET`) feed answering «what happened to the referred patient» with
+  operational state / owner / next action. Dashboard consumer = D-FB-1 (ChatGPT, contract in issue #141). Owner carry (G1)
+  lives in #137. `CHANGELOG-crm-handoff-status.md`.
+
 ## Outpatient CRM program (issue #141) — Phase C: «היום שלי» one task engine (Oct 31, 2026 — DRAFT, stacked on 3B)
 
 - Persisted tasks + derived rows merged with suppression; priority-ordered sections; inline task actions. No Code.gs change.

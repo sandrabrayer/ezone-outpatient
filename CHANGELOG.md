@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D, draft 2026-10-31)
+- New read-only cross-app action `getHandoffStatus` (fail-closed `HANDOFF_STATUS_SECRET`): by exact `outpatientIds` / `dashboardPatientIds` only → operational state, owner, next action, dates; no money/clinical/phone. See `CHANGELOG-crm-handoff-status.md`.
+
 ### «היום שלי» — one task engine, priority order (Phase C, draft 2026-10-31, stacked on 3B)
 - Persisted tasks become rows; derived rows are suppressed when an open task covers the subject; the day is shown in the program's priority order with inline ✓ / 📞 / ⏩; new «משימות לביצוע» / «שיחות להיום» cards (null-not-0). See `CHANGELOG-crm-my-day-tasks.md`.
 
