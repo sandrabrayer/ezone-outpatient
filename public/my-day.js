@@ -157,7 +157,7 @@
     var cards = [
       { id: 'tasks', label: 'משימות לביצוע', value: tasks ? count(rowsBy.tasks, dueNow) : null, hint: tasks ? count(rowsBy.tasks, function (r) { return r.state === 'late'; }) + ' באיחור · ' + rowsBy.tasks.length + ' פתוחות' : 'המידע אינו זמין' },
       { id: 'calls', label: 'שיחות להיום', value: tasks ? count(rowsBy.tasks, function (r) { return isCall(r) && dueNow(r); }) : null, hint: tasks ? count(rowsBy.tasks, function (r) { return isCall(r) && r.state === 'late'; }) + ' שיחות באיחור' : 'המידע אינו זמין', domain: 'tasks' },
-      { id: 'leads', label: 'פניות שטרם נקבעה להן היכרות', value: leads ? count(rowsBy.leads, function (r) { return r.kind === 'lead_new' || r.kind === 'intro_unscheduled'; }) : null, hint: leads ? count(rowsBy.leads, function (r) { return r.kind === 'intro_passed'; }) + ' היכרויות ללא החלטה' : 'המידע אינו זמין' },
+      { id: 'leads', label: 'לידים שטרם שובצו', value: leads ? count(rowsBy.leads, function (r) { return r.kind === 'lead_new' || r.kind === 'intro_unscheduled'; }) : null, hint: leads ? count(rowsBy.leads, function (r) { return r.kind === 'intro_passed'; }) + ' היכרויות ללא החלטה' : 'המידע אינו זמין' },
       { id: 'intros', label: 'שיחות היכרות היום', value: leads ? count(rowsBy.leads, function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) : null, second: leads ? { label: 'מתוכננות', value: count(rowsBy.leads, function (r) { return r.kind === 'intro_scheduled' && r.state === 'wait'; }) } : null, domain: 'leads' },
       { id: 'plans', label: 'תוכניות להפעלה', value: leads ? rowsBy.plans.length : null, hint: leads ? count(rowsBy.plans, function (r) { return r.priority === 'exception'; }) + ' אחרי תאריך ההתחלה' : 'המידע אינו זמין' }
     ];
