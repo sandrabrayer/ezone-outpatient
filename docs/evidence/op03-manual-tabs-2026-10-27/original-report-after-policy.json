@@ -1,0 +1,66 @@
+{
+  "range": "'_DrillReport'!A1:H10",
+  "majorDimension": "ROWS",
+  "values": [
+    [
+      "at",
+      "phase",
+      "result",
+      "detail",
+      "sourceSHA256",
+      "helperSHA256",
+      "drillSHA256",
+      "durationMs"
+    ],
+    [
+      "2026-10-27T13:22:17.127Z",
+      "prepare",
+      "PASS",
+      "Synthetic sessions, both journal kinds, approved quote and typed audit values seeded",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+      "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+      "33792"
+    ],
+    [
+      "2026-10-27T13:24:37.780Z",
+      "capture",
+      "PASS",
+      "20 manifest entries fingerprint-verified in native Sheets",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+      "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+      "53601"
+    ],
+    [
+      "2026-10-27T13:26:12.416Z",
+      "restore",
+      "PASS",
+      "Native copy into separate target; every restored grid matched",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+      "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+      "36877"
+    ],
+    [
+      "2026-10-27T13:27:59.006Z",
+      "verify",
+      "PASS",
+      "Native round-trip and exact retries passed; not production certification",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+      "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+      "43697"
+    ],
+    [
+      "2026-10-27T13:30:20.246Z",
+      "manual",
+      "PASS",
+      "Empty Sheet1 and synthetic archive preserved; certification correctly refused",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "f73935f89f9dbaf9bf3b6f4908bb837783e15accb3c6597da69603b255ba4c63",
+      "4c9f57d33f7ffd15441005cccc81a96dfc0d2ed8b0ee1c5fcc9f20b55d93cc91",
+      "79834"
+    ]
+  ]
+}

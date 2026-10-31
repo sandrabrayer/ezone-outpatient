@@ -1,5 +1,12 @@
 # E-ZONE Outpatient Dashboard
 
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> Uninstalled, default-disabled removed-leads header helper: [runbook](docs/removed-leads-header-correction.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> A phased [isolated Google drill](docs/google-operational-drill.md) is prepared;
+> its checked-in runner refuses execution until a separate test project is pinned.
+
 Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israel.
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
 through an Apps Script Web App.

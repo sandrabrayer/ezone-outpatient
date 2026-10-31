@@ -1,43 +1,170 @@
-# Outpatient local update — 2026-10-18
+# Outpatient current handoff — 2026-10-27
 
-OP-01 #115, release-order #116, OP-02a #117, OP-02b1 #118 and renewal #120 are
-released. Production baseline: 535dc659cae2807987f68002c20ac2ddb4fcc6c4, SW v11,
-source @97 (run 39117376211). #119 planned-exit fields remain included. Keep
-credentials and the Node-first explicit source dispatch gate. Historical notes
-below do not override DEPLOY.md.
+OP-03 follow-up: a manual-tab policy verifier is implemented with a blank
+approval pin. Unknown tabs remain blocked. Synthetic tests exercise exact scope,
+typed grids, formulas, evidence and hold retention. All five isolated native
+Google phases passed on candidate 09a00ab5 on October 26; see
+docs/evidence/op03-google-drill-2026-10-26.md for private artifacts and timings.
+The five integrated phases subsequently passed on 3297311c, and four separate
+approved-policy phases passed once in the same existing test project on October 27.
+All nine executions are Completed; final policy state is verified/idle/not failed,
+with two successful proofs and the late native comparison before hold removal.
+See docs/evidence/op03-manual-tabs-2026-10-27-result.md. Do not rerun phases,
+reset state or create a replacement project. Real evidence/policy/pin and
+production approval remain open. See docs/manual-tab-recovery-policy.md.
+A fresh audit found the Oct22 body-parser high advisory; compatible dependency
+lockfile patches are included. Read exact-head validation in PR125. No release.
 
-Current isolated candidate: OP-02b2-b additional-charge creation with optional
-initial payment, shared FinancialOps reservation and mixed-kind recovery. It also
-persists treatmentType/frequencyPerWeek previously lost by the source. See
-`docs/extra-charge-journal.md`, especially the no-@97-rollback rule after any extra
-history. Separate production approval remains required. Intake/activation/edit-paid/
-later toggles remain OP-02b2. OP-03 real scheduled backup and Google restore
-proof, OP-04 latency/journal scans/archive/repair, OP-05 review follow-up queues,
-deleted-client review access and bank/document evidence remain open. OP-05 also
-owns initial extra payment coverage and future-start/current-month inconsistencies;
-this candidate preserves actual existing semantics.
+OP-03 current note (2026-10-28): the removed-leads S1:U1 header helper
+`ops/removed-leads-header-correction.gs` is uninstalled and default-disabled;
+nothing has been run in Google. Sandra's three-cell consent remains conditional
+and no new production approval exists. The nine native executions remain
+completed and are not rerun. Preview takes the lock and scans cells, so it
+belongs inside the coordinated pause. See docs/removed-leads-header-correction.md.
 
-CRM Outpatient #114 / Dashboard #220 and other drafts are unchanged. OP-06 still
-includes legacy `recordTreatmentGiven` usage and cross-app retry/delivery; do not
-invent a receiver. Keep ten-app order: Outpatient → Therapists → Staffing →
-Coordinators → Dashboard → Managers → Logistics → Kitchen → Hadrachot → Helpdesk.
-For every app assess structure/workflows, business logic, missing information and
-features, security/privacy, save/recovery, backups, speed and controls. Maintain
-return points; finishing one financial step does not complete an app. Use Claude
-for bounded review where available, with one implementation owner and exact
-review/test evidence. Recommend new chat/model at a completed milestone with a
-handoff rather than losing context during unfinished financial work.
+Integrated Git base: `b14db7991776f49fdcaee0a018dc0d67d371f8d2`, SW20 assets,
+branch `claude/youthful-volta-laarnk` (PR133 merged October 26 at 17:33:05 UTC).
+PR125's earlier metadata exposed336c8ef9 until a single close/reopen on October 27;
+the actual branch now independently resolves b14db799. Its roster/PIN runtime,
+browser behavior and tests are preserved, with two documentation conflicts
+resolved in the draft. No Apps Script or workflow file changed in PR133.
+This does not verify the currently served Node build or PIN configuration.
+October26 read-only
+/api/version reported336c8ef9 and /healthz returned ok; earlier source executions
+were99. Source deployment after PR132 was not verified in that inspection.
+The prior native Google drill at09a00ab5 remains historical; the separate
+October 27 integrated and approved-policy results above cover the unchanged
+Apps Script candidate. Refresh matching live evidence before release. #121/#123/#122/#126
+remain released. Therapists #105 merged to d38d85b1 and #107 advanced its deploy
+branch to a8a1afbc. Merges alone do not prove the latest live package flow.
+Never push merged branches or repeat releases. Source deployment remains an
+explicit dispatch AFTER matching healthy Node, with the approved full merge SHA.
+Historical all-app automatic-deploy text never overrides this repo's DEPLOY.md.
 
-Parallel work allocation (Sandra, 2026-10-18): Codex continues financial-safety
-draft #121; Claude owns package catalog/pricing draft #122 and its therapists
-integration. Both are candidates, not releases. #122 was observed at 821a82f5;
-its confidentiality and cross-app completion gaps remain open. Preserve both
-branches. See docs/extra-charge-journal.md for SW, backup and fixture integration
-requirements. After this bounded financial step return to the remaining OP-02b2
-flows, then OP-03 backup/restore evidence, OP-04 speed and OP-05 controls; the CRM
-and broader ten-app review remain in the program.
+Codex owns isolated OP-03 issue #124 implementation, branch
+`codex/op03-operational-backup-20261019`. The prior eight-table nightly set loses
+session replay identity/payroll state and custom rates on whole-workbook recovery.
+Candidate extends the set and adds inventory, validation and recovery hold.
+See docs/operational-recovery.md. It is not deployed. Unknown/manual tabs,
+real per-target evidence/policy, source-header readiness and a complete new v2
+set, release configuration, exact-head CI and separate final production
+approval remain open. October26 read-only evidence verifies the old nightly
+job's scheduling/latest success and private destination, not the candidate's
+runtime or alert delivery (PR comment6416538625).
 
-## Browser-tab favicons (Oct 20, 2026 — PRs open, NOT released)
+OP-03 integrates preferred-house base 336c8ef9/PR132 and now the roster base
+b14db799/PR133, retaining both changes. Public assets/SW20, lib/users.js and
+server.js exactly match b14db799. Apps Script and test-support remain identical
+to dc09d5d3. The one local UTC integration run on Node 24.22.1 passes 1,787/fails 0/
+skips 38 of 1,825; exact-head CI and bounded review receipts are tracked in PR125.
+The new preferred-house writer rechecks hold under its lock before header or
+cell mutation. Eight new regressions cover write refusal, four-schema round-trip
+and old-width rejection. Full current header prefixes remain mandatory; require
+a fresh verified matching v2 set, never an automatic blank-tail migration.
+The generated unbound drill includes preferred house and its hold refusal;
+the corresponding five native phases passed October 27. Candidate09a00ab5 remains the historical
+native-tested default-disabled manual-policy implementation. Its registry retains
+both package datasets; the package lock rechecks recovery hold after acquisition.
+A real catalog + approved request survives manifest-checked local restore and
+an exact submission retry without another row. The October 20 integrated UTC suite
+passed 1,640 tests with 37 skipped (1,677 total), including sixteen failure-path
+and coordination regressions added after Claude's bounded static reviews. Removing the new package-lock
+check makes both queued-writer regressions fail. Google execution is separate. A reproduced capture/recovery overlap is now gated
+by a whole-run backup marker admitted under ScriptLock. Begin reports draining;
+finish refuses until all old-job writes complete. Interrupted-run markers stay
+fail-closed for operator investigation, without automatic expiry.
+
+Read-only source inspection Oct 20: Sheet1 has no cell values/formulas in its
+entire 1,000 x 26 grid. Copy of Clients has 21 unique-id rows and 33 headers;
+all 21 ids exist in Clients, but values were not equated. It is retained as a
+historical archive, never merged into Clients. No source cell was changed.
+The private full safety copy of Oct20 has20 tabs including packages; the Oct19
+copy is historical. Neither proves restoration. Unknown-tab recovery stays
+blocked pending reviewed real evidence. The phased synthetic Google drill at
+docs/google-operational-drill.md passed all five native phases on October 26.
+Thirteen local runner tests are separate service-double evidence.
+Candidate 09a00ab5 CI40222990471 passed 1,723/0/38 (1,761 total), plus 32/0/0 browser
+tests; bounded Claude reviews and exact scope limits are recorded in PR125.
+Native execution times ranged 24.263–61.297s on the small fixture. No production
+volume or scheduled-job acceptance is claimed. Separate successful synthetic
+manual-policy acceptance was established October 27 as recorded above.
+
+Read-only readiness observations completedOctober 2717:24:47UTC identify one
+real header gap: removed-leads has18/21 headers in both source and that night's
+snapshot; S1:U1 lacks updatedAt/updatedBy/preferredHouse. Three other affected
+schema prefixes match. The proposed three-cell correction is unapplied and
+requires separately approved, freshly guarded execution. The new night's
+manifest still covers only10 legacy datasets, omits nine registered operational
+families and lacks v2 metadata. FinancialOps is present that night; the older
+October26 absent observation is historical. See
+docs/evidence/op03-release-readiness-2026-10-27.md for exact retained read scope,
+the formula-aware empty-tail observations and all remaining gates.
+
+Keep FinancialOps history/marker and both operation kinds. Never roll source
+back to 97. Remaining OP-02b2 intake/activation/edit-paid/month toggles and
+existing negative-timezone date-helper drift stay open; OP-04 latency/journal
+scans, OP-05 queues/bank/document controls, OP-06 delivery and legacy
+recordTreatmentGiven remain. CRM Outpatient #114 / Dashboard #220 are unchanged.
+
+Ten-app order: Outpatient → Therapists → Staffing → Coordinators → Dashboard →
+Managers → Logistics → Kitchen → Hadrachot → Helpdesk. For each cover structure,
+workflow, logic, missing information/features, privacy, integrity/recovery,
+backup, speed and controls. One implementation owner; Claude review where
+available, with exact commit and executed/static evidence distinguished. No
+subscriptions, check-ins or unapproved production release.
+
+## Outpatient: roster and personal PINs (PR133 merged October26)
+
+The existing deployed-branch commit b14db799 changes login/assignee names to
+ורד / אורן / דנה; שירן, יעל and ירדן are retired for login and stale named
+sessions are refused. Historical assignees remain intact on edit. Vered uses
+APP_PIN, while Oren/Dana use their separately configured USER_PIN_OREN /
+USER_PIN_DANA; missing, malformed or overlapping personal PINs fail closed.
+No configured values were read, changed or retained in this integration.
+SW20 and all five runtime files are preserved exactly from the merged base.
+The inherited limitation remains: anyone retaining APP_PIN can still select
+Vered until the owner rotates APP_PIN and SESSION_SECRET. This observation
+does not authorize a rotation, re-release or new authentication policy.
+See CHANGELOG-user-roster-oren-dana.md. Live Node/version/configuration was
+not independently reverified in this draft-integration step.
+
+## Outpatient: packages and pricing access (released #122 / #126; Oct 20, 2026)
+
+#122 merged at `3c1d2607e166ad3d09565ac4cc47b365647fbe42`; its explicit source
+deploy workflow 39298379832 confirmed the existing deployment at @99. #126 merged at
+`f7b37d70691caa775b81f6ab1fab32b1fb79e54e` and changes Node/UI only. Public
+The morning /api/version check reported f7b37d7 with healthy /healthz. PackageCatalog and
+PackageRequests exist in the source workbook. This does not independently
+verify every configured secret or manager end-to-end usage.
+
+Sandra's removal of the extra catalog PIN is recorded in #126. Access uses the
+signed-in name allowlist (Vered), a scoped 15-minute session bound to the unique
+base login, server revocation and a body-bound source HMAC. Anyone with shared
+APP_PIN can choose Vered; name-only access is an accepted limitation in that
+owner record, not personal authentication. The catalog PIN/limiter are gone.
+Do not reintroduce the superseded PIN gate or describe it as still required.
+
+Claude owns continuation of package verification. Therapists #105 merged at
+`d38d85b1c0554b419f7da352d0069363dbe3c5eb`; do not merge it again.
+It supplies the managers' price-free catalog/status and idempotent request flow;
+current configuration and live end-to-end evidence still need verification here. Keep two distinct
+PACKAGE_* secrets. Quotes remain integer-agorot immutable snapshots; priced is
+not paid, attach stores a reference, and package quotes do not create charges.
+Sandra's current prices, VAT, Solo tiers/extensions and Vered continuation
+ownership are documented by Claude; do not ask for those decisions again.
+See docs/package-catalog.md and docs/package-release-checklist.md for design and
+remaining rollout steps; older draft/release labels there are historical until
+reconciled by the package owner.
+
+## Outpatient: price / pay constants protection (released #123, Oct 19, 2026)
+
+Price assets require a signed session, use no-store, load after sign-in and are
+removed on logout; SW excludes them. Shared APP_PIN holders still see them after
+sign-in. Therapists #106 removes browser amounts while preserving the debt gate.
+Neither released branch needs another push or release. See
+CHANGELOG-protect-price-constants.md for the original change.
+
+## Browser-tab favicons (Oct 20, 2026 — merged; live release verification separate)
 
 Assets: Therapists = pink **T** on `#2c1a28`, Outpatient = green **O** on `#071410`
 (same palette as each app's PWA icons, so the two tabs differ by letter AND colour).
@@ -56,43 +183,8 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
   Dashboard; **G3** Outpatient has no server-side money separation for דנה. Planned: OP-CRM-2 (G1+G2, both repos, Code.gs
   release), OP-CRM-3 (Tasks/Activity + contact log port, G3), OP-CRM-4 (light theme).
 
-## Outpatient: package catalog + pricing requests (OP-PKG, Oct 18, 2026 — DRAFT, not released)
 
-Isolated draft (branch `claude/package-catalog-quotes`, separate from the PR #121
-financial-safety work, which MERGED first as #121 `2d4950f`; this branch includes it
-and is re-bumped to SW **v14** (v13 is #123's) — confirm the LIVE version before release). Design, PDF→catalog mapping, ambiguities, configuration and
-release steps: `docs/package-catalog.md`. Therapists contract:
-`docs/package-therapists-contract.md`. The therapists side exists as ezone-therapists draft **#105**
-(not released). Single release checklist (secrets, config, alignment checks, PDF verification of all 15 rows,
-open owner decisions): `docs/package-release-checklist.md`. **No approval to release the packages yet.**
-
-- Vered-only pricing tab «תמחור חבילות»: a separate server-verified
-  Vered's signed-in name (server allowlist; the second `CATALOG_ADMIN_PIN` was REMOVED 2026-10-19 — anyone who knows `APP_PIN` can pick «ורד») → 15-minute scoped HttpOnly cookie pointing at a server-side admin session bound to the base session + named user (revoked on logout AND on any re-login / account switch, unique per-login id); sign-in is two-step — a name-less PIN-stage session reaches only the name picker, every ordinary route needs an allow-listed named session, retired/unknown names get 403 (shared per-IP/global failure caps can still pause Vered's PIN entry ≤ 15 min — documented); Apps Script re-verifies a
-  body-bound HMAC assertion. Display name / `sessionStorage` never grant it.
-- Managers (Oren/Shahar, therapists app) get price-free catalog/status through two
-  distinct secrets (`PACKAGE_CATALOG_SECRET`, `PACKAGE_REQUEST_SECRET`).
-- Quotation only: money in integer agorot, versioned catalog, immutable snapshots,
-  `priced` ≠ paid, attach stores a reference only. No charge/payment/credit/
-  TherapistRates/payout code changed.
-- 2026-10-26: login roster is ורד / אורן / דנה (שירן, יעל retired like ירדן). ורד = shared `APP_PIN`; אורן / דנה = personal PINs in Railway `USER_PIN_OREN` / `USER_PIN_DANA` (fail-closed; `APP_PIN` does not sign in as them). Residual: leavers who know `APP_PIN` can still sign in as ורד until `APP_PIN` + `SESSION_SECRET` are rotated.
-- ירדן is retired: not offered, old cookies refused (`RETIRED_SESSION_USERS`);
-  rotating `APP_PIN` + `SESSION_SECRET` is the manual step that revokes the shared PIN.
-- Confidentiality (shipped, reported by the reviewer; live behaviour not verified from the build sandbox): the public
-  price/pay constants are fixed by Outpatient **#123** (merge `0941004`, SW v13); the therapists-browser `amountOwed`
-  payload by Therapists **#106** (merge `e9021a5`, SW v46). Residual limitation: any holder of the shared Outpatient
-  `APP_PIN` can still read the session-only constants after sign-in; rotating `APP_PIN` + `SESSION_SECRET` is the
-  operator step. Keep the claim cautious until a live check by the operator.
-- Release order is unchanged and explicit: matching Node SHA live → dispatch
-  **Deploy Apps Script** with `expected_commit` = merge SHA.
-
-## Outpatient: price / pay constants no longer public (Oct 18, 2026 — DRAFT, not released)
-
-Branch `claude/protect-price-constants` (base `2d4950f`): `treatment-map.js` and `therapist-pay.js` were
-served without any session; now session-only, `no-store`, loaded after sign-in, dropped on logout, never
-cached (SW v13). Browser + server tests. Details and limits (shared-PIN holders still see them):
-`CHANGELOG-protect-price-constants.md`. Release BEFORE the package-catalog PR; the later PR re-bumps the SW.
-
-## Outpatient: preferred house `preferredHouse` (בית מועדף) (Oct 26, 2026 — DRAFT, not released)
+## Outpatient: preferred house `preferredHouse` (בית מועדף) (PR132 merged Oct 26; original feature record)
 
 - Branch `feat/preferred-house` (base `claude/youthful-volta-laarnk` @ `8b68cd7`, live SW v18 → **v19**).
 - Schema (append-only): `CLIENTS_HEADERS` gains `preferredHouse` at position **38**; also appended

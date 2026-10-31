@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-27",
+  "scriptId": "1zZkII4vZXE-VJfSeWmYBjiobIf8CfLrrio6S1RGiZFq0qkn2VGwK4S8B",
+  "approval": {
+    "service": "Google Sheets API v4",
+    "terms": "Google APIs Terms of Service and applicable service terms shown in Add dialog",
+    "userReply": "כן רק אל תשכח כל הזמן אם צריך לעדכן את קלוד",
+    "consentCompleted": true
+  },
+  "manifestRaw": "{\n  \"timeZone\": \"America/Los_Angeles\",\n  \"dependencies\": {\n    \"enabledAdvancedServices\": [\n      {\n        \"userSymbol\": \"Sheets\",\n        \"version\": \"v4\",\n        \"serviceId\": \"sheets\"\n      }\n    ]\n  },\n  \"exceptionLogging\": \"STACKDRIVER\",\n  \"runtimeVersion\": \"V8\",\n  \"oauthScopes\": [\n    \"https://www.googleapis.com/auth/spreadsheets\"\n  ]\n}",
+  "manifestSHA256": "a2fa79090fbfcb5e3fad738b43c5f54837faa6d90a866c88eba7d64640ce0766",
+  "originalCodeBytes": 121088,
+  "originalCodeSHA256": "1ddb8de07a08d5b427f0ca06e914d3da0f5394af5c17363f8c4844aeb173f773",
+  "setupCodeBytes": 78920,
+  "setupCodeSHA256": "ce3ba0deff8208fb04dd13becdf22eee90cf1008d30ae5b191e8f4d8109437d0",
+  "baselineStateSHA256": "47ac4ce4c4372b9bfa85fb6d254f6c008c73a46e9a67db6eff422f28ba25e55f",
+  "policyStateAbsentBeforePreparation": true,
+  "originalExecutionsBeforePreparation": 5,
+  "policyExecutionsBeforePreparation": 0,
+  "triggersBeforePreparation": 0,
+  "productionCertified": false
+}
