@@ -66,7 +66,7 @@ Dashboard owner, mapped to a `SESSION_USERS` name or blank), `_createLead`
 accepts it **only if** it is in `SESSION_USERS` (else blank, never rejected —
 the lead must still be created).
 
-### G2 — no status feedback
+### G2 — no status feedback (Outpatient side DONE in Phase D draft: `getHandoffStatus`; Dashboard consumer D-FB-1 pending)
 The Dashboard marks the patient «נשלח לאמבולטורי» at send time and never learns
 «נוצר קשר / נקבעה היכרות / התחיל טיפול / לא רלוונטי». Fix (OP-CRM-2): a
 read-only, shared-secret endpoint on this app (`getLeadStatus` by lead id or

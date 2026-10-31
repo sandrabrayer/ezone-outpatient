@@ -4556,6 +4556,112 @@ function _logContact(payload) {
   } finally { try { lock.releaseLock(); } catch (_) {} }
 }
 
+
+/* ===== Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D) =======
+ * CHANGELOG-crm-handoff-status.md. READ-ONLY, cross-app, fail-closed behind
+ * the dedicated Script Property HANDOFF_STATUS_SECRET (same pattern as
+ * getTreatmentPlans). The Dashboard asks «what happened to the patient I
+ * referred?» by EXACT identifiers only — the Outpatient lead/client id it
+ * received from createLead (`outpatientIds`) and/or the Dashboard stay id
+ * (`dashboardPatientIds`, matched against the append-only identity columns
+ * once PR #137 is live; absent columns simply never match). Never by name or
+ * phone. The answer carries operational state only: no prices, payments,
+ * clinical type, notes or phone. */
+var HANDOFF_STATES = ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant'];
+function _handoffStatusAuthOk(params) {
+  var expected = PropertiesService.getScriptProperties().getProperty('HANDOFF_STATUS_SECRET');
+  if (!expected) return false; // not configured -> reject
+  var got = (params && params.secret != null) ? String(params.secret) : '';
+  if (got === '' || got.length !== expected.length) return false;
+  var diff = 0;
+  for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}
+function _handoffIdList(v) {
+  var raw = Array.isArray(v) ? v : String(v == null ? '' : v).split(',');
+  var out = [], seen = {};
+  for (var i = 0; i < raw.length && out.length < 200; i++) {
+    var x = String(raw[i] == null ? '' : raw[i]).trim();
+    if (!x || !/^[A-Za-z0-9_:-]{1,120}$/.test(x) || seen[x]) continue;
+    seen[x] = true; out.push(x);
+  }
+  return out;
+}
+function _handoffDay(v) { var d = String(v == null ? '' : v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''; }
+function _handoffLeadState(l, contacted) {
+  var st = String(l.stage == null ? '' : l.stage).trim();
+  if (st === LOST_LEAD_STAGE_HE || st === 'not_relevant') return { state: 'not_relevant', stateDate: _handoffDay(l.updatedAt) };
+  if (st === 'תוכנית טיפול' || st === 'הסכם נחתם' || st === 'agreement') return { state: 'plan', stateDate: _handoffDay(l.startDate) };
+  if (st === 'שיחת היכרות' || st === 'intro') {
+    var d = String(l.introDateTime == null ? '' : l.introDateTime).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return { state: d < _crmToday() ? 'intro_passed' : 'intro_scheduled', stateDate: d };
+    return { state: 'contacted', stateDate: '' };
+  }
+  return { state: contacted ? 'contacted' : 'referred', stateDate: _handoffDay(l.created) };
+}
+function _handoffClientState(c) {
+  var st = String(c.status == null ? '' : c.status).trim();
+  if (st === DISCHARGED_CLIENT_STATUS_HE || st === DEACTIVATED_CLIENT_STATUS_HE) return { state: 'ended', stateDate: _handoffDay(c.exitDate) };
+  var start = _handoffDay(c.startDate);
+  return { state: start && start <= _crmToday() ? 'active' : 'admitted', stateDate: start };
+}
+function _getHandoffStatus(params) {
+  var p = params || {};
+  var outIds = _handoffIdList(p.outpatientIds), dashIds = _handoffIdList(p.dashboardPatientIds);
+  if (!outIds.length && !dashIds.length) return { ok: false, error: 'missing_ids' };
+  var leads = _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS);
+  var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
+  var tasks = _readAll(_ensureSheet(TASKS_SHEET, TASKS_HEADERS), TASKS_HEADERS);
+  var events = _readAll(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS), ACTIVITY_HEADERS);
+  var wantOut = {}, wantDash = {};
+  outIds.forEach(function (x) { wantOut[x] = true; });
+  dashIds.forEach(function (x) { wantDash[x] = true; });
+  var byLead = {}; // leadId -> client (activation)
+  clients.forEach(function (c) { if (c.fromLead) byLead[String(c.fromLead)] = c; });
+  var contacted = {}, lastAct = {}, nextTask = {};
+  events.forEach(function (e) {
+    var keys = [e.leadId ? 'lead:' + e.leadId : '', e.clientId ? 'client:' + e.clientId : ''];
+    keys.forEach(function (k) {
+      if (!k) return;
+      var d = String(e.occurredAt || '').slice(0, 10);
+      if (e.kind === 'contact_logged' && e.leadId) contacted['lead:' + e.leadId] = true;
+      if (!lastAct[k] || d > lastAct[k]) lastAct[k] = d;
+    });
+  });
+  tasks.forEach(function (t) {
+    if (!(t.status === 'open' || t.status === 'deferred')) return;
+    if (t.kind === 'collection' || String(t.money) === 'true') return; // never money
+    [t.leadId ? 'lead:' + t.leadId : '', t.clientId ? 'client:' + t.clientId : ''].forEach(function (k) {
+      if (!k) return;
+      var cur = nextTask[k], d = String(t.dueDate || '') || '9999';
+      if (!cur || d < (String(cur.dueDate || '') || '9999')) nextTask[k] = t;
+    });
+  });
+  function match(row, id) { return wantOut[String(row.id)] || (row.dashboardPatientId && wantDash[String(row.dashboardPatientId)]); }
+  function out(entity, row, st) {
+    var k = entity + ':' + row.id, nt = nextTask[k] || (entity === 'client' && row.fromLead ? nextTask['lead:' + row.fromLead] : null);
+    var la = lastAct[k] || (entity === 'client' && row.fromLead ? lastAct['lead:' + row.fromLead] : '') || '';
+    return {
+      outpatientId: String(row.id), entity: entity, dashboardPatientId: String(row.dashboardPatientId || ''),
+      state: st.state, stateDate: st.stateDate || '', assignedTo: String(row.assignedTo || ''),
+      nextAction: nt ? String(nt.title || '') : '', nextActionDate: nt ? String(nt.dueDate || '') : '',
+      lastActionDate: la, updatedAt: String(row.updatedAt || '')
+    };
+  }
+  var results = [], seen = {};
+  leads.forEach(function (l) {
+    if (!match(l)) return;
+    var c = byLead[String(l.id)];
+    if (c) { results.push(out('client', c, _handoffClientState(c))); seen[String(c.id)] = true; return; }
+    results.push(out('lead', l, _handoffLeadState(l, !!contacted['lead:' + l.id])));
+  });
+  clients.forEach(function (c) {
+    if (seen[String(c.id)] || !match(c)) return;
+    results.push(out('client', c, _handoffClientState(c)));
+  });
+  return { ok: true, sourceApp: 'ezone-outpatient', states: HANDOFF_STATES, results: results };
+}
+
 /* ===== Source authentication boundary (OP-01) =============================
  * Every HTTP action is classified before any business handler or Sheets access.
  * Browser sessions end at Node; internal actions require its dedicated key.
@@ -5843,6 +5949,7 @@ var SOURCE_GET_AUTH = {
   getWinbackSource: 'WINBACK_SECRET',
   getDebtStatus: 'DEBT_STATUS_SECRET',
   getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
+  getHandoffStatus: 'HANDOFF_STATUS_SECRET',
   scanClientColumns: 'COLUMN_REPAIR_SECRET',
   getStopFlags: 'OUTPATIENT_PROXY_SECRET',
   getStopAlerts: 'STOP_ALERTS_SECRET',
@@ -5878,6 +5985,7 @@ var SOURCE_POST_AUTH = {
   getWinbackSource: 'WINBACK_SECRET',
   getDebtStatus: 'DEBT_STATUS_SECRET',
   getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
+  getHandoffStatus: 'HANDOFF_STATUS_SECRET',
   flagStop: 'STOP_FLAG_SECRET',
   createLead: 'CREATE_LEAD_SECRET',
   scanClientColumns: 'COLUMN_REPAIR_SECRET',
@@ -5996,6 +6104,10 @@ function doGet(e) {
       }
       return _json(_getTreatmentPlans());
     }
+    if (action === 'getHandoffStatus') {
+      if (!_handoffStatusAuthOk(e && e.parameter)) return _json({ ok: false, error: 'unauthorized' });
+      return _json(_getHandoffStatus(e && e.parameter));
+    }
     if (action === 'scanClientColumns') {
       // READ-ONLY column-shift pre-condition scan (2026-07-06). Writes nothing.
       if (!_columnRepairAuthOk(e && e.parameter)) {
@@ -6109,6 +6221,11 @@ function doPost(e) {
         return _json({ ok: false, error: 'unauthorized' });
       }
       return _json(_getTreatmentPlans());
+    }
+    if (action === 'getHandoffStatus') {
+      var hsParams = Object.assign({}, (e && e.parameter) || {}, payload || {});
+      if (!_handoffStatusAuthOk(hsParams)) return _json({ ok: false, error: 'unauthorized' });
+      return _json(_getHandoffStatus(hsParams));
     }
     if (action === 'flagStop') {
       var sfParams = (e && e.parameter) || {};

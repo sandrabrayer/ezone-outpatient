@@ -98,6 +98,13 @@ Two ordered release phases:
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
 
+## CRM handoff status feed (OP-CRM-2 / G2 — Phase D, draft; values are never committed)
+
+At release only: Apps Script → **Project Settings → Script properties**: add `HANDOFF_STATUS_SECRET`
+(≥ 32 random chars, distinct from every other secret) and configure the same value on the Dashboard side
+(D-FB-1). Until it exists `getHandoffStatus` answers `unauthorized` (fail-closed). No Railway variable is
+needed on this service. See `CHANGELOG-crm-handoff-status.md`.
+
 ## Package catalog configuration (OP-PKG — values are never committed)
 
 Railway → *ezone-outpatient* → **Variables** (applies to deployments started
