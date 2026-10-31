@@ -46,7 +46,7 @@
     <header class="topbar">
       <div class="logo"><img class="logo-mark" src="icon-v1-192.png?v=__BUILD__" alt="" width="30" height="30" />טיפולי חוץ</div>
       <nav class="tabs">
-        <button class="tab active" data-view="dashboard">דשבורד</button>
+        <button class="tab active" data-view="dashboard">היום שלי</button>
         <button class="tab" data-view="leads">לידים</button>
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
@@ -79,11 +79,9 @@
       </div>
       <!-- Dashboard -->
       <section id="view-dashboard" class="view active">
-        <div class="kpis">
-          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
-          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
-          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
-        </div>
+        <!-- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md): the work screen — summary cards,
+             the urgent band and the lists by domain come from public/my-day.js. -->
+        <div id="myDay" class="my-day"></div>
 
         <!-- Cross-tab patient locator: searches Clients (any status), the
              Clients-removed tombstones AND orphan billing rows at once, so a
@@ -101,24 +99,31 @@
           <div id="creditAlerts" class="renewals-list"></div>
         </div>
 
-        <!-- Renewals & overdue alerts -->
-        <div class="panel renewals-panel">
+        <!-- Renewals / stop flags / extra requests: still rendered here (their action buttons —
+             WhatsApp, stop alert, approve — live in these panels); «היום שלי» above lists the same
+             items with a «פתיחה» that scrolls to the row. -->
+        <div class="panel renewals-panel" id="panel-renewals">
           <div class="panel-title">⚠️ חידושים ועצירות טיפול</div>
           <div id="renewalsAlerts" class="renewals-list"></div>
         </div>
 
-        <!-- Stop-treatment flags awaiting Vered's confirmation -->
-        <div class="panel stopflags-panel">
+        <div class="panel stopflags-panel" id="panel-stopflags">
           <div class="panel-title">⏳ המתנה לאישור הפסקה</div>
           <div id="stopFlagsAlerts" class="renewals-list"></div>
         </div>
 
-        <!-- Over-package extra-session requests awaiting Vered's approval -->
-        <div class="panel stopflags-panel">
+        <div class="panel stopflags-panel" id="panel-extras">
           <div class="panel-title">➕ בקשות לטיפול נוסף (מעבר לחבילה)</div>
           <div id="extraRequestsAlerts" class="renewals-list"></div>
         </div>
 
+        <!-- Metrics (the former «דשבורד»): collapsed — the work comes first. -->
+        <details class="panel my-day-metrics"><summary class="panel-title">📊 מדדים ופילוחים</summary>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
+          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
         <div class="grid-2">
           <div class="panel">
             <div class="panel-title">פילוח לפי סוג טיפול</div>
@@ -133,6 +138,7 @@
             <div id="pipeline" class="pipeline-counts"></div>
           </div>
         </div>
+        </details>
       </section>
 
       <!-- Leads -->
@@ -998,6 +1004,7 @@
   <script src="name-search.js?v=__BUILD__" defer></script>
   <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
+  <script src="my-day.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER
        sign-in, in this order (therapist-payout.js reads TherapistPay when it loads).

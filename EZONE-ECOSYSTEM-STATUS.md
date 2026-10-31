@@ -173,6 +173,16 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient: «היום שלי» CRM opening screen (OP-CRM-1, Oct 29, 2026 — DRAFT, not released)
+
+- First tab of ezone-outpatient becomes the CRM opening screen on the Dashboard CRM model (`public/my-day.js`, pure UMD,
+  tested): cards + urgent band + domain queues (leads/intros, plans to activate, renewals & collection, approvals,
+  continuation). No urgency by lead age; null-not-0; money hidden for דנה (display only). SW v20 → v21. No Code.gs change.
+- Stage-0 mapping + handoff audit: `docs/crm/OUTPATIENT-STAGE0.md`. Dashboard → Outpatient `createLead` is fail-closed and
+  validated (**verified**), but: **G1** owner (`assignedTo`) is lost across the handoff; **G2** no status flows back to the
+  Dashboard; **G3** Outpatient has no server-side money separation for דנה. Planned: OP-CRM-2 (G1+G2, both repos, Code.gs
+  release), OP-CRM-3 (Tasks/Activity + contact log port, G3), OP-CRM-4 (light theme).
+
 
 ## Outpatient: preferred house `preferredHouse` (בית מועדף) (PR132 merged Oct 26; original feature record)
 

@@ -28,6 +28,7 @@ const h2s = lines.filter((l) => l.startsWith('## ')).map((l) => l.slice(3).trim(
 
 const REQUIRED_SECTIONS = [
   'כניסה',
+  '«היום שלי» — מסך הפתיחה',
   'פעולות יומיומיות',
   'הכנסות חודשיות',
   'תשלום למטפלים',
