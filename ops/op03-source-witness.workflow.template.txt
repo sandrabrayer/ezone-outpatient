@@ -1,0 +1,34 @@
+DRAFT REFERENCE ONLY — NOT AN EXECUTABLE WORKFLOW.
+This file is deliberately in ops/, not .github/workflows/.
+Requires separate review and approval before any real workflow on the default/deployed branch.
+
+name: OP03 Source Witness — one-time, reviewed
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: op03-source-witness
+  cancel-in-progress: false
+
+jobs:
+  witness:
+    if: github.repository == 'sandrabrayer/ezone-outpatient' && github.ref == 'refs/heads/claude/youthful-volta-laarnk'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: REPLACE_WITH_EXACT_REVIEWED_FULL_40_CHARACTER_COMMIT
+          persist-credentials: false
+      - name: Verify exact reviewed SHA and file blob BEFORE secrets
+        run: |
+          echo "DISABLED BY DESIGN"
+          exit 1
+      - name: Explicitly authorized read-only source witness
+        env:
+          OP03_SOURCE_WITNESS_ENABLE: YES_READ_ONLY_ONCE
+          CLASPRC_JSON: {{ INSERT_EXISTING_APPROVED_GITHUB_SECRET_REFERENCE_AFTER_SEPARATE_WORKFLOW_REVIEW }}
+        run: node ops/op03-source-witness.cjs
+
+This is only a conceptual sketch. DO NOT copy unchanged or insert secrets into a PR workflow.
+Teardown/disable the reviewed installed workflow after the sole approved run.
