@@ -96,8 +96,8 @@ test('#2 the two-column split makes the money (right) panel wider than the plan 
 });
 
 test('#2 the green/blue tint scheme + @supports color-mix fallback are preserved', () => {
-  assert.match(CSS, /\.client-card \.cc-money \{ background: #124733;/);
-  assert.match(CSS, /\.client-card \.cc-plan  \{ background: #0d3845;/);
+  assert.match(CSS, /\.client-card \.cc-money \{ background: #E6F4EC;/); // light theme (OP-CRM-4)
+  assert.match(CSS, /\.client-card \.cc-plan  \{ background: #E7F0FA;/);
   assert.match(CSS, /@supports \(background: color-mix\(in srgb, red, blue\)\)/);
 });
 

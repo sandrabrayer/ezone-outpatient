@@ -71,6 +71,13 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
   phase after an approved merge. `CHANGELOG-crm-money-scope.md`.
 
 ## Outpatient: «היום שלי» CRM opening screen (OP-CRM-1, Oct 29, 2026 — DRAFT, not released)
+## Outpatient: light CRM theme, Dashboard format, own palette (OP-CRM-4, Oct 29, 2026 — DRAFT)
+
+- `public/style.css` tokens → light (sage page `#EDF4EF`, forest action `#157A52`; deliberately not the Dashboard's slate/teal);
+  right-side menu with icons on desktop, mobile unchanged; AA contrast pinned (`test/crm-theme.test.js`). SW v21 → v22.
+  No Code.gs change. `CHANGELOG-crm-theme.md`.
+
+## Outpatient: «היום שלי» CRM opening screen (OP-CRM-1, Oct 29, 2026 — merged `a487a3a`, SW v21)
 
 - First tab of ezone-outpatient becomes the CRM opening screen on the Dashboard CRM model (`public/my-day.js`, pure UMD,
   tested): cards + urgent band + domain queues (leads/intros, plans to activate, renewals & collection, approvals,
