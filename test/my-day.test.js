@@ -169,7 +169,11 @@ test('10. wiring: index.html hosts #myDay first, loads my-day.js cache-busted, t
   assert.match(indexRaw, /<script src="my-day\.js\?v=__BUILD__" defer><\/script>/);
   assert.ok(indexRaw.includes('data-view="dashboard"'), 'dashboard view id unchanged (deep links / tests)');
   assert.match(indexRaw, /data-view="dashboard">היום שלי</);
-  assert.match(indexRaw, /<details class="panel my-day-metrics">/);
+  assert.match(indexRaw, /<details class="panel my-day-metrics" open>/, 'breakdowns open by default (Sandra, 2026-10-31)');
+  // the three headline KPIs sit ABOVE «היום שלי» on landing; revenue is money-only
+  assert.ok(indexRaw.indexOf('class="kpis kpis-landing"') < indexRaw.indexOf('id="myDay"'), 'KPIs above the work screen');
+  assert.match(indexRaw, /<div class="kpi money-only"><div class="kpi-label">הכנסה חודשית<\/div><div id="kpiRevenue"/);
+  assert.equal((indexRaw.match(/id="kpiActive"/g) || []).length, 1);
   assert.ok(indexRaw.indexOf('<script src="my-day.js') > indexRaw.indexOf('<script src="continuation-logic.js'), 'loads after continuation-logic');
 });
 

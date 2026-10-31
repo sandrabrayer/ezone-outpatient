@@ -1331,3 +1331,10 @@ body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
   .topbar-right .session-user { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
   .main { max-width: none; padding: 18px 22px 40px; }
 }
+
+/* Landing KPIs above «היום שלי» (OP-CRM-G): compact, three across, stack on phones */
+.kpis-landing { margin: 0 0 12px; grid-template-columns: repeat(3, 1fr); }
+.kpis-landing .kpi { padding: 12px 14px; }
+.kpis-landing .kpi-value { font-size: 26px; }
+body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 800px) { .kpis-landing { grid-template-columns: 1fr 1fr; } .kpis-landing .kpi:nth-child(3) { grid-column: 1 / -1; } }

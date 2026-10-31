@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Landing KPIs back on top (OP-CRM-G, draft 2026-10-31)
+- מטופלים פעילים / הכנסה חודשית (ורד, אורן) / לידים פתוחים above «היום שלי»; breakdowns open by default; clearer card label. See `CHANGELOG-crm-landing-kpis.md`.
+
 ### CRM program — acceptance record + release checklist (Phase F, draft 2026-10-31)
 - `docs/crm/ACCEPTANCE-OUTPATIENT.md`, `docs/crm/RELEASE-CHECKLIST.md`; ops sessions skip money reads at boot. See `CHANGELOG-crm-acceptance.md`.
 
