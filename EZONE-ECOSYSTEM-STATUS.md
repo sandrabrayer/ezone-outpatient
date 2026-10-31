@@ -46,6 +46,11 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient CRM program (issue #141) — Phase C: «היום שלי» one task engine (Oct 31, 2026 — DRAFT, stacked on 3B)
+
+- Persisted tasks + derived rows merged with suppression; priority-ordered sections; inline task actions. No Code.gs change.
+  `CHANGELOG-crm-my-day-tasks.md`.
+
 ## Outpatient CRM program (issue #141) — Phase B: Tasks / Activity / contact history (OP-CRM-3B, Oct 31, 2026 — DRAFT, stacked on 3A)
 
 - `Tasks` + `Activity` sheets (append-only, auto-created), 8 proxy-key actions, idempotent writes, server actor, money tasks

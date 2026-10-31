@@ -1286,3 +1286,7 @@ body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
 .crm-next-modes .inline { display: inline-flex; align-items: center; gap: 4px; }
 .form-grid-inline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 @media (max-width: 560px) { .crm-line { grid-template-columns: 1fr; } .crm-task { grid-template-columns: auto 1fr; } .crm-task-actions { grid-column: 1 / -1; } }
+/* Phase C — «היום שלי» priority sections + task cards */
+.acc-tasks { --acc: #0073EA; } .acc-calls { --acc: #579BFC; }
+.md-sec-critical .md-title strong { color: var(--red); }
+.md-actions .btn-sm { padding: 3px 7px; }
