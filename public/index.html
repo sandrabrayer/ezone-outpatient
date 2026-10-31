@@ -81,6 +81,14 @@
       <section id="view-dashboard" class="view active">
         <!-- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md): the work screen — summary cards,
              the urgent band and the lists by domain come from public/my-day.js. -->
+        <!-- The three headline numbers Sandra wants on landing (restored 2026-10-31, OP-CRM-G):
+             above the work screen, always visible. הכנסה חודשית is a money figure — hidden for an
+             operational session (body.ops-scope) and never computed from stripped data. -->
+        <div class="kpis kpis-landing">
+          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
+          <div class="kpi money-only"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
         <div id="myDay" class="my-day"></div>
 
         <!-- Cross-tab patient locator: searches Clients (any status), the
@@ -117,13 +125,8 @@
           <div id="extraRequestsAlerts" class="renewals-list"></div>
         </div>
 
-        <!-- Metrics (the former «דשבורד»): collapsed — the work comes first. -->
-        <details class="panel my-day-metrics"><summary class="panel-title">📊 מדדים ופילוחים</summary>
-        <div class="kpis">
-          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
-          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
-          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
-        </div>
+        <!-- Breakdowns (the former «דשבורד» charts): open by default again (Sandra, 2026-10-31). -->
+        <details class="panel my-day-metrics" open><summary class="panel-title">📊 פילוחים</summary>
         <div class="grid-2">
           <div class="panel">
             <div class="panel-title">פילוח לפי סוג טיפול</div>
