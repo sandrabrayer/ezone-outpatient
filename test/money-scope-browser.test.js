@@ -102,7 +102,10 @@ test('browser: דנה — app boots, money tabs/settings hidden, no money in the
   // the pay constants were refused but the app did not fail
   const pay = f.statuses.find((s) => s.user === 'דנה' && s.path.startsWith('/therapist-pay.js'));
   assert.ok(pay && pay.status === 403, 'therapist-pay.js refused');
-  assert.equal(f.statuses.some((s) => s.user === 'דנה' && /action=getPayments|action=getCredits|action=getCharges|action=getSessionLog|action=getSettings/.test(s.path) && s.status === 200), false, 'no money read succeeded');
+  // (the page's pre-login boot attempt is refused with 401 before any session exists; once signed in as an ops
+  // session, no money read is even requested)
+  const moneyReqs = f.statuses.filter((s) => s.user === 'דנה' && s.status !== 401 && /action=getPayments|action=getCredits|action=getCharges|action=getSessionLog|action=getSettings/.test(s.path));
+  assert.deepEqual(moneyReqs.map((s) => s.path + ' ' + s.status), [], 'an ops session never requests money reads');
 
   // an operational edit (note) through the real UI
   await page.locator('.client-card').first().getByRole('button', { name: 'עריכה', exact: true }).click();

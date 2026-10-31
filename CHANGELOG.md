@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM program — acceptance record + release checklist (Phase F, draft 2026-10-31)
+- `docs/crm/ACCEPTANCE-OUTPATIENT.md`, `docs/crm/RELEASE-CHECKLIST.md`; ops sessions skip money reads at boot. See `CHANGELOG-crm-acceptance.md`.
+
 ### Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D, draft 2026-10-31)
 - New read-only cross-app action `getHandoffStatus` (fail-closed `HANDOFF_STATUS_SECRET`): by exact `outpatientIds` / `dashboardPatientIds` only → operational state, owner, next action, dates; no money/clinical/phone. See `CHANGELOG-crm-handoff-status.md`.
 
