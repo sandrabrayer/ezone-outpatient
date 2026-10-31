@@ -74,7 +74,7 @@ phone, same auth pattern as the existing cross-app reads, `no-store`) that the
 Dashboard polls when it renders the ambulatory card. No write from the
 Dashboard into Outpatient beyond `createLead`.
 
-### G3 — money separation is client-side only
+### G3 — money separation is client-side only (CLOSED in OP-CRM-3A, draft — see `CHANGELOG-crm-money-scope.md`)
 Same decision as the Dashboard: operational people (דנה) must not receive money
 fields from the server. Fix (OP-CRM-3 or its own PR): `OPS_USER_IDS`-style
 list in `lib/users.js`; the session-gated read routes strip

@@ -47,6 +47,11 @@ secret-looking is added to it.
   served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
   never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
   See `CHANGELOG-protect-price-constants.md`.
+- **Money scope (OP-CRM-3A).** The server decides per session, from the signed cookie name only and
+  fail-closed, whether money may flow: ורד / אורן `full`; דנה (and any unknown / retired name) `ops` — money
+  `/api/sheets` actions answer 403, every other answer is deep-stripped of money keys (fresh, cached and stale),
+  `therapist-pay.js` is refused, and `saveAll` carries `moneyScope` so Apps Script keeps the stored money fields
+  on her saves. `GET /api/me` reports `moneyScope` for the UI. See `lib/money-scope.js`, `CHANGELOG-crm-money-scope.md`.
 - The former "המשך כצופה בלבד" button was removed (2026-10-20): the PIN screen has only the PIN entry. A stale
   remembered viewer flag is ignored and cleared. The credential is the cookie, never a browser flag.
 - Who/when: every Clients / Leads write stamps `updatedAt` (server time) and

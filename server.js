@@ -6,6 +6,7 @@ const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } 
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
 const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
+const moneyScope = require('./lib/money-scope');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -241,6 +242,14 @@ function isCacheFresh() {
 function isCacheStaleButUsable() {
   return getDataCache.data && (Date.now() - getDataCache.timestamp) < STALE_FALLBACK_MS;
 }
+/* OP-CRM-3A: the money scope of THIS request's session — decided from the signed
+ * cookie name only, fails closed (blank / unknown / retired -> ops). Every
+ * /api/sheets answer to an ops session is projected through stripMoney, cached,
+ * stale and fresh alike (the cache is shared across users, so the projection
+ * happens at response time, never at cache time). */
+function requestMoneyScope(req) { return moneyScope.scopeOf(sessionUserFromRequest(req)); }
+function scoped(req, data) { return requestMoneyScope(req) === moneyScope.SCOPE_OPS ? moneyScope.stripMoney(data) : data; }
+
 function invalidateCache() {
   getDataCache.data = null;
   getDataCache.status = null;
@@ -329,6 +338,8 @@ app.use((req, res, next) => {
   return requireSession(req, res, () => {
     res.set('Cache-Control', 'no-store');
     if (name === 'blocked') return res.status(404).end();
+    // OP-CRM-3A: the pay-rate constants never reach an operational session.
+    if (moneyScope.MONEY_STATIC.indexOf(name) >= 0 && requestMoneyScope(req) === moneyScope.SCOPE_OPS) return res.status(403).end();
     res.type('js');
     return res.sendFile(path.join(__dirname, 'public', name), { dotfiles: 'deny' });
   });
@@ -389,13 +400,17 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   // Package catalog / pricing actions have their own Vered-only route and the
   // manager feeds never go through the browser: refuse them here.
   if (catalogAdmin.isPackageAction(action)) return res.status(403).json({ ok: false, error: 'forbidden_action' });
+  // OP-CRM-3A: money reads are refused for an operational session before any upstream call.
+  if (requestMoneyScope(req) === moneyScope.SCOPE_OPS && moneyScope.isMoneyAction('GET', action)) {
+    return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+  }
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
 
   // Serve from cache when possible: only for the bulk read, and only when
   // the caller hasn't explicitly asked for a fresh fetch.
   if (action === 'getData' && !forceFresh && isCacheFresh()) {
     res.set('X-Cache', 'HIT');
-    return res.status(getDataCache.status || 200).json(getDataCache.data);
+    return res.status(getDataCache.status || 200).json(scoped(req, getDataCache.data));
   }
 
   try {
@@ -427,7 +442,7 @@ app.get('/api/sheets', requireSession, async (req, res) => {
     }
 
     res.set('X-Cache', 'MISS');
-    res.status(r.status).json(data);
+    res.status(r.status).json(scoped(req, data));
   } catch (err) {
     lastLoad.at = new Date().toISOString();
     lastLoad.status = 'error';
@@ -440,7 +455,7 @@ app.get('/api/sheets', requireSession, async (req, res) => {
     if (action === 'getData' && isCacheStaleButUsable()) {
       res.set('X-Cache', 'STALE');
       res.set('X-Cache-Error', 'upstream_unavailable');
-      return res.status(getDataCache.status || 200).json(getDataCache.data);
+      return res.status(getDataCache.status || 200).json(scoped(req, getDataCache.data));
     }
 
     res.status(502).json({ ok: false, error: 'upstream_unavailable' });
@@ -463,11 +478,19 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     if (catalogAdmin.isPackageAction(body.action)) {
       return res.status(403).json({ ok: false, error: 'forbidden_action' });
     }
-    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin']) {
+    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin', 'moneyScope']) {
       if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
         return res.status(400).json({ ok: false, error: 'forbidden_field' });
       }
     }
+    // OP-CRM-3A: money writes are refused for an operational session; every other
+    // write carries the SERVER-decided scope so Apps Script saveAll can keep the
+    // stored money fields of rows an operational user re-saves.
+    const scope = requestMoneyScope(req);
+    if (scope === moneyScope.SCOPE_OPS && moneyScope.isMoneyAction('POST', body.action)) {
+      return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+    }
+    body.moneyScope = scope;
     if (body.action === 'saveAll') {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
       body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
@@ -497,7 +520,7 @@ app.post('/api/sheets', requireSession, async (req, res) => {
       invalidateCache();
     }
 
-    res.status(r.status).json(data);
+    res.status(r.status).json(scoped(req, data));
   } catch (err) {
     res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
@@ -709,7 +732,10 @@ app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (r
  * frontend reads it after the PIN (empty -> name picker) and at load (header
  * "מחובר/ת כ: <name>"). */
 app.get('/api/me', requireLoginStage, (req, res) => {
-  res.status(200).json({ ok: true, user: sessionUserFromRequest(req) });
+  const user = sessionUserFromRequest(req);
+  // moneyScope is informational for the UI (hide money tabs/fields); the server
+  // enforces it on every route regardless of what the browser does with it.
+  res.status(200).json({ ok: true, user, moneyScope: user ? moneyScope.scopeOf(user) : moneyScope.SCOPE_OPS });
 });
 
 /* GET /api/users — the fixed list of names the login name picker offers

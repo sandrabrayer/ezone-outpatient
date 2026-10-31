@@ -151,6 +151,7 @@
   var state = {
     role: 'viewer',
     user: '',       // the name inside this device's session cookie (GET /api/me); '' = user-less (legacy) session
+    moneyScope: 'full', // OP-CRM-3A: server-decided ('full' | 'ops'), read from /api/me before the app opens. UI-only: the server strips/refuses money for an ops session regardless of this flag
     view: 'dashboard',
     leads: [],
     clients: [],
@@ -364,6 +365,10 @@
   //     that already passed without a paid row.
   function renewalInfo(c) {
     if (!c || c.status === 'סיים טיפול' || c.status === 'לא פעיל') return { status: 'unknown' };
+    // OP-CRM-3A: an operational session never receives payments / billing dates,
+    // so a collection state cannot be derived for it — never show a false
+    // «לא שולם» / «עצור טיפול» from stripped data.
+    if (isOpsScope()) return { status: 'unknown' };
     var renewal = nextRenewalDueDate(c);
     if (!renewal) return { status: 'unknown' };
     var daysLeft = daysBetween(today(), renewal);
@@ -464,7 +469,13 @@
           var el = document.createElement('script');
           el.src = src; el.async = false; el.setAttribute('data-protected', '1');
           el.onload = function () { resolve(); };
-          el.onerror = function () { el.remove(); reject(new Error('protected_script_unavailable')); };
+          el.onerror = function () {
+            el.remove();
+            // OP-CRM-3A: the server refuses the pay-rate constants to an operational
+            // session (403); that is not a failure for her — the payouts tab is hidden.
+            if (isOpsScope() && /therapist-pay\.js/.test(src)) { resolve(); return; }
+            reject(new Error('protected_script_unavailable'));
+          };
           document.head.appendChild(el);
         });
       });
@@ -536,7 +547,38 @@
     var data = {};
     try { data = await r.json(); } catch (_) {}
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    // OP-CRM-3A: the SERVER decides the money scope from the signed cookie; the
+    // browser only uses it to hide money tabs/fields (enforcement is server-side,
+    // fail-closed: anything but 'full' is operational).
+    state.moneyScope = data.moneyScope === 'full' ? 'full' : 'ops';
+    applyMoneyScopeUI();
     return typeof data.user === 'string' ? data.user : '';
+  }
+  var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink'];
+  var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון'];
+  function isOpsScope() { return state.moneyScope !== 'full'; }
+  /* Operational session: hide the money tabs / settings, and take the money
+   * inputs out of every form (disabled inputs are not serialized, so the save
+   * carries no money and the server keeps the stored values). Idempotent. */
+  function applyMoneyScopeUI() {
+    var ops = isOpsScope();
+    document.body.classList.toggle('ops-scope', ops);
+    ['billing', 'revenue', 'payouts', 'packages'].forEach(function (v) {
+      var t = document.querySelector('.tab[data-view="' + v + '"]');
+      if (t) t.hidden = ops;
+    });
+    var sb = $('#settingsBtn'); if (sb) sb.hidden = ops;
+    MONEY_FORM_FIELDS.forEach(function (name) {
+      $$('form [name="' + name + '"]').forEach(function (el) {
+        if (ops) { el.dataset.moneyRequired = el.required ? '1' : ''; el.required = false; el.disabled = true; }
+        else if (el.dataset.moneyRequired != null) { el.required = el.dataset.moneyRequired === '1'; el.disabled = false; }
+        var lab = el.closest('label'); if (lab) lab.hidden = ops;
+      });
+    });
+    $$('.form-section-title').forEach(function (el) {
+      if (MONEY_SECTION_TITLES.indexOf(el.textContent.trim()) >= 0) el.hidden = ops;
+    });
+    if (ops && ['billing', 'revenue', 'payouts', 'packages'].indexOf(state.view) >= 0) setView('dashboard');
   }
   // The allow-listed names the picker offers (lib/users.js, via the server —
   // the client keeps no copy that could drift).
@@ -5126,7 +5168,9 @@
     // mark paid, paid → revert to unpaid (both via persistPayment).
     var paidChipHtml = '';
     var paidOnRow = '';
-    if (c.status !== 'סיים טיפול') {
+    // OP-CRM-3A: an operational session has no payment data — no paid/unpaid
+    // chip, no mark-paid action (the server would refuse it anyway).
+    if (c.status !== 'סיים טיפול' && !isOpsScope()) {
       // Paid-up follows the BILLING CYCLE, not the calendar month: a cycle
       // paid on 31/8 that runs to 30/09 has no September calendar-month row,
       // yet the package is fully paid. packagePaidState reads the same

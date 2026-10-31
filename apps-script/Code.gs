@@ -557,6 +557,30 @@ function _requestUser(payload) {
     .replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 40);
 }
 
+/* ===== Money scope (OP-CRM-3A, CHANGELOG-crm-money-scope.md) ================
+ * The Node proxy decides each session's money scope from the signed cookie
+ * name (lib/money-scope.js) and writes it into every /api/sheets POST as
+ * payload.moneyScope ('full' | 'ops'); a browser-supplied value is refused
+ * there (forbidden_field). Here 'ops' means: the saver never received the
+ * money fields, so they are carried from the sheet (existing row) or left
+ * blank (new row). Mirrors MONEY_KEYS in lib/money-scope.js — append-only. */
+var OPS_CLIENT_MONEY_KEYS = [
+  'pricePerSession', 'billingType', 'billingDay', 'bundleSize', 'bundlePrice', 'bundlePaid',
+  'paymentStatus', 'paymentDate', 'nextBillingDate', 'paymentLink'
+];
+var OPS_LEAD_MONEY_KEYS = ['pricePerSession'];
+function _isOpsScope(payload) {
+  return !!payload && String(payload.moneyScope == null ? '' : payload.moneyScope).trim() === 'ops';
+}
+function _opsPreserveMoney(payload, row, existing, keys) {
+  if (!_isOpsScope(payload) || !row || typeof row !== 'object') return row;
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    row[k] = existing ? (existing[k] == null ? '' : existing[k]) : '';
+  }
+  return row;
+}
+
 /* Stamp a row object in place: updatedAt = ISO server time, updatedBy = user
  * (may be blank). Returns the row for chaining. */
 function _stampRow(row, user) {
@@ -1436,6 +1460,12 @@ function _saveAll(payload) {
       clients[i].preferredHouse = existingRow
         ? (existingRow.preferredHouse == null ? '' : existingRow.preferredHouse)
         : (_preferredHouseOrNull(clients[i].preferredHouse) || '');
+      // OP-CRM-3A: an operational session (moneyScope 'ops', decided by the Node
+      // proxy from the signed cookie — never by the browser) never saw the money
+      // fields, so its snapshot cannot change them: existing rows keep the
+      // sheet's values, brand-new rows start blank. Done BEFORE the diff so a
+      // stripped field never reads as an edit.
+      _opsPreserveMoney(payload, clients[i], existingRow, OPS_CLIENT_MONEY_KEYS);
       if (reservedClients[cid] && existingRow) {
         var pendingChanges = _clientDiffCols(clients[i], existingRow);
         if (pendingChanges.length) {
@@ -1597,6 +1627,7 @@ function _saveAll(payload) {
         leads[li].preferredHouse = existingLead
           ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
           : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
+        _opsPreserveMoney(payload, leads[li], existingLead, OPS_LEAD_MONEY_KEYS); // OP-CRM-3A
       }
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {
@@ -5722,7 +5753,10 @@ function doPost(e) {
         dataVersion: payload.dataVersion,
         // who/when: the session user the Railway proxy injected from the
         // SIGNED cookie (never client-controlled — the proxy overwrites it).
-        user: _requestUser(payload)
+        user: _requestUser(payload),
+        // OP-CRM-3A: the proxy-decided money scope ('full' | 'ops'); the proxy
+        // refuses a browser-supplied value, so this is never client-controlled.
+        moneyScope: payload.moneyScope
       }));
     }
     if (action === 'getData')     return _json(_getData());

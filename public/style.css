@@ -1256,3 +1256,13 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   .md-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .md-cards { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* OP-CRM-3A: operational session (body.ops-scope) — money never reaches the
+   browser (server-side), these rules only hide the empty money UI. */
+body.ops-scope .client-card .cc-money,
+body.ops-scope #panel-renewals,
+body.ops-scope #panel-credits,
+body.ops-scope .money-only,
+body.ops-scope .revenue-kpis,
+body.ops-scope .chip-paid, body.ops-scope .chip-partial, body.ops-scope .chip-unpaid, body.ops-scope .chip-next { display: none !important; }
+body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }

@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Server-side money scope — דנה operational (OP-CRM-3A, draft 2026-10-31)
+- The Node proxy decides each session's money scope from the signed cookie (fail-closed) and enforces it: money actions 403, every `/api/sheets` answer deep-stripped of money for an operational session (fresh/cached/stale), pay constants refused, `saveAll` carries the scope so Apps Script keeps stored money on her saves. UI hides money tabs/fields. See `CHANGELOG-crm-money-scope.md`.
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 
