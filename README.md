@@ -263,6 +263,10 @@ checkout ever drifts back.
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
 - `GET /api/continuation-roster` — session-gated.
+- CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
+  `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
+  the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
+  tasks from an operational session. Writes are idempotent by a browser `submissionId`. See `CHANGELOG-crm-tasks-activity.md`.
 - The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
   (write) are Apps Script actions the client reaches through the two
   session-gated `/api/sheets` calls above. On `saveCredit` the proxy's

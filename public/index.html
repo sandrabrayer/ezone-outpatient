@@ -989,6 +989,82 @@
     </div>
 
     <!-- Continuation → outpatient lead confirm (מסלול המשך) -->
+    <!-- CRM (OP-CRM-3B): contact log — the one form every «יצרתי קשר» goes through.
+         No default follow-up date: a date, «בעוד N ימים», or «אין המשך» + reason. -->
+    <div id="contactModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">תיעוד יצירת קשר — <span id="contactModalName"></span></div>
+        <form id="contactForm" class="form-grid">
+          <p id="contactTaskHint" class="wide" hidden style="margin:0;color:var(--muted);font-size:12px;">התיעוד יסגור את המשימה הפתוחה שממנה הגעתם.</p>
+          <label>ערוץ<select name="channel" id="contactChannel" required></select></label>
+          <label>מתי<input name="occurredAt" id="contactOccurredAt" type="datetime-local" required /></label>
+          <label>עם מי<input name="withWhom" type="text" maxlength="80" placeholder="המטופל/ת, הורה, גורם מפנה…" /></label>
+          <label>תוצאה<select name="outcome" id="contactOutcome" required></select></label>
+          <label class="wide">סיכום קצר<textarea name="summary" rows="3" maxlength="1000" placeholder="מה סוכם / מה נאמר"></textarea></label>
+          <div class="wide form-section-title">הצעד הבא</div>
+          <div class="wide crm-next-modes">
+            <label class="inline"><input type="radio" name="nextMode" value="date" checked /> בתאריך</label>
+            <label class="inline"><input type="radio" name="nextMode" value="days" /> בעוד</label>
+            <label class="inline"><input type="radio" name="nextMode" value="none" /> אין המשך</label>
+          </div>
+          <div id="contactNextDate" class="wide form-grid-inline">
+            <label>תאריך<input name="nextDate" type="date" /></label>
+            <label>שעה (רשות)<input name="nextTime" type="time" /></label>
+          </div>
+          <div id="contactNextDays" class="wide" hidden>
+            <label>ימים<input name="nextDays" type="number" min="1" max="365" placeholder="3" /></label>
+          </div>
+          <div id="contactNextNone" class="wide" hidden>
+            <label class="wide">למה אין המשך<input name="nextExplanation" type="text" maxlength="300" placeholder="למשל: ביקש/ה שלא נחזור" /></label>
+          </div>
+          <div id="contactNextTaskFields" class="wide form-grid-inline">
+            <label>סוג<select name="nextKind"><option value="call">שיחה</option><option value="meeting">פגישה</option><option value="intro">שיחת היכרות</option><option value="plan">תוכנית טיפול</option><option value="activation">הפעלת טיפול</option><option value="review">בירור</option><option value="other">אחר</option></select></label>
+            <label>כותרת (רשות)<input name="nextTitle" type="text" maxlength="160" placeholder="שיחה חוזרת עם …" /></label>
+            <label>אחראי/ת<select name="nextAssignee" id="contactNextAssignee"></select></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="contactSubmit">שמור תיעוד</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM (OP-CRM-3B): manual task -->
+    <div id="taskModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">משימה חדשה — <span id="taskModalName"></span></div>
+        <form id="taskForm" class="form-grid">
+          <label>סוג<select name="kind" id="taskKind" required></select></label>
+          <label>אחראי/ת<select name="assignee" id="taskAssignee" required></select></label>
+          <label class="wide">מה לעשות<input name="title" type="text" maxlength="160" required /></label>
+          <label>תאריך יעד<input name="dueDate" type="date" /></label>
+          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
+          <label class="wide">למה / הקשר (רשות)<input name="reason" type="text" maxlength="300" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="taskSubmit">צור משימה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM (OP-CRM-3B): defer a task — the previous date is kept in the history -->
+    <div id="deferModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">דחיית משימה</div>
+        <form id="deferForm" class="form-grid">
+          <label>מועד חדש<input name="dueDate" type="date" required /></label>
+          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
+          <label class="wide">סיבת הדחייה<input name="reason" type="text" maxlength="300" required minlength="2" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="deferSubmit">דחה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="continuationToOutpatientModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">העברה לטיפול חוץ</div>
@@ -1004,6 +1080,7 @@
   <script src="name-search.js?v=__BUILD__" defer></script>
   <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
+  <script src="crm-activity.js?v=__BUILD__" defer></script>
   <script src="my-day.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER

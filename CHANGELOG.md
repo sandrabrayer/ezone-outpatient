@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Tasks, Activity and contact history (OP-CRM-3B, draft 2026-10-31, stacked on 3A)
+- New append-only `Tasks` + `Activity` sheets and 8 internal actions (`getTasks getActivity createTask completeTask deferTask reassignTask withdrawTask logContact`), idempotent by submissionId, actor from the session; every lead/client card shows last contact, next action, open tasks with direct actions and the history; «יצרתי קשר» form with no default follow-up date; money tasks invisible to an ops session. See `CHANGELOG-crm-tasks-activity.md`.
+
 ### Server-side money scope — דנה operational (OP-CRM-3A, draft 2026-10-31)
 - The Node proxy decides each session's money scope from the signed cookie (fail-closed) and enforces it: money actions 403, every `/api/sheets` answer deep-stripped of money for an operational session (fresh/cached/stale), pay constants refused, `saveAll` carries the scope so Apps Script keeps stored money on her saves. UI hides money tabs/fields. See `CHANGELOG-crm-money-scope.md`.
 

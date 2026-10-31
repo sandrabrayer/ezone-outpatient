@@ -46,6 +46,12 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient CRM program (issue #141) — Phase B: Tasks / Activity / contact history (OP-CRM-3B, Oct 31, 2026 — DRAFT, stacked on 3A)
+
+- `Tasks` + `Activity` sheets (append-only, auto-created), 8 proxy-key actions, idempotent writes, server actor, money tasks
+  scoped; CRM block on every lead/client card (`public/crm-activity.js` pure model). Code.gs change → Apps Script release
+  phase after an approved merge. `CHANGELOG-crm-tasks-activity.md`.
+
 ## Outpatient CRM program (issue #141) — Phase A: server-side money scope (OP-CRM-3A, Oct 31, 2026 — DRAFT)
 
 - Closes gap G3: `lib/money-scope.js` + `server.js` enforce that דנה's session never receives or writes money (403 on money

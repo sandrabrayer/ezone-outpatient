@@ -1266,3 +1266,23 @@ body.ops-scope .money-only,
 body.ops-scope .revenue-kpis,
 body.ops-scope .chip-paid, body.ops-scope .chip-partial, body.ops-scope .chip-unpaid, body.ops-scope .chip-next { display: none !important; }
 body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
+
+/* ===== CRM activity block on every lead / client card (OP-CRM-3B) ===== */
+.crm-block { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg-elev); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.crm-na { color: var(--muted); }
+.crm-line { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: start; }
+.crm-k { color: var(--muted); font-size: 12px; padding-top: 2px; }
+.crm-block .sub { color: var(--muted); font-size: 12px; }
+.crm-tasks { display: flex; flex-direction: column; gap: 4px; }
+.crm-task { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.crm-task-actions { display: flex; gap: 2px; }
+.crm-task-actions .btn-sm { padding: 2px 6px; font-size: 12px; }
+.crm-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.crm-history summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.crm-timeline { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.crm-timeline li { border-inline-start: 2px solid var(--border); padding-inline-start: 8px; }
+.crm-timeline .t { color: var(--muted); font-size: 12px; }
+.crm-next-modes { display: flex; gap: 14px; flex-wrap: wrap; }
+.crm-next-modes .inline { display: inline-flex; align-items: center; gap: 4px; }
+.form-grid-inline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+@media (max-width: 560px) { .crm-line { grid-template-columns: 1fr; } .crm-task { grid-template-columns: auto 1fr; } .crm-task-actions { grid-column: 1 / -1; } }
