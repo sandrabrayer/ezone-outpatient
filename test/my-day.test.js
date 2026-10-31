@@ -108,6 +108,7 @@ test('6. cards count the same rows as the lists; renewals card only with money',
   const out = MyDay.build(fixture());
   const byId = Object.fromEntries(out.cards.map((c) => [c.id, c]));
   assert.equal(byId.leads.value, 2, 'new + unscheduled');
+  assert.equal(byId.tasks.value, null, 'no tasks source in this fixture');
   assert.equal(byId.intros.value, 1);
   assert.equal(byId.intros.second.value, 1);
   assert.equal(byId.plans.value, 2);
@@ -143,7 +144,11 @@ test('8. a source that did not load gives null (never 0) and «המידע אינ
   assert.equal(out.rowsBy.leads.length, 0);
   // empty arrays are a real 0
   const g = fixture(); g.leads = [];
-  assert.equal(MyDay.build(g).cards[0].value, 0);
+  assert.equal(MyDay.build(g).cards.find((c) => c.id === 'leads').value, 0);
+  // Phase C: tasks/calls cards are null when getTasks did not load, 0 when it loaded empty
+  assert.equal(MyDay.build(g).cards.find((c) => c.id === 'tasks').value, null);
+  g.tasks = [];
+  assert.equal(MyDay.build(g).cards.find((c) => c.id === 'tasks').value, 0);
 });
 
 test('9. build is pure and tolerant of garbage rows', () => {
@@ -190,4 +195,71 @@ test('12. SW cache bumped to v21+ (index.html shell changed) and styles ship', (
   assert.ok(Number(m[1]) >= 21, `expected v21+, got v${m[1]}`);
   assert.ok(cssRaw.includes('.my-day'), 'my-day styles present');
   assert.ok(cssRaw.includes('.md-urgent'), 'urgent band style present');
+});
+
+/* ---- Phase C: one task engine — persisted tasks + derived rows, priority sections ---- */
+function tasked() {
+  const f = fixture();
+  f.activity = [{ eventId: 'contact:x', kind: 'contact_logged', leadId: 'L2', occurredAt: '2026-10-28T10:00:00' }];
+  f.tasks = [
+    { id: 't-late', kind: 'call', leadId: 'L1', title: 'לחזור לפנייה', dueDate: '2026-10-27', dueTime: '', status: 'open', assignee: 'דנה' },
+    { id: 't-today', kind: 'call', clientId: 'C5', title: 'שיחת מעקב', dueDate: TODAY, dueTime: '10:00', status: 'deferred', assignee: 'ורד', deferredFrom: '2026-10-27' },
+    { id: 't-later', kind: 'meeting', clientId: 'C5', title: 'פגישה', dueDate: '2026-11-05', status: 'open', assignee: 'ורד' },
+    { id: 't-money', kind: 'collection', clientId: 'C1', title: 'גבייה', dueDate: TODAY, status: 'open', assignee: 'ורד' },
+    { id: 't-done', kind: 'call', leadId: 'L3', title: 'בוצע', dueDate: TODAY, status: 'done', assignee: 'ורד' },
+    { id: 't-cont', kind: 'continuity', leadId: 'L7', title: 'להשלים תוכנית', dueDate: '', status: 'open', assignee: 'ורד' }
+  ];
+  return f;
+}
+
+test('13. persisted open/deferred tasks are rows; done tasks are not; names come from leads/clients', () => {
+  const out = MyDay.build(tasked());
+  const ids = out.rowsBy.tasks.map((r) => r.id);
+  assert.deepEqual(ids.sort(), ['task:t-cont', 'task:t-late', 'task:t-later', 'task:t-money', 'task:t-today'].sort());
+  const late = out.rowsBy.tasks.find((r) => r.id === 'task:t-late');
+  assert.equal(late.name, 'פנייה חדשה'); assert.equal(late.state, 'late'); assert.equal(late.open, 'lead'); assert.equal(late.leadId, 'L1');
+  const td = out.rowsBy.tasks.find((r) => r.id === 'task:t-today');
+  assert.equal(td.priority, 'binding', 'today + time'); assert.equal(td.name, 'בסדר'); assert.match(td.why, /נדחתה מ-27\/10\/2026/);
+  assert.equal(out.rowsBy.tasks.find((r) => r.id === 'task:t-money').money, true);
+});
+
+test('14. a derived row is suppressed when an open task already covers the subject (no duplicate engines)', () => {
+  const out = MyDay.build(tasked());
+  assert.equal(out.rowsBy.leads.some((r) => r.id === 'lead:new:L1'), false, 'L1 has a call task');
+  assert.equal(out.rowsBy.leads.some((r) => r.id === 'lead:intro-undated:L2'), true, 'L2 has no task');
+  assert.equal(out.rowsBy.renewals.some((r) => r.subjectId === 'C1'), false, 'C1 has a collection task');
+  assert.equal(out.rowsBy.plans.some((r) => r.id === 'lead:plan:L7'), true, 'a continuity task does not cover a plan');
+  // a logged contact turns «ללא קשר ראשון» into «ממתין» (still not urgent)
+  const f = tasked(); f.tasks = [];
+  const o2 = MyDay.build(f);
+  assert.equal(o2.rowsBy.leads.find((r) => r.subjectId === 'L1').kind, 'lead_new');
+  f.activity = [{ eventId: 'c1', kind: 'contact_logged', leadId: 'L1' }];
+  const o3 = MyDay.build(f);
+  assert.equal(o3.rowsBy.leads.find((r) => r.subjectId === 'L1').kind, 'lead_waiting');
+  assert.equal(o3.urgent.some((r) => r.subjectId === 'L1'), false);
+});
+
+test('15. sections follow the priority order, each row appears once, cards count the same rows', () => {
+  const out = MyDay.build(tasked());
+  const order = out.sections.map((x) => x.id);
+  const want = ['critical', 'intros', 'undecided', 'first', 'starts', 'approvals', 'money', 'later'];
+  assert.deepEqual(order.filter((id) => want.includes(id)), want.filter((id) => order.includes(id)));
+  assert.equal(order.indexOf('critical'), 0);
+  const seen = {}; out.sections.forEach((x) => x.rows.forEach((r) => { assert.ok(!seen[r.id], 'row ' + r.id + ' twice'); seen[r.id] = 1; }));
+  assert.equal(Object.keys(seen).length, out.total, 'every row is in exactly one section');
+  const critical = out.sections[0].rows.map((r) => r.id);
+  assert.ok(critical.includes('task:t-late')); assert.ok(critical.includes('task:t-today')); assert.ok(critical.includes('task:t-money'));
+  assert.ok(critical.includes('lead:intro-passed:L3'), 'an undecided intro is late/exception and goes to critical');
+  const byId = Object.fromEntries(out.cards.map((c) => [c.id, c]));
+  assert.equal(byId.tasks.value, out.rowsBy.tasks.filter((r) => r.state === 'late' || r.state === 'today').length);
+  assert.equal(byId.calls.value, 2, 'late + today call tasks');
+  assert.equal(out.sections.find((x) => x.id === 'later').rows.some((r) => r.id === 'task:t-later'), true);
+});
+
+test('16. דנה: money tasks never reach her rows/sections even if a payload carried one', () => {
+  const f = tasked(); f.user = 'דנה';
+  const out = MyDay.build(f);
+  assert.equal(out.rowsBy.tasks.some((r) => r.money), false);
+  assert.equal(out.sections.some((x) => x.id === 'money'), false);
+  assert.equal(out.rowsBy.tasks.length, 4);
 });

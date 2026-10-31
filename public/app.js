@@ -1452,7 +1452,8 @@
     if (!box || !window.MyDay) return;
     var m = window.MyDay.build({
       leads: state.leads, clients: state.clients, stopFlags: state.stopFlags, extraRequests: state.extraRequests,
-      continuation: state.continuationRows, today: today(), user: state.user, renewalInfo: renewalInfo
+      continuation: state.continuationRows, tasks: state.tasks, activity: state.activity,
+      today: today(), user: state.user, renewalInfo: renewalInfo
     });
     var dayName = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'][new Date(today() + 'T12:00:00').getDay()];
     var card = function (k) {
@@ -1460,13 +1461,21 @@
         (k.value === null ? '<span class="v na">—</span>' : '<span class="v">' + k.value + '</span>') + '<span class="l">' + escapeHtml(k.label) + '</span>' +
         (k.second ? '<span class="l2"><b>' + k.second.value + '</b> ' + escapeHtml(k.second.label) + '</span>' : '') + (k.hint ? '<span class="l2">' + escapeHtml(k.hint) + '</span>' : '') + '</button>';
     };
+    var editor = state.role === 'editor';
     var row = function (r) {
-      return '<div class="md-row' + (r.priority === 'exception' ? ' is-exception' : '') + '" data-md-open="' + escapeHtml(r.open) + '" data-md-id="' + escapeHtml(r.subjectId) + '" data-md-name="' + escapeHtml(r.name) + '">' +
+      // a persisted task row carries the CRM subject so ✓ / 📞 work right here (handleCrmClick)
+      var crmAttrs = r.kind === 'task' ? ' data-crm-lead="' + escapeHtml(r.leadId || '') + '" data-crm-client="' + escapeHtml(r.clientId || '') + '" data-crm-name="' + escapeHtml(r.name) + '"' : '';
+      var taskBtns = r.kind === 'task' && editor
+        ? '<button type="button" class="btn btn-sm" data-crm="contact" data-task-id="' + escapeHtml(r.taskId) + '" title="תיעוד קשר שסוגר את המשימה">📞</button>' +
+          '<button type="button" class="btn btn-sm" data-crm="complete" data-task-id="' + escapeHtml(r.taskId) + '" title="סמן כבוצע">✓</button>' +
+          '<button type="button" class="btn btn-sm" data-crm="defer" data-task-id="' + escapeHtml(r.taskId) + '" title="דחייה">⏩</button>'
+        : '';
+      return '<div class="md-row' + (r.priority === 'exception' ? ' is-exception' : '') + '" data-md-open="' + escapeHtml(r.open) + '" data-md-id="' + escapeHtml(r.subjectId) + '" data-md-name="' + escapeHtml(r.name) + '"' + crmAttrs + '>' +
         '<span><b class="name">' + escapeHtml(r.name) + '</b>' + (r.sub ? '<br><span class="sub">' + escapeHtml(r.sub) + '</span>' : '') + '</span>' +
         '<span><b>' + escapeHtml(r.action) + '</b>' + (r.why ? '<br><span class="sub">' + escapeHtml(r.why) + '</span>' : '') + '</span>' +
         '<span>' + (r.when ? escapeHtml(window.MyDay.fmtDate(r.when) + (r.time ? ' ' + r.time : '')) : '—') + '<br><span class="md-chip st-' + escapeHtml(r.priority === 'exception' ? 'exception' : r.state) + '">' + escapeHtml(window.MyDay.stateText(r)) + '</span></span>' +
         '<span>' + escapeHtml(r.owner || '—') + '</span>' +
-        '<span class="md-actions"><button type="button" class="btn btn-primary btn-sm" data-md-go="1">' + (r.open === 'lead' ? 'פתיחת הליד' : r.open === 'client' ? 'כרטיס' : 'לפעולה') + '</button></span></div>';
+        '<span class="md-actions">' + taskBtns + '<button type="button" class="btn btn-primary btn-sm" data-md-go="1">' + (r.open === 'lead' ? 'פתיחת הליד' : r.open === 'client' ? 'כרטיס' : 'לפעולה') + '</button></span></div>';
     };
     var block = function (rows, cap) {
       if (!rows.length) return '<p class="md-empty">אין פריטים.</p>';
@@ -1476,13 +1485,20 @@
     };
     var html = '<div class="md-head"><h2>היום שלי</h2><span class="sub">יום ' + dayName + ', ' + escapeHtml(window.MyDay.fmtDate(m.today)) + (state.user ? ' · ' + escapeHtml(state.user) : '') + '</span></div>';
     html += '<div class="md-cards">' + m.cards.map(card).join('') + '</div>';
-    if (m.urgent.length && !myDayDomain) html += '<section class="md-urgent"><div class="md-title">⚠ דורש החלטה / באיחור <span class="md-n">' + m.urgent.length + '</span></div>' + block(m.urgent, 8) + '</section>';
-    m.domains.forEach(function (d) {
-      if (myDayDomain && myDayDomain !== d.id) return;
-      var rows = m.rowsBy[d.id];
-      if (!myDayDomain && !rows.length) return;
-      html += '<section class="md-domain acc-' + escapeHtml(d.id) + '"><div class="md-title"><strong>' + escapeHtml(d.label) + '</strong> <span class="md-n">' + rows.length + '</span>' + (myDayDomain ? ' <button type="button" class="link-btn" data-md-domain="">חזרה לכל התחומים</button>' : '') + '</div>' + block(rows, myDayDomain ? 0 : 8) + '</section>';
-    });
+    if (!myDayDomain) {
+      // Phase C: the day in priority order — overdue/dated commitments, calls today,
+      // intros today, undecided intros, first contact, starts/continuation, approvals,
+      // (money), later. Every row appears once; the cards count the same rows.
+      m.sections.forEach(function (sec, idx) {
+        html += '<section class="md-domain md-sec-' + escapeHtml(sec.id) + (sec.id === 'critical' ? ' md-urgent' : '') + '"><div class="md-title"><strong>' + (idx + 1) + '. ' + escapeHtml(sec.label) + '</strong> <span class="md-n">' + sec.rows.length + '</span></div>' + block(sec.rows, 8) + '</section>';
+      });
+    } else {
+      m.domains.forEach(function (d) {
+        if (myDayDomain !== d.id) return;
+        var rows = m.rowsBy[d.id];
+        html += '<section class="md-domain acc-' + escapeHtml(d.id) + '"><div class="md-title"><strong>' + escapeHtml(d.label) + '</strong> <span class="md-n">' + rows.length + '</span> <button type="button" class="link-btn" data-md-domain="">חזרה לכל התחומים</button></div>' + block(rows, 0) + '</section>';
+      });
+    }
     if (!m.total) html += '<p class="md-empty">אין משימות פתוחות היום 🎉</p>';
     box.innerHTML = html;
   }
@@ -6877,6 +6893,7 @@
     if (myDayBox) myDayBox.addEventListener('click', function (e) {
       var d = e.target.closest('[data-md-domain]');
       if (d) { myDayDomain = myDayDomain === d.getAttribute('data-md-domain') ? '' : d.getAttribute('data-md-domain'); renderMyDay(); return; }
+      if (e.target.closest('[data-crm]')) return; // task buttons → handleCrmClick
       var r = e.target.closest('[data-md-open]');
       if (r) myDayOpen(r.getAttribute('data-md-open'), r.getAttribute('data-md-id'), r.getAttribute('data-md-name'));
     });
