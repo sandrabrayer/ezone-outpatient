@@ -524,8 +524,12 @@ function _crossAppPhone(cl) {
 
 /* Columns that must be stored as plain text: phones (leading zeros) and the
  * who/when stamps (ISO timestamps that Sheets would otherwise Date-coerce). */
-function _isTextForcedColumn(name) {
-  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name] || PACKAGE_TEXT_COLUMNS[name]);
+function _isTextForcedColumn(name, headers) {
+  // CRM_TEXT_COLUMNS applies ONLY to the CRM sheets (Tasks / Activity): their
+  // generic names (createdAt, dueTime …) must not change how other sheets store
+  // same-named cells.
+  var crm = (headers === TASKS_HEADERS || headers === ACTIVITY_HEADERS) && CRM_TEXT_COLUMNS[name];
+  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name] || PACKAGE_TEXT_COLUMNS[name] || crm);
 }
 
 /* Force '@' (plain text) format on any phone / stamp columns in this sheet,
@@ -535,7 +539,7 @@ function _formatPhoneColumns(sh, headers) {
   var maxRows = sh.getMaxRows();
   if (maxRows < 2) return;
   for (var i = 0; i < headers.length; i++) {
-    if (_isTextForcedColumn(headers[i])) {
+    if (_isTextForcedColumn(headers[i], headers)) {
       sh.getRange(2, i + 1, maxRows - 1, 1).setNumberFormat('@');
     }
   }
@@ -781,7 +785,7 @@ function _writeAll(sh, headers, rows) {
   // and ISO timestamps survive (Sheets would otherwise coerce a numeric-looking
   // phone to a number and an ISO string to a Date).
   for (var c = 0; c < headers.length; c++) {
-    if (_isTextForcedColumn(headers[c])) {
+    if (_isTextForcedColumn(headers[c], headers)) {
       sh.getRange(2, c + 1, values.length, 1).setNumberFormat('@');
     }
   }
@@ -4245,6 +4249,313 @@ function _saveContinuation(payload) {
   }
 }
 
+
+/* ===== CRM: Tasks + Activity + contact history (OP-CRM-3B) ================
+ * CHANGELOG-crm-tasks-activity.md. Adapted from the Dashboard CRM (E-Zone-
+ * Dashboard docs/crm/SPEC §8/§14) to this app's data model: a subject is a
+ * Lead (leadId) or a Client (clientId); the actor is ALWAYS the session user
+ * the Node proxy injected (payload.user) — never a browser field; every write
+ * is idempotent by a browser-minted submissionId so a retry after a lost
+ * response creates nothing twice; money tasks (kind 'collection' / money flag)
+ * are invisible to an operational session (payload.moneyScope 'ops', also
+ * proxy-decided). Both sheets are auto-created and APPEND-ONLY. */
+var TASKS_SHEET = 'Tasks';
+var TASKS_HEADERS = [
+  'id', 'kind', 'leadId', 'clientId', 'title', 'reason', 'assignee',
+  'dueDate', 'dueTime', 'status', 'source', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy',
+  'doneAt', 'doneBy', 'outcome', 'deferredFrom', 'contactEventId', 'submissionId', 'money'
+];
+var ACTIVITY_SHEET = 'Activity';
+var ACTIVITY_HEADERS = [
+  'eventId', 'occurredAt', 'recordedAt', 'kind', 'source', 'actorName',
+  'leadId', 'clientId', 'summary', 'detailsJson', 'nextAction', 'nextDate'
+];
+var CRM_TEXT_COLUMNS = {
+  id: true, eventId: true, submissionId: true, createdAt: true, doneAt: true, occurredAt: true,
+  recordedAt: true, dueDate: true, dueTime: true, nextDate: true, deferredFrom: true, contactEventId: true
+};
+var TASK_KINDS = ['call', 'meeting', 'intro', 'plan', 'activation', 'continuity', 'collection', 'review', 'other'];
+var TASK_STATUSES = ['open', 'done', 'deferred', 'cancelled'];
+var TASK_SOURCES = ['manual', 'contact', 'derived'];
+var CONTACT_CHANNELS = ['phone', 'whatsapp', 'meeting', 'email', 'other'];
+var CONTACT_OUTCOMES = ['spoke_follow_up', 'no_answer', 'call_back_later', 'awaiting_decision', 'meeting_set', 'no_interest_now', 'bad_contact_details', 'stop_contact'];
+var CONTACT_OUTCOME_HE = {
+  spoke_follow_up: 'התקיימה שיחה ונדרש המשך', no_answer: 'לא היה מענה', call_back_later: 'התבקשנו לחזור במועד',
+  awaiting_decision: 'ממתינים להחלטה או למידע', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע',
+  bad_contact_details: 'פרטי הקשר אינם תקינים', stop_contact: 'התבקשה הפסקת פניות'
+};
+var CRM_ID_RE = /^[A-Za-z0-9_:-]{1,120}$/;
+var CRM_TASK_MAX = 1000, CRM_ACTIVITY_MAX = 600;
+
+function _crmText(v, max) { return _sanitizeLeadText(v, max); }
+function _crmIso(v) { return _isContinuationDate(v) ? String(v == null ? '' : v).trim() : null; } // '' or yyyy-MM-dd, else null
+function _crmTime(v) { var t = String(v == null ? '' : v).trim(); return t === '' || /^\d{2}:\d{2}$/.test(t) ? t : null; }
+function _crmNow() { return new Date().toISOString(); }
+function _crmToday() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd'); }
+function _crmNo(reason, extra) { var o = { ok: false, error: reason }; if (extra) for (var k in extra) o[k] = extra[k]; return o; }
+function _crmActor(payload) { return _requestUser(payload); }
+function _crmOps(payload) { return _isOpsScope(payload); }
+function _crmAssignee(v) { var a = String(v == null ? '' : v).trim(); return CARE_ASSIGNEES_OK(a) ? a : ''; }
+function CARE_ASSIGNEES_OK(a) { return a === 'ורד' || a === 'אורן' || a === 'דנה'; }
+function _crmSubmissionId(v) { var x = String(v == null ? '' : v).trim(); return CRM_ID_RE.test(x) ? x : null; }
+function _taskMoney(t) { return t.kind === 'collection' || String(t.money) === 'true'; }
+function _taskVisible(t, payload) { return !(_crmOps(payload) && _taskMoney(t)); }
+
+function _tasksRead(sh) { return _readAll(sh, TASKS_HEADERS); }
+function _activityAppend(sh, ev) {
+  // dedupe by eventId (append-only sheet: a replay answers the same event)
+  var idCol = 1, lastRow = sh.getLastRow();
+  if (lastRow >= 2) {
+    var ids = sh.getRange(2, idCol, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === ev.eventId) return { written: false, duplicate: true };
+  }
+  var rowNum = lastRow + 1;
+  for (var c = 0; c < ACTIVITY_HEADERS.length; c++) {
+    if (_isTextForcedColumn(ACTIVITY_HEADERS[c], ACTIVITY_HEADERS)) sh.getRange(rowNum, c + 1).setNumberFormat('@');
+  }
+  sh.getRange(rowNum, 1, 1, ACTIVITY_HEADERS.length).setValues([ACTIVITY_HEADERS.map(function (h) { return ev[h] == null ? '' : ev[h]; })]);
+  return { written: true };
+}
+function _activityEvent(kind, subject, actor, summary, details, eventId, extra) {
+  var ev = {
+    eventId: eventId, occurredAt: (extra && extra.occurredAt) || _crmNow(), recordedAt: _crmNow(), kind: kind, source: (extra && extra.source) || 'manual',
+    actorName: actor, leadId: subject.leadId || '', clientId: subject.clientId || '',
+    summary: _crmText(summary, 300), detailsJson: JSON.stringify(details || {}),
+    nextAction: _crmText(extra && extra.nextAction, 200), nextDate: (extra && extra.nextDate) || ''
+  };
+  return ev;
+}
+function _taskOut(t) { var o = {}; for (var i = 0; i < TASKS_HEADERS.length; i++) { var h = TASKS_HEADERS[i]; o[h] = t[h] == null ? '' : t[h]; } o.money = _taskMoney(t); return o; }
+
+/* GET action=getTasks[&status=open|done|deferred|cancelled][&leadId=|&clientId=] */
+function _getTasks(params, payload) {
+  var p = params || {};
+  var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+  var rows = _tasksRead(sh), out = [];
+  var status = String(p.status || '').trim(), leadId = String(p.leadId || '').trim(), clientId = String(p.clientId || '').trim();
+  for (var i = 0; i < rows.length && out.length < CRM_TASK_MAX; i++) {
+    var t = rows[i];
+    if (!t.id) continue;
+    if (!_taskVisible(t, payload)) continue;
+    if (status && String(t.status) !== status) continue;
+    if (leadId && String(t.leadId) !== leadId) continue;
+    if (clientId && String(t.clientId) !== clientId) continue;
+    out.push(_taskOut(t));
+  }
+  return { ok: true, tasks: out };
+}
+/* GET action=getActivity[&leadId=|&clientId=][&limit=] — newest first. */
+function _getActivity(params, payload) {
+  var p = params || {};
+  var sh = _ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS);
+  var rows = _readAll(sh, ACTIVITY_HEADERS);
+  var leadId = String(p.leadId || '').trim(), clientId = String(p.clientId || '').trim();
+  var limit = parseInt(p.limit, 10); if (!(limit > 0) || limit > CRM_ACTIVITY_MAX) limit = CRM_ACTIVITY_MAX;
+  var ops = _crmOps(payload), out = [];
+  for (var i = rows.length - 1; i >= 0 && out.length < limit; i--) {
+    var e = rows[i];
+    if (!e.eventId) continue;
+    if (leadId && String(e.leadId) !== leadId) continue;
+    if (clientId && String(e.clientId) !== clientId) continue;
+    if (ops && /collection|payment|money/.test(String(e.kind))) continue;
+    out.push(e);
+  }
+  return { ok: true, events: out };
+}
+
+function _taskClean(input, actor, nowIso, sid) {
+  var b = input && typeof input === 'object' ? input : {};
+  var kind = String(b.kind == null ? 'other' : b.kind).trim() || 'other';
+  if (TASK_KINDS.indexOf(kind) < 0) return _crmNo('bad_kind');
+  var leadId = _crmText(b.leadId, 120), clientId = _crmText(b.clientId, 120);
+  if (!leadId && !clientId) return _crmNo('missing_subject');
+  var title = _crmText(b.title, 160);
+  if (!title) return _crmNo('missing_title');
+  var dueDate = _crmIso(b.dueDate); if (dueDate === null) return _crmNo('bad_due');
+  var dueTime = _crmTime(b.dueTime); if (dueTime === null) return _crmNo('bad_due');
+  var rawAssignee = String(b.assignee == null ? '' : b.assignee).trim();
+  var assignee = rawAssignee ? _crmAssignee(rawAssignee) : actor;
+  if (rawAssignee && !assignee) return _crmNo('bad_assignee');
+  var source = String(b.source == null ? 'manual' : b.source).trim() || 'manual';
+  if (TASK_SOURCES.indexOf(source) < 0) source = 'manual';
+  return { ok: true, task: {
+    id: 'task-' + sid, kind: kind, leadId: leadId, clientId: clientId, title: title, reason: _crmText(b.reason, 300),
+    assignee: assignee, dueDate: dueDate, dueTime: dueDate ? dueTime : '', status: 'open', source: source,
+    createdAt: nowIso, createdBy: actor, updatedAt: nowIso, updatedBy: actor,
+    doneAt: '', doneBy: '', outcome: '', deferredFrom: '', contactEventId: '', submissionId: sid,
+    money: (kind === 'collection' || b.money === true) ? 'true' : ''
+  } };
+}
+
+/* POST action=createTask { task:{...}, submissionId } — idempotent by submissionId. */
+function _createTask(payload) {
+  var actor = _crmActor(payload);
+  var sid = _crmSubmissionId(payload && payload.submissionId);
+  if (!sid) return _crmNo('bad_submission_id');
+  var v = _taskClean(payload && payload.task, actor, _crmNow(), sid);
+  if (!v.ok) return v;
+  if (!_taskVisible(v.task, payload)) return _crmNo('forbidden_money_task');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return _crmNo('busy');
+  try {
+    var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+    var rows = _tasksRead(sh);
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === v.task.id) return { ok: true, task: _taskOut(rows[i]), created: false, replayed: true };
+    rows.push(v.task);
+    _writeAll(sh, TASKS_HEADERS, rows);
+    _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
+      _activityEvent('task_created', v.task, actor, 'משימה נוצרה: ' + v.task.title, { id: v.task.id, kind: v.task.kind, dueDate: v.task.dueDate, assignee: v.task.assignee }, 'task_created:' + v.task.id, { nextAction: v.task.title, nextDate: v.task.dueDate }));
+    return { ok: true, task: _taskOut(v.task), created: true };
+  } finally { try { lock.releaseLock(); } catch (_) {} }
+}
+
+/* Shared mutation of ONE open/deferred task under the lock. */
+function _taskMutate(payload, apply, eventKind, summaryOf) {
+  var actor = _crmActor(payload);
+  var id = String(payload && payload.id == null ? '' : payload.id).trim();
+  if (!CRM_ID_RE.test(id)) return _crmNo('not_found');
+  var nowIso = _crmNow();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return _crmNo('busy');
+  try {
+    var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+    var rows = _tasksRead(sh), idx = -1;
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === id) { idx = i; break; }
+    if (idx < 0) return _crmNo('not_found');
+    var t = rows[idx];
+    if (!_taskVisible(t, payload)) return _crmNo('not_found');
+    if (t.status !== 'open' && t.status !== 'deferred') return _crmNo('not_open', { task: _taskOut(t) });
+    var prev = {}; for (var k in t) prev[k] = t[k];
+    var res = apply(t, nowIso, actor);
+    if (res && res.ok === false) return res;
+    t.updatedAt = nowIso; t.updatedBy = actor;
+    _writeAll(sh, TASKS_HEADERS, rows);
+    _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
+      _activityEvent(eventKind, t, actor, summaryOf(t, prev), (res && res.details) || {}, eventKind + ':' + id + ':' + nowIso.replace(/[^0-9]/g, '').slice(0, 14),
+        { nextAction: t.status === 'open' || t.status === 'deferred' ? t.title : '', nextDate: t.status === 'open' || t.status === 'deferred' ? t.dueDate : '' }));
+    return { ok: true, task: _taskOut(t) };
+  } finally { try { lock.releaseLock(); } catch (_) {} }
+}
+/* POST action=completeTask { id, outcome? } */
+function _completeTask(payload) {
+  return _taskMutate(payload, function (t, nowIso, actor) {
+    t.status = 'done'; t.doneAt = nowIso; t.doneBy = actor; t.outcome = _crmText(payload.outcome, 300);
+    return { ok: true, details: { outcome: t.outcome } };
+  }, 'task_completed', function (t) { return 'המשימה הושלמה: ' + t.title; });
+}
+/* POST action=deferTask { id, dueDate, dueTime?, reason } — the previous date is kept in deferredFrom + Activity. */
+function _deferTask(payload) {
+  return _taskMutate(payload, function (t) {
+    var d = _crmIso(payload.dueDate); if (!d) return _crmNo('bad_due');
+    var tm = _crmTime(payload.dueTime); if (tm === null) return _crmNo('bad_due');
+    var reason = _crmText(payload.reason, 300);
+    if (reason.length < 2) return _crmNo('missing_reason');
+    var prev = t.dueDate;
+    t.deferredFrom = prev || t.deferredFrom || ''; t.dueDate = d; t.dueTime = tm; t.status = 'deferred';
+    return { ok: true, details: { prev: prev, next: d, reason: reason } };
+  }, 'task_deferred', function (t, prev) { return 'המשימה נדחתה: ' + (prev.dueDate || '—') + ' ← ' + t.dueDate; });
+}
+/* POST action=reassignTask { id, assignee } */
+function _reassignTask(payload) {
+  return _taskMutate(payload, function (t) {
+    var a = _crmAssignee(payload.assignee); if (!a) return _crmNo('bad_assignee');
+    var prev = t.assignee; t.assignee = a;
+    return { ok: true, details: { prev: prev, next: a } };
+  }, 'task_reassigned', function (t, prev) { return 'האחריות הועברה: ' + (prev.assignee || '—') + ' ← ' + t.assignee; });
+}
+/* POST action=withdrawTask { id, reason } — the row stays (status cancelled). */
+function _withdrawTask(payload) {
+  return _taskMutate(payload, function (t, nowIso, actor) {
+    var reason = _crmText(payload.reason, 300); if (reason.length < 2) return _crmNo('missing_reason');
+    t.status = 'cancelled'; t.outcome = reason; t.doneAt = nowIso; t.doneBy = actor;
+    return { ok: true, details: { reason: reason } };
+  }, 'task_cancelled', function (t) { return 'המשימה בוטלה: ' + t.title; });
+}
+
+/* POST action=logContact { contact:{ leadId|clientId, channel, outcome, summary, withWhom?, occurredAt?, taskId? },
+ *                           next:{ none:true, explanation } | { dueDate, dueTime?, kind?, title?, assignee? } | { days },
+ *                           submissionId }
+ * ONE transaction: Activity event 'contact:<sid>' (replay = same event, nothing twice);
+ * the task it fulfils → done; the follow-up task 'task-<sid>-next' (no default date — a
+ * follow-up either has a date or an explicit «אין המשך» with a reason). */
+function _logContact(payload) {
+  var actor = _crmActor(payload);
+  var sid = _crmSubmissionId(payload && payload.submissionId);
+  if (!sid) return _crmNo('bad_submission_id');
+  var c = payload && payload.contact && typeof payload.contact === 'object' ? payload.contact : null;
+  if (!c) return _crmNo('missing_contact');
+  var leadId = _crmText(c.leadId, 120), clientId = _crmText(c.clientId, 120);
+  if (!leadId && !clientId) return _crmNo('missing_subject');
+  var outcome = String(c.outcome == null ? '' : c.outcome).trim();
+  if (CONTACT_OUTCOMES.indexOf(outcome) < 0) return _crmNo('bad_outcome');
+  var channel = String(c.channel == null ? 'phone' : c.channel).trim() || 'phone';
+  if (CONTACT_CHANNELS.indexOf(channel) < 0) return _crmNo('bad_channel');
+  var summary = _crmText(c.summary, 1000);
+  var nowIso = _crmNow();
+  var occurredAt = nowIso;
+  if (c.occurredAt) {
+    var oc = String(c.occurredAt).trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(oc)) occurredAt = oc.length === 16 ? oc + ':00' : oc;
+    else if (_crmIso(oc)) occurredAt = oc + 'T12:00:00';
+    else return _crmNo('bad_occurred_at');
+  }
+  var n = payload.next && typeof payload.next === 'object' ? payload.next : null;
+  if (!n) return _crmNo('missing_next');
+  var nextTask = null, noNext = '';
+  if (n.none === true) {
+    noNext = _crmText(n.explanation, 300);
+    if (noNext.length < 2) return _crmNo('missing_next_explanation');
+  } else {
+    var dueDate = n.dueDate ? _crmIso(n.dueDate) : '';
+    if (n.dueDate && !dueDate) return _crmNo('bad_due');
+    if (!dueDate && n.days !== undefined && n.days !== null && n.days !== '') {
+      var days = parseInt(n.days, 10);
+      if (!(days >= 1 && days <= 365)) return _crmNo('bad_due');
+      var dt = new Date(_crmToday() + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + days);
+      dueDate = dt.toISOString().slice(0, 10);
+    }
+    if (!dueDate) return _crmNo('bad_due'); // no default date — ever
+    var v = _taskClean({ kind: n.kind || 'call', leadId: leadId, clientId: clientId,
+      title: _crmText(n.title, 160) || ('שיחה חוזרת' + (_crmText(c.withWhom, 80) ? ' עם ' + _crmText(c.withWhom, 80) : '')),
+      reason: _crmText(n.reason, 300) || CONTACT_OUTCOME_HE[outcome], assignee: n.assignee,
+      dueDate: dueDate, dueTime: n.dueTime, source: 'contact', money: n.money === true }, actor, nowIso, sid + '-next');
+    if (!v.ok) return v;
+    if (!_taskVisible(v.task, payload)) return _crmNo('forbidden_money_task');
+    nextTask = v.task;
+  }
+  var subject = { leadId: leadId, clientId: clientId };
+  var ev = _activityEvent('contact_logged', subject, actor,
+    CONTACT_OUTCOME_HE[outcome] + (summary ? ' · ' + summary.slice(0, 150) : ''),
+    { channel: channel, withWhom: _crmText(c.withWhom, 80), outcome: outcome, summary: summary, taskId: _crmText(c.taskId, 120), nextTaskId: nextTask ? nextTask.id : '', noNext: noNext },
+    'contact:' + sid, { occurredAt: occurredAt, nextAction: nextTask ? nextTask.title : (noNext ? 'אין המשך: ' + noNext : ''), nextDate: nextTask ? nextTask.dueDate : '' });
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return _crmNo('busy');
+  try {
+    var wrote = _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS), ev);
+    var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+    var rows = _tasksRead(sh), changed = false, completed = null, created = null;
+    var tid = _crmText(c.taskId, 120);
+    if (tid) {
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i].id) !== tid || !_taskVisible(rows[i], payload)) continue;
+        if (rows[i].status === 'open' || rows[i].status === 'deferred') {
+          rows[i].status = 'done'; rows[i].doneAt = nowIso; rows[i].doneBy = actor; rows[i].outcome = CONTACT_OUTCOME_HE[outcome];
+          rows[i].contactEventId = ev.eventId; rows[i].updatedAt = nowIso; rows[i].updatedBy = actor; changed = true;
+        }
+        completed = _taskOut(rows[i]); break;
+      }
+    }
+    if (nextTask) {
+      var prior = null;
+      for (var j = 0; j < rows.length; j++) if (String(rows[j].id) === nextTask.id) { prior = rows[j]; break; }
+      if (prior) created = _taskOut(prior); else { rows.push(nextTask); created = _taskOut(nextTask); changed = true; }
+    }
+    if (changed) _writeAll(sh, TASKS_HEADERS, rows);
+    return { ok: true, event: { eventId: ev.eventId, occurredAt: ev.occurredAt, kind: ev.kind, summary: ev.summary, nextAction: ev.nextAction, nextDate: ev.nextDate },
+      completed: completed, created: created, replayed: wrote.duplicate === true };
+  } finally { try { lock.releaseLock(); } catch (_) {} }
+}
+
 /* ===== Source authentication boundary (OP-01) =============================
  * Every HTTP action is classified before any business handler or Sheets access.
  * Browser sessions end at Node; internal actions require its dedicated key.
@@ -5538,6 +5849,8 @@ var SOURCE_GET_AUTH = {
   getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
+  getTasks: 'OUTPATIENT_PROXY_SECRET',
+  getActivity: 'OUTPATIENT_PROXY_SECRET',
   getCredits: 'OUTPATIENT_PROXY_SECRET',
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
   // Package catalog (managers): price-free reads, their own scoped secret.
@@ -5585,6 +5898,14 @@ var SOURCE_POST_AUTH = {
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   saveContinuation: 'OUTPATIENT_PROXY_SECRET',
+  getTasks: 'OUTPATIENT_PROXY_SECRET',
+  getActivity: 'OUTPATIENT_PROXY_SECRET',
+  createTask: 'OUTPATIENT_PROXY_SECRET',
+  completeTask: 'OUTPATIENT_PROXY_SECRET',
+  deferTask: 'OUTPATIENT_PROXY_SECRET',
+  reassignTask: 'OUTPATIENT_PROXY_SECRET',
+  withdrawTask: 'OUTPATIENT_PROXY_SECRET',
+  logContact: 'OUTPATIENT_PROXY_SECRET',
   resolveStopFlag: 'resolveStopFlag',
   mergeClients: 'OUTPATIENT_PROXY_SECRET',
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
@@ -5696,6 +6017,8 @@ function doGet(e) {
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
+    if (action === 'getTasks') return _json(_getTasks(e && e.parameter, { moneyScope: e && e.parameter && e.parameter.moneyScope }));
+    if (action === 'getActivity') return _json(_getActivity(e && e.parameter, { moneyScope: e && e.parameter && e.parameter.moneyScope }));
     // INTERNAL dashboard read (same trust level as getData): the credits /
     // refunds ledger. No new unauthenticated surface — the browser only ever
     // reaches this through the session-cookie-gated /api/sheets proxy.
@@ -5903,6 +6226,14 @@ function doPost(e) {
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
+    if (action === 'getTasks') return _json(_getTasks(payload, payload));
+    if (action === 'getActivity') return _json(_getActivity(payload, payload));
+    if (action === 'createTask') return _json(_createTask(payload));
+    if (action === 'completeTask') return _json(_completeTask(payload));
+    if (action === 'deferTask') return _json(_deferTask(payload));
+    if (action === 'reassignTask') return _json(_reassignTask(payload));
+    if (action === 'withdrawTask') return _json(_withdrawTask(payload));
+    if (action === 'logContact') return _json(_logContact(payload));
     if (action === 'resolveStopFlag') {
       // A request carrying a secret is the secured therapists-app receiver
       // (resolve by canonical phone, fail-closed). Without a secret it is the

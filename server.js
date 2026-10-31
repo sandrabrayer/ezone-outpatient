@@ -418,6 +418,10 @@ app.get('/api/sheets', requireSession, async (req, res) => {
       + (SHEETS_URL.includes('?') ? '&' : '?')
       + 'action=' + encodeURIComponent(action)
       + '&proxySecret=' + encodeURIComponent(OUTPATIENT_PROXY_SECRET)
+      // OP-CRM-3A/3B: the SERVER-decided money scope rides on reads too (money
+      // tasks / money activity are filtered at the source for an ops session).
+      // Built from `action` only, so a browser query string cannot smuggle it.
+      + '&moneyScope=' + encodeURIComponent(requestMoneyScope(req))
       + (req.query.secret ? '&secret=' + encodeURIComponent(req.query.secret) : '');
     const r = await fetch(url, { redirect: 'follow' });
     const text = await r.text();
