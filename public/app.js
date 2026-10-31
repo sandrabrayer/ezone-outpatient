@@ -6722,13 +6722,16 @@
       // Fired in PARALLEL: total load = slowest call, not the sum (was serial,
       // 6-18s worst case). Non-critical reads fall back to empty on failure —
       // same semantics as before; only the main load (apiLoad) is fatal.
+      // OP-CRM-3A: an operational session does not even ask for money (the
+      // server would answer 403); three fewer round-trips at boot for דנה.
+      var ops = isOpsScope();
       var results = await Promise.all([
         apiLoad(),
-        apiGetPayments().catch(function (pe) {
+        ops ? Promise.resolve({ payments: [] }) : apiGetPayments().catch(function (pe) {
           console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
           return { payments: [] };
         }),
-        apiGetCharges().catch(function (ce) {
+        ops ? Promise.resolve({ charges: [] }) : apiGetCharges().catch(function (ce) {
           console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
           return { charges: [] };
         }),
@@ -6740,7 +6743,7 @@
           console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
           return { requests: [] };
         }),
-        apiLoadSettings().catch(function () { return {}; }),
+        ops ? Promise.resolve({}) : apiLoadSettings().catch(function () { return {}; }),
         apiGetMyStopAlerts().catch(function (mse) {
           console.warn('[ezone] getMyStopAlerts failed, assuming empty:', mse.message);
           return { myStopAlerts: [] };

@@ -46,6 +46,11 @@ Files in each app's `public/`: `favicon.ico` (16/32/48), `favicon.svg`,
 (no deps); served by explicit public routes in `server.js`; how to replace:
 `docs/favicons.md`. SW: therapists v48, outpatient v18. PWA/home-screen icons unchanged.
 
+## Outpatient CRM program (issue #141) — Phase F: acceptance + release checklist (Oct 31, 2026 — DRAFT; release candidate = chain #142–#147)
+
+- `docs/crm/ACCEPTANCE-OUTPATIENT.md` (scenarios → evidence, measured boot numbers), `docs/crm/RELEASE-CHECKLIST.md`
+  (order, gates, Apps Script phase, `HANDOFF_STATUS_SECRET`, rollback). Nothing merged or deployed.
+
 ## Outpatient CRM program (issue #141) — Phase D: `getHandoffStatus` for the Dashboard (Oct 31, 2026 — DRAFT, stacked on C)
 
 - Read-only, exact-id, fail-closed (`HANDOFF_STATUS_SECRET`) feed answering «what happened to the referred patient» with
