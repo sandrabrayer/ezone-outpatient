@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 independent HEAD source-witness candidate (2026-10-31; DRAFT, NOT RUN)
+- Added source-identity/hash-only witness tooling, synthetic tests and a non-executable operator workflow sketch. No Google credential use, source read, helper installation, header write, production merge or deploy. This is stacked on integrated OP-03 PR #139; see [CHANGELOG-op03-source-witness.md](CHANGELOG-op03-source-witness.md) and [docs/op03-source-witness.md](docs/op03-source-witness.md).
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 
