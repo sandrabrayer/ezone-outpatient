@@ -213,10 +213,11 @@ test('app.js wiring: mark/unmark key on the cycle row and remember dueDateISO fo
   assert.match(fn, /dueDateISO = cyclePaymentDueDate\(c, todayIso\)/);
   assert.match(fn, /\(prevRemembered && prevRemembered\.dueDateISO\) \|\|\s*\n\s*latestPaidBaseDueDate\(c\) \|\|\s*\n\s*prevCycleDueDateBefore\(c, c\.nextBillingDate\)/);
   assert.match(fn, /dueDateISO: dueDateISO \}/);
-  // the advance rule is #94's, clamped to land strictly after today
-  assert.match(fn, /nextCycleDueDateAfter\(c, dueDateISO\)/);
-  assert.match(fn, /if \(advanced && advanced <= todayIso\)/);
-  assert.match(fn, /nextCycleDueDate\(c, addDays\(todayIso, 1\)\)/);
+  // NEW verified receipts advance from the actual payment date, not old due day.
+  // Past-due arrears must be reviewed rather than silently skipped.
+  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate\)/);
+  assert.match(fn, /dueDateISO < todayIso/);
+  assert.match(fn, /var advanced = verified\.next/);
   // the revert lands strictly behind today
   assert.match(fn, /\{ nextBillingDate: revertTo, paymentDate: c\.paymentDate \}/);
 });
