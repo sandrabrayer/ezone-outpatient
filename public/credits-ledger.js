@@ -312,10 +312,32 @@
    * would be a lie — and stamping its single day would change what the
    * credits ledger reads for that row today. Blank keeps BOTH readers exactly
    * where they are. */
-  function withDefaultCoverage(payment) {
+  /* The policy for NEW, ordinary monthly receipts. This does not reinterpret
+   * historical rows; callers must opt in explicitly at the new-write boundary.
+   * A coverage period is inclusive; the next collection is the following day. */
+  function paymentDateCoverage(value) {
+    var iso = coverageDateISO(value);
+    var d = iso && localDateFromISO(iso);
+    if (!d) return null;
+    var next = addMonthsClamped(d, 1);
+    return { start: iso, end: isoFromLocalDate(addDays(next, -1)),
+      next: isoFromLocalDate(next) };
+  }
+
+  function withDefaultCoverage(payment, options) {
     if (!payment) return payment;
     if (isOneTimePayment(payment)) return payment;
     if (recordedCoverage(payment)) return payment;
+    // Only a confirmed NEW base monthly receipt may opt into the paid-date
+    // policy. A partial/unpaid row or extra charge never advances coverage.
+    var newPaid = options && options.newPaidMonthly === true &&
+      str(payment.status) === 'paid' && str(payment.billingType) === 'monthly' &&
+      Number(payment.amountDue) > 0 &&
+      Number(payment.amountPaid) >= Number(payment.amountDue);
+    var win = newPaid && paymentDateCoverage(payment.paymentDate);
+    if (win) return assign({}, payment, {
+      coverageStart: win.start, coverageEnd: win.end
+    });
     var inf = inferredCoverage(payment);
     if (!inf) return payment;
     return assign({}, payment, {
@@ -813,6 +835,7 @@
     inferredCoverage: inferredCoverage,
     recordedCoverage: recordedCoverage,
     paymentCoverage: paymentCoverage,
+    paymentDateCoverage: paymentDateCoverage,
     paidThroughReview: paidThroughReview,
     coverageDiffersFromDefault: coverageDiffersFromDefault,
     withDefaultCoverage: withDefaultCoverage,
