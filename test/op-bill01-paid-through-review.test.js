@@ -71,7 +71,7 @@ test('Explicit verified coverage disagrees with stored nextBillingDate: show act
 test('Contiguous verified payments extend coverage with no phantom new receipt', () => {
   const rows = [
     paid('2026-10', '2026-10-15', '2026-10-15', '2026-10-15', '2026-11-14'),
-    paid('2026-11', '2026-10-31', '2026-11-15', '2026-11-15', '2026-12-14')
+    paid('2026-11', '2026-10-31', '2026-11-20', '2026-11-15', '2026-12-14')
   ];
   const r = inspect(client('2026-12-15'), rows);
   assert.equal(r.state, 'confirmed');
@@ -100,7 +100,7 @@ test('Missing or invalid paid date is not silently accepted as a current month, 
 });
 
 test('Multi-cycle gap is not bridged by adding months to the next collection date', () => {
-  const p = paid('2026-11', '2026-11-20', '2026-11-20', '2026-11-20', '2026-12-19');
+  const p = paid('2026-11', '2026-10-29', '2026-11-15', '2026-11-20', '2026-12-19');
   const r = inspect(client('2026-12-20'), [p], '2026-11-01');
   assert.equal(r.state, 'review');
   assert.equal(r.reason, 'coverage_gap_or_future_advance');
