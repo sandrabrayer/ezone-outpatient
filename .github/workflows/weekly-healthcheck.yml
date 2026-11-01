@@ -5,6 +5,8 @@ name: Weekly Healthcheck
 #
 # 18:00 UTC Saturday = 21:00 IDT (summer) / 20:00 IST (winter).
 #
+# Auth: uses APP_PIN with the allow-listed shared-PIN user to request a NAMED
+# signed session cookie. A PIN-only pre-auth cookie cannot access data endpoints.
 # Failure semantics:
 #   - CRITICAL breakage (shell down, PIN rejected, loadAll endpoint broken,
 #     clients schema drift) -> the job fails -> GitHub emails the workflow
