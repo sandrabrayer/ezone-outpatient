@@ -3093,6 +3093,12 @@
         currentMonthBaseDueDate(c);
     }
     var base = paymentForClientOn(c, dueDateISO);
+    // Do not let the quick toggle forgive arrears or re-date an existing paid
+    // receipt. Such source discrepancies require explicit financial review.
+    if (makePaid && (base.status === 'paid' || dueDateISO < todayIso)) {
+      toast('נדרש בירור גבייה קודמת — יש לטפל ברשומת הגבייה', true);
+      return;
+    }
     var newStatus = makePaid ? 'paid' : 'unpaid';
     // Write the row only when it actually changes; when it already says so
     // (legacy paid row, already-reverted row) only the anchor moves — the
@@ -3117,13 +3123,14 @@
     var clientPatch;
     if (makePaid) {
       monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate, dueDateISO: dueDateISO };
-      var advanced = nextCycleDueDateAfter(c, dueDateISO);
-      // An anchor several cycles stale advances one cycle into the PAST; the
-      // mark must land strictly ahead so the package reads paid-up (the first
-      // cycle after today).
-      if (advanced && advanced <= todayIso) {
-        advanced = nextCycleDueDate(c, addDays(todayIso, 1)) || advanced;
+      var verified = CL && CL.paymentDateCoverage(updated.paymentDate);
+      if (!verified) {
+        delete monthPaidPrevClient[c.id];
+        toast('תאריך תשלום לא תקין', true);
+        return;
       }
+      // Never advance from the old scheduled due day for a new full receipt.
+      var advanced = verified.next;
       clientPatch = {
         nextBillingDate: advanced,
         paymentDate: (!rowNeedsWrite && base.paymentDate) || today()
@@ -6898,9 +6905,13 @@
         // Next collection = the cycle AFTER the intake month, on the client's
         // billing day (else the startDate day-of-month, clamped) — anchored on
         // the startDate cycle, never payDate+30, so the billing day never drifts.
-        var nextBill = startDate
-          ? nextCycleDueDateAfter({ billingDay: bdDay || '', startDate: startDate }, startDate)
-          : '';
+        var intakeCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate);
+        if (payStatus === 'paid' && (!intakeCoverage || payDate < startDate || payDate > today())) {
+          toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+          submit.disabled = false;
+          return;
+        }
+        var nextBill = payStatus === 'paid' ? intakeCoverage.next : startDate;
         var client = {
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
@@ -7071,7 +7082,13 @@
       // Next collection = the cycle AFTER the activation month, on the
       // startDate day-of-month (clamped) — anchored on the startDate cycle,
       // never payDate+30, so the billing day never drifts.
-      var nextBill = nextCycleDueDateAfter({ billingDay: '', startDate: startDate }, startDate);
+      var activateCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate);
+      if (payStatus === 'paid' && (!activateCoverage || payDate < startDate || payDate > today())) {
+        toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+        submit.disabled = false;
+        return;
+      }
+      var nextBill = payStatus === 'paid' ? activateCoverage.next : startDate;
 
       var client = {
         id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
