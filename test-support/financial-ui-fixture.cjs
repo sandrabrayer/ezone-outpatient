@@ -30,6 +30,7 @@ function fixture(fields = {}) {
   const out = { notices: [], writes: [], closed: [], renders: 0, reloads: 0 };
   let serial = 0;
   const ctx = {
+    CL: require('../public/credits-ledger'),
     state: { clients: [client], leads: [lead], payments: [], charges: [] },
     renewClientId: client.id, addChargeClientId: client.id, editClientId: client.id, activateLeadId: lead.id,
     $: (selector) => selector === '#financialSaveWarning' ? warning : selector === '#financialSaveWarningText' ? warningText : selector.startsWith('[data-') ? null : button,
