@@ -39,7 +39,10 @@ function fullClient(overrides) {
 function okPayloads(overrides) {
   const p = {
     '/': '<!doctype html><html><body>E-ZONE Outpatient</body></html>',
-    'verify-pin': { status: 200, json: { ok: true } },
+    'verify-pin': {
+      status: 200, json: { ok: true, stage: 'named' },
+      cookies: ['ezone_session=synthetic-named-token; HttpOnly; Path=/', 'ezone_catalog_admin=; Max-Age=0']
+    },
     'action=getPayments': { ok: true, payments: [{ id: 'p1', clientId: 'c1', dueDate: '2026-07-01', paymentDate: '2026-07-02' }] },
     'action=getCharges': { ok: true, charges: [{ id: 'ch1', clientId: 'c1', chargeDate: '2026-07-03' }] },
     'action=getStopFlags': { ok: true, stopFlags: [] },
@@ -92,8 +95,57 @@ test('all endpoints healthy -> no criticals, no warnings', async () => {
   const r = await run(okPayloads());
   assert.deepEqual(r.criticals, []);
   assert.deepEqual(r.warnings, []);
-  assert.ok(r.notes.some((n) => n.includes('stateless')), 'notes explain the no-cookie login');
+  assert.ok(r.notes.some((n) => n.includes('named session')), 'named cookie required for data access');
   assert.ok(r.notes.some((n) => n.includes('TherapistRates')), 'TherapistRates skip is noted');
+});
+
+test('login uses the allow-listed shared-PIN user and ONLY the named cookie on all protected reads', async () => {
+  const { SHARED_PIN_USER } = require('../lib/users');
+  const calls = [];
+  const delegate = mockFetch(okPayloads());
+  const r = await hc.runHealthcheck({
+    appUrl: BASE, appPin: DUMMY_PIN,
+    fetchImpl: async function (url, opts) {
+      calls.push({ url: String(url), method: opts && opts.method, body: opts && opts.body, cookie: opts && opts.headers && opts.headers.Cookie });
+      return delegate(url, opts);
+    }
+  });
+  assert.deepEqual(r.criticals, []);
+  const login = calls.find((c) => c.url.endsWith('/api/verify-pin'));
+  assert.deepEqual(JSON.parse(login.body), { pin: DUMMY_PIN, user: SHARED_PIN_USER });
+  const reads = calls.filter((c) => c.url.includes('/api/sheets'));
+  assert.equal(reads.length, hc.ENDPOINTS.length + 1, 'every loadAll read plus SessionLog');
+  assert.ok(reads.every((c) => c.cookie === 'ezone_session=synthetic-named-token'));
+  assert.ok(!JSON.stringify([r.notes, r.criticals, r.warnings]).includes(DUMMY_PIN));
+  assert.ok(!JSON.stringify([r.notes, r.criticals, r.warnings]).includes('synthetic-named-token'));
+});
+
+test('a PIN-only pre-auth stage is not accepted and no financial or clinical data is fetched', async () => {
+  let dataCalls = 0;
+  const delegate = mockFetch(okPayloads({ 'verify-pin': { status: 200, json: { ok: true, stage: 'name_required' },
+    cookies: ['ezone_session=synthetic-preauth-cookie; Path=/'] } }));
+  const r = await hc.runHealthcheck({ appUrl: BASE, appPin: DUMMY_PIN, fetchImpl: async function (url, opts) {
+    if (String(url).includes('/api/sheets')) dataCalls++;
+    return delegate(url, opts);
+  } });
+  assert.equal(dataCalls, 0);
+  assert.equal(r.criticals.length, 1);
+  assert.match(r.criticals[0], /named session required/);
+});
+
+test('a named response without exactly one session cookie is critical and stops data reads', async () => {
+  for (const cookies of [[], ['ezone_session=; Max-Age=0'],
+    ['ezone_session=a; Path=/', 'ezone_session=b; Path=/']]) {
+    let dataCalls = 0;
+    const delegate = mockFetch(okPayloads({ 'verify-pin': { status: 200, json: { ok: true, stage: 'named' }, cookies } }));
+    const r = await hc.runHealthcheck({ appUrl: BASE, appPin: DUMMY_PIN, fetchImpl: async (url, opts) => {
+      if (String(url).includes('/api/sheets')) dataCalls++;
+      return delegate(url, opts);
+    } });
+    assert.equal(dataCalls, 0, 'not safe to read with missing/ambiguous cookie');
+    assert.equal(r.criticals.length, 1);
+    assert.match(r.criticals[0], /named session cookie missing or ambiguous/);
+  }
 });
 
 /* ===== criticals ========================================================== */
