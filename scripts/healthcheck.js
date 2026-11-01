@@ -3,7 +3,7 @@
 /**
  * Weekly automated healthcheck for the E-ZONE Outpatient app.
  *
- * Standalone Node script (built-ins only, global fetch, Node 20+). Run by
+ * Standalone Node script (Node built-ins + local user constants; no npm install, Node 20+). Run by
  * .github/workflows/weekly-healthcheck.yml every Saturday evening (Israel time)
  * and on demand via workflow_dispatch.
  *
@@ -14,10 +14,10 @@
  *
  * CRITICAL checks (any failure -> exit 1, workflow goes red):
  *   a. GET APP_URL           -> 200 + HTML shell marker ("E-ZONE Outpatient").
- *   b. POST /api/verify-pin  -> 200 { ok:true }. This app is STATELESS: the PIN
- *      gate stores the role in the browser's sessionStorage and no session
- *      cookie is issued — any Set-Cookie is still captured and replayed
- *      defensively.
+ *   b. POST /api/verify-pin with { pin, user: SHARED_PIN_USER } -> HTTP 200
+ *      { ok:true, stage:'named' } plus a nonempty signed ezone_session cookie.
+ *      PIN-only login returns a pre-auth cookie that cannot read /api/sheets.
+ *      A missing named session is CRITICAL; data calls are not attempted.
  *   c. Every read the frontend's loadAll() fires in parallel (Promise.all in
  *      public/app.js): getData, getPayments, getCharges, getStopFlags,
  *      getExtraSessionRequests, getSettings, getMyStopAlerts
@@ -49,6 +49,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { SHARED_PIN_USER } = require('../lib/users');
 
 const DEFAULT_APP_URL = 'https://ezone-outpatient.up.railway.app';
 const HTML_SHELL_MARKER = 'E-ZONE Outpatient';
@@ -263,17 +264,24 @@ async function runHealthcheck(opts) {
     const login = await fetchWithRetry(fetchImpl, appUrl + '/api/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: appPin })
+      // Named sign-in is required: a PIN-only cookie is restricted to user selection.
+      body: JSON.stringify({ pin: appPin, user: SHARED_PIN_USER })
     });
     const body = classifyBody(login.text);
-    if (login.status === 200 && body.kind === 'json' && body.data && body.data.ok === true) {
-      const cookies = extractCookies(login.headers);
-      if (cookies.length) {
-        cookieHeader = cookies.join('; ');
-        notes.push('login: session cookie captured (' + cookies.length + ' cookie(s); values not logged)');
+    if (login.status === 200 && body.kind === 'json' && body.data &&
+        body.data.ok === true && body.data.stage === 'named') {
+      // Two Set-Cookie headers are expected (session + cleared catalog admin).
+      // Forward ONLY the signed session cookie to the data routes.
+      const sessionCookies = extractCookies(login.headers)
+        .filter(function (c) { return /^ezone_session=[^;]+$/.test(c); });
+      if (sessionCookies.length === 1) {
+        cookieHeader = sessionCookies[0];
+        notes.push('login: named session cookie captured (value not logged)');
       } else {
-        notes.push('login: PIN accepted; no session cookie issued — this app is stateless by design (role lives in browser sessionStorage)');
+        criticals.push('login: named session cookie missing or ambiguous — no data requests attempted');
       }
+    } else if (login.status === 200) {
+      criticals.push('login: named session required (wrong login stage or response shape) — no data requests attempted');
     } else if (login.status === 401) {
       criticals.push('login: PIN rejected (401) — the APP_PIN secret does not match the deployed APP_PIN');
     } else if (login.status === 429) {
@@ -284,6 +292,10 @@ async function runHealthcheck(opts) {
   } catch (err) {
     criticals.push('login: request failed — ' + (err && err.message ? err.message : String(err)));
   }
+
+  // Without a verified NAMED login, never probe data with a missing or pre-auth cookie.
+  // This avoids cascading 401s and preserves the server's fail-closed access policy.
+  if (!cookieHeader) return { criticals, warnings, notes, stats };
 
   // ---- c+d. loadAll data endpoints ----------------------------------------
   const datasets = {};
