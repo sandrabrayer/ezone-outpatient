@@ -2144,6 +2144,22 @@ function _upsertPayment(payment) {
         }
       }
     }
+    // OP-BILL-01: fail closed on NEW fully-paid base-month receipts. Existing
+    // historical rows are left unchanged on read and are not migrated here.
+    // A custom explicit coverage period can differ from paid-date (advance),
+    // but it must still be a valid pair and backed by a real full receipt.
+    if (String(payment.status || '') === 'paid' &&
+        String(payment.billingType || '') === 'monthly' &&
+        String(payment.id || '').indexOf('::base::') !== -1) {
+      var paidPeriod = _finPaidDateCoverage(payment.paymentDate);
+      var amountDue = Number(payment.amountDue), amountPaid = Number(payment.amountPaid);
+      if (!paidPeriod || paidPeriod.start > _todayISODate() ||
+          !isFinite(amountDue) || amountDue <= 0 ||
+          !isFinite(amountPaid) || amountPaid < amountDue ||
+          !payment.coverageStart || !payment.coverageEnd) {
+        return { ok: false, error: 'invalid_new_monthly_receipt' };
+      }
+    }
     sh.appendRow(row);
     _forcePaymentTextCells(sh, sh.getLastRow());
     return { ok: true, payment: payment, created: true };
