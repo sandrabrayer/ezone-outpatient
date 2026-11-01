@@ -41,6 +41,22 @@ test('B: 15 Oct payment for old 23rd-day cycle is UNCERTAIN; proposed collection
   assert.equal(r.candidateNext, '2026-11-15');
 });
 
+test('Month-end proposal clamps Jan 31 to Feb 28 without timezone drift (non-leap year)', () => {
+  const row = paid('2026-02', '2026-01-31', '2026-02-01', '2026-02-01', '2026-02-28');
+  const r = inspect(client('2026-03-01'), [row], '2026-02-01');
+  assert.equal(r.state, 'review');
+  assert.equal(r.candidateEnd, '2026-02-27');
+  assert.equal(r.candidateNext, '2026-02-28');
+});
+
+test('Month-end proposal clamps Jan 31 to Feb 29 in a leap year', () => {
+  const row = paid('2028-02', '2028-01-31', '2028-02-01', '2028-02-01', '2028-02-29');
+  const r = inspect(client('2028-03-01'), [row], '2028-02-01');
+  assert.equal(r.state, 'review');
+  assert.equal(r.candidateEnd, '2028-02-28');
+  assert.equal(r.candidateNext, '2028-02-29');
+});
+
 test('Exact payment-date one-month coverage is confirmed, inclusive through Nov 14, next collection Nov 15', () => {
   const p = paid('2026-10', '2026-10-15', '2026-10-15', '2026-10-15', '2026-11-14');
   const r = inspect(client('2026-11-15'), [p]);
