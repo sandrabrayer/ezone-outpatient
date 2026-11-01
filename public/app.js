@@ -3018,6 +3018,27 @@
     if (state.role !== 'editor') return;
     var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
+    if (paymentKindFromId(updated.id).kind === 'base' &&
+        updated.billingType === 'monthly' && updated.status === 'paid') {
+      if (!prev || prev.status !== 'paid') {
+        // Do not save a paid receipt without its client next-date via the
+        // non-atomic billing editor. Route to the OP-02 journalled renewal.
+        var sourceClient = state.clients.find(function (c) { return c.id === updated.clientId; });
+        if (sourceClient) openRenewModal(sourceClient);
+        else toast('לא נמצא מטופל — נדרש בירור לפני חיוב', true);
+        renderBilling();
+        return;
+      }
+      if (updated.paymentDate !== prev.paymentDate ||
+          updated.coverageStart !== prev.coverageStart ||
+          updated.coverageEnd !== prev.coverageEnd) {
+        // This would move the period without the source next date, changing
+        // refunds/revenue independently. Requires controlled reconciliation.
+        toast('שינוי תאריך או תקופת תשלום קיימת מחייב בירור והתאמת גבייה', true);
+        renderBilling();
+        return;
+      }
+    }
     if (idx >= 0) state.payments[idx] = updated;
     else state.payments.push(updated);
     renderBillingMonthlySummary(state.billingDate || today());
@@ -3105,6 +3126,16 @@
     // row's own paymentDate/amount history is left untouched.
     var rowNeedsWrite = base.status !== newStatus;
     var amount = base.amountDue || clientAmountDue(c) || 0;
+    if (makePaid) {
+      var actualWindow = CL && CL.paymentDateCoverage(todayIso);
+      var oldWindow = CL && CL.recordedCoverage(base);
+      if (!actualWindow || amount <= 0 || (oldWindow &&
+          (CL.isoFromLocalDate(oldWindow.start) !== actualWindow.start ||
+           CL.isoFromLocalDate(oldWindow.end) !== actualWindow.end))) {
+        toast('תקופת כיסוי קיימת אינה תואמת — יש לבצע בירור בגבייה', true);
+        return;
+      }
+    }
     var updated = {
       id: base.id,
       clientId: base.clientId || c.id,
