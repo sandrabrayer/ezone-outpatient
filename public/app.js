@@ -5174,6 +5174,44 @@
     var nextBillRow = c.nextBillingDate
       ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' + displayDate(c.nextBillingDate) + '</span></div>'
       : '';
+    // OP-BILL-01: NEVER claim that Clients.nextBillingDate proves paid coverage.
+    // The ledger's per-receipt period wins; legacy periods auto-stamped from a
+    // different billing day cannot distinguish prepay from month-from-payment,
+    // so show a review rather than invent verified cash or change the ledger.
+    var paidReview = CL && typeof CL.paidThroughReview === 'function'
+      ? CL.paidThroughReview(c, state.payments, today()) : null;
+    if (paidReview && c.status !== 'סיים טיפול') {
+      if (paidReview.state === 'confirmed') {
+        // "שולם עד" is INCLUSIVE. גבייה הבאה is the following day, NOT the
+        // same displayed date. The quick toggle works by old due-cycle ids;
+        // financial corrections must use the existing גבייה editor instead.
+        paidChipHtml = '<span class="chip chip-paid" title="תקופת הכיסוי אומתה מול רשומות התשלום">שולם עד ' +
+          escapeHtml(displayDate(paidReview.confirmedEnd)) + ' ✓</span>';
+        nextBillRow = '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.nextCollection)) + '</span></div>';
+      } else if (paidReview.state === 'review') {
+        paidChipHtml = paidReview.confirmedEnd
+          ? '<span class="chip chip-paid">כיסוי מאומת עד ' + escapeHtml(displayDate(paidReview.confirmedEnd)) + '</span>' +
+            '<span class="chip chip-payment-review" title="מועד הגבייה הרשום אינו תואם לתקופת הכיסוי המאומתת">נדרשת התאמת גבייה</span>'
+          : '<span class="chip chip-payment-review" role="status" title="תאריך התשלום לבדו אינו מאמת תקופת כיסוי כאשר מחזור החיוב שונה או חסר מקור">נדרש בירור תקופת תשלום</span>';
+        nextBillRow = paidReview.nextCollection
+          ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה לפי כיסוי מאומת</span><span class="cc-v">' +
+              escapeHtml(displayDate(paidReview.nextCollection)) + '</span></div>'
+          : (paidReview.candidateNext
+              ? '<div class="cc-line"><span class="cc-k">חודש מתאריך התשלום (לבירור)</span><span class="cc-v">' +
+                  escapeHtml(displayDate(paidReview.candidateNext)) + '</span></div>'
+              : '');
+        if (paidReview.registeredNext) nextBillRow += '<div class="cc-line"><span class="cc-k">מועד גבייה רשום (לבדיקה)</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.registeredNext)) + '</span></div>';
+      }
+      // For confirmed/reviewed rows the reported paid date is from an actual
+      // receipt; never borrow another payment's date from Clients.paymentDate.
+      if ((paidReview.state === 'confirmed' || paidReview.state === 'review') && paidReview.paidDate) {
+        paidOnRow = '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.paidDate)) + '</span></div>';
+      }
+    }
+
     var startRow = c.startDate
       ? '<div class="cc-line"><span class="cc-k">תחילת טיפול</span><span class="cc-v">' + displayDate(c.startDate) + '</span></div>'
       : '';
