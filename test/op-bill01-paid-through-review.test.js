@@ -95,9 +95,8 @@ test('Unpaid / partial / one-time additional-charge / another client never prove
 test('Missing or invalid paid date is not silently accepted as a current month, even if recorded due-date coverage looks paid', () => {
   const p = paid('2026-11', '', '2026-11-01', '2026-11-01', '2026-11-30');
   const r = inspect(client('2026-12-01'), [p]);
-  assert.equal(r.state, 'confirmed', 'a separately recorded valid period is an authority even without receipt date');
-  assert.equal(r.confirmedEnd, '2026-11-30');
-  assert.equal(r.paidDate, '');
+  assert.equal(r.state, 'review', 'a missing actual payment date cannot prove a completed receipt');
+  assert.equal(r.reason, 'old_cycle_or_unverified_amount');
 });
 
 test('Multi-cycle gap is not bridged by adding months to the next collection date', () => {
