@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-HC-01 — weekly healthcheck uses a named session (draft, 2026-11-01)
+- Root cause of the 2026-10-31 healthcheck's seven `401` responses: the monitor posted only `{ pin }`, which now mints a 10-minute **name-less** login-stage cookie, not an authorized data session (correct fail-closed server behavior).
+- The monitor now posts `{ pin, user: SHARED_PIN_USER }` (the shared-PIN user from `lib/users.js`), requires `stage:'named'` and exactly one non-empty `ezone_session` cookie, forwards only that cookie, and refuses further data reads if login is incomplete. It never logs any PIN/token.
+- Synthetic tests cover the real named-login payload, cookie forwarding, incomplete pre-auth, missing/duplicate cookies and non-leakage. No server/session logic, security policy, Railway variable, Apps Script, production data or workflow schedule changed. **Draft only; re-run on live production requires separately approved release of this monitor change to the workflow branch.**
+
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 
