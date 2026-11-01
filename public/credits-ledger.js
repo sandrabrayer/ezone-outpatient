@@ -362,7 +362,9 @@
       var explicit = !!rec && coverageDiffersFromDefault(p);
       var matchesPaid = !!proposed && !!win && proposed.start === win.start && proposed.end === win.end;
       var amount = Number(p.amountPaid), due = Number(p.amountDue);
-      var amountOk = isFinite(amount) && amount > 0 && (!isFinite(due) || due <= 0 || amount >= due);
+      var actualPaidDate = isoDate(p.paymentDate);
+      var amountOk = !!actualPaidDate && actualPaidDate <= now && isFinite(amount) && amount > 0 &&
+        (!isFinite(due) || due <= 0 || amount >= due);
       return { id: str(p.id), paidDate: isoDate(p.paymentDate), proposed: proposed,
         win: win, trusted: amountOk && (explicit || matchesPaid), explicit: explicit };
     });
