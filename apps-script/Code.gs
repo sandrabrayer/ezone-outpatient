@@ -2150,7 +2150,7 @@ function _upsertPayment(payment) {
     // but it must still be a valid pair and backed by a real full receipt.
     if (String(payment.status || '') === 'paid' &&
         String(payment.billingType || '') === 'monthly' &&
-        String(payment.id || '').indexOf('::base::') !== -1) {
+        String(payment.id || '').indexOf('::chg-') < 0) {
       var paidPeriod = _finPaidDateCoverage(payment.paymentDate);
       var amountDue = Number(payment.amountDue), amountPaid = Number(payment.amountPaid);
       if (!paidPeriod || paidPeriod.start > _todayISODate() ||
