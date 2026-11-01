@@ -305,7 +305,7 @@ for (const flow of ['edit']) {
     assert.deepEqual(fx.errors, []);
   });
 }
-test('browser: successful renewal retains amount, backdated paid date and billing cycle', skipOpt, async (t) => {
+test('browser: successful renewal keeps source receipt, but warns when coverage follows the old cycle not actual paid date', skipOpt, async (t) => {
   const fx = await fixture(t); if (!fx) return;
   const page = await fx.login('ורד');
   await clientCard(page).getByRole('button', { name: 'חידוש ותשלום', exact: true }).click();
@@ -317,7 +317,11 @@ test('browser: successful renewal retains amount, backdated paid date and billin
   await page.click('#renewResume');
   await page.waitForSelector('#renewModal', { state: 'hidden' });
   assert.equal(fx.sb.rows('FinancialOps')[0].state,'acknowledged');
-  await clientCard(page).locator('.chip-paid').waitFor();
+  // The existing source renewal still uses cycle due date (01/10), although
+  // the receipt was paid on 16/10. Do not display that old source date as a
+  // verified month-from-payment window; the source policy migration is gated.
+  await clientCard(page).locator('.chip-payment-review').waitFor();
+  assert.equal(await clientCard(page).locator('.month-pay-btn').count(), 0);
   const p = fx.sb.rows('Payments')[0];
   assert.equal(p.id, 'pay::fixture-client::base::2026-10');
   assert.equal(p.paymentDate, '2026-10-16');
@@ -326,15 +330,15 @@ test('browser: successful renewal retains amount, backdated paid date and billin
   assert.equal(await page.isHidden('#financialSaveWarning'), true);
   assert.deepEqual(fx.errors, []);
 });
-test('browser: legacy paid row still confirms its cycle; no date or amount rewrite', skipOpt, async (t) => {
+test('browser: legacy paid row is preserved, but auto-inferred due-date coverage is not silently trusted', skipOpt, async (t) => {
   const fx = await fixture(t); if (!fx) return;
   fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [{ ...fx.client, nextBillingDate: '2026-11-01' }]);
   fx.sb.seed('Payments', fx.sb.ctx.PAYMENTS_HEADERS, [{ id: 'pay::fixture-client::2026-10', clientId: 'fixture-client',
     clientName: fx.client.name, billingType: 'monthly', dueDate: '2026-10-01', amountDue: 500, amountPaid: 500,
     status: 'paid', paymentDate: '2026-10-02' }]);
   const page = await fx.login('ורד');
-  await clientCard(page).locator('.chip-paid').waitFor();
-  assert.equal(await clientCard(page).locator('.chip-payment-review').count(), 0);
+  await clientCard(page).locator('.chip-payment-review').waitFor();
+  assert.equal(await clientCard(page).locator('.month-pay-btn').count(), 0);
   assert.equal(fx.captured.filter((r) => ['saveAll', 'savePayment'].includes(r.payload.action)).length, 0);
   assert.equal(fx.sb.rows('Payments')[0].id, 'pay::fixture-client::2026-10');
   assert.deepEqual(fx.errors, []);
@@ -350,7 +354,7 @@ test('browser: recorded two-cycle prepayment stays paid without invoking a wrong
   await clientCard(page).locator('.chip-paid').waitFor();
   assert.equal(await clientCard(page).locator('.chip-payment-review').count(), 0);
   assert.equal(await clientCard(page).locator('.month-pay-btn').count(), 0, 'custom row is edited in billing, not a guessed cycle toggle');
-  assert.match(await clientCard(page).locator('.chip-paid').textContent(), /01\/11/);
+  assert.match(await clientCard(page).locator('.chip-paid').textContent(), /31\/10/, 'paid-through is the LAST covered day, not the following collection day');
   assert.equal(fx.captured.filter((r) => ['saveAll', 'savePayment'].includes(r.payload.action)).length, 0);
   assert.deepEqual(fx.errors, []);
 });
