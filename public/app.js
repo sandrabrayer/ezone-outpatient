@@ -1030,12 +1030,26 @@
     var merged = p;
     if (!CL.recordedCoverage(merged)) {
       var live = findPaymentById(p && p.id);
-      var stored = live && live !== p ? CL.recordedCoverage(live) : null;
-      if (stored) {
-        merged = Object.assign({}, p, {
-          coverageStart: CL.isoFromLocalDate(stored.start),
-          coverageEnd: CL.isoFromLocalDate(stored.end)
-        });
+      if (live && live !== p) {
+        var stored = CL.recordedCoverage(live);
+        if (stored) {
+          merged = Object.assign({}, p, {
+            coverageStart: CL.isoFromLocalDate(stored.start),
+            coverageEnd: CL.isoFromLocalDate(stored.end)
+          });
+        } else {
+          // Old rows without a recorded period remain untouched on edit.
+          // Never convert a guessed historical due-cycle into a fact.
+          return Object.assign({}, p, {
+            coverageStart: live.coverageStart || '',
+            coverageEnd: live.coverageEnd || ''
+          });
+        }
+      } else {
+        // Only a NEW, fully paid monthly base row gets the paid-date policy.
+        // One-off/extra, unpaid and partial rows keep their old behavior.
+        var isBase = paymentKindFromId(p && p.id).kind === 'base';
+        return CL.withDefaultCoverage(merged, { newPaidMonthly: isBase });
       }
     }
     return CL.withDefaultCoverage(merged);
@@ -6154,8 +6168,14 @@
     if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
     var paidDate = fd.get('renewDate') || today(), notes = (fd.get('renewNotes') || '').trim();
     var pkg = readPackageSessionsFromForm(c, form), changed = packageSessionsChanged(c, pkg);
+    var paidCoverage = CL && CL.paymentDateCoverage(paidDate);
+    if (!paidCoverage || paidDate > today()) {
+      toast('תאריך תשלום לא תקין', true); return;
+    }
+    // New full-month payments are covered from the ACTUAL payment date.
+    // The scheduled cycle date remains the immutable financial item key.
     var patch = { pricePerSession: amount, paymentDate: paidDate,
-      nextBillingDate: nextCycleDueDateAfter(c, renewSourceState.cycleDate) };
+      nextBillingDate: paidCoverage.next };
     if (changed) {
       c.sessionsPerWeek = pkg.sessions; c.sessionsUnit = pkg.units;
       patch.sessionsPerWeek = clientForSheet(c).sessionsPerWeek;
