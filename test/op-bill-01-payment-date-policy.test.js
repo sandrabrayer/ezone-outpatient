@@ -59,10 +59,13 @@ test('diagnosis: paid chip uses stored NEXT BILLING DATE, not one-month paid per
   assert.notEqual(current.until, requestedOneMonth('2026-10-25').nextCollection);
 });
 
-test('diagnosis: old due-date contract spans frontend, pure helpers, source renewal guard', () => {
-  assert.match(APP_SRC, /Anchors on the DUE/);
-  assert.match(APP_SRC, /nextBillingDate: nextCycleDueDateAfter\(c, renewSourceState\.cycleDate\)/);
-  assert.match(SOURCE_SRC, /patch\.nextBillingDate !== _finNext\(c, intent\.cycleDate\)/);
+test('new renewal contract is anchored to recorded payment date on UI and actual source', () => {
+  assert.match(APP_SRC, /nextBillingDate: paidCoverage\.next/);
+  assert.match(SOURCE_SRC, /function _finPaidDateCoverage\(paymentDate\)/);
+  assert.match(SOURCE_SRC, /p\.coverageStart === paidWindow\.start/);
+  assert.match(SOURCE_SRC, /patch\.nextBillingDate === paidWindow\.next/);
+  // The old due-date guard remains ONLY for immutable stored operation replay.
+  assert.match(SOURCE_SRC, /var legacyReplay = !!stored/);
 });
 
 test('one-time charge and partial/unpaid receipts are NOT an ordinary month-paid proof', () => {
