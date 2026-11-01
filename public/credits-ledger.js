@@ -324,6 +324,97 @@
     });
   }
 
+
+  /* OP-BILL-01: READ-ONLY reconciliation of what the card may safely claim.
+   * A source row explicitly matching the old inferred due-date window may have
+   * been AUTO-STAMPED by withDefaultCoverage. Therefore it is NOT evidence that
+   * a person chose to cover that period when paymentDate is different.
+   * Source calculations/writes are deliberately unchanged in this draft. */
+  function paidThroughReview(client, payments, todayISO) {
+    var registeredNext = isoDate(client && client.nextBillingDate);
+    var now = isoDate(todayISO);
+    var cid = str(client && client.id);
+    if (!cid || !now || !Array.isArray(payments)) return { state: 'unavailable' };
+    function asWindow(start, end) {
+      return start && end ? { start: isoFromLocalDate(start), end: isoFromLocalDate(end) } : null;
+    }
+    function fromPaidDate(v) {
+      var d = localDateFromISO(coverageDateISO(v));
+      return d ? asWindow(d, addDays(addMonthsClamped(d, 1), -1)) : null;
+    }
+    function nextDay(iso) {
+      var d = localDateFromISO(iso);
+      return d ? isoFromLocalDate(addDays(d, 1)) : '';
+    }
+    function isBase(p) {
+      var id = str(p && p.id);
+      // Match the current canonical id plus earlier base-id formats; NEVER
+      // match an additional charge (::chg-), a one-off or a foreign client.
+      return p && str(p.clientId) === cid &&
+        str(p.status) === 'paid' && str(p.billingType) !== 'one_time' &&
+        id.indexOf('::chg-') < 0 && (id.indexOf('pay::') === 0 || id.indexOf('payment::') === 0);
+    }
+    var items = payments.filter(isBase).map(function (p) {
+      var proposed = fromPaidDate(p.paymentDate);
+      var rec = recordedCoverage(p), inf = inferredCoverage(p);
+      var chosen = rec || inf;
+      var win = chosen ? asWindow(chosen.start, chosen.end) : null;
+      var explicit = !!rec && coverageDiffersFromDefault(p);
+      var matchesPaid = !!proposed && !!win && proposed.start === win.start && proposed.end === win.end;
+      var amount = Number(p.amountPaid), due = Number(p.amountDue);
+      var amountOk = isFinite(amount) && amount > 0 && (!isFinite(due) || due <= 0 || amount >= due);
+      return { id: str(p.id), paidDate: isoDate(p.paymentDate), proposed: proposed,
+        win: win, trusted: amountOk && (explicit || matchesPaid), explicit: explicit };
+    });
+    if (!items.length) return registeredNext && registeredNext >= now
+      ? { state: 'review', reason: 'future_anchor_without_receipt', registeredNext: registeredNext }
+      : { state: 'none', registeredNext: registeredNext };
+
+    // Only rows that could cover today matter for a current paid-through claim.
+    var relevant = items.filter(function (p) {
+      return (p.win && p.win.end >= now) || (p.proposed && p.proposed.end >= now);
+    }).sort(function (a, b) { return (b.paidDate || '').localeCompare(a.paidDate || '') || b.id.localeCompare(a.id); });
+    if (!relevant.length) return { state: registeredNext >= now ? 'review' : 'expired',
+      reason: 'no_current_paid_receipt', registeredNext: registeredNext };
+    var uncertain = relevant.filter(function (x) { return !x.trusted; });
+    if (uncertain.length) {
+      var recent = uncertain[0];
+      return { state: 'review', reason: 'old_cycle_or_unverified_amount',
+        registeredNext: registeredNext, paidDate: recent.paidDate,
+        candidateEnd: recent.proposed ? recent.proposed.end : '',
+        candidateNext: recent.proposed ? nextDay(recent.proposed.end) : '' };
+    }
+
+    // Contiguous verified coverages, not a guessed gap-bridging month count.
+    var windows = relevant.filter(function (x) { return x.win; })
+      .sort(function (a, b) { return a.win.start.localeCompare(b.win.start) || a.win.end.localeCompare(b.win.end); });
+    for (var i = 1; i < windows.length; i++) {
+      if (windows[i].win.start === windows[i - 1].win.start &&
+          windows[i].win.end === windows[i - 1].win.end) {
+        return { state: 'review', reason: 'duplicate_coverage', registeredNext: registeredNext };
+      }
+    }
+    var active = windows.filter(function (x) { return x.win.start <= now && x.win.end >= now; });
+    if (!active.length) return { state: 'review', reason: 'coverage_gap_or_future_advance',
+      registeredNext: registeredNext };
+    var latest = active.sort(function (a, b) { return b.win.end.localeCompare(a.win.end); })[0];
+    var end = latest.win.end, paidDate = latest.paidDate;
+    var changed = true;
+    while (changed) {
+      changed = false;
+      windows.forEach(function (w) {
+        if (w.win.start <= nextDay(end) && w.win.end > end) {
+          end = w.win.end; paidDate = w.paidDate; changed = true;
+        }
+      });
+    }
+    var next = nextDay(end);
+    if (!next || registeredNext !== next) return { state: 'review', reason: 'next_date_conflict',
+      confirmedEnd: end, nextCollection: next, registeredNext: registeredNext, paidDate: paidDate };
+    return { state: 'confirmed', confirmedEnd: end, nextCollection: next,
+      registeredNext: registeredNext, paidDate: paidDate };
+  }
+
   /* The 15th of the next month on or after decidedDate: decided on the 1st–15th
    * -> the 15th of that month; the 16th onward -> the 15th of the following
    * month. Pure string arithmetic on the parts (no Date, so no timezone can
@@ -718,6 +809,7 @@
     inferredCoverage: inferredCoverage,
     recordedCoverage: recordedCoverage,
     paymentCoverage: paymentCoverage,
+    paidThroughReview: paidThroughReview,
     coverageDiffersFromDefault: coverageDiffersFromDefault,
     withDefaultCoverage: withDefaultCoverage,
     payoutDateFor: payoutDateFor,
