@@ -39,7 +39,10 @@ function fullClient(overrides) {
 function okPayloads(overrides) {
   const p = {
     '/': '<!doctype html><html><body>E-ZONE Outpatient</body></html>',
-    'verify-pin': { status: 200, json: { ok: true } },
+    'verify-pin': { status: 200, json: { ok: true, stage: 'named' }, cookies: [
+      'ezone_session=TEST-SESSION-NOT-REAL; Path=/; HttpOnly; Secure',
+      'ezone_catalog_admin=; Path=/api/catalog-admin; Max-Age=0'
+    ] },
     'action=getPayments': { ok: true, payments: [{ id: 'p1', clientId: 'c1', dueDate: '2026-07-01', paymentDate: '2026-07-02' }] },
     'action=getCharges': { ok: true, charges: [{ id: 'ch1', clientId: 'c1', chargeDate: '2026-07-03' }] },
     'action=getStopFlags': { ok: true, stopFlags: [] },
@@ -60,6 +63,14 @@ function mockFetch(payloads) {
     let body;
     if (init && init.method === 'POST' && url.indexOf('/api/verify-pin') !== -1) {
       const spec = payloads['verify-pin'];
+      const req = JSON.parse(init.body || '{}');
+      // Reproduce the deployed two-stage login: PIN-only returns a PREAUTH
+      // cookie and cannot access patient/finance data (never treated as named).
+      if (spec.status === 200 && req.user !== 'ורד') return {
+        status: 200,
+        headers: { getSetCookie: function () { return ['ezone_session=PREAUTH-TEST; Path=/']; } },
+        text: async function () { return JSON.stringify({ ok: true, stage: 'name_required' }); }
+      };
       return {
         status: spec.status,
         headers: { getSetCookie: function () { return spec.cookies || []; } },
@@ -67,6 +78,12 @@ function mockFetch(payloads) {
       };
     }
     if (url.indexOf('/api/sheets') !== -1) {
+      const cookies = init && init.headers ? init.headers.Cookie || '' : '';
+      if (cookies !== 'ezone_session=TEST-SESSION-NOT-REAL') return {
+        status: 401,
+        headers: { getSetCookie: function () { return []; } },
+        text: async function () { return JSON.stringify({ ok: false, error: 'name_required' }); }
+      };
       const key = Object.keys(payloads).find(function (k) {
         return k.indexOf('action=') === 0 && url.indexOf(k) !== -1;
       });
@@ -92,8 +109,57 @@ test('all endpoints healthy -> no criticals, no warnings', async () => {
   const r = await run(okPayloads());
   assert.deepEqual(r.criticals, []);
   assert.deepEqual(r.warnings, []);
-  assert.ok(r.notes.some((n) => n.includes('stateless')), 'notes explain the no-cookie login');
+  assert.ok(r.notes.some((n) => n.includes('named session cookie')), 'notes identify the named session without printing tokens');
   assert.ok(r.notes.some((n) => n.includes('TherapistRates')), 'TherapistRates skip is noted');
+});
+
+
+test('login uses the established Vered PIN identity; every read carries only the named base session cookie', async () => {
+  const calls = [];
+  const fetchImpl = mockFetch(okPayloads());
+  const r = await hc.runHealthcheck({
+    appUrl: BASE, appPin: DUMMY_PIN,
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), method: init && init.method, body: init && init.body, cookie: init && init.headers && init.headers.Cookie });
+      return fetchImpl(url, init);
+    }
+  });
+  assert.deepEqual(r.criticals, []);
+  const login = calls.find((x) => x.url.includes('/api/verify-pin'));
+  assert.deepEqual(JSON.parse(login.body), { pin: DUMMY_PIN, user: 'ורד' });
+  const reads = calls.filter((x) => x.url.includes('/api/sheets'));
+  assert.equal(reads.length, 8, 'seven boot reads and one SessionLog warning check');
+  reads.forEach((x) => assert.equal(x.cookie, 'ezone_session=TEST-SESSION-NOT-REAL'));
+  assert.ok(!JSON.stringify(r).includes(DUMMY_PIN));
+  assert.ok(!JSON.stringify(r).includes('TEST-SESSION-NOT-REAL'));
+});
+
+test('a PIN-only/preauth reply is a single login failure, never seven misleading read failures', async () => {
+  const seen = [];
+  const r = await hc.runHealthcheck({
+    appUrl: BASE, appPin: DUMMY_PIN,
+    fetchImpl: async (url, init) => {
+      seen.push(String(url));
+      if (String(url).endsWith('/')) return { status: 200, text: async () => okPayloads()['/'], headers: {} };
+      return { status: 200, text: async () => JSON.stringify({ ok: true, stage: 'name_required' }),
+        headers: { getSetCookie: function () { return ['ezone_session=PREAUTH-TEST; Path=/']; } } };
+    }
+  });
+  assert.equal(r.criticals.length, 1);
+  assert.match(r.criticals[0], /preauth|named login/);
+  assert.equal(seen.length, 2, 'protected endpoints are skipped');
+});
+
+test('named login with no session cookie fails closed and does not read data', async () => {
+  const base = okPayloads({ 'verify-pin': { status: 200, json: { ok: true, stage: 'named' }, cookies: [
+    'ezone_catalog_admin=; Path=/api/catalog-admin; Max-Age=0'
+  ] } });
+  const seen = [];
+  const fetchImpl = mockFetch(base);
+  const r = await hc.runHealthcheck({ appUrl: BASE, appPin: DUMMY_PIN, fetchImpl: async (url, init) => { seen.push(String(url)); return fetchImpl(url, init); } });
+  assert.equal(r.criticals.length, 1);
+  assert.match(r.criticals[0], /session cookie/);
+  assert.equal(seen.length, 2);
 });
 
 /* ===== criticals ========================================================== */
