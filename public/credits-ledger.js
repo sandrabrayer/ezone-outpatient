@@ -317,6 +317,9 @@
    * A coverage period is inclusive; the next collection is the following day. */
   function paymentDateCoverage(value) {
     var iso = coverageDateISO(value);
+    // Canonical date only. A timestamp must not silently change calendar day
+    // between browser and Apps Script source verification.
+    if (typeof value !== 'string' || value !== iso) return null;
     var d = iso && localDateFromISO(iso);
     if (!d) return null;
     var next = addMonthsClamped(d, 1);
