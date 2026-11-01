@@ -128,11 +128,11 @@ test('app.js: renew / intake / activate / agreement / derive all use the cycle r
 
 test('app.js: the edit modal no longer recomputes nextBillingDate unconditionally', () => {
   assert.doesNotMatch(APP, /if \(client\.paymentDate\) \{\s*\n\s*client\.nextBillingDate/);
-  // The only edit-path recompute sits behind the deliberate paid-date change
-  // (propagatePaid) and anchors on the CYCLE due date — the same
-  // cyclePaymentDueDate the chip settles, resolved before the anchor moves.
-  assert.match(APP,
-    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,900}if \(propagatePaid\) \{\s*\n\s*cycleDueISO = cyclePaymentDueDate\(client, today\(\)\);\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, cycleDueISO\);/);
+  // Paid-date changes must be verified and cannot rewrite existing receipts.
+  // A new full-month receipt uses paymentDate, not the old due-cycle.
+  assert.match(APP, /hasPriorPaidReceipt/);
+  assert.match(APP, /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';/);
+  assert.match(APP, /client\.nextBillingDate = editPaidWindow\.next/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
