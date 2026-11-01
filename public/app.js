@@ -7342,6 +7342,23 @@
       // that role was removed from the product.)
       var ptPhoneChanged = recoverPhone(ptPhone) !== recoverPhone(client.phone);
       if (ptPhoneChanged && duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
+      var proposedPaidDate = String(fd.get('paymentDate') || '');
+      var proposedPaidStatus = String(fd.get('paymentStatus') || client.paymentStatus || '');
+      if (proposedPaidDate && proposedPaidDate !== String(client.paymentDate || '') &&
+          proposedPaidStatus === 'paid') {
+        var newWindow = CL && CL.paymentDateCoverage(proposedPaidDate);
+        var hasPriorPaidReceipt = state.payments.some(function (p) {
+          return p && String(p.clientId) === String(client.id) &&
+            p.status === 'paid' && paymentKindFromId(p.id).kind === 'base';
+        });
+        if (!newWindow || proposedPaidDate > today() ||
+            (client.startDate && proposedPaidDate < client.startDate) ||
+            hasPriorPaidReceipt) {
+          toast('שינוי מועד תשלום מאומת דורש בירור בגבייה; לא נשמר שינוי כספי', true);
+          submit.disabled = false;
+          return;
+        }
+      }
       var prev = {
         name: client.name,
         location: client.location,
@@ -7417,7 +7434,14 @@
       var cycleDueISO = '';
       if (propagatePaid) {
         cycleDueISO = cyclePaymentDueDate(client, today());
-        client.nextBillingDate = nextCycleDueDateAfter(client, cycleDueISO);
+        var editPaidWindow = CL && CL.paymentDateCoverage(client.paymentDate);
+        if (!editPaidWindow) {
+          Object.assign(client, prev);
+          toast('תאריך תשלום אינו תקין', true);
+          submit.disabled = false;
+          return;
+        }
+        client.nextBillingDate = editPaidWindow.next;
       }
       // Build the replacement but retain the existing confirmed payment until
       // the source acknowledges the new paid date.
