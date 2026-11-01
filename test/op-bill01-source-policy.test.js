@@ -59,6 +59,20 @@ test('actual source rejects a new renewal using the legacy due-date window', () 
   assert.equal(f.sb.rows('Payments').length, 0);
 });
 
+test('source rejects unverified NEW monthly receipts under canonical and legacy base IDs', () => {
+  for (const id of ['pay::P::base::2026-10', 'pay::P::2026-10', 'payment::P::2026-10']) {
+    const sb = sandbox([], [{ id: 'P', name: 'Synthetic', startDate: '2026-10-01',
+      status: 'פעיל', billingDay: 1, nextBillingDate: '2026-10-01' }]);
+    const row = { id, clientId: 'P', billingType: 'monthly', dueDate: '2026-10-01',
+      amountDue: 500, amountPaid: 500, status: 'paid', paymentDate: '2026-10-16',
+      coverageStart: '', coverageEnd: '' };
+    const denied = sb.post({ action: 'savePayment', payment: row });
+    assert.equal(denied.ok, false, id);
+    assert.equal(denied.error, 'invalid_new_monthly_receipt', id);
+    assert.equal(sb.rows('Payments').length, 0, id);
+  }
+});
+
 test('actual source accepts a verified new renewal exactly once, without a duplicate payment', () => {
   const f = fixture();
   assert.equal(f.reserve().ok, true);
