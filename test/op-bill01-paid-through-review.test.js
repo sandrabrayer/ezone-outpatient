@@ -92,6 +92,31 @@ test('Unpaid / partial / one-time additional-charge / another client never prove
   assert.ok(!r.confirmedEnd);
 });
 
+test('Status paid is not enough when billed amount is missing, zero or invalid', () => {
+  for (const invalidDue of ['', '0', 'not-a-number', undefined]) {
+    const row = paid('2026-10', '2026-10-15', '2026-10-15', '2026-10-15', '2026-11-14',
+      { amountDue: invalidDue });
+    const r = inspect(client('2026-11-15'), [row]);
+    assert.equal(r.state, 'review', 'unverified amountDue: ' + String(invalidDue));
+    assert.equal(r.reason, 'old_cycle_or_unverified_amount');
+  }
+});
+
+test('Even explicitly recorded monthly coverage cannot validate an impossible paid date', () => {
+  const row = paid('2026-10', '2026-02-30', '2026-10-23', '2026-10-15', '2026-11-14');
+  const r = inspect(client('2026-11-15'), [row]);
+  assert.equal(r.state, 'review');
+  assert.equal(r.reason, 'old_cycle_or_unverified_amount');
+});
+
+test('A paid status with amountPaid below amountDue remains unverified', () => {
+  const row = paid('2026-10', '2026-10-15', '2026-10-15', '2026-10-15', '2026-11-14',
+    { amountDue: 13000, amountPaid: 5000 });
+  const r = inspect(client('2026-11-15'), [row]);
+  assert.equal(r.state, 'review');
+  assert.equal(r.reason, 'old_cycle_or_unverified_amount');
+});
+
 test('Missing or invalid paid date is not silently accepted as a current month, even if recorded due-date coverage looks paid', () => {
   const p = paid('2026-11', '', '2026-11-01', '2026-11-01', '2026-11-30');
   const r = inspect(client('2026-12-01'), [p]);
