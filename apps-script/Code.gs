@@ -6276,6 +6276,27 @@ function _integrityFingerprint(grid) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(typed), Utilities.Charset.UTF_8)
     .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
 }
+/* Only the two CRM families that carry user tasks/contact history. No
+ * inference for older unknown sheets: a strict typed, keyed snapshot is
+ * needed before those rows can be called operationally restorable. */
+function _integrityValidateCrmGrid_(source, grid) {
+  var isTasks = source === 'Tasks', isActivity = source === 'Activity';
+  if (!isTasks && !isActivity) return;
+  var headers = isTasks ? TASKS_HEADERS : ACTIVITY_HEADERS;
+  var key = isTasks ? 'id' : 'eventId';
+  if (!Array.isArray(grid) || !grid.length ||
+      JSON.stringify(grid[0].slice(0, headers.length)) !== JSON.stringify(headers)) {
+    throw new Error('Invalid CRM backup headers: ' + source);
+  }
+  var at = headers.indexOf(key), seen = Object.create(null);
+  for (var i = 1; i < grid.length; i++) {
+    var raw = grid[i][at];
+    if (typeof raw !== 'string' || !raw.trim() || raw.trim() !== raw || seen[raw]) {
+      throw new Error('Invalid CRM backup key: ' + source);
+    }
+    seen[raw] = true;
+  }
+}
 function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
@@ -6300,6 +6321,7 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
     if (!data) throw new Error('Restore snapshot missing: ' + source);
     var grid = data.getDataRange().getValues();
     if (_integrityFingerprint(grid) !== row[4]) throw new Error('Restore snapshot mismatch: ' + source);
+    if (source === 'Tasks' || source === 'Activity') _integrityValidateCrmGrid_(source, grid);
     if (String(row[3]) === '1' && grid.length !== 1) throw new Error('Absent restore snapshot contains rows');
     if (source === 'FinancialOps' && requireJournal && (String(row[3]) === '1' ||
         JSON.stringify(grid[0].slice(0, FINANCIAL_OP_HEADERS.length)) !== JSON.stringify(FINANCIAL_OP_HEADERS))) {
