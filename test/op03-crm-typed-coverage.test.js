@@ -70,7 +70,7 @@ test('OP03-CRM-01b: pre-CRM unknown tabs called Tasks/Activity retain their opaq
 test('OP03-CRM-02: exact CRM schema makes both source families typed, preserving linkage on snapshot and restore preflight', () => {
   const h = harness(source()); enable(h);
   const specs = h.ctx._integritySourceSpecs();
-  assert.deepEqual(specs.filter(x => ['Tasks','Activity'].includes(x.source)).map(x=>[x.source,x.key,x.prefix]),
+  assert.deepEqual(JSON.parse(JSON.stringify(specs.filter(x => ['Tasks','Activity'].includes(x.source)).map(x=>[x.source,x.key,x.prefix]))),
     [['Tasks','id','tasks-'],['Activity','eventId','activity-']]);
   const before = Object.fromEntries(['Tasks','Activity'].map(k => [k,h.live.getSheetByName(k).getDataRange().getValues()]));
   const result = h.ctx.nightlyIntegrityJob();
