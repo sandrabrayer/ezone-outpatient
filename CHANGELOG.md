@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fix: «סיים טיפול» did not persist after another edit of the same card (2026-11-02)
+- `saveAll` now returns `stamps` (id → updatedAt, stamps only); `persist()` adopts them, so a second edit of the same row from the same tab is no longer refused as a conflict with the tab's own first edit.
+- Discharge uses `persistClientChange`: a refused save rolls back and shows «סיום הטיפול לא נשמר» instead of a false «סיום נשמר». Real concurrent-edit protection unchanged. SW v21 → v22. Code.gs changed (Deploy Apps Script after merge). See `CHANGELOG-discharge-persist.md`.
+
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
 

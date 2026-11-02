@@ -566,6 +566,20 @@ function _stampRow(row, user) {
   return row;
 }
 
+/* { id: updatedAt } for the rows a save just wrote (discharge-persist fix).
+ * Stamps only — never row content — so the response adds no data exposure.
+ * Rows without an id are skipped; a missing stamp maps to ''. */
+function _stampMapById(rows) {
+  var out = {};
+  for (var i = 0; i < (rows || []).length; i++) {
+    var r = rows[i];
+    var id = r && r.id != null ? String(r.id) : '';
+    if (!id) continue;
+    out[id] = r.updatedAt == null ? '' : String(r.updatedAt);
+  }
+  return out;
+}
+
 /* Column names (from `headers`) where two row objects differ, ignoring the
  * `meta` columns (identity / audit / server-managed cells). Plain String
  * comparison: _readAll already hands back ISO date strings and recovered
@@ -1620,7 +1634,13 @@ function _saveAll(payload) {
       dataVersion: newVersion,
       // who/when: rows whose stamps were rewritten by this save (changed or
       // new). Additive — old clients ignore it.
-      stamped: { clients: stampedClients, leads: stampedLeads }
+      stamped: { clients: stampedClients, leads: stampedLeads },
+      // Self-conflict fix (discharge-persist): the updatedAt each row now
+      // holds on the sheet, by id, so the tab can refresh the stamp it echoes
+      // on its NEXT save. Without this a second edit of the same row from the
+      // same tab was refused as a "stale" conflict against the tab's own first
+      // edit. Additive — old clients ignore it. Stamps only, no row content.
+      stamps: { clients: _stampMapById(clients), leads: _stampMapById(leads) }
     };
     // Additive: the rows this save was REFUSED for (stale-save conflict
     // refusal), each { id, name, sheetUpdatedAt, sheetUpdatedBy, changed }.
