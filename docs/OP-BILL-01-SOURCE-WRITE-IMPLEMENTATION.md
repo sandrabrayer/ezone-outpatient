@@ -1,7 +1,16 @@
 # OP-BILL-01 — Source financial policy integration (DRAFT; no production authorization)
 
 ## Objective
-Correct the monthly collection date for **new verified ordinary monthly receipts**, preserving all previously stored records and their explicit service periods. This document is a work specification, not evidence the write-side correction has been implemented.
+Correct the monthly collection date for **new verified ordinary monthly receipts**, preserving all previously stored records and their explicit service periods. This is the **DRAFT code implementation and release gate record**, not evidence of activation in production. The paid-date write policy is implemented in isolated draft PR #162 on production baseline `98c49c72396b76082498826ab7aa51890b89e9cb`, preserving Claude #158 and #161. Do not treat CI or code review as verification of real historical payment rows.
+
+## Current integration state (2026-11-02)
+
+- Draft #162 holds monthly payment-date coverage in both Node UI and Apps Script, validated by synthetic tests. No live data was changed.
+- For an **ordinary new** monthly receipt, next collection = one clamped calendar month after actual payment date; `שולם עד` is the preceding inclusive day.
+- For PR #161's **historical missing receipt confirmation** where `Clients.nextBillingDate` already reflects an older due-cycle agreement, keep that existing anchor, explicitly record its verified cycle coverage and do not silently create a conflicting paid-date default. This is a separately verified exception, not an ordinary renewal.
+- A historical row without enough evidence remains marked for review. Never rewrite existing source periods automatically.
+- Service-worker cache bumped from live v23 to v24 on draft. Any further production changes must be reintegrated before release.
+- Release blockers remain: current-source OP-03 restore evidence, exact-head integrated CI/browser checks and read-only finance reconciliation of ambiguity with separate approval. No merge, deploy, source write or migration without Sandra's explicit release decision.
 
 ## Contract
 - `dueDate` identifies the original billing item; it is *not* evidence for the paid service period.
