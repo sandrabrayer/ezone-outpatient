@@ -793,6 +793,7 @@
       throw new Error('לא התקבל אישור לשמירת הכרטיס');
     }
     if (data && data.dataVersion != null) state.dataVersion = Number(data.dataVersion);
+    applySavedStamps(data);
     // Conflict refusal (PR 2): the server REFUSED the rows another person
     // edited after this tab loaded them (the sheet row was kept, the rest of
     // the save went through) and lists them in `conflicts`. Show the banner
@@ -821,6 +822,32 @@
       if (opts && opts.requireIds) await staleReload;
     }
   }
+  // Discharge-persist fix: adopt the updatedAt the server just wrote for each
+  // saved row, so this tab's NEXT save of the same row echoes the current
+  // stamp instead of being refused as a conflict with its own previous edit.
+  // Rows the server refused (`conflicts`) are skipped — the conflict reload
+  // replaces them. Old backends send no `stamps`: nothing changes.
+  function applySavedStamps(data) {
+    var stamps = data && data.stamps;
+    if (!stamps || typeof stamps !== 'object') return;
+    var refused = {};
+    (Array.isArray(data.conflicts) ? data.conflicts : []).forEach(function (c) {
+      if (c && c.id != null) refused[String(c.id)] = true;
+    });
+    function adopt(rows, map) {
+      if (!map || typeof map !== 'object' || !Array.isArray(rows)) return;
+      rows.forEach(function (r) {
+        if (!r || r.id == null) return;
+        var id = String(r.id);
+        if (refused[id] || !Object.prototype.hasOwnProperty.call(map, id)) return;
+        var v = map[id];
+        if (typeof v === 'string' && v.length <= 40) r.updatedAt = v;
+      });
+    }
+    adopt(state.clients, stamps.clients);
+    adopt(state.leads, stamps.leads);
+  }
+
   // Pure wording helper (public/conflicts.js, unit-tested): '' when the
   // response carries no conflicts. Defensive if the module failed to load.
   function conflictsMessage(res) {
@@ -7098,10 +7125,16 @@
       if (!client) { submit.disabled = false; return; }
       var fd = new FormData(e.target);
       var dischargedId = client.id;
+      var prevExit = { status: client.status, exitDate: client.exitDate };
+      var dischargeSaved = false;
       client.status = 'סיים טיפול';
       client.exitDate = fd.get('exitDate') || today();
-      persist()
+      // persistClientChange (requireIds): a refused row THROWS instead of
+      // resolving, so a discharge the server did not store can never show
+      // «סיום נשמר» (it used to: the card came back after the reload).
+      persistClientChange(client)
         .then(function () {
+          dischargeSaved = true;
           // Vered confirmed the discharge → resolve any pending stop-flags for
           // this client. Best-effort; the discharge itself already succeeded.
           return resolveStopFlagsForClient(dischargedId);
@@ -7117,7 +7150,18 @@
           // מטופלים לא פעילים tab.
           openCreditsForClient(client, client.exitDate);
         })
-        .catch(function (err) { toast('שגיאה: ' + err.message, true); })
+        .catch(function (err) {
+          if (!dischargeSaved) {
+            // Not stored → undo the optimistic change on this object (a
+            // conflict reload may already have replaced it) and say so.
+            client.status = prevExit.status;
+            client.exitDate = prevExit.exitDate;
+            render();
+            toast('סיום הטיפול לא נשמר: ' + err.message, true);
+            return;
+          }
+          toast('שגיאה: ' + err.message, true);
+        })
         .finally(function () { submit.disabled = false; });
     });
 
