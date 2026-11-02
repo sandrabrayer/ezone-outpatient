@@ -1,0 +1,18 @@
+{
+  "scriptId": "1zZkII4vZXE-VJfSeWmYBjiobIf8CfLrrio6S1RGiZFq0qkn2VGwK4S8B",
+  "evidenceCommit": "9ed06ddf3e947f4700f51908194d64fab18e66ed",
+  "verifierRecordCommit": "cd5b658382927a3ec6538d1aae2106637d9b4626",
+  "savedVerifierBytes": 88752,
+  "savedVerifierFileSHA256": "8ae5d5f1eb1e291db879071cca8ea0f82e677193a9c07f479877fed405abe268",
+  "savedVerifierExactMatch": true,
+  "rawOriginalStateUnchanged": true,
+  "rawRestoredStateUnchanged": true,
+  "retainedHold": "1",
+  "executionsBeforeRun": 8,
+  "priorPolicyVerifications": 0,
+  "selectedFunction": "verifyManualPolicyDrill",
+  "runClicks": 1,
+  "displayedLogStart": "2026-10-27 09:11:02 America/Los_Angeles",
+  "resultAtThisCheckpoint": "running",
+  "productionCertified": false
+}

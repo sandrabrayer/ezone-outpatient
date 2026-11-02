@@ -1,0 +1,224 @@
+// STANDALONE ISOLATED PROJECT ONLY. No web deployment or production Code.gs.
+// Build with an explicitly authorized test project ID; the checked-in file
+// refuses to run. Run the five entry points separately, in the listed order.
+function prepareOperationalDrill() { return op03Drill_('prepare'); }
+function captureOperationalDrill() { return op03Drill_('capture'); }
+function restoreOperationalDrill() { return op03Drill_('restore'); }
+function verifyOperationalDrill() { return op03Drill_('verify'); }
+function verifyManualTabDrill() { return op03Drill_('manual'); }
+
+function op03Drill_(phase) {
+  var expectedScriptId = __SCRIPT_ID_JSON__;
+  if (expectedScriptId === 'ISOLATED_SCRIPT_ID_REQUIRED' ||
+      ScriptApp.getScriptId() !== expectedScriptId) throw new Error('Wrong isolated script project');
+  // A bound project can be an application. This drill requires a standalone one.
+  if (SpreadsheetApp.getActiveSpreadsheet()) throw new Error('Standalone test project required');
+  var metadata = __METADATA_JSON__;
+  var fixture = __FIXTURE_JSON__;
+  var phaseStartedAt = Date.now();
+  var nativeSheets = SpreadsheetApp, nativeProps = PropertiesService.getScriptProperties();
+  var stateKey = 'OP03_DRILL_STATE', prefix = 'OP03_DRILL_FIXTURE_';
+  var state, books, currentBook, lock = LockService.getScriptLock();
+  var stages = { prepare: '', capture: 'prepared', restore: 'captured', verify: 'restored', manual: 'verified' };
+  if (!Object.prototype.hasOwnProperty.call(stages, phase)) throw new Error('Unknown drill phase');
+  lock.waitLock(30000);
+  try {
+    var raw = nativeProps.getProperty(stateKey);
+    state = raw ? JSON.parse(raw) : null;
+    if (phase === 'prepare') {
+      if (state) throw new Error('Drill already exists; preserve its evidence');
+      // Names only: do not inspect any values from a pre-existing project.
+      if (nativeProps.getKeys().length) throw new Error('Fresh standalone test project required');
+      state = { tag: Utilities.getUuid(), phase: '', ids: {}, running: true,
+        sourceHash: metadata.sourceCodeSHA256, helperHash: metadata.helperSHA256, drillHash: metadata.drillDefinitionSHA256,
+        day: Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd') };
+    } else {
+      if (!state || state.running || state.failed || state.phase !== stages[phase] ||
+          state.sourceHash !== metadata.sourceCodeSHA256 || state.helperHash !== metadata.helperSHA256 ||
+          state.drillHash !== metadata.drillDefinitionSHA256) {
+        throw new Error('Drill state, order or source hash mismatch');
+      }
+      state.running = true;
+    }
+    nativeProps.setProperty(stateKey, JSON.stringify(state));
+  } finally { lock.releaseLock(); }
+
+  function name(role) { return 'OP03 SYNTHETIC NOT PRODUCTION ' + state.tag + ' ' + role; }
+  function loadBooks() {
+    var seen = {}, result = {};
+    ['source', 'backup', 'target'].forEach(function (role) {
+      var id = state.ids[role];
+      if (!id || seen[id]) throw new Error('Invalid isolated workbook IDs');
+      seen[id] = true;
+      var ss = nativeSheets.openById(id);
+      if (ss.getName() !== name(role)) throw new Error('Isolated workbook name mismatch');
+      result[role] = ss;
+    });
+    return result;
+  }
+  function saveState() { nativeProps.setProperty(stateKey, JSON.stringify(state)); }
+  function report(result, detail) {
+    if (!books || !books.backup) return;
+    var sh = books.backup.getSheetByName('_DrillReport');
+    if (!sh) throw new Error('Drill report missing');
+    var row = [new Date().toISOString(), phase, result, detail,
+      metadata.sourceCodeSHA256, metadata.helperSHA256, metadata.drillDefinitionSHA256, Date.now() - phaseStartedAt];
+    sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@')
+      .setValues([row.map(function (v) { return "'" + String(v); })]);
+  }
+  var facade = {
+    getActiveSpreadsheet: function () { return currentBook; },
+    openById: function (id) {
+      for (var role in books) if (books[role].getId() === id) return books[role];
+      throw new Error('Workbook outside isolated drill');
+    },
+    flush: function () { nativeSheets.flush(); }
+  };
+  // Production property names are scoped to this drill, including its hold.
+  var propertyFacade = { getScriptProperties: function () { return {
+    getProperty: function (k) { return nativeProps.getProperty(prefix + k); },
+    setProperty: function (k, v) { nativeProps.setProperty(prefix + k, String(v)); },
+    deleteProperty: function (k) { nativeProps.deleteProperty(prefix + k); }
+  }; } };
+
+  try {
+    if (phase === 'prepare') {
+      books = {};
+      ['source', 'backup', 'target'].forEach(function (role) {
+        books[role] = nativeSheets.create(name(role));
+        state.ids[role] = books[role].getId(); saveState();
+      });
+      books.backup.getSheets()[0].setName('_DrillReport').getRange(1, 1, 1, 8)
+        .setValues([['at', 'phase', 'result', 'detail', 'sourceSHA256', 'helperSHA256', 'drillSHA256', 'durationMs']]);
+    } else books = loadBooks();
+    currentBook = phase === 'verify' ? books.target : books.source;
+    var result = (function (SpreadsheetApp, PropertiesService) {
+      // Exact production function bodies and derived constants, source-hashed.
+__HELPERS__
+      function check(ok, reason) { if (!ok) throw new Error(reason); }
+      function rejected(fn, pattern) {
+        var error = null; try { fn(); } catch (e) { error = String(e); }
+        check(error && pattern.test(error), 'Expected refusal: ' + pattern);
+      }
+      function grid(name) { return currentBook.getSheetByName(name).getDataRange().getValues(); }
+      function revive(rows) { return rows.map(function (row) { return row.map(function (v) {
+        return v && typeof v === 'object' && v.drillDate ? new Date(v.drillDate) : v;
+      }); }); }
+      function seed(ss, tab, values, i) {
+        // The actual verified writer supplies literal-string/type handling.
+        _integrityWriteSnapshot(ss, 'outpatient-' + ('2099-01-' + ('0' + (i + 1)).slice(-2)), values).setName(tab);
+      }
+      function publish(day) {
+        var items = _integrityCaptureData(books.source);
+        var manifest = [['id', 'source', 'snapshot', 'absent', 'sha256']];
+        items.forEach(function (item) {
+          var snapshot = 'outpatient-' + item.prefix + day;
+          _integrityWriteSnapshot(books.backup, snapshot, item.grid, item.formats);
+          manifest.push([item.source, item.source, snapshot, item.absent ? '1' : '0', _integrityFingerprint(item.grid)]);
+        });
+        _integrityWriteSnapshot(books.backup, 'outpatient-manifest-' + day, manifest);
+        return _integrityValidateRestoreSet(books.backup, day, true);
+      }
+      if (phase === 'prepare') {
+        var initial = books.source.getSheets()[0];
+        Object.keys(fixture.grids).forEach(function (tab, i) {
+          seed(books.source, tab, revive(fixture.grids[tab]), i);
+        });
+        books.source.deleteSheet(initial);
+        PropertiesService.getScriptProperties().setProperty('FINANCIAL_OPS_CREATED', '1');
+        PropertiesService.getScriptProperties().setProperty('SESSION_OUTCOME_SECRET', fixture.event.secret);
+        check(_finJournal().ops.length === 2, 'Both journal kinds must exist');
+        check(grid('SessionLog').length === 3, 'Two nonempty session rows required');
+        check(grid('PackageCatalog').length > 1 && grid('PackageRequests').length === 2, 'Package fixtures required');
+        return { stage: 'prepared', detail: 'Synthetic sessions, both journal kinds, approved quote and typed audit values seeded' };
+      }
+      if (phase === 'capture') {
+        var captured = publish(state.day);
+        check(captured.length === 20, 'Expected 19 registered datasets plus metadata');
+        check(captured.filter(function (x) { return x.source === 'FinancialOps'; })[0].grid.length === 3,
+          'Journal history was omitted');
+        return { stage: 'captured', detail: '20 manifest entries fingerprint-verified in native Sheets' };
+      }
+      if (phase === 'restore') {
+        check(beginOutpatientRecovery().ok === true, 'Fixture recovery must be quiescent');
+        var items = _integrityValidateRestoreSet(books.backup, state.day, true);
+        var blank = books.target.getSheets()[0];
+        check(books.target.getSheets().length === 1 && blank.getLastRow() === 0, 'Restore target must be fresh');
+        items.forEach(function (item) {
+          if (item.absent || item.source === '__RecoveryMetadata') return;
+          var copy = books.backup.getSheetByName('outpatient-' + item.prefix + state.day).copyTo(books.target);
+          copy.setName(item.source);
+          _integrityVerifyGrid(item.grid, copy.getDataRange().getValues());
+        });
+        books.target.deleteSheet(blank);
+        return { stage: 'restored', detail: 'Native copy into separate target; every restored grid matched' };
+      }
+      if (phase === 'verify') {
+        var heldClients = _integrityFingerprint(grid('Clients'));
+        rejected(function () { _setPreferredHouse({ clientId: 'drill-session-client', preferredHouse: '' }); }, /recovery_pending/);
+        check(heldClients === _integrityFingerprint(grid('Clients')), 'Held preferred-house write changed the target');
+        check(_readAll(books.target.getSheetByName('Clients'), CLIENTS_HEADERS).some(function (row) {
+          return row.id === 'drill-session-client' && row.preferredHouse === fixture.preferredHouse;
+        }), 'Preferred house did not survive recovery');
+        rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, state.day, books.target, false); }, /configuration verification/);
+        rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, state.day, books.source, true); }, /isolated target/);
+        var sessions = books.target.getSheetByName('SessionLog');
+        sessions.setName('_DrillMissingSessionLog');
+        try { rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, state.day, books.target, true); }, /Recovered sheet missing/); }
+        finally { sessions.setName('SessionLog'); }
+        var journal = _finJournal().ops;
+        check(journal.length === 2 && journal.some(function (op) { return JSON.parse(op.intent).kind === 'extra_charge'; }) &&
+          journal.some(function (op) { return !JSON.parse(op.intent).kind; }), 'Mixed journal validation failed');
+        check(finishOutpatientRecovery(books.backup.getId(), state.day, true).ok === true, 'Fixture finish failed');
+        var before = { payments: _integrityFingerprint(grid('Payments')), charges: _integrityFingerprint(grid('ClientCharges')),
+          journal: _integrityFingerprint(grid('FinancialOps')), clients: _integrityFingerprint(grid('Clients')) };
+        check(_applyRenewal({ opId: fixture.renewalId }).ok === true, 'Renewal retry failed');
+        check(_applyExtraCharge({ opId: fixture.extraId }).ok === true, 'Extra-charge retry failed');
+        check(_recordSessionOutcome(fixture.event).ok === true, 'Cancellation retry failed');
+        check(_recordSessionOutcome(fixture.paidEvent).ok === true, 'Paid-session retry failed');
+        check(before.payments === _integrityFingerprint(grid('Payments')) && before.charges === _integrityFingerprint(grid('ClientCharges')) &&
+          before.journal === _integrityFingerprint(grid('FinancialOps')) && before.clients === _integrityFingerprint(grid('Clients')),
+          'Retry changed financial effects or patient balance');
+        var rows = _readAll(books.target.getSheetByName('SessionLog'), SESSION_LOG_HEADERS);
+        var paid = rows.filter(function (x) { return x.sessionId === fixture.paidEvent.sessionId; })[0];
+        check(rows.length === 2 && paid.forwardedToPayroll === '2026-10' && Number(paid.therapistPay) === 777,
+          'Replay lost payroll stamp or configured rate');
+        _integrityVerifyGrid(revive(fixture.grids.AuditLog), grid('AuditLog'));
+        _integrityVerifyGrid(fixture.grids.PackageCatalog, grid('PackageCatalog'));
+        _integrityVerifyGrid(fixture.grids.PackageRequests, grid('PackageRequests'));
+        Object.keys(fixture.grids).forEach(function (tab) {
+          _integrityVerifyGrid(revive(fixture.grids[tab]), books.source.getSheetByName(tab).getDataRange().getValues());
+        });
+        return { stage: 'verified', detail: 'Native round-trip and exact retries passed; not production certification' };
+      }
+      // Preserve unknown/manual tabs faithfully, and prove that the gate still
+      // refuses them. This does not whitelist the actual production archive.
+      books.source.insertSheet('Sheet1');
+      seed(books.source, 'Copy of Clients', [['id', 'note'], ['drill-archive', '=literal archive']], 25);
+      var manualDay = '2099-12-31', manual = publish(manualDay);
+      check(manual.length === 22, 'Manual inventory lost');
+      ['Sheet1', 'Copy of Clients'].forEach(function (tab) {
+        var item = manual.filter(function (x) { return x.source === tab; })[0];
+        check(!!item && !item.absent, 'Manual source not preserved');
+        _integrityVerifyGrid(books.source.getSheetByName(tab).getDataRange().getValues(), item.grid);
+      });
+      rejected(function () { _integrityVerifyRecoveredWorkbook(books.backup, manualDay, books.target, true); }, /Unclassified sheets/);
+      return { stage: 'manual_block_verified', detail: 'Empty Sheet1 and synthetic archive preserved; certification correctly refused' };
+    })(facade, propertyFacade);
+    state.phase = result.stage; report('PASS', result.detail); saveState();
+    Logger.log(JSON.stringify({ phase: phase, result: 'PASS', detail: result.detail,
+      workbookIds: state.ids, sourceCodeSHA256: metadata.sourceCodeSHA256,
+      helperSHA256: metadata.helperSHA256, drillDefinitionSHA256: metadata.drillDefinitionSHA256,
+      durationMs: Date.now() - phaseStartedAt, productionCertified: false }));
+    return { ok: true, phase: state.phase, workbookIds: state.ids, productionCertified: false };
+  } catch (error) {
+    state.failed = true;
+    try { saveState(); report('FAIL', String(error).slice(0, 500)); }
+    catch (reportError) { Logger.log('Drill evidence write failed: ' + String(reportError).slice(0, 200)); }
+    throw error;
+  } finally {
+    lock.waitLock(30000);
+    try { state.running = false; saveState(); }
+    finally { lock.releaseLock(); }
+  }
+}
