@@ -5341,7 +5341,12 @@
         nextBillRow = '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' +
           escapeHtml(displayDate(paidReview.nextCollection)) + '</span></div>';
       } else if (paidReview.state === 'review') {
-        paidChipHtml = paidReview.confirmedEnd
+        // #161's explicitly confirmed missing historical receipt remains a
+        // valid repair. Keep its already-guarded button when no paid row exists;
+        // never offer it for a disputed receipt or an irregular legacy anchor.
+        var canConfirmMissingReceipt = paidReview.reason === 'future_anchor_without_receipt' &&
+          state.role === 'editor' && !!missingCyclePayment(c, today());
+        if (!canConfirmMissingReceipt) paidChipHtml = paidReview.confirmedEnd
           ? '<span class="chip chip-paid">כיסוי מאומת עד ' + escapeHtml(displayDate(paidReview.confirmedEnd)) + '</span>' +
             '<span class="chip chip-payment-review" title="מועד הגבייה הרשום אינו תואם לתקופת הכיסוי המאומתת">נדרשת התאמת גבייה</span>'
           : '<span class="chip chip-payment-review" role="status" title="תאריך התשלום לבדו אינו מאמת תקופת כיסוי כאשר מחזור החיוב שונה או חסר מקור">נדרש בירור תקופת תשלום</span>';

@@ -346,6 +346,63 @@ test('browser: legacy paid row is preserved, but auto-inferred due-date coverage
   assert.deepEqual(fx.errors, []);
 });
 
+test('browser: OP-BILL-01 preserves #161 missing-receipt confirmation and never repeats it after reload', skipOpt, async (t) => {
+  const fx = await fixture(t); if (!fx) return;
+  fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [{ ...fx.client,
+    paymentStatus: 'paid', paymentDate: '2026-10-16', nextBillingDate: '2026-11-01' }]);
+  const before = JSON.stringify(fx.sb.rows('Clients'));
+  const page = await fx.login('ורד');
+  const verify = clientCard(page).locator('[data-action="confirm-cycle-payment"]');
+  assert.equal(await verify.count(), 1, '#161 repair must remain reachable on the actual rendered card');
+  page.on('dialog', dialog => dialog.accept());
+  const saved = page.waitForResponse(r => r.url().endsWith('/api/sheets') &&
+    r.request().method() === 'POST' && r.request().postDataJSON().action === 'savePayment');
+  await verify.click();
+  assert.equal((await (await saved).json()).ok, true);
+  await page.waitForLoadState('networkidle');
+  assert.equal(fx.sb.rows('Payments').length, 1);
+  const receipt = fx.sb.rows('Payments')[0];
+  assert.equal(receipt.paymentDate, '2026-10-16');
+  assert.equal(receipt.coverageStart, '2026-10-01');
+  assert.equal(receipt.coverageEnd, '2026-10-31');
+  assert.equal(JSON.stringify(fx.sb.rows('Clients')), before, 'confirmation never changes the historic anchor');
+  for (const reader of [page, await fx.login('אורן')]) {
+    await reader.reload({ waitUntil: 'networkidle' });
+    await reader.click('.tab[data-view="clients"]');
+    await clientCard(reader).waitFor();
+    assert.equal(await clientCard(reader).locator('[data-action="confirm-cycle-payment"]').count(), 0);
+    // A saved legacy due-cycle receipt is not proof of a new paid-date agreement.
+    assert.equal(await clientCard(reader).locator('.chip-payment-review').count(), 1);
+  }
+  assert.equal(fx.captured.filter(r => r.payload.action === 'savePayment').length, 1);
+  assert.equal(fx.sb.rows('Payments').length, 1);
+  assert.deepEqual(fx.errors, []);
+});
+
+test('browser: OP-BILL-01 keeps irregular anchors and disputed paid receipts out of quick confirmation', skipOpt, async (t) => {
+  const fx = await fixture(t); if (!fx) return;
+  const irregular = { ...fx.client, id: 'irregular-fixture', name: 'עוגן חריג לבדיקה',
+    paymentStatus: 'paid', paymentDate: '2026-10-16', nextBillingDate: '2026-11-04' };
+  const disputed = { ...fx.client, paymentStatus: 'paid', paymentDate: '2026-10-16',
+    nextBillingDate: '2026-11-01' };
+  fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [irregular, disputed]);
+  fx.sb.seed('Payments', fx.sb.ctx.PAYMENTS_HEADERS, [{
+    id: 'pay::fixture-client::base::2026-10', clientId: disputed.id,
+    billingType: 'monthly', dueDate: '2026-10-01', status: 'paid',
+    amountDue: 500, amountPaid: 500, paymentDate: '2026-10-16',
+    coverageStart: '2026-10-01', coverageEnd: '2026-10-20'
+  }]);
+  const before = JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments')]);
+  const page = await fx.login('ורד');
+  for (const name of [irregular.name, disputed.name]) {
+    assert.equal(await clientCard(page, name).locator('[data-action="confirm-cycle-payment"]').count(), 0);
+    assert.equal(await clientCard(page, name).locator('.chip-payment-review').count(), 1);
+  }
+  assert.equal(fx.captured.filter(r => ['saveAll', 'savePayment'].includes(r.payload.action)).length, 0);
+  assert.equal(JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments')]), before);
+  assert.deepEqual(fx.errors, []);
+});
+
 test('browser: recorded two-cycle prepayment stays paid without invoking a wrong-month quick toggle', skipOpt, async (t) => {
   const fx = await fixture(t); if (!fx) return;
   fx.sb.seed('Clients', fx.sb.ctx.CLIENTS_HEADERS, [{ ...fx.client, nextBillingDate: '2026-11-01' }]);

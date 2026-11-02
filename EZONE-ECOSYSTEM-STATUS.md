@@ -1,3 +1,9 @@
+# Outpatient release acceptance — 2026-11-02
+
+OP-BILL-01 remains DRAFT in #162, based on verified production `98c49c7` (SW v23; last recorded Apps Script deployment @101). Candidate source and UI implement the new paid-date month policy; the acceptance pass corrected a renderer regression that hid #161's missing-receipt confirmation and added real-browser and source-transition evidence. See `docs/OP-BILL-01-RELEASE-ACCEPTANCE-20261102.md` for exact source hashes, tests, today's backup manifest and rollback boundary.
+
+Production remains **NO-GO**: #162 alone lacks the existing #142 Dana money boundary; the local CRM + OP-03 compatibility tree still has 40 failing recovery/fixture checks, and current native source/restore/UAT evidence is outstanding. No duplicate implementation, production merge/deploy, live financial records, permissions or credentials were changed. Prior dated notes below remain historical.
+
 # Outpatient local update — 2026-10-18
 
 OP-01 #115, release-order #116, OP-02a #117, OP-02b1 #118 and renewal #120 are

@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-BILL-01 release acceptance: retain the missing-receipt action (draft, 2026-11-02)
+- The paid-period review renderer no longer hides #161's guarded historical missing-receipt confirmation. Irregular anchors and already-paid disputed receipts remain read-only review cases.
+- Real-browser regressions cover confirmation, reload, an independent reader, no duplicate receipt and unchanged historical anchor. Six release-transition checks preserve old journal intents and expose the pending-operation rollback boundary.
+- Replaced the policy TODO with a persisted-source → card → revenue acceptance check for an ordinary renewal and explicit two-month prepayment.
+- Current-base, backup metadata, CRM/OP-03 compatibility and exact remaining release gates are recorded in `docs/OP-BILL-01-RELEASE-ACCEPTANCE-20261102.md`. No merge, deploy, permission change or live financial data operation.
+
 ### Fix: «נדרש אימות תשלום» after marking a patient paid (2026-11-02)
 - עריכה: setting the status to «שולם» without changing the paid date saved the client as paid with no payment row. It now records the CURRENT cycle's base row when the anchor is already ahead (anchor not moved).
 - The «נדרש אימות תשלום» chip is now a confirm button for editors: records that cycle's row (package amount, stored paid date) after an explicit confirm; failures show the financial-save warning. SW v22 → v23. No Apps Script change. See `CHANGELOG-payment-verify.md`.
