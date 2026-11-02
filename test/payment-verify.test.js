@@ -23,6 +23,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { fixture, settled, named, source } = require('../test-support/financial-ui-fixture.cjs');
+const CreditsLedger = require('../public/credits-ledger.js');
 
 const HELPERS = ['toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey', 'addDays',
   'paymentId', 'legacyBasePaymentId', 'paymentKindFromId', 'findPaymentById', 'basePaymentPaidOn',
@@ -57,6 +58,24 @@ test('A: the stuck card yields the current cycle row, anchor untouched', () => {
   assert.equal(plan.row.paymentDate, '2026-10-22');
   assert.equal(plan.until, '2026-11-26');
   assert.equal(c.nextBillingDate, '2026-11-26', 'never moves the anchor');
+});
+
+test('A2: legacy missing-cycle verification preserves the historical agreed window, not a new default', () => {
+  const c = { ...STUCK };
+  const row = harness().missingCyclePayment(c, TODAY).row;
+  assert.equal(row.coverageStart, '2026-10-26');
+  assert.equal(row.coverageEnd, '2026-11-25');
+  assert.equal(row.paymentDate, '2026-10-22');
+  assert.equal(CreditsLedger.paymentDateCoverage(row.paymentDate).next, '2026-11-22',
+    'ordinary new receipt would differ: historical confirmation is explicit coverage');
+  const preserved = CreditsLedger.withDefaultCoverage(row, { newPaidMonthly: true });
+  assert.equal(preserved.coverageStart, row.coverageStart);
+  assert.equal(preserved.coverageEnd, row.coverageEnd);
+  const ctx = harness([row]);
+  ctx.CL = CreditsLedger;
+  assert.ok(ctx.confirmedPackagePayment(c, c.nextBillingDate, row),
+    'the #161 confirmation must not remain an endless review button after the row is recorded');
+  assert.equal(c.nextBillingDate, '2026-11-26', 'historical client anchor unchanged');
 });
 
 test('A: nothing to record when the cycle is confirmed or the package is not paid-up', () => {
