@@ -408,7 +408,7 @@ test('E: RECEIVED and EXPECTED are never blended — no combined field exists an
   assert.match(APP, /\$\('#revExpected'\)\.textContent = revMoney\(model\.expected\.exVat\)/);
   // And they are coloured apart, so they cannot be skim-read as the same thing.
   assert.match(CSS, /\.revenue-kpi-received \.kpi-value \{ color: var\(--green-2\); \}/);
-  assert.match(CSS, /\.revenue-kpi-expected \.kpi-value \{ color: var\(--blue-soft\); \}/);
+  assert.match(CSS, /\.revenue-kpi-expected \.kpi-value \{ color: var\(--blue-deep\); \}/); // light theme: a readable blue, still distinct from received-green
 });
 
 /* ================= F. VAT — the cross-app contract ================= */
@@ -759,7 +759,7 @@ function startStub() {
       if (p === '/api/users') return json({ ok: true, users: ['ורד', 'אורן', 'דנה'] }); // public, like the real server
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false }); }
-      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
+      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu), moneyScope: 'full' }); // OP-CRM-3A: the real server reports the scope
       if (p === '/api/users') return json({ ok: true, users: ['ורד', 'אורן', 'דנה'] });
       if (p === '/api/sheets') {
         if (req.method === 'GET') {

@@ -1,0 +1,114 @@
+// ISOLATED SYNTHETIC EXTENSION ONLY. Preserve the original Code.gs and report.
+// Run prepare, capture, restore separately. Verify owner-only files between phases.
+function prepareManualPolicyDrill() { return op03PolicySetup_('prepare'); }
+function captureManualPolicyDrill() { return op03PolicySetup_('capture'); }
+function restoreManualPolicyDrill() { return op03PolicySetup_('restore'); }
+function op03PolicySetup_(phase) {
+  return (function (nativeSheets, nativeProperties, nativeLocks, nativeCache, nativeSheetsApi) {
+    var config = __OP03_CONFIG__;
+    var metadata = __OP03_METADATA__;
+__OP03_COMMON__
+    // Exact candidate function bodies. The setup's approval constant stays blank.
+__OP03_HELPERS__
+    var previous = { prepare: '', capture: 'prepared', restore: 'captured' };
+    check(Object.prototype.hasOwnProperty.call(previous, phase), 'Unknown policy setup phase');
+    return run(phase, previous[phase], function () {
+      if (phase === 'prepare') {
+        ['backup', 'target'].forEach(function (role) {
+          guardBudget('artifact-create-before:' + role);
+          books[role] = nativeSheets.create(policyName(role)); state.ids[role] = books[role].getId(); saveState();
+          guardBudget('artifact-create-after:' + role);
+        });
+        books.backup.getSheets()[0].setName('_PolicyDrillReport').getRange(1, 1, 1, 9).setValues([
+          ['at', 'phase', 'result', 'detail', 'sourceSHA256', 'helperSHA256', 'setupSHA256', 'verifierSHA256', 'durationMs']]);
+        books.backup.insertSheet('_PolicyEvidence').getRange(1, 1, 1, 5).setValues([['packet', 'part', 'parts', 'sha256', 'jsonChunk']]);
+        loadBooks(); currentBook = books.source;
+        var target = inventory(books.target);
+        check(target.sheets.length === 1 && target.sheets[0].lastRow === 0 && target.sheets[0].lastColumn === 0,
+          'New policy target is not empty');
+        check(nativeProps.getProperty('OP03_DRILL_FIXTURE_FINANCIAL_OPS_CREATED') === '1' && _finJournal().ops.length === 2,
+          'Original fixture journal state changed');
+        PropertiesService.getScriptProperties().setProperty('FINANCIAL_OPS_CREATED', '1');
+        writePacket('prepare', { schema: 'op03-policy-prepare-v2', phaseStartedAt: new Date(phaseStartedAt).toISOString(), observedAt: new Date().toISOString(),
+          targetId: state.ids.target, targetInitiallyEmpty: true, target: target, targetSHA256: sha(JSON.stringify(target)),
+          originalStateSHA256: config.baselineStateSHA256, originalReportSHA256: state.originalReportSHA256 });
+        return { stage: 'prepared', detail: 'New backup and initially empty target retained; owner-only metadata check required before capture' };
+      }
+      if (phase === 'capture') {
+        currentBook = books.source;
+        var started = new Date().toISOString(), before = inventory(books.source);
+        guardBudget('native-copy-before');
+        var nativeCopy = books.source.copy(policyName('nativeCopy'));
+        state.ids.nativeCopy = nativeCopy.getId(); saveState();
+        guardBudget('native-copy-after'); loadBooks();
+        guardBudget('capture-data-before');
+        var items = _integrityCaptureData(books.source), manifest = [['id', 'source', 'snapshot', 'absent', 'sha256']];
+        guardBudget('capture-data-after');
+        check(items.length === 22, 'Expected 19 registered datasets, two manual tabs and metadata');
+        items.forEach(function (item) {
+          var name = 'outpatient-' + item.prefix + state.day;
+          guardBudget('snapshot-before:' + item.source);
+          _integrityWriteSnapshot(books.backup, name, item.grid, item.formats);
+          guardBudget('snapshot-after:' + item.source);
+          manifest.push([item.source, item.source, name, item.absent ? '1' : '0', _integrityFingerprint(item.grid)]);
+        });
+        guardBudget('manifest-before'); _integrityWriteSnapshot(books.backup, 'outpatient-manifest-' + state.day, manifest);
+        guardBudget('manifest-after');
+        var verified = _integrityValidateRestoreSet(books.backup, state.day, true);
+        guardBudget('capture-validation-after');
+        var meta = _integrityRecoveryMetadata(verified), unknown = JSON.parse(meta.unclassifiedSources).sort();
+        check(JSON.stringify(unknown) === JSON.stringify(['Copy of Clients', 'Sheet1']), 'Unexpected manual source inventory');
+        var after = inventory(books.source), copied = inventory(books.nativeCopy), ended = new Date().toISOString();
+        check(sha(JSON.stringify(before)) === sha(JSON.stringify(after)), 'Source changed during coordinated capture');
+        check(comparableHash(before) === comparableHash(copied), 'Native copy properties differ from source');
+        var manualTabs = unknown.map(function (name) {
+          var item = verified.filter(function (x) { return x.source === name; })[0];
+          var source = before.sheets.filter(function (x) { return x.name === name; })[0];
+          check(item && source && !item.absent, 'Manual source missing');
+          return { source: name, sheetId: source.sheetId, prefix: item.prefix, absent: false,
+            role: name === 'Sheet1' ? 'structural-empty' : 'retained-archive', sha256: _integrityFingerprint(item.grid),
+            rows: item.grid.length, columns: item.grid[0].length, allocatedRows: source.allocatedRows, allocatedColumns: source.allocatedColumns };
+        });
+        var metadataItem = verified.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
+        writePacket('capture', { schema: 'op03-policy-capture-v2', phaseStartedAt: new Date(phaseStartedAt).toISOString(), captureStartedAt: started, captureEndedAt: ended,
+          metadataCapturedAt: meta.capturedAt, before: before, after: after, nativeCopy: copied,
+          beforeSHA256: sha(JSON.stringify(before)), afterSHA256: sha(JSON.stringify(after)), comparableSHA256: comparableHash(before),
+          nativeCopyComparableSHA256: comparableHash(copied), formulasAbsent: true, manifestSHA256: _integrityFingerprint(manifest),
+          metadataSHA256: _integrityFingerprint(metadataItem.grid), manualTabs: manualTabs, manifest: typed(manifest), metadata: typed(metadataItem.grid) });
+        return { stage: 'captured', detail: 'Fresh 22-entry capture, native copy and matching source inventories retained; verify native-copy sharing before restore' };
+      }
+      currentBook = books.target;
+      var prepared = readPacket('prepare'), capture = readPacket('capture');
+      check(sha(JSON.stringify(inventory(books.target))) === prepared.targetSHA256, 'Initially empty target changed before restore');
+      check(comparableHash(inventory(books.nativeCopy)) === capture.nativeCopyComparableSHA256, 'Native copy changed before restore');
+      guardBudget('begin-recovery-before');
+      check(beginOutpatientRecovery().ok === true, 'Policy fixture recovery is not quiescent');
+      guardBudget('restore-validation-before');
+      var restored = _integrityValidateRestoreSet(books.backup, state.day, true), blank = books.target.getSheets()[0];
+      guardBudget('restore-validation-after');
+      var blankName = '_OP03_POLICY_INITIAL_EMPTY_' + state.tag;
+      check(!capture.before.sheets.some(function (sheet) { return sheet.name === blankName; }), 'Reserved initial target name collision');
+      blank.setName(blankName);
+      books.target.setSpreadsheetLocale(capture.before.locale); books.target.setSpreadsheetTimeZone(capture.before.timeZone);
+      capture.before.sheets.forEach(function (source) {
+        guardBudget('restore-copy-before:' + source.name);
+        var item = restored.filter(function (x) { return x.source === source.name; })[0];
+        check(item && !item.absent, 'Source inventory differs from capture');
+        var manual = capture.manualTabs.some(function (tab) { return tab.source === source.name; });
+        var originalSheet = manual ? books.nativeCopy.getSheetByName(source.name) :
+          books.backup.getSheetByName('outpatient-' + item.prefix + state.day);
+        var copy = originalSheet.copyTo(books.target); copy.setName(source.name);
+        _integrityVerifyGrid(item.grid, copy.getDataRange().getValues());
+        guardBudget('restore-copy-after:' + source.name);
+      });
+      books.target.deleteSheet(blank);
+      var target = inventory(books.target), sourceAfter = inventory(books.source);
+      check(comparableHash(target) === capture.comparableSHA256, 'Restored native properties differ from source packet');
+      check(sha(JSON.stringify(sourceAfter)) === capture.afterSHA256, 'Original source changed during restore');
+      writePacket('restore', { schema: 'op03-policy-restore-v2', phaseStartedAt: new Date(phaseStartedAt).toISOString(), observedAt: new Date().toISOString(), target: target,
+        comparableSHA256: comparableHash(target), sourceAfterSHA256: sha(JSON.stringify(sourceAfter)),
+        holdRetained: PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD') === '1' });
+      return { stage: 'restored', detail: 'Known snapshots and native manual sheets restored in source order; hold retained for separately pinned verifier' };
+    });
+  })(SpreadsheetApp, PropertiesService, LockService, CacheService, typeof Sheets === 'undefined' ? null : Sheets);
+}
