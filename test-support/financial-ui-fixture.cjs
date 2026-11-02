@@ -57,7 +57,7 @@ function fixture(fields = {}) {
   vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
   for (const name of ['preferredHouseOrBlank', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
-    'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'persist',
+    'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);
   return { ctx, client, lead, out, button, warning, warningText,
     submit: (name) => vm.runInContext(handler(name), ctx)({ preventDefault() {}, target: {} }) };

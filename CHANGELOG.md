@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fix: «נדרש אימות תשלום» after marking a patient paid (2026-11-02)
+- עריכה: setting the status to «שולם» without changing the paid date saved the client as paid with no payment row. It now records the CURRENT cycle's base row when the anchor is already ahead (anchor not moved).
+- The «נדרש אימות תשלום» chip is now a confirm button for editors: records that cycle's row (package amount, stored paid date) after an explicit confirm; failures show the financial-save warning. SW v22 → v23. No Apps Script change. See `CHANGELOG-payment-verify.md`.
+
 ### Fix: «סיים טיפול» did not persist after another edit of the same card (2026-11-02)
 - `saveAll` now returns `stamps` (id → updatedAt, stamps only); `persist()` adopts them, so a second edit of the same row from the same tab is no longer refused as a conflict with the tab's own first edit.
 - Discharge uses `persistClientChange`: a refused save rolls back and shows «סיום הטיפול לא נשמר» instead of a false «סיום נשמר». Real concurrent-edit protection unchanged. SW v21 → v22. Code.gs changed (Deploy Apps Script after merge). See `CHANGELOG-discharge-persist.md`.
