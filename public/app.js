@@ -3122,7 +3122,10 @@
     var pkg = packagePaidState(c, todayIso);
     if (!pkg.paid) return null;
     var cycleDue = prevCycleDueDateBefore(c, pkg.until);
-    if (!cycleDue) return null;
+    // A manually moved/irregular anchor is not evidence of a normal cycle.
+    // Never fabricate one 7-day or 55-day 'monthly' payment from an arbitrary
+    // future nextBillingDate; require a separate finance reconciliation.
+    if (!cycleDue || nextCycleDueDateAfter(c, cycleDue) !== pkg.until) return null;
     var cycleRow = paymentForClientOn(c, cycleDue);
     if (confirmedPackagePayment(c, pkg.until, cycleRow)) return null;
     var amount = cycleRow.amountDue || clientAmountDue(c) || 0;
@@ -5291,7 +5294,7 @@
         // Editors can record the missing confirmed payment for THIS cycle in
         // one explicit, confirmed step (payment-verify fix). The anchor is not
         // moved; the row id is the cycle's own base id.
-        paidChipHtml = state.role === 'editor'
+        paidChipHtml = state.role === 'editor' && !!missingCyclePayment(c, today())
           ? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. לחיצה תרשום את התשלום למחזור הנוכחי (אחרי אישור).">נדרש אימות תשלום — לרישום ✓</button>'
           : '<span class="chip chip-payment-review" role="status" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. יש לבדוק בגבייה לפני פעולה נוספת.">נדרש אימות תשלום</span>';
       } else if (customPaidCycle) {
