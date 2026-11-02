@@ -3077,6 +3077,52 @@
     });
     return latest;
   }
+  // Payment-verify fix (2026-11-02): the card reads paid-up from a future
+  // nextBillingDate, but no confirmed payment row exists for the current
+  // cycle (e.g. «שולם» was set in עריכה without changing the paid date).
+  // Records exactly that cycle's base row — amount = the package amount, paid
+  // date = the client's stored paymentDate (else today) — after an explicit
+  // confirm. Never moves the anchor; never touches another cycle's row.
+  function missingCyclePayment(c, todayIso) {
+    var pkg = packagePaidState(c, todayIso);
+    if (!pkg.paid) return null;
+    var cycleDue = prevCycleDueDateBefore(c, pkg.until);
+    if (!cycleDue) return null;
+    var cycleRow = paymentForClientOn(c, cycleDue);
+    if (confirmedPackagePayment(c, pkg.until, cycleRow)) return null;
+    var amount = cycleRow.amountDue || clientAmountDue(c) || 0;
+    if (!(amount > 0)) return null;
+    var paidOn = fmtDate(c.paymentDate);
+    if (!paidOn || paidOn > todayIso) paidOn = todayIso;
+    var row = basePaymentPaidOn(c, cycleDue, amount, paidOn, cycleRow.notes || '');
+    row.id = cycleRow.id; // keep a legacy-shaped id when one already exists
+    row.method = cycleRow.method || '';
+    return { row: row, until: pkg.until };
+  }
+  function confirmCyclePayment(c, btn) {
+    if (state.role !== 'editor') return;
+    var plan = missingCyclePayment(c, today());
+    if (!plan) { render(); return; }
+    var r = plan.row;
+    var msg = 'לרשום תשלום של ₪' + Number(r.amountDue).toLocaleString('he-IL') + ' עבור ' + (c.name || 'המטופל') +
+      '\nמחזור: ' + displayDate(r.dueDate) + ' עד ' + displayDate(addDays(plan.until, -1)) +
+      '\nתאריך תשלום: ' + displayDate(r.paymentDate) +
+      '\nיש לוודא שהתשלום התקבל בפועל.';
+    if (!confirm(msg)) return;
+    if (btn) btn.disabled = true;
+    persistPayment(r)
+      .then(function () {
+        rememberConfirmedPayment(r);
+        render();
+        toast('התשלום נרשם');
+      })
+      .catch(function (err) {
+        if (btn) btn.disabled = false;
+        showFinancialSaveWarning('התשלום לא אושר', c.name);
+        console.warn('[ezone] confirm-cycle-payment failed:', err && err.message);
+      });
+  }
+
   function setCurrentMonthPaid(c, makePaid) {
     if (state.role !== 'editor') return;
     var todayIso = today();
@@ -5175,7 +5221,12 @@
       var customPaidCycle = cycleRow && cycleRow.id !== cycleId;
       var untilDM = pkg.until ? pkg.until.slice(8, 10) + '/' + pkg.until.slice(5, 7) : '';
       if (needsPaymentCheck) {
-        paidChipHtml = '<span class="chip chip-payment-review" role="status" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. יש לבדוק בגבייה לפני פעולה נוספת.">נדרש אימות תשלום</span>';
+        // Editors can record the missing confirmed payment for THIS cycle in
+        // one explicit, confirmed step (payment-verify fix). The anchor is not
+        // moved; the row id is the cycle's own base id.
+        paidChipHtml = state.role === 'editor'
+          ? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. לחיצה תרשום את התשלום למחזור הנוכחי (אחרי אישור).">נדרש אימות תשלום — לרישום ✓</button>'
+          : '<span class="chip chip-payment-review" role="status" title="קיים תאריך גבייה עתידי, אך אין רישום תשלום מאושר למחזור זה. יש לבדוק בגבייה לפני פעולה נוספת.">נדרש אימות תשלום</span>';
       } else if (customPaidCycle) {
         paidChipHtml = '<span class="chip chip-paid" title="מאושר לפי תקופת הכיסוי הרשומה; לתיקון התשלום יש לפתוח גבייה">שולם עד ' + untilDM + '</span>';
       } else if (state.role === 'editor') {
@@ -5354,6 +5405,8 @@
       if (payBtn) payBtn.addEventListener('click', function () { setCurrentMonthPaid(c, true); });
       var unpayBtn = $('[data-action="mark-month-unpaid"]', card);
       if (unpayBtn) unpayBtn.addEventListener('click', function () { setCurrentMonthPaid(c, false); });
+      var verifyBtn = $('[data-action="confirm-cycle-payment"]', card);
+      if (verifyBtn) verifyBtn.addEventListener('click', function () { confirmCyclePayment(c, verifyBtn); });
 
       var statusSel = document.createElement('select');
       ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
@@ -7346,6 +7399,17 @@
       // per-cycle base payment row (the single source the card chip + גבייה read)
       // via persistPayment — otherwise the chip keeps showing the old/today date.
       var propagatePaid = paidDateChanged && client.paymentStatus === 'paid';
+      // Payment-verify fix: switching the status to «שולם» while the paid
+      // date stays the same used to save the client as paid with NO payment
+      // row (card: «נדרש אימות תשלום»). When the anchor is already ahead,
+      // record the CURRENT cycle's missing row instead — the anchor does not
+      // move (that cycle is the one the anchor already covers).
+      var paidStatusChanged = client.paymentStatus === 'paid' && prev.paymentStatus !== 'paid';
+      var verifyPlan = null;
+      if (client.paymentStatus === 'paid' && (paidStatusChanged || paidDateChanged)) {
+        verifyPlan = missingCyclePayment(client, today());
+        if (verifyPlan) propagatePaid = false;
+      }
       // nextBillingDate is recomputed ONLY on that same deliberate change: an
       // ordinary edit must never touch the stored renewal anchor (it used to
       // unconditionally re-stamp paymentDate + 30 days, silently dragging the
@@ -7360,6 +7424,7 @@
       // Build the replacement but retain the existing confirmed payment until
       // the source acknowledges the new paid date.
       var basePay = null;
+      if (verifyPlan) basePay = verifyPlan.row;
       if (propagatePaid) {
         basePay = basePaymentPaidOn(client, cycleDueISO, clientAmountDue(client) || 0, client.paymentDate, '');
         var pi = state.payments.findIndex(function (p) { return p.id === basePay.id; });
@@ -7381,7 +7446,7 @@
           });
         })
         .then(function () {
-          return propagatePaid ? persistPayment(basePay) : null;
+          return basePay ? persistPayment(basePay) : null;
         })
         .then(function () {
           if (basePay) rememberConfirmedPayment(basePay);

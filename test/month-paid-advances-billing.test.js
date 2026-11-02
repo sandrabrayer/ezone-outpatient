@@ -133,7 +133,7 @@ test('app.js: the edit modal no longer recomputes nextBillingDate unconditionall
   // (propagatePaid) and anchors on the CYCLE due date — the same
   // cyclePaymentDueDate the chip settles, resolved before the anchor moves.
   assert.match(APP,
-    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,900}if \(propagatePaid\) \{\s*\n\s*cycleDueISO = cyclePaymentDueDate\(client, today\(\)\);\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, cycleDueISO\);/);
+    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,1800}if \(propagatePaid\) \{\s*\n\s*cycleDueISO = cyclePaymentDueDate\(client, today\(\)\);\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, cycleDueISO\);/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
