@@ -99,6 +99,17 @@ test('OP03-CRM-03: absence before feature creation is recorded, but after a capt
   assert.deepEqual(h.locks(),[false,false]);
 });
 
+test('OP03-CRM-03b: a half-present CRM source pair is refused before capture and writes no snapshots', () => {
+  for (const single of ['Tasks','Activity']) {
+    const partial = source();
+    delete partial[single];
+    const h = harness(partial); enable(h);
+    assert.throws(()=>h.ctx._integrityCaptureData(h.live),/Incomplete CRM operational source pair/);
+    assert.equal(h.backup.getSheets().length,0);
+    assert.deepEqual(h.locks(),[false,false]);
+  }
+});
+
 test('OP03-CRM-04: exact headers and unique task/event IDs required for certified restore, not just checksum', () => {
   const h = harness(source()); enable(h);
   const goodTasks=source().Tasks,goodActivity=source().Activity;
