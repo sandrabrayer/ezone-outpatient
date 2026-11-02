@@ -6218,6 +6218,14 @@ function _integrityCaptureData(sourceSs) {
     var props = PropertiesService.getScriptProperties();
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var specs = _integritySourceSpecs(), known = Object.create(null);
+    // Once CRM schemas are available, neither half of the source pair may be
+    // silently snapshotted alone. Both absent is permitted before CRM usage;
+    // both present permits typed checks below. This does not create a sheet.
+    if (specs.some(function (x) { return x.source === 'Tasks'; })) {
+      var tasksPresent = !!sourceSs.getSheetByName('Tasks');
+      var activityPresent = !!sourceSs.getSheetByName('Activity');
+      if (tasksPresent !== activityPresent) throw new Error('Incomplete CRM operational source pair');
+    }
     var journalRequired = !!props.getProperty('FINANCIAL_OPS_CREATED');
     var previouslyPresent = JSON.parse(props.getProperty('INTEGRITY_REQUIRED_SOURCES') || '[]');
     if (!Array.isArray(previouslyPresent)) throw new Error('Invalid backup source history');
