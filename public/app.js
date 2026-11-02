@@ -3127,7 +3127,9 @@
     // future nextBillingDate; require a separate finance reconciliation.
     if (!cycleDue || nextCycleDueDateAfter(c, cycleDue) !== pkg.until) return null;
     var cycleRow = paymentForClientOn(c, cycleDue);
-    if (confirmedPackagePayment(c, pkg.until, cycleRow)) return null;
+    // A paid-but-disputed source row must not be overwritten by a quick
+    // verification action. Its period needs financial reconciliation instead.
+    if (cycleRow.status === 'paid' || confirmedPackagePayment(c, pkg.until, cycleRow)) return null;
     var amount = cycleRow.amountDue || clientAmountDue(c) || 0;
     if (!(amount > 0)) return null;
     var paidOn = fmtDate(c.paymentDate);
@@ -3143,7 +3145,8 @@
     // contradictory receipt and a permanently unconfirmed card.
     if (cycleRow.coverageStart || cycleRow.coverageEnd) {
       if (!cycleRow.coverageStart || !cycleRow.coverageEnd ||
-          (CL && CL.coveragePeriodError(cycleRow.coverageStart, cycleRow.coverageEnd))) return null;
+          (CL && CL.coveragePeriodError(cycleRow.coverageStart, cycleRow.coverageEnd)) ||
+          cycleRow.coverageStart > cycleDue || cycleRow.coverageEnd < addDays(pkg.until, -1)) return null;
       row.coverageStart = cycleRow.coverageStart;
       row.coverageEnd = cycleRow.coverageEnd;
     } else {
