@@ -6056,7 +6056,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -6196,6 +6196,14 @@ function _integritySourceSpecs() {
     specs.push({ source: 'PackageCatalog', prefix: 'package-catalog-', key: 'id', headers: PACKAGE_CATALOG_HEADERS });
     specs.push({ source: 'PackageRequests', prefix: 'package-requests-', key: 'id', headers: PACKAGE_REQUEST_HEADERS });
   }
+  // CRM-3B owns these two schemas. Backup only recognises both typed
+  // families when their actual definitions have been integrated; this draft
+  // must not create the CRM sheets or silently certify a legacy v2 snapshot.
+  if (typeof TASKS_HEADERS !== 'undefined' && typeof ACTIVITY_HEADERS !== 'undefined' &&
+      Array.isArray(TASKS_HEADERS) && Array.isArray(ACTIVITY_HEADERS)) {
+    specs.push({ source: 'Tasks', prefix: 'tasks-', key: 'id', headers: TASKS_HEADERS });
+    specs.push({ source: 'Activity', prefix: 'activity-', key: 'eventId', headers: ACTIVITY_HEADERS });
+  }
   return specs;
 }
 
@@ -6210,6 +6218,14 @@ function _integrityCaptureData(sourceSs) {
     var props = PropertiesService.getScriptProperties();
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var specs = _integritySourceSpecs(), known = Object.create(null);
+    // Once CRM schemas are available, neither half of the source pair may be
+    // silently snapshotted alone. Both absent is permitted before CRM usage;
+    // both present permits typed checks below. This does not create a sheet.
+    if (specs.some(function (x) { return x.source === 'Tasks'; })) {
+      var tasksPresent = !!sourceSs.getSheetByName('Tasks');
+      var activityPresent = !!sourceSs.getSheetByName('Activity');
+      if (tasksPresent !== activityPresent) throw new Error('Incomplete CRM operational source pair');
+    }
     var journalRequired = !!props.getProperty('FINANCIAL_OPS_CREATED');
     var previouslyPresent = JSON.parse(props.getProperty('INTEGRITY_REQUIRED_SOURCES') || '[]');
     if (!Array.isArray(previouslyPresent)) throw new Error('Invalid backup source history');
@@ -6268,6 +6284,31 @@ function _integrityFingerprint(grid) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(typed), Utilities.Charset.UTF_8)
     .map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
 }
+/* Only the two CRM families that carry user tasks/contact history. No
+ * inference for older unknown sheets: a strict typed, keyed snapshot is
+ * needed before those rows can be called operationally restorable. */
+function _integrityValidateCrmGrid_(source, grid) {
+  var isTasks = source === 'Tasks', isActivity = source === 'Activity';
+  if (!isTasks && !isActivity) return;
+  // A pre-CRM workbook may have an unrelated, opaque tab with this name.
+  // Never treat it as typed without the paired source schema definitions.
+  if (typeof TASKS_HEADERS === 'undefined' || typeof ACTIVITY_HEADERS === 'undefined' ||
+      !Array.isArray(TASKS_HEADERS) || !Array.isArray(ACTIVITY_HEADERS)) return;
+  var headers = isTasks ? TASKS_HEADERS : ACTIVITY_HEADERS;
+  var key = isTasks ? 'id' : 'eventId';
+  if (!Array.isArray(grid) || !grid.length ||
+      JSON.stringify(grid[0].slice(0, headers.length)) !== JSON.stringify(headers)) {
+    throw new Error('Invalid CRM backup headers: ' + source);
+  }
+  var at = headers.indexOf(key), seen = Object.create(null);
+  for (var i = 1; i < grid.length; i++) {
+    var raw = grid[i][at];
+    if (typeof raw !== 'string' || !raw.trim() || raw.trim() !== raw || seen[raw]) {
+      throw new Error('Invalid CRM backup key: ' + source);
+    }
+    seen[raw] = true;
+  }
+}
 function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
@@ -6292,6 +6333,7 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
     if (!data) throw new Error('Restore snapshot missing: ' + source);
     var grid = data.getDataRange().getValues();
     if (_integrityFingerprint(grid) !== row[4]) throw new Error('Restore snapshot mismatch: ' + source);
+    if (source === 'Tasks' || source === 'Activity') _integrityValidateCrmGrid_(source, grid);
     if (String(row[3]) === '1' && grid.length !== 1) throw new Error('Absent restore snapshot contains rows');
     if (source === 'FinancialOps' && requireJournal && (String(row[3]) === '1' ||
         JSON.stringify(grid[0].slice(0, FINANCIAL_OP_HEADERS.length)) !== JSON.stringify(FINANCIAL_OP_HEADERS))) {
