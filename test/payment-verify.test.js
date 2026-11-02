@@ -92,6 +92,20 @@ test('A3: manually shifted anchor is NOT auto-filled with an invented extended m
   assert.equal(irregular.nextBillingDate, '2026-11-25', 'no silent anchor edit');
 });
 
+test('A4: disputed already-paid row and short explicit period cannot be overwritten to fake verification', () => {
+  const row = {
+    id: 'pay::fixture-client-9::base::2026-10', clientId: STUCK.id,
+    billingType: 'monthly', dueDate: '2026-10-26', amountDue: 1234,
+    amountPaid: 1234, status: 'paid', paymentDate: '2026-10-22',
+    coverageStart: '2026-10-26', coverageEnd: '2026-11-20'
+  };
+  assert.equal(harness([row]).missingCyclePayment({ ...STUCK }, TODAY), null,
+    'already-paid but mismatched coverage requires review, not rewriting');
+  assert.equal(harness([{ ...row, status: 'unpaid', amountPaid: 0 }])
+    .missingCyclePayment({ ...STUCK }, TODAY), null,
+    'an explicit shorter period cannot be extended by the verification button');
+});
+
 test('A: a future paid date is clamped to today', () => {
   const plan = harness().missingCyclePayment({ ...STUCK, paymentDate: '2026-12-01' }, TODAY);
   assert.equal(plan.row.paymentDate, TODAY);
