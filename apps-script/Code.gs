@@ -6282,6 +6282,10 @@ function _integrityFingerprint(grid) {
 function _integrityValidateCrmGrid_(source, grid) {
   var isTasks = source === 'Tasks', isActivity = source === 'Activity';
   if (!isTasks && !isActivity) return;
+  // A pre-CRM workbook may have an unrelated, opaque tab with this name.
+  // Never treat it as typed without the paired source schema definitions.
+  if (typeof TASKS_HEADERS === 'undefined' || typeof ACTIVITY_HEADERS === 'undefined' ||
+      !Array.isArray(TASKS_HEADERS) || !Array.isArray(ACTIVITY_HEADERS)) return;
   var headers = isTasks ? TASKS_HEADERS : ACTIVITY_HEADERS;
   var key = isTasks ? 'id' : 'eventId';
   if (!Array.isArray(grid) || !grid.length ||
