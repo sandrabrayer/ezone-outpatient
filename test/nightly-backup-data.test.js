@@ -259,7 +259,7 @@ for (const crash of ['client_done','payment_written']) test('isolated manifest-c
   assert.equal(discover.operation.cycleDate,'2026-02-28');
   assert.equal(restored.post({action:'applyRenewal',opId:f.request.opId}).operation.state,'done');
   assert.equal(restored.rows('Payments').length,1);
-  assert.equal(restored.rows('Clients')[0].nextBillingDate,'2026-03-31');
+  assert.equal(restored.rows('Clients')[0].nextBillingDate,'2026-03-25');
   assert.equal(restored.rows('Payments')[0].amountPaid,600);
   assert.equal(restored.post({action:'applyRenewal',opId:f.request.opId}).operation.state,'done');
   assert.deepEqual(h.locks(),[false,false]);

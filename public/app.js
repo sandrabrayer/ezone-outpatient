@@ -1057,12 +1057,26 @@
     var merged = p;
     if (!CL.recordedCoverage(merged)) {
       var live = findPaymentById(p && p.id);
-      var stored = live && live !== p ? CL.recordedCoverage(live) : null;
-      if (stored) {
-        merged = Object.assign({}, p, {
-          coverageStart: CL.isoFromLocalDate(stored.start),
-          coverageEnd: CL.isoFromLocalDate(stored.end)
-        });
+      if (live && live !== p) {
+        var stored = CL.recordedCoverage(live);
+        if (stored) {
+          merged = Object.assign({}, p, {
+            coverageStart: CL.isoFromLocalDate(stored.start),
+            coverageEnd: CL.isoFromLocalDate(stored.end)
+          });
+        } else {
+          // Old rows without a recorded period remain untouched on edit.
+          // Never convert a guessed historical due-cycle into a fact.
+          return Object.assign({}, p, {
+            coverageStart: live.coverageStart || '',
+            coverageEnd: live.coverageEnd || ''
+          });
+        }
+      } else {
+        // Only a NEW, fully paid monthly base row gets the paid-date policy.
+        // One-off/extra, unpaid and partial rows keep their old behavior.
+        var isBase = paymentKindFromId(p && p.id).kind === 'base';
+        return CL.withDefaultCoverage(merged, { newPaidMonthly: isBase });
       }
     }
     return CL.withDefaultCoverage(merged);
@@ -3031,6 +3045,27 @@
     if (state.role !== 'editor') return;
     var idx = state.payments.findIndex(function (p) { return p.id === updated.id; });
     var prev = idx >= 0 ? state.payments[idx] : null;
+    if (paymentKindFromId(updated.id).kind === 'base' &&
+        updated.billingType === 'monthly' && updated.status === 'paid') {
+      if (!prev || prev.status !== 'paid') {
+        // Do not save a paid receipt without its client next-date via the
+        // non-atomic billing editor. Route to the OP-02 journalled renewal.
+        var sourceClient = state.clients.find(function (c) { return c.id === updated.clientId; });
+        if (sourceClient) openRenewModal(sourceClient);
+        else toast('לא נמצא מטופל — נדרש בירור לפני חיוב', true);
+        renderBilling();
+        return;
+      }
+      if (updated.paymentDate !== prev.paymentDate ||
+          updated.coverageStart !== prev.coverageStart ||
+          updated.coverageEnd !== prev.coverageEnd) {
+        // This would move the period without the source next date, changing
+        // refunds/revenue independently. Requires controlled reconciliation.
+        toast('שינוי תאריך או תקופת תשלום קיימת מחייב בירור והתאמת גבייה', true);
+        renderBilling();
+        return;
+      }
+    }
     if (idx >= 0) state.payments[idx] = updated;
     else state.payments.push(updated);
     renderBillingMonthlySummary(state.billingDate || today());
@@ -3152,12 +3187,28 @@
         currentMonthBaseDueDate(c);
     }
     var base = paymentForClientOn(c, dueDateISO);
+    // Do not let the quick toggle forgive arrears or re-date an existing paid
+    // receipt. Such source discrepancies require explicit financial review.
+    if (makePaid && (base.status === 'paid' || dueDateISO < todayIso)) {
+      toast('נדרש בירור גבייה קודמת — יש לטפל ברשומת הגבייה', true);
+      return;
+    }
     var newStatus = makePaid ? 'paid' : 'unpaid';
     // Write the row only when it actually changes; when it already says so
     // (legacy paid row, already-reverted row) only the anchor moves — the
     // row's own paymentDate/amount history is left untouched.
     var rowNeedsWrite = base.status !== newStatus;
     var amount = base.amountDue || clientAmountDue(c) || 0;
+    if (makePaid) {
+      var actualWindow = CL && CL.paymentDateCoverage(todayIso);
+      var oldWindow = CL && CL.recordedCoverage(base);
+      if (!actualWindow || amount <= 0 || (oldWindow &&
+          (CL.isoFromLocalDate(oldWindow.start) !== actualWindow.start ||
+           CL.isoFromLocalDate(oldWindow.end) !== actualWindow.end))) {
+        toast('תקופת כיסוי קיימת אינה תואמת — יש לבצע בירור בגבייה', true);
+        return;
+      }
+    }
     var updated = {
       id: base.id,
       clientId: base.clientId || c.id,
@@ -3176,13 +3227,14 @@
     var clientPatch;
     if (makePaid) {
       monthPaidPrevClient[c.id] = { nextBillingDate: c.nextBillingDate, paymentDate: c.paymentDate, dueDateISO: dueDateISO };
-      var advanced = nextCycleDueDateAfter(c, dueDateISO);
-      // An anchor several cycles stale advances one cycle into the PAST; the
-      // mark must land strictly ahead so the package reads paid-up (the first
-      // cycle after today).
-      if (advanced && advanced <= todayIso) {
-        advanced = nextCycleDueDate(c, addDays(todayIso, 1)) || advanced;
+      var verified = CL && CL.paymentDateCoverage(updated.paymentDate);
+      if (!verified) {
+        delete monthPaidPrevClient[c.id];
+        toast('תאריך תשלום לא תקין', true);
+        return;
       }
+      // Never advance from the old scheduled due day for a new full receipt.
+      var advanced = verified.next;
       clientPatch = {
         nextBillingDate: advanced,
         paymentDate: (!rowNeedsWrite && base.paymentDate) || today()
@@ -5252,6 +5304,44 @@
     var nextBillRow = c.nextBillingDate
       ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' + displayDate(c.nextBillingDate) + '</span></div>'
       : '';
+    // OP-BILL-01: NEVER claim that Clients.nextBillingDate proves paid coverage.
+    // The ledger's per-receipt period wins; legacy periods auto-stamped from a
+    // different billing day cannot distinguish prepay from month-from-payment,
+    // so show a review rather than invent verified cash or change the ledger.
+    var paidReview = CL && typeof CL.paidThroughReview === 'function'
+      ? CL.paidThroughReview(c, state.payments, today()) : null;
+    if (paidReview && c.status !== 'סיים טיפול') {
+      if (paidReview.state === 'confirmed') {
+        // "שולם עד" is INCLUSIVE. גבייה הבאה is the following day, NOT the
+        // same displayed date. The quick toggle works by old due-cycle ids;
+        // financial corrections must use the existing גבייה editor instead.
+        paidChipHtml = '<span class="chip chip-paid" title="תקופת הכיסוי אומתה מול רשומות התשלום">שולם עד ' +
+          escapeHtml(displayDate(paidReview.confirmedEnd)) + ' ✓</span>';
+        nextBillRow = '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.nextCollection)) + '</span></div>';
+      } else if (paidReview.state === 'review') {
+        paidChipHtml = paidReview.confirmedEnd
+          ? '<span class="chip chip-paid">כיסוי מאומת עד ' + escapeHtml(displayDate(paidReview.confirmedEnd)) + '</span>' +
+            '<span class="chip chip-payment-review" title="מועד הגבייה הרשום אינו תואם לתקופת הכיסוי המאומתת">נדרשת התאמת גבייה</span>'
+          : '<span class="chip chip-payment-review" role="status" title="תאריך התשלום לבדו אינו מאמת תקופת כיסוי כאשר מחזור החיוב שונה או חסר מקור">נדרש בירור תקופת תשלום</span>';
+        nextBillRow = paidReview.nextCollection
+          ? '<div class="cc-line cc-line-hot"><span class="cc-k">גבייה הבאה לפי כיסוי מאומת</span><span class="cc-v">' +
+              escapeHtml(displayDate(paidReview.nextCollection)) + '</span></div>'
+          : (paidReview.candidateNext
+              ? '<div class="cc-line"><span class="cc-k">חודש מתאריך התשלום (לבירור)</span><span class="cc-v">' +
+                  escapeHtml(displayDate(paidReview.candidateNext)) + '</span></div>'
+              : '');
+        if (paidReview.registeredNext) nextBillRow += '<div class="cc-line"><span class="cc-k">מועד גבייה רשום (לבדיקה)</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.registeredNext)) + '</span></div>';
+      }
+      // For confirmed/reviewed rows the reported paid date is from an actual
+      // receipt; never borrow another payment's date from Clients.paymentDate.
+      if ((paidReview.state === 'confirmed' || paidReview.state === 'review') && paidReview.paidDate) {
+        paidOnRow = '<div class="cc-line"><span class="cc-k">שולם ב</span><span class="cc-v">' +
+          escapeHtml(displayDate(paidReview.paidDate)) + '</span></div>';
+      }
+    }
+
     var startRow = c.startDate
       ? '<div class="cc-line"><span class="cc-k">תחילת טיפול</span><span class="cc-v">' + displayDate(c.startDate) + '</span></div>'
       : '';
@@ -6196,8 +6286,14 @@
     if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
     var paidDate = fd.get('renewDate') || today(), notes = (fd.get('renewNotes') || '').trim();
     var pkg = readPackageSessionsFromForm(c, form), changed = packageSessionsChanged(c, pkg);
+    var paidCoverage = CL && CL.paymentDateCoverage(paidDate);
+    if (!paidCoverage || paidDate > today()) {
+      toast('תאריך תשלום לא תקין', true); return;
+    }
+    // New full-month payments are covered from the ACTUAL payment date.
+    // The scheduled cycle date remains the immutable financial item key.
     var patch = { pricePerSession: amount, paymentDate: paidDate,
-      nextBillingDate: nextCycleDueDateAfter(c, renewSourceState.cycleDate) };
+      nextBillingDate: paidCoverage.next };
     if (changed) {
       c.sessionsPerWeek = pkg.sessions; c.sessionsUnit = pkg.units;
       patch.sessionsPerWeek = clientForSheet(c).sessionsPerWeek;
@@ -6920,9 +7016,13 @@
         // Next collection = the cycle AFTER the intake month, on the client's
         // billing day (else the startDate day-of-month, clamped) — anchored on
         // the startDate cycle, never payDate+30, so the billing day never drifts.
-        var nextBill = startDate
-          ? nextCycleDueDateAfter({ billingDay: bdDay || '', startDate: startDate }, startDate)
-          : '';
+        var intakeCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate);
+        if (payStatus === 'paid' && (!intakeCoverage || payDate < startDate || payDate > today())) {
+          toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+          submit.disabled = false;
+          return;
+        }
+        var nextBill = payStatus === 'paid' ? intakeCoverage.next : startDate;
         var client = {
           id: uid(), name: name, phone: directPhone,
           serviceType: formatServices(services),
@@ -7093,7 +7193,13 @@
       // Next collection = the cycle AFTER the activation month, on the
       // startDate day-of-month (clamped) — anchored on the startDate cycle,
       // never payDate+30, so the billing day never drifts.
-      var nextBill = nextCycleDueDateAfter({ billingDay: '', startDate: startDate }, startDate);
+      var activateCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate);
+      if (payStatus === 'paid' && (!activateCoverage || payDate < startDate || payDate > today())) {
+        toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+        submit.disabled = false;
+        return;
+      }
+      var nextBill = payStatus === 'paid' ? activateCoverage.next : startDate;
 
       var client = {
         id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
@@ -7333,6 +7439,23 @@
       // that role was removed from the product.)
       var ptPhoneChanged = recoverPhone(ptPhone) !== recoverPhone(client.phone);
       if (ptPhoneChanged && duplicateClientBlock(ptPhone, client.id)) { submit.disabled = false; return; }
+      var proposedPaidDate = String(fd.get('paymentDate') || '');
+      var proposedPaidStatus = String(fd.get('paymentStatus') || client.paymentStatus || '');
+      if (proposedPaidDate && proposedPaidDate !== String(client.paymentDate || '') &&
+          proposedPaidStatus === 'paid') {
+        var newWindow = CL && CL.paymentDateCoverage(proposedPaidDate);
+        var hasPriorPaidReceipt = state.payments.some(function (p) {
+          return p && String(p.clientId) === String(client.id) &&
+            p.status === 'paid' && paymentKindFromId(p.id).kind === 'base';
+        });
+        if (!newWindow || proposedPaidDate > today() ||
+            (client.startDate && proposedPaidDate < client.startDate) ||
+            hasPriorPaidReceipt) {
+          toast('שינוי מועד תשלום מאומת דורש בירור בגבייה; לא נשמר שינוי כספי', true);
+          submit.disabled = false;
+          return;
+        }
+      }
       var prev = {
         name: client.name,
         location: client.location,
@@ -7419,7 +7542,14 @@
       var cycleDueISO = '';
       if (propagatePaid) {
         cycleDueISO = cyclePaymentDueDate(client, today());
-        client.nextBillingDate = nextCycleDueDateAfter(client, cycleDueISO);
+        var editPaidWindow = CL && CL.paymentDateCoverage(client.paymentDate);
+        if (!editPaidWindow) {
+          Object.assign(client, prev);
+          toast('תאריך תשלום אינו תקין', true);
+          submit.disabled = false;
+          return;
+        }
+        client.nextBillingDate = editPaidWindow.next;
       }
       // Build the replacement but retain the existing confirmed payment until
       // the source acknowledges the new paid date.
