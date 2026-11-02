@@ -86,6 +86,12 @@ test('A: nothing to record when the cycle is confirmed or the package is not pai
   assert.equal(harness().missingCyclePayment({ ...STUCK, pricePerSession: 0 }, TODAY), null, 'no amount → no row');
 });
 
+test('A3: manually shifted anchor is NOT auto-filled with an invented extended monthly period', () => {
+  const irregular = { ...STUCK, nextBillingDate: '2026-11-25' };
+  assert.equal(harness().missingCyclePayment(irregular, TODAY), null);
+  assert.equal(irregular.nextBillingDate, '2026-11-25', 'no silent anchor edit');
+});
+
 test('A: a future paid date is clamped to today', () => {
   const plan = harness().missingCyclePayment({ ...STUCK, paymentDate: '2026-12-01' }, TODAY);
   assert.equal(plan.row.paymentDate, TODAY);
@@ -108,7 +114,7 @@ test('B: edit form — status set to «שולם» with an anchor already ahead r
 });
 
 test('C: the review chip is a confirm button for editors only, wired to confirmCyclePayment', () => {
-  assert.match(source, /state\.role === 'editor'\s*\n?\s*\? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment"/);
+  assert.match(source, /state\.role === 'editor' && !!missingCyclePayment\(c, today\(\)\)\s*\n?\s*\? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment"/);
   assert.match(source, /\[data-action="confirm-cycle-payment"\]', card\);\s*\n\s*if \(verifyBtn\) verifyBtn\.addEventListener\('click', function \(\) \{ confirmCyclePayment\(c, verifyBtn\); \}\);/);
   const fn = named('confirmCyclePayment');
   assert.match(fn, /if \(state\.role !== 'editor'\) return;/);
