@@ -6056,7 +6056,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -6195,6 +6195,14 @@ function _integritySourceSpecs() {
   if (typeof PACKAGE_CATALOG_HEADERS !== 'undefined' && typeof PACKAGE_REQUEST_HEADERS !== 'undefined') {
     specs.push({ source: 'PackageCatalog', prefix: 'package-catalog-', key: 'id', headers: PACKAGE_CATALOG_HEADERS });
     specs.push({ source: 'PackageRequests', prefix: 'package-requests-', key: 'id', headers: PACKAGE_REQUEST_HEADERS });
+  }
+  // CRM-3B owns these two schemas. Backup only recognises both typed
+  // families when their actual definitions have been integrated; this draft
+  // must not create the CRM sheets or silently certify a legacy v2 snapshot.
+  if (typeof TASKS_HEADERS !== 'undefined' && typeof ACTIVITY_HEADERS !== 'undefined' &&
+      Array.isArray(TASKS_HEADERS) && Array.isArray(ACTIVITY_HEADERS)) {
+    specs.push({ source: 'Tasks', prefix: 'tasks-', key: 'id', headers: TASKS_HEADERS });
+    specs.push({ source: 'Activity', prefix: 'activity-', key: 'eventId', headers: ACTIVITY_HEADERS });
   }
   return specs;
 }
