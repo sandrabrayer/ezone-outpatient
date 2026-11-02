@@ -55,6 +55,18 @@ test('OP03-CRM-01: registry remains 19 datasets with no CRM source loaded; no in
   assert.deepEqual(h.locks(),[false,false]);
 });
 
+test('OP03-CRM-01b: pre-CRM unknown tabs called Tasks/Activity retain their opaque contract without undefined schema crash', () => {
+  const h = harness(source());
+  const before = h.ctx._integrityCaptureData(h.live);
+  assert.ok(before.find(x => x.source === 'Tasks' && x.prefix.startsWith('other-')));
+  assert.ok(before.find(x => x.source === 'Activity' && x.prefix.startsWith('other-')));
+  h.ctx.nightlyIntegrityJob();
+  const inspect = h.ctx._integrityValidateRestoreSet(h.backup,day(h),false);
+  assert.ok(inspect.some(x=>x.source==='Tasks'));
+  assert.ok(inspect.some(x=>x.source==='Activity'));
+  assert.deepEqual(h.locks(),[false,false]);
+});
+
 test('OP03-CRM-02: exact CRM schema makes both source families typed, preserving linkage on snapshot and restore preflight', () => {
   const h = harness(source()); enable(h);
   const specs = h.ctx._integritySourceSpecs();
