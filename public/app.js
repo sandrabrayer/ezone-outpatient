@@ -3132,6 +3132,21 @@
     var row = basePaymentPaidOn(c, cycleDue, amount, paidOn, cycleRow.notes || '');
     row.id = cycleRow.id; // keep a legacy-shaped id when one already exists
     row.method = cycleRow.method || '';
+    // OP-BILL-01 × #161: this is a verified HISTORICAL missing cycle payment,
+    // not a new ordinary renewal. The client's earlier due-cycle anchor must
+    // remain unchanged, so record its specific service window as an explicit
+    // exception. Otherwise paymentForSheet would silently stamp the NEW
+    // paid-date default while keeping the OLD nextBillingDate, leaving a
+    // contradictory receipt and a permanently unconfirmed card.
+    if (cycleRow.coverageStart || cycleRow.coverageEnd) {
+      if (!cycleRow.coverageStart || !cycleRow.coverageEnd ||
+          (CL && CL.coveragePeriodError(cycleRow.coverageStart, cycleRow.coverageEnd))) return null;
+      row.coverageStart = cycleRow.coverageStart;
+      row.coverageEnd = cycleRow.coverageEnd;
+    } else {
+      row.coverageStart = cycleDue;
+      row.coverageEnd = addDays(pkg.until, -1);
+    }
     return { row: row, until: pkg.until };
   }
   function confirmCyclePayment(c, btn) {
