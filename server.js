@@ -491,6 +491,11 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     if (catalogAdmin.isPackageAction(body.action)) {
       return res.status(403).json({ ok: false, error: 'forbidden_action' });
     }
+    // Server-only write: the milestone sync takes the roster Node fetched itself (see
+    // runContinuationSync), never a patient list typed by a browser.
+    if (body.action === 'syncContinuationMilestones') {
+      return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
     for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin', 'moneyScope']) {
       if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
         return res.status(400).json({ ok: false, error: 'forbidden_field' });
@@ -546,36 +551,95 @@ app.post('/api/sheets', requireSession, async (req, res) => {
 // GET /api/continuation-roster — proxy the dashboard's getAdmittedRoster behind
 // the server-held secret. The continuation WORKFLOW rows themselves go through
 // the existing /api/sheets path (getContinuation / saveContinuation), NOT here.
+/* Continuation milestones (CRM, 2026-11-03): after the roster is (re)fetched, the
+ * SERVER asks Apps Script to open / move / close the milestone contact tasks
+ * (syncContinuationMilestones) from the roster it fetched itself — a browser can
+ * neither supply the patient list nor call that action (refused on /api/sheets).
+ * Single-flight, best effort: a sync failure never fails the roster response, and
+ * the browser refreshes its tasks afterwards. `rosterComplete` is true only for a
+ * roster the Dashboard answered ok, so an upstream hiccup never cancels tasks. */
+let continuationSyncFlight = null;
+const continuationSyncState = { lastAt: 0, lastResult: null };
+function runContinuationSync(roster, user) {
+  if (continuationSyncFlight) return continuationSyncFlight;
+  if (!SHEETS_URL || !roster || roster.ok === false || !Array.isArray(roster.patients)) return Promise.resolve(null);
+  const patients = roster.patients.map((p) => ({
+    name: String((p && p.name) || ''), house: String((p && p.house) || ''), entryDate: String((p && p.entryDate) || ''),
+    phone: String((p && p.phone) || ''), id: String((p && (p.id || p.patientId)) || '')
+  }));
+  continuationSyncFlight = (async () => {
+    try {
+      const r = await fetch(SHEETS_URL, {
+        method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'syncContinuationMilestones', proxySecret: OUTPATIENT_PROXY_SECRET, user: typeof user === 'string' ? user : '', moneyScope: moneyScope.SCOPE_OPS, patients, rosterComplete: true })
+      });
+      const text = await r.text();
+      let data; try { data = JSON.parse(text); } catch (_) { data = { ok: false, error: 'upstream_unavailable' }; }
+      continuationSyncState.lastAt = Date.now(); continuationSyncState.lastResult = data && data.ok ? { ok: true, created: data.created, updated: data.updated, cancelled: data.cancelled } : { ok: false, error: (data && data.error) || 'sync_failed' };
+      return data;
+    } catch (_) {
+      continuationSyncState.lastAt = Date.now(); continuationSyncState.lastResult = { ok: false, error: 'upstream_unavailable' };
+      return null;
+    } finally { continuationSyncFlight = null; }
+  })();
+  return continuationSyncFlight;
+}
+
+async function fetchRoster(forceFresh) {
+  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
+    return { hit: true, status: rosterCache.status || 200, data: rosterCache.data };
+  }
+  const url = DASHBOARD_SHEETS_URL
+    + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
+    + 'action=getAdmittedRoster'
+    + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
+  const r = await fetch(url, { redirect: 'follow' });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
+  const good = r.status >= 200 && r.status < 300 && data.ok !== false;
+  if (good) {
+    rosterCache.data = data;
+    rosterCache.status = r.status;
+    rosterCache.timestamp = Date.now();
+  }
+  return { hit: false, status: r.status, data, good };
+}
+
 app.get('/api/continuation-roster', requireSession, async (req, res) => {
   if (!requireContinuationConfig(res)) return;
 
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
-  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
-    res.set('X-Cache', 'HIT');
-    return res.status(rosterCache.status || 200).json(rosterCache.data);
-  }
-
   try {
-    const url = DASHBOARD_SHEETS_URL
-      + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
-      + 'action=getAdmittedRoster'
-      + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
-    const r = await fetch(url, { redirect: 'follow' });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
-
-    if (r.status >= 200 && r.status < 300 && data.ok !== false) {
-      rosterCache.data = data;
-      rosterCache.status = r.status;
-      rosterCache.timestamp = Date.now();
+    const got = await fetchRoster(forceFresh);
+    if (!got.hit && got.good) {
+      // keep the milestone tasks in step with the roster BEFORE answering, so the
+      // browser's next getTasks already shows them (bounded by the upstream timeout)
+      await runContinuationSync(got.data, sessionUserFromRequest(req));
     }
-
-    res.set('X-Cache', 'MISS');
-    res.status(r.status).json(data);
+    res.set('X-Cache', got.hit ? 'HIT' : 'MISS');
+    res.status(got.status).json(got.data);
   } catch (err) {
     res.status(502).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+/* POST /api/continuation-sync — re-run the milestone sync on demand (after a CRM
+ * status change, or when the cached roster served the tab). Session-gated; the
+ * body is ignored. Answers the sync counters, never the roster. */
+app.post('/api/continuation-sync', requireSession, async (req, res) => {
+  if (!requireContinuationConfig(res)) return;
+  if (!requireSheetsUrl(res)) return;
+  try {
+    const got = await fetchRoster(false);
+    if (!(got.hit || got.good)) return res.status(502).json({ ok: false, error: 'roster_unavailable' });
+    const out = await runContinuationSync(got.data, sessionUserFromRequest(req));
+    if (!out || out.ok === false) return res.status(502).json({ ok: false, error: (out && out.error) || 'sync_failed' });
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json({ ok: true, created: out.created || 0, updated: out.updated || 0, cancelled: out.cancelled || 0 });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
 });
 

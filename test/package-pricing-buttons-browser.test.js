@@ -82,7 +82,13 @@ async function fixture(t, opts) {
     page.setDefaultTimeout(15000);
     const errors = [], consoleErrors = [], calls = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    page.on('console', (m) => { if (m.type() === 'error' && !/status of 401/.test(m.text())) consoleErrors.push(m.text()); });
+    page.on('console', (m) => {
+      if (m.type() !== 'error' || /status of 401/.test(m.text())) return;
+      // this fixture has no Dashboard roster configured: the boot-time roster probe answers 500 by design
+      const where = (m.location && m.location().url) || '';
+      if (/\/api\/continuation-roster/.test(where)) return;
+      consoleErrors.push(m.text() + ' @ ' + where);
+    });
     page.on('response', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/api/catalog-admin')) calls.push({ path: u.pathname, status: r.status(), body: r.request().postData() || '' }); });
     await page.goto(origin, { waitUntil: 'networkidle' });
     await page.locator('#pinNames .user-btn').getByText('ורד', { exact: true }).click();

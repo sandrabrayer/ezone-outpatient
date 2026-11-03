@@ -149,6 +149,105 @@
     return HOUSE_TO_ORIGIN[s] || '';
   }
 
+  /* ===== Continuation milestones (CRM, 2026-11-03) ===================================
+   *
+   * BUSINESS RULE: continuation treatment is offered BEFORE the patient reaches one, two
+   * and three months of stay — counted from the ACTUAL entry date into the house, never
+   * from an exit date, a meeting date or the row's creation. A contact task opens 14 days
+   * before each milestone. Example: entry 15/09 → milestones 15/10, 15/11, 15/12 → contact
+   * dates 01/10, 01/11, 01/12.
+   *
+   * Calendar months with end-of-month clamping (31/01 → 28/02 or 29/02 in a leap year), pure
+   * ISO-date arithmetic (no Date-object time zones, so the result is the same in the browser
+   * and in Apps Script). "Today" is supplied by the caller in Asia/Jerusalem.
+   *
+   * The SAME algorithm lives in apps-script/Code.gs (_contAddMonths / _contMilestones);
+   * test/continuation-milestones.test.js runs both on one vector table and fails on drift.
+   * ============================================================================== */
+  var MILESTONE_MONTHS = [1, 2, 3];
+  var CONTACT_LEAD_DAYS = 14;
+  // Stable CRM status keys of a continuation patient; Hebrew labels are render-time only (app.js).
+  var CRM_STATUSES = ['not_contacted', 'in_progress', 'interested', 'postponed', 'declined', 'converted', 'closed'];
+  var CRM_TERMINAL = ['declined', 'converted', 'closed'];
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+  function daysInMonth(y, mo) { return [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]; }
+  function toISO(y, mo, d) { return y + '-' + pad2(mo) + '-' + pad2(d); }
+
+  /** entryDate + n calendar months, day clamped to the target month's length. null on a bad date. */
+  function addCalendarMonths(iso, n) {
+    var a = _parseISO(iso);
+    if (!a || a.d > daysInMonth(a.y, a.mo)) return null;
+    var total = a.mo - 1 + n;
+    var y = a.y + Math.floor(total / 12), mo = (total % 12 + 12) % 12 + 1;
+    return toISO(y, mo, Math.min(a.d, daysInMonth(y, mo)));
+  }
+  /** iso ± n days (pure civil arithmetic). null on a bad date. */
+  function addDays(iso, n) {
+    var a = _parseISO(iso);
+    if (!a || a.d > daysInMonth(a.y, a.mo)) return null;
+    var y = a.y, mo = a.mo, d = a.d + n;
+    while (d > daysInMonth(y, mo)) { d -= daysInMonth(y, mo); mo++; if (mo > 12) { mo = 1; y++; } }
+    while (d < 1) { mo--; if (mo < 1) { mo = 12; y--; } d += daysInMonth(y, mo); }
+    return toISO(y, mo, d);
+  }
+  /**
+   * The three milestones of an entry date, or null when there is no valid entry date
+   * (then NO task is created and the UI says «חסר תאריך כניסה»).
+   * [{ n: 1, suffix: 'm1', milestoneDate, contactDate }, …]
+   */
+  function milestones(entryDate) {
+    if (!_parseISO(entryDate) || addCalendarMonths(entryDate, 0) === null) return null;
+    return MILESTONE_MONTHS.map(function (n) {
+      var md = addCalendarMonths(entryDate, n);
+      return { n: n, suffix: 'm' + n, milestoneDate: md, contactDate: addDays(md, -CONTACT_LEAD_DAYS) };
+    });
+  }
+  /** Stable task id: cont::<ref>::<entryDate>::m1|m2|m3 */
+  function milestoneTaskId(ref, entryDate, n) { return 'cont::' + ref + '::' + entryDate + '::m' + n; }
+  /** Parse a milestone task id back into its parts, or null. */
+  function parseMilestoneTaskId(id) {
+    var m = /^cont::(.+)::(\d{4}-\d{2}-\d{2})::m([123])$/.exec(String(id == null ? '' : id));
+    return m ? { ref: m[1], entryDate: m[2], n: +m[3] } : null;
+  }
+  /** Normalize an Israeli phone to 0XXXXXXXXX; '' when it is not one. */
+  function normalizePhone(v) {
+    var digits = String(v == null ? '' : v).replace(/\D/g, '');
+    if (/^972\d{9}$/.test(digits)) digits = '0' + digits.slice(3);
+    return /^0\d{9}$/.test(digits) ? digits : '';
+  }
+  /**
+   * Stable reference of a roster patient — never the name. The Dashboard's own patient id when
+   * the roster carries one (id / patientId), else the normalized phone; '' when neither exists
+   * (no milestone tasks can be keyed, the UI asks for a manual check).
+   */
+  function patientRef(p) {
+    var id = String((p && (p.id || p.patientId)) || '').trim();
+    if (/^[A-Za-z0-9_-]{1,80}$/.test(id)) return 'id:' + id;
+    var ph = normalizePhone(p && p.phone);
+    return ph ? 'phone:' + ph : '';
+  }
+  /** The CRM subject id milestone tasks / contacts are filed under. */
+  function subjectId(ref) { return ref ? 'cont:' + ref : ''; }
+  /**
+   * Link a roster patient to the outpatient records by NORMALIZED PHONE only (never by name).
+   * Exactly one client → linked client; else exactly one lead → linked lead; several → ambiguous
+   * (manual check); none → none. Removed / not-relevant records are not candidates.
+   */
+  function linkPatient(p, clients, leads) {
+    var ph = normalizePhone(p && p.phone);
+    if (!ph) return { state: 'none', clientId: '', leadId: '', reason: 'no_phone' };
+    var cs = (clients || []).filter(function (c) { return c && normalizePhone(c.phone) === ph; });
+    var ls = (leads || []).filter(function (l) { return l && l.stage !== 'removed' && normalizePhone(l.phone) === ph; });
+    if (cs.length + ls.length === 0) return { state: 'none', clientId: '', leadId: '', reason: 'no_match' };
+    if (cs.length === 1 && ls.length === 0) return { state: 'linked', clientId: String(cs[0].id), leadId: '', reason: 'client' };
+    if (cs.length === 0 && ls.length === 1) return { state: 'linked', clientId: '', leadId: String(ls[0].id), reason: 'lead' };
+    return { state: 'ambiguous', clientId: '', leadId: '', reason: 'multiple', matches: cs.length + ls.length };
+  }
+  function isCrmStatus(v) { return CRM_STATUSES.indexOf(String(v == null ? '' : v)) >= 0; }
+  function isTerminalStatus(v) { return CRM_TERMINAL.indexOf(String(v == null ? '' : v)) >= 0; }
+
   return {
     VALID_OUTCOMES: VALID_OUTCOMES,
     HOUSE_TO_ORIGIN: HOUSE_TO_ORIGIN,
@@ -157,6 +256,21 @@
     bucketOf: bucketOf,
     isValidOutcome: isValidOutcome,
     compareByTenure: compareByTenure,
-    houseToOrigin: houseToOrigin
+    houseToOrigin: houseToOrigin,
+    MILESTONE_MONTHS: MILESTONE_MONTHS,
+    CONTACT_LEAD_DAYS: CONTACT_LEAD_DAYS,
+    CRM_STATUSES: CRM_STATUSES,
+    CRM_TERMINAL: CRM_TERMINAL,
+    addCalendarMonths: addCalendarMonths,
+    addDays: addDays,
+    milestones: milestones,
+    milestoneTaskId: milestoneTaskId,
+    parseMilestoneTaskId: parseMilestoneTaskId,
+    normalizePhone: normalizePhone,
+    patientRef: patientRef,
+    subjectId: subjectId,
+    linkPatient: linkPatient,
+    isCrmStatus: isCrmStatus,
+    isTerminalStatus: isTerminalStatus
   };
 });

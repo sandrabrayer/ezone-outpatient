@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### מסלול המשך — CRM flow with milestones from the entry date (2026-11-03)
+- Milestones +1/+2/+3 calendar months from the ACTUAL entry date (clamped, leap-safe), a contact task 14 days before each (`cont::<ref>::<entryDate>::m1|m2|m3` in the existing Tasks sheet, subject `cont:<ref>`, ref = Dashboard id or normalized phone — never the name); server-only idempotent sync (`syncContinuationMilestones`, run by Node from its own roster fetch + `POST /api/continuation-sync`): corrected entry date moves, discharge / terminal status closes. No entry date → «חסר תאריך כניסה», no task.
+- Tab: status / owner / last contact / next contact / offer / history per patient; phone-only linking with manual-check chip; five appended columns on the workflow sheet. «היום שלי» names the milestone rows and shows last contact + outcome on every row. See `CHANGELOG-continuation-milestones.md`.
+
 ### CRM navigation order + win-back follow-up (2026-11-03)
 - «שימור לידים» and «מטופלים לא פעילים» move to the end of the menu; lost leads carry the CRM block (last contact / next contact / owner); archive cards restyled to the light theme. `test/crm-nav-order.test.js`. See `CHANGELOG-crm-nav-order.md`.
 
