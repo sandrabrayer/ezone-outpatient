@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM navigation order + win-back follow-up (2026-11-03)
+- «שימור לידים» and «מטופלים לא פעילים» move to the end of the menu; lost leads carry the CRM block (last contact / next contact / owner); archive cards restyled to the light theme. `test/crm-nav-order.test.js`. See `CHANGELOG-crm-nav-order.md`.
+
 ### «תמחור חבילות» buttons opened nothing (fix, 2026-11-03)
 - `public/package-pricing.js`: single-flight catalog login/boot (two mounts during the load ran two logins that revoked each other → `401 admin_required` → redraw loop); an expired 15-minute privilege is renewed once and the clicked action retried instead of dropped; a failed load shows «הנתונים לא נטענו» + «נסי שוב» instead of an empty catalog; an unrelated host re-render no longer wipes the open screen. Browser regression `test/package-pricing-buttons-browser.test.js` (1280px + 360px). See `CHANGELOG-package-pricing-buttons-fix.md`.
 

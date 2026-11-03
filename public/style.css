@@ -1338,3 +1338,14 @@ body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
 .kpis-landing .kpi-value { font-size: 26px; }
 body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 800px) { .kpis-landing { grid-template-columns: 1fr 1fr; } .kpis-landing .kpi:nth-child(3) { grid-column: 1 / -1; } }
+
+/* ===== CRM nav order + archive views (שימור לידים / מטופלים לא פעילים), 2026-11-03 =====
+   Light-theme cards instead of the old inline dark colours; one quiet style for both archives. */
+.view-title { font-size: 1rem; font-weight: 600; color: var(--green-2); margin: 0; }
+.arc-heading { font-size: 0.95rem; font-weight: 700; color: var(--green-2); padding: 14px 4px 8px; border-bottom: 2px solid var(--border); margin-bottom: 12px; }
+.arc-card { margin-bottom: 12px; }
+.arc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.arc-name { font-weight: 700; font-size: 1rem; color: var(--text); }
+.arc-row { display: flex; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.arc-k { color: var(--muted); font-weight: 600; min-width: 110px; flex-shrink: 0; }
+.arc-v { color: var(--text); overflow-wrap: anywhere; }

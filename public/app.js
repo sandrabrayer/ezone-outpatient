@@ -3717,15 +3717,15 @@
   // ---- Retention view (not_relevant + finished clients)
   function retRow(label, val) {
     if (!val) return '';
-    return '<div style="display:flex;gap:12px;padding:5px 0;border-bottom:1px solid #1e3a56;font-size:0.85rem;">' +
-      '<span style="color:#7a9bbf;font-weight:600;min-width:110px;flex-shrink:0;">' + label + '</span>' +
-      '<span style="color:#c5d5e8;">' + val + '</span>' +
-      '</div>';
+    return '<div class="arc-row"><span class="arc-k">' + label + '</span><span class="arc-v">' + val + '</span></div>';
+  }
+  function arcHeading(text) {
+    var h = document.createElement('div');
+    h.className = 'arc-heading';
+    h.textContent = text;
+    return h;
   }
 
-  // Leads ONLY — a lead is someone who has not started treatment. Patients who
-  // left (discharged or cross-app deactivated) live in the dedicated
-  // מטופלים לא פעילים tab (renderInactive), not here.
   function renderRetention() {
     var list = $('#retentionList');
     list.innerHTML = '';
@@ -3743,16 +3743,14 @@
     }
 
     if (notRel.length) {
-      var h1 = document.createElement('div');
-      h1.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      h1.textContent = 'לא רלוונטים';
-      list.appendChild(h1);
+      list.appendChild(arcHeading('לא רלוונטים'));
       notRel.forEach(function (l) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(l.name) + '</span>' +
-          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא רלוונטי</span>' +
+        card.className = 'panel arc-card';
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(l.name) + '</span>' +
+          '<span class="chip status-done">לא רלוונטי</span>' +
+          (l.assignedTo ? '<span class="chip">אחראי/ת: ' + escapeHtml(l.assignedTo) + '</span>' : '') +
           '</div>';
         var body = retRow('טלפון', l.phone ? escapeHtml(String(l.phone)) : '') +
           retRow('סוג טיפול', l.serviceType ? escapeHtml(formatServices(parseServices(l.serviceType))) : '') +
@@ -3762,7 +3760,10 @@
           retRow('סיבה', escapeHtml(notRelevantReasonLabel(l.not_relevant_reason))) +
           retRow('פירוט', escapeHtml(l.not_relevant_note)) +
           retRow('הערה', l.note ? escapeHtml(l.note) : '');
-        card.innerHTML = header + body;
+        // CRM follow-up for win-back (2026-11-03): last contact, outcome, next contact, owner — the same
+        // Tasks/Activity block as the lead card. A lead without a planned action is NOT an urgent task
+        // (my-day.js skips not_relevant leads; only a real task on it reaches «היום שלי»).
+        card.innerHTML = header + body + crmBlockHtml('lead', l);
         if (state.role === 'editor') {
           var restoreBtn = document.createElement('button');
           restoreBtn.className = 'btn btn-ghost';
@@ -4292,15 +4293,12 @@
 
     function inactiveSection(title, patients, badgeHtml, extraRowsFor, withCredits) {
       if (!patients.length) return;
-      var h = document.createElement('div');
-      h.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      h.textContent = title;
-      list.appendChild(h);
+      list.appendChild(arcHeading(title));
       patients.forEach(function (c) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(c.name) + '</span>' +
+        card.className = 'panel arc-card';
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(c.name) + '</span>' +
           badgeHtml +
           '</div>';
         var body = retRow('טלפון', c.phone ? escapeHtml(String(c.phone)) : '') +
@@ -4349,16 +4347,13 @@
     // (the server copies the tombstone back to Clients), not the status-based
     // restore modal.
     if (removedRows.length) {
-      var rh = document.createElement('div');
-      rh.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      rh.textContent = 'מטופלים שנמחקו';
-      list.appendChild(rh);
+      list.appendChild(arcHeading('מטופלים שנמחקו'));
       removedRows.forEach(function (t) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
+        card.className = 'panel arc-card';
         var viaLabel = t.removedVia === 'explicit-delete' ? 'נמחק ידנית (✕)' : 'נשמט בשמירה — שחזור זמין';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(t.name || '') + '</span>' +
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(t.name || '') + '</span>' +
           '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#e2d6f8;color:#4a2a80;font-weight:600;">נמחק</span>' +
           '</div>';
         var body = retRow('טלפון', t.phone ? escapeHtml(String(t.phone)) : '') +
