@@ -473,9 +473,10 @@
           el.onload = function () { resolve(); };
           el.onerror = function () {
             el.remove();
-            // OP-CRM-3A: the server refuses the pay-rate constants to an operational
-            // session (403); that is not a failure for her — the payouts tab is hidden.
-            if (isOpsScope() && /therapist-pay\.js/.test(src)) { resolve(); return; }
+            // OP-CRM-3A: the server refuses the price / pay constants (treatment-map.js,
+            // therapist-pay.js) to an operational session (403); that is not a failure
+            // for her — the payouts tab and the session modal are hidden.
+            if (isOpsScope() && /(therapist-pay|treatment-map)\.js/.test(src)) { resolve(); return; }
             reject(new Error('protected_script_unavailable'));
           };
           document.head.appendChild(el);

@@ -176,13 +176,18 @@ test('routes: every write carries the SERVER-decided moneyScope; a browser-suppl
   assert.equal(hasMoney(r.json), false);
 });
 
-test('routes: pay-rate constants file is 403 for דנה, served to ורד / אורן; treatment-map stays available; /api/me reports the scope', async () => {
+test('routes: price / pay constants files are 403 for דנה, served to ורד / אורן; /api/me reports the scope', async () => {
   const v = await login('ורד'), o = await login('אורן'), d = await login('דנה');
   let r = await request('GET', '/therapist-pay.js', null, H(d));
   assert.equal(r.status, 403);
   r = await request('GET', '/therapist-pay.js', null, H(v)); assert.equal(r.status, 200);
   r = await request('GET', '/therapist-pay.js', null, H(o)); assert.equal(r.status, 200);
-  r = await request('GET', '/treatment-map.js', null, H(d)); assert.equal(r.status, 200);
+  // treatment-map.js holds the client price table (500 / 1100 / 2300 per session,
+  // 15000 / 18000 per month) — never served to an operational session.
+  r = await request('GET', '/treatment-map.js', null, H(d)); assert.equal(r.status, 403);
+  r = await request('GET', '/treatment-map.js', null, H(v)); assert.equal(r.status, 200);
+  r = await request('GET', '/treatment-map.js', null, H(o)); assert.equal(r.status, 200);
+  r = await request('GET', '/treatment-map.js'); assert.equal(r.status, 401);
   r = await request('GET', '/api/me', null, H(d)); assert.deepEqual(r.json, { ok: true, user: 'דנה', moneyScope: 'ops' });
   r = await request('GET', '/api/me', null, H(v)); assert.equal(r.json.moneyScope, 'full');
   r = await request('GET', '/api/me', null, H(o)); assert.equal(r.json.moneyScope, 'full');
@@ -238,5 +243,6 @@ test('source guard: money lists mirror each other and the UI hides money for an 
   assert.match(APP, /function applyMoneyScopeUI\(\)/);
   assert.match(APP, /moneyScope: 'full', \/\/ OP-CRM-3A: server-decided/, 'UI flag is cosmetic; enforcement is server-side');
   for (const v of ['billing', 'revenue', 'payouts', 'packages']) assert.ok(APP.includes("'" + v + "'"), 'tab ' + v + ' handled');
-  assert.match(APP, /therapist-pay\\\.js/, 'refused pay constants tolerated for ops');
+  assert.match(APP, /\(therapist-pay\|treatment-map\)\\\.js/, 'refused price / pay constants tolerated for ops');
+  for (const f of MS.MONEY_STATIC) assert.ok(APP.includes(f.replace('.js', '')), f + ' refusal must be tolerated by loadProtectedScripts');
 });

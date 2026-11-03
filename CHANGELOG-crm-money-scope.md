@@ -10,7 +10,7 @@ CRM spec §2 / `docs/crm/OUTPATIENT-STAGE0.md` G3: **דנה never receives finan
 - **`server.js`**
   - `GET /api/sheets`: money actions → `403 forbidden_money_action` **before any upstream call**; every other answer to an ops session is projected through `stripMoney` — fresh (`MISS`), cached (`HIT`) and stale (`STALE`) alike. The cache is shared across users, so the projection happens at response time and never mutates the cached object.
   - `POST /api/sheets`: money actions → 403; `moneyScope` in a browser body → `400 forbidden_field`; the server stamps `body.moneyScope` (`full`/`ops`) on every forwarded write; responses are projected too.
-  - `/therapist-pay.js` (pay-rate constants) → 403 for ops; `treatment-map.js` (no amounts) stays.
+  - `/therapist-pay.js` (pay-rate constants) and `/treatment-map.js` → 403 for ops. **Correction (review of #162):** `treatment-map.js` is NOT amount-free — it holds the client price table (₪500 / ₪1,100 / ₪2,300 per session, ₪15,000 / ₪18,000 per month incl. VAT); the first cut served it to an operational session. Its only consumer (the session modal) is hidden for ops, so the 403 is resolved silently in `loadProtectedScripts`.
   - `/api/me` adds `moneyScope` (informational for the UI).
   - Unnamed / invalid / retired sessions were already refused on data routes (401) — unchanged.
 - **`apps-script/Code.gs`**: `_saveAll` receives `moneyScope`; for `'ops'`, `OPS_CLIENT_MONEY_KEYS` / `OPS_LEAD_MONEY_KEYS` are carried from the on-sheet row (existing) or left blank (new) **before** the diff/stale logic, so a stripped field never reads as an edit and a tampered value never lands. Absent scope (legacy callers) → unchanged behaviour.

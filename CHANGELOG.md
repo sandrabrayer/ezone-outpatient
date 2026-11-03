@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM money scope — review fixes on #162 (2026-11-03)
+- **Price table refused for an operational session.** `treatment-map.js` holds the client price table (per-session and per-month amounts incl. VAT), not only the clinical→billing map; it is now in `MONEY_STATIC` → 403 for דנה, like `therapist-pay.js`. `loadProtectedScripts` tolerates that refusal for an ops session (`CHANGELOG-crm-money-scope.md` corrected).
+- Follow-up (not in this change): `MONEY_GET_ACTIONS` / `MONEY_POST_ACTIONS` are a deny-list — a future money action must be added there explicitly or an operational session can call it. An allow-list of permitted actions would fail closed.
+
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
 - Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
 - CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.
