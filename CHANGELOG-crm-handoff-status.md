@@ -24,3 +24,7 @@ Apps Script → Project settings → Script properties: add `HANDOFF_STATUS_SECR
 
 ## Tests
 `test/crm-handoff-status.test.js` (4): fail-closed auth incl. other secrets/proxy key, every state + converted lead + contacted-by-activity + next action, no money/PII in the answer and money tasks never the next action, exact ids only / list sanitizing / absent-vs-present identity column. Full suite 1749/1749.
+
+## Review fix (2026-11-03, on #162): truly read-only
+- `_getHandoffStatus` read Leads / Clients / Tasks / Activity through `_ensureSheet`, which inserts a missing sheet and rewrites row 1 on a header mismatch — a secret-gated cross-app GET could write, without the lock. It now reads with `getSheetByName` (`_handoffRead`); a missing sheet answers `[]`. Test: an empty spreadsheet stays empty, a shorter legacy header row is left as-is.
+

@@ -4716,14 +4716,20 @@ function _handoffClientState(c) {
   var start = _handoffDay(c.startDate);
   return { state: start && start <= _crmToday() ? 'active' : 'admitted', stateDate: start };
 }
+function _handoffRead(name, headers) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  return sh ? _readAll(sh, headers) : [];
+}
 function _getHandoffStatus(params) {
   var p = params || {};
   var outIds = _handoffIdList(p.outpatientIds), dashIds = _handoffIdList(p.dashboardPatientIds);
   if (!outIds.length && !dashIds.length) return { ok: false, error: 'missing_ids' };
-  var leads = _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS);
-  var clients = _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS);
-  var tasks = _readAll(_ensureSheet(TASKS_SHEET, TASKS_HEADERS), TASKS_HEADERS);
-  var events = _readAll(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS), ACTIVITY_HEADERS);
+  // READ-ONLY: never _ensureSheet here — a cross-app GET must not create a
+  // sheet or rewrite a header row (and it holds no lock). Missing sheet = [].
+  var leads = _handoffRead('Leads', LEADS_HEADERS);
+  var clients = _handoffRead('Clients', CLIENTS_HEADERS);
+  var tasks = _handoffRead(TASKS_SHEET, TASKS_HEADERS);
+  var events = _handoffRead(ACTIVITY_SHEET, ACTIVITY_HEADERS);
   var wantOut = {}, wantDash = {};
   outIds.forEach(function (x) { wantOut[x] = true; });
   dashIds.forEach(function (x) { wantDash[x] = true; });
