@@ -1,5 +1,12 @@
 # Deploy — E-ZONE Outpatient
 
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> `ops/removed-leads-header-correction.gs` is not part of the deployment root and must not be installed or run without separate authorization: [runbook](docs/removed-leads-header-correction.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> Use the [isolated Google drill](docs/google-operational-drill.md) for runtime
+> evidence. It is not part of deployment and must not use this repo's clasp target.
+
 ## Source authentication — configuration prerequisites
 
 OP-01 was released in PR #115 on 2026-10-17 (Node `76de4cc5`, Apps Script @94).
@@ -97,6 +104,13 @@ Two ordered release phases:
 **Verify a Railway deploy:** `GET https://ezone-outpatient.up.railway.app/api/version`
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
+
+## CRM handoff status feed (OP-CRM-2 / G2 — Phase D, draft; values are never committed)
+
+At release only: Apps Script → **Project Settings → Script properties**: add `HANDOFF_STATUS_SECRET`
+(≥ 32 random chars, distinct from every other secret) and configure the same value on the Dashboard side
+(D-FB-1). Until it exists `getHandoffStatus` answers `unauthorized` (fail-closed). No Railway variable is
+needed on this service. See `CHANGELOG-crm-handoff-status.md`.
 
 ## Package catalog configuration (OP-PKG — values are never committed)
 
