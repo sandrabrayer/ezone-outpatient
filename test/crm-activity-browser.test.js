@@ -170,3 +170,51 @@ test('browser: דנה sees the activity block and can log a contact; the task fo
   await card(page, LEAD.name).locator('.crm-task').waitFor();
   assert.deepEqual(f.errors, []);
 });
+
+test('browser: a stale submission key never follows the form to the next opening (contact + task)', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const page = await f.login('ורד');
+  const c = card(page, LEAD.name);
+  await c.locator('.crm-block').waitFor();
+  // 1st opening: a save "fails" from the user's point of view (we only plant the key the
+  // form would keep after a lost response), then the modal is cancelled.
+  await c.locator('[data-crm="contact"]').first().click();
+  await page.waitForSelector('#contactModal:not([hidden])');
+  await page.evaluate(() => { document.getElementById('contactForm').dataset.sid = 'contact-stale-key'; });
+  await page.click('#contactModal [data-close]');
+  await page.waitForSelector('#contactModal[hidden]', { state: 'attached' });
+  // 2nd opening (another contact): no key carried over, and the submission mints a new one
+  await c.locator('[data-crm="contact"]').first().click();
+  await page.waitForSelector('#contactModal:not([hidden])');
+  assert.equal(await page.evaluate(() => document.getElementById('contactForm').dataset.sid), undefined, 'contact form key cleared on open');
+  await page.selectOption('#contactOutcome', 'no_answer');
+  await page.check('#contactForm [name="nextMode"][value="none"]');
+  await page.fill('#contactForm [name="nextExplanation"]', 'ננסה מחר');
+  const r1 = page.waitForResponse((r) => r.url().endsWith('/api/sheets') && r.request().method() === 'POST' && r.request().postDataJSON().action === 'logContact');
+  await page.click('#contactSubmit');
+  const d1 = await (await r1).json();
+  assert.equal(d1.ok, true); assert.notEqual(d1.replayed, true);
+  const sent = f.captured.filter((x) => x.payload.action === 'logContact').map((x) => x.payload.submissionId);
+  assert.equal(sent.length, 1); assert.notEqual(sent[0], 'contact-stale-key'); assert.match(sent[0], /^contact-/);
+  await page.waitForSelector('#contactModal[hidden]', { state: 'attached' });
+  // same for the task form
+  await card(page, LEAD.name).locator('[data-crm="task"]').click();
+  await page.waitForSelector('#taskModal:not([hidden])');
+  await page.evaluate(() => { document.getElementById('taskForm').dataset.sid = 'task-stale-key'; });
+  await page.click('#taskModal [data-close]');
+  await page.waitForSelector('#taskModal[hidden]', { state: 'attached' });
+  await card(page, LEAD.name).locator('[data-crm="task"]').click();
+  await page.waitForSelector('#taskModal:not([hidden])');
+  assert.equal(await page.evaluate(() => document.getElementById('taskForm').dataset.sid), undefined, 'task form key cleared on open');
+  await page.fill('#taskForm [name="title"]', 'לשלוח טופס');
+  await page.fill('#taskForm [name="dueDate"]', '2026-12-01');
+  const r2 = page.waitForResponse((r) => r.url().endsWith('/api/sheets') && r.request().method() === 'POST' && r.request().postDataJSON().action === 'createTask');
+  await page.click('#taskSubmit');
+  const d2 = await (await r2).json();
+  assert.equal(d2.ok, true); assert.equal(d2.created, true);
+  const tsent = f.captured.filter((x) => x.payload.action === 'createTask').map((x) => x.payload.submissionId);
+  assert.equal(tsent.length, 1); assert.notEqual(tsent[0], 'task-stale-key'); assert.match(tsent[0], /^task-/);
+  assert.equal(f.sb.rows('Tasks').length, 1);
+  assert.deepEqual(f.errors, []);
+});
+

@@ -16,6 +16,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Quick chip: an OVERDUE unpaid/partial cycle is settleable again (today-based B1 window written explicitly on the row, anchor = window end + 1). A PAID row is still never re-dated, and an explicitly recorded different period is never overwritten.
 - גבייה editor: unpaid/partial → paid for the client's DUE cycle opens the renewal (which settles the row in place); older arrears are settled directly with the B1 window and do not move the anchor. No header change, no legacy-id row rewrite. Regressions in `test/op-bill01-b1-b2-regressions.test.js`.
 
+### CRM money scope — review fixes on #162 (2026-11-03)
+- **Price table refused for an operational session.** `treatment-map.js` holds the client price table (per-session and per-month amounts incl. VAT), not only the clinical→billing map; it is now in `MONEY_STATIC` → 403 for דנה, like `therapist-pay.js`. `loadProtectedScripts` tolerates that refusal for an ops session (`CHANGELOG-crm-money-scope.md` corrected).
+- **Money-task trail hidden from an operational session.** `getActivity` for ops filtered on an event kind that never occurs; the created / completed / deferred / reassigned / cancelled events of a collection task (free-text title) and the contacts that close or spawn one reached דנה. Events now carry `money:true` + task id in `detailsJson`, and the ops read also drops anything referencing a money task on the Tasks sheet (legacy rows), read without creating it (`CHANGELOG-crm-tasks-activity.md`).
+- **`getHandoffStatus` no longer creates or re-heads sheets.** The Dashboard feed read via `_ensureSheet`; it now uses `getSheetByName` and treats a missing sheet as `[]` (`CHANGELOG-crm-handoff-status.md`).
+- **Contact / task modals mint a fresh idempotency key per opening.** A `dataset.sid` left by a timed-out save survived cancel + reopen and made the next patient's contact / task a server-side «replay» (never saved).
+- Follow-up (not in this change): `MONEY_GET_ACTIONS` / `MONEY_POST_ACTIONS` are a deny-list — a future money action must be added there explicitly or an operational session can call it. An allow-list of permitted actions would fail closed.
+
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
 - Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
 - CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.

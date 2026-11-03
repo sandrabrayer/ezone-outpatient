@@ -104,3 +104,21 @@ test('ids: exact match only, caps and sanitizes the list; dashboardPatientIds ma
   const r2 = get(sb, { action: 'getHandoffStatus', secret: SECRET, dashboardPatientIds: 'id-stay-1' });
   assert.equal(r2.results.length, 1); assert.equal(r2.results[0].outpatientId, 'L-new'); assert.equal(r2.results[0].dashboardPatientId, 'id-stay-1');
 });
+
+test('read-only: a GET on an empty spreadsheet creates no sheet and rewrites no header; missing sheets answer []', () => {
+  const sb = sandbox();
+  delete sb.sheets.Leads; delete sb.sheets.Clients; // the sandbox seeds both; the feed must cope with neither
+  sb.props.HANDOFF_STATUS_SECRET = SECRET;
+  const r = get(sb, { action: 'getHandoffStatus', secret: SECRET, outpatientIds: 'L-new,C-active', dashboardPatientIds: 'id-stay-1' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.results, []);
+  assert.deepEqual(Object.keys(sb.sheets), [], 'no Leads / Clients / Tasks / Activity sheet was created');
+  // a Tasks sheet with an older (shorter) header row is read as-is, never re-headed
+  sb.seed('Tasks', ['id', 'kind'], [{ id: 'task-x', kind: 'call' }]);
+  const before = JSON.stringify(sb.sheets.Tasks.grid);
+  get(sb, { action: 'getHandoffStatus', secret: SECRET, outpatientIds: 'L-new' });
+  assert.equal(JSON.stringify(sb.sheets.Tasks.grid), before, 'header row untouched by the read');
+  assert.deepEqual(Object.keys(sb.sheets), ['Tasks']);
+  assert.doesNotMatch(String(sb.ctx._getHandoffStatus) + String(sb.ctx._handoffRead), /_ensureSheet\(/, 'source guard: the feed never calls _ensureSheet');
+});
+
