@@ -569,7 +569,7 @@
     return typeof data.user === 'string' ? data.user : '';
   }
   var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink'];
-  var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון'];
+  var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון', 'הצעות מחיר — WhatsApp'];
   function isOpsScope() { return state.moneyScope !== 'full'; }
   /* Operational session: hide the money tabs / settings, and take the money
    * inputs out of every form (disabled inputs are not serialized, so the save
@@ -604,6 +604,17 @@
     return Array.isArray(data.users) ? data.users.filter(function (u) { return typeof u === 'string' && u; }) : [];
   }
 
+  // Price-free offer summaries (GET /api/offers): full-money-scope sessions only; null = unavailable.
+  async function apiGetOffers() {
+    var r = await apiFetch('/api/offers', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return Array.isArray(data.offers) ? data.offers : [];
+  }
+  function offersReload() {
+    if (isOpsScope()) { state.offers = null; return Promise.resolve(null); }
+    return apiGetOffers().then(function (o) { state.offers = o; return o; }).catch(function (e) { console.warn('[ezone] offers failed:', e.message); state.offers = null; return null; });
+  }
   async function apiLoadSettings() {
     try {
       var r = await apiFetch('/api/sheets?action=getSettings', { cache: 'no-store' });
@@ -1438,7 +1449,12 @@
     window.PackagePricing.mount($('#packagesRoot'), {
       notify: toast,
       onUnauthorized: handleUnauthorized,
-      onPending: function (n) { var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות'; },
+      settings: function () { return state.settings || {}; },
+      signedInName: state.user || '',
+      onPending: function (n) {
+        var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות';
+        offersReload(); // the price-free summaries the cards / «היום שלי» read follow every offer change
+      },
       targets: function () {
         return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '' }; })
           .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '' }; }));
@@ -5263,7 +5279,8 @@
   function crmReload() {
     return Promise.all([
       apiGetTasks().catch(function () { return state.tasks; }),
-      apiGetActivity().catch(function () { return state.activity; })
+      apiGetActivity().catch(function () { return state.activity; }),
+      offersReload()
     ]).then(function (res) { state.tasks = res[0]; state.activity = res[1]; render(); });
   }
   var CRM_ERROR_HE = {
@@ -5282,6 +5299,16 @@
   function crmSubjectFor(kind, row) {
     // a client carries its lead-era history (fromLead) along
     return kind === 'lead' ? { leadId: row.id, clientId: '' } : { leadId: row.fromLead || '', clientId: row.id };
+  }
+  // Offer CRM status → Hebrew (render time only; keys from the server's crmStatus)
+  var OFFER_STATUS_HE = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף' };
+  function offerStatusHe(k) { return OFFER_STATUS_HE[k] || String(k || ''); }
+  function offersFor(subj) {
+    if (!Array.isArray(state.offers) || !subj) return [];
+    return state.offers.filter(function (o) {
+      return (subj.clientId && o.attachedType === 'client' && String(o.attachedId) === String(subj.clientId)) ||
+        (subj.leadId && o.attachedType === 'lead' && String(o.attachedId) === String(subj.leadId));
+    });
   }
   function crmAssigneeOptions(selected) {
     return ['ורד', 'אורן', 'דנה'].map(function (n) { return '<option value="' + n + '"' + (n === selected ? ' selected' : '') + '>' + n + '</option>'; }).join('');
@@ -5304,6 +5331,13 @@
       (sum.lastContact ? '<span>' + escapeHtml(sum.lastContact.when) + ' · ' + escapeHtml(sum.lastContact.who || '—') + (sum.lastContact.channel ? ' · ' + escapeHtml(sum.lastContact.channel) : '') + '<br><span class="sub">' + escapeHtml(sum.lastContact.summary) + '</span></span>' : '<span class="sub">לא תועד קשר</span>') + '</div>';
     html += '<div class="crm-line"><span class="crm-k">הפעולה הבאה</span>' +
       (sum.nextAction ? '<span><b>' + escapeHtml(sum.nextAction.title) + '</b> · ' + escapeHtml(sum.nextAction.assignee || '—') + (sum.nextAction.due ? ' · ' + escapeHtml(sum.nextAction.due) + (sum.nextAction.dueTime ? ' ' + escapeHtml(sum.nextAction.dueTime) : '') : ' · ללא מועד') + ' <span class="md-chip st-' + sum.nextAction.state + '">' + CA.stateText(sum.nextAction.state) + '</span></span>' : '<span class="sub">אין פעולה פתוחה</span>') + '</div>';
+    var offers = offersFor(subj);
+    if (offers.length) {
+      html += '<div class="crm-line"><span class="crm-k">הצעת מחיר</span><span>' + offers.slice(0, 3).map(function (o) {
+        return '<button type="button" class="link-btn" data-offer-open="' + escapeHtml(o.id) + '">' + escapeHtml(offerStatusHe(o.crmStatus)) + '</button>' +
+          (o.followUpDate ? ' · מעקב ' + escapeHtml(displayDate(o.followUpDate)) : '') + (o.validUntil ? ' · בתוקף עד ' + escapeHtml(displayDate(o.validUntil)) : '') + (o.assignee ? ' · ' + escapeHtml(o.assignee) : '');
+      }).join('<br>') + '</span></div>';
+    }
     if (sum.openTasks.length) {
       html += '<div class="crm-tasks">' + sum.openTasks.map(function (t) {
         return '<div class="crm-task" data-task-id="' + escapeHtml(t.id) + '">' +
@@ -5379,6 +5413,8 @@
     });
   }
   function handleCrmClick(e) {
+    var off = e.target.closest ? e.target.closest('[data-offer-open]') : null;
+    if (off) { setView('packages'); return; }
     var btn = e.target.closest ? e.target.closest('[data-crm]') : null;
     if (!btn || state.role !== 'editor') return;
     var subject = crmSubjectOf(btn);
@@ -6904,6 +6940,7 @@
     form.bankBranch.value = s.bankBranch || '';
     form.bankAccount.value = s.bankAccount || '';
     form.bankHolder.value = s.bankHolder || '';
+    if (form.orenWhatsapp) form.orenWhatsapp.value = s.orenWhatsapp || '';
     $('#settingsModal').hidden = false;
   }
   function closeSettingsModal() { $('#settingsModal').hidden = true; }
@@ -7117,10 +7154,13 @@
         }),
         // CRM (OP-CRM-3B): soft — a failed read shows «המידע אינו זמין», never 0.
         apiGetTasks().catch(function (te) { console.warn('[ezone] getTasks failed:', te.message); return null; }),
-        apiGetActivity().catch(function (ae) { console.warn('[ezone] getActivity failed:', ae.message); return null; })
+        apiGetActivity().catch(function (ae) { console.warn('[ezone] getActivity failed:', ae.message); return null; }),
+        // Offers CRM (2026-11-03): price-free summaries for «היום שלי» / cards; an ops session never asks
+        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { console.warn('[ezone] offers failed:', oe.message); return null; })
       ]);
       state.tasks = results[7];
       state.activity = results[8];
+      state.offers = results[9];
       // The main read succeeded, so the session is valid: only now fetch the price / pay
       // constants (a signed-out page never even requests them). Render below needs them.
       await loadProtectedScripts();
@@ -7158,7 +7198,8 @@
         bankName: s.bankName || '',
         bankBranch: s.bankBranch || '',
         bankAccount: s.bankAccount || '',
-        bankHolder: s.bankHolder || ''
+        bankHolder: s.bankHolder || '',
+        orenWhatsapp: s.orenWhatsapp || ''
       };
       // This app's own stop/resume alerts (minimal fields) — sent-state source of
       // truth across sessions. Replaces any in-session optimistic entries with the
@@ -8090,8 +8131,11 @@
         bankName: (fd.get('bankName') || '').trim(),
         bankBranch: (fd.get('bankBranch') || '').trim(),
         bankAccount: (fd.get('bankAccount') || '').trim(),
-        bankHolder: (fd.get('bankHolder') || '').trim()
+        bankHolder: (fd.get('bankHolder') || '').trim(),
+        // Oren's WhatsApp for offer messages — a setting, never a constant in code (CHANGELOG-offer-whatsapp.md)
+        orenWhatsapp: (fd.get('orenWhatsapp') || '').trim()
       };
+      if (next.orenWhatsapp && !/^0\d{9}$/.test(next.orenWhatsapp.replace(/\D/g, '').replace(/^972/, '0'))) { toast('מספר WhatsApp של אורן לא תקין (05X-XXXXXXX)', true); submit.disabled = false; return; }
       apiSaveSettings(next)
         .then(function () {
           state.settings = next;

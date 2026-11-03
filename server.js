@@ -807,6 +807,33 @@ app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (r
   }
 });
 
+/* GET /api/offers — PRICE-FREE package-offer summaries (id, CRM status, patient, attached lead /
+ * client, follow-up, validity, owner) for «היום שלי», the cards and «מסלול המשך». No amount, VAT,
+ * discount or price constant is in the answer. Still refused for an operational session (דנה
+ * sees no pricing object at all); the full offers with prices stay behind /api/catalog-admin/rpc. */
+app.get('/api/offers', requireSession, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireSheetsUrl(res)) return;
+  if (requestMoneyScope(req) === moneyScope.SCOPE_OPS) return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+  try {
+    const url = SHEETS_URL + (SHEETS_URL.includes('?') ? '&' : '?') + 'action=getPackageOfferSummaries&proxySecret=' + encodeURIComponent(OUTPATIENT_PROXY_SECRET);
+    const r = await fetch(url, { redirect: 'follow' });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('upstream_unavailable'); }
+    if (!data || data.ok === false) return res.status(502).json({ ok: false, error: (data && data.error) || 'upstream_unavailable' });
+    const offers = Array.isArray(data.offers) ? data.offers.map((o) => ({
+      id: String(o.id || ''), status: String(o.status || ''), crmStatus: String(o.crmStatus || ''), requesterKey: String(o.requesterKey || ''),
+      patientName: String(o.patientName || ''), attachedType: String(o.attachedType || ''), attachedId: String(o.attachedId || ''),
+      validUntil: String(o.validUntil || ''), followUpDate: String(o.followUpDate || ''), assignee: String(o.assignee || ''),
+      sentAt: String(o.sentAt || ''), createdAt: String(o.createdAt || ''), createdFrom: String(o.createdFrom || ''), itemCount: Number(o.itemCount) || 0
+    })) : [];
+    res.status(200).json({ ok: true, offers });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
+});
+
 /* GET /api/me — the display name embedded in this session's signed cookie
  * (who/when stamping). Session-gated like every data route; a legacy
  * user-less cookie answers { user: '' } and everything keeps working. The

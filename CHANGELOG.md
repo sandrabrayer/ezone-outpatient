@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Offers CRM in «תמחור חבילות» + WhatsApp (2026-11-03)
+- «➕ הצעת מחיר חדשה» (lead/client, packages + single treatments + quantities, Solo tier, validity, follow-up, owner, notes; double click = one request); statuses draft · ready_to_send · sent · awaiting_decision · approved · rejected · expired (legacy mapped at read, expired computed at read); prices from the catalog server-side only; discount = existing adjust with reason; «אושרה» creates no charge/payment. Price-free `GET /api/offers` feeds the cards, «היום שלי» and «מסלול המשך»; דנה 403. Nine appended `PackageRequests` columns.
+- WhatsApp: prepared message to אורן (number in Settings) or another number, opened via `wa.me` for human sending; only «סמן כנשלחה» moves the offer to `sent` (date, recipient, follow-up). See `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`.
+
 ### מסלול המשך — CRM flow with milestones from the entry date (2026-11-03)
 - Milestones +1/+2/+3 calendar months from the ACTUAL entry date (clamped, leap-safe), a contact task 14 days before each (`cont::<ref>::<entryDate>::m1|m2|m3` in the existing Tasks sheet, subject `cont:<ref>`, ref = Dashboard id or normalized phone — never the name); server-only idempotent sync (`syncContinuationMilestones`, run by Node from its own roster fetch + `POST /api/continuation-sync`): corrected entry date moves, discharge / terminal status closes. No entry date → «חסר תאריך כניסה», no task.
 - Tab: status / owner / last contact / next contact / offer / history per patient; phone-only linking with manual-check chip; five appended columns on the workflow sheet. «היום שלי» names the milestone rows and shows last contact + outcome on every row. See `CHANGELOG-continuation-milestones.md`.

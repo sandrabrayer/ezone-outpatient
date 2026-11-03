@@ -27,7 +27,11 @@
   var TIER = { basic: 'בסיסי', extended: 'מורחב', core: 'Core', standard: 'Standard', complex: 'Complex', single: 'טיפול בודד', combined: 'משולב', monthly: 'חודשי', consult: 'ייעוץ', diagnosis: 'אבחון', range: 'טווח מחיר' };
   var UNIT = { per_session_pack: 'חבילת טיפולים', flat: 'מחיר כולל קבוע', per_month: 'מחיר חודשי', per_month_range: 'טווח חודשי (בחירה)' };
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
-  var REQUESTER = { oren: 'אורן', shahar: 'שחר' };
+  // Offer CRM statuses (stable keys; pending ≙ draft and priced ≙ ready_to_send are mapped by the server at read time)
+  var CRM_STATUS = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף' };
+  var CRM_ORDER = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'];
+  var REQUESTER = { oren: 'אורן', shahar: 'שחר', outpatient: 'ורד (טיפולי חוץ)' };
+  var ASSIGNEES = ['ורד', 'אורן', 'דנה'];
   var ERRORS = {
     vered_only: 'האזור הזה מיועד לורד בלבד', named_session_required: 'יש להיכנס עם שם משתמש (לא כניסה אנונימית) כדי לגשת לתמחור', too_many_attempts: 'יותר מדי ניסיונות — נסי שוב מאוחר יותר',
     catalog_admin_not_configured: 'התמחור עדיין לא הוגדר בשרת', admin_required: 'נדרשת כניסה מחדש',
@@ -37,7 +41,12 @@
     reason_required: 'חובה לרשום סיבה לשינוי', invalid_adjustment: 'סכום לא תקין',
     not_priced: 'אפשר לשייך רק בקשה שתומחרה', already_attached: 'הבקשה כבר משויכת למטופל אחר',
     target_not_found: 'המטופל/הליד לא נמצא', invalid_target: 'יעד שיוך לא תקין', invalid_fields: 'שדות לא תקינים',
-    upstream_unavailable: 'השרת לא זמין, נסי שוב', busy: 'המערכת עסוקה, נסי שוב', unauthorized: 'אין הרשאה'
+    upstream_unavailable: 'השרת לא זמין, נסי שוב', busy: 'המערכת עסוקה, נסי שוב', unauthorized: 'אין הרשאה',
+    items_required: 'יש להוסיף לפחות פריט אחד', too_many_items: 'יותר מדי פריטים בהצעה', invalid_quantity: 'כמות לא מותרת (1–20)',
+    invalid_package: 'חבילה לא פעילה או לא קיימת', invalid_months: 'משך לא מותר לחבילה זו', invalid_patient: 'יש לבחור לקוח או להזין שם',
+    invalid_phone: 'טלפון לא תקין', invalid_date: 'תאריך לא תקין', invalid_assignee: 'אחראי/ת לא מוכר/ת', not_found: 'הבקשה לא נמצאה',
+    invalid_transition: 'המעבר הזה לא אפשרי במצב הנוכחי', offer_closed: 'ההצעה כבר נסגרה', invalid_recipient: 'יש לבחור יעד תקין (אורן או מספר 05X)',
+    recovery_pending: 'המערכת בשחזור — נסי מאוחר יותר'
   };
   var MAX_SHEKELS_DIGITS = 7;
 
@@ -90,7 +99,13 @@
 
   // ---- state -----------------------------------------------------------------
   var S = { onUnauthorized: function () {}, root: null, phase: 'loading', tab: 'requests', configured: true, catalog: null, requests: null, error: '',
-    targets: function () { return []; }, notify: function () {}, onPending: function () {} };
+    targets: function () { return []; }, notify: function () {}, onPending: function () {}, settings: function () { return {}; }, signedInName: '',
+    filter: 'open', newForm: null, wa: {} };
+  // yyyy-mm-dd of today (+n days), local calendar (the server validates; display only)
+  function isoPlus(n) { var d = new Date(); d.setDate(d.getDate() + (n || 0)); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function fmtDay(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
+  // 0XXXXXXXXX -> 972XXXXXXXXX for wa.me; '' when not an Israeli mobile/landline
+  function waNumber(v) { var d = String(v == null ? '' : v).replace(/\D/g, ''); if (/^972\d{9}$/.test(d)) d = '0' + d.slice(3); return /^0\d{9}$/.test(d) ? '972' + d.slice(1) : ''; }
 
   function say(msg, isErr) { try { S.notify(msg, !!isErr); } catch (_) {} }
 
@@ -202,7 +217,7 @@
 
   async function lock() {
     try { await call('/api/catalog-admin/logout', 'POST', {}); } catch (_) {}
-    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; S.loadError = ''; ops = {}; draw();
+    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; S.loadError = ''; S.newForm = null; S.wa = {}; ops = {}; draw();
   }
 
   function pkgName(key) {
@@ -211,11 +226,117 @@
   }
 
   // -- requests --
+  function crmOf(r) { return r.crmStatus || (r.status === 'priced' ? 'ready_to_send' : 'draft'); }
   function requestsView() {
     if (!S.requests) return h('p', { class: 'muted', text: 'רשימת הבקשות לא נטענה.' });
     var items = S.requests.items;
-    if (!items.length) return h('p', { class: 'muted', text: 'אין בקשות תמחור.' });
-    return h('div', { class: 'pkg-list' }, items.map(requestCard));
+    var counts = {}; items.forEach(function (r) { var k = crmOf(r); counts[k] = (counts[k] || 0) + 1; });
+    var openN = items.filter(function (r) { return ['approved', 'rejected', 'expired'].indexOf(crmOf(r)) < 0; }).length;
+    var filters = [['open', 'פתוחות' + (openN ? ' (' + openN + ')' : '')], ['all', 'הכל (' + items.length + ')']].concat(CRM_ORDER.map(function (k) { return [k, CRM_STATUS[k] + (counts[k] ? ' (' + counts[k] + ')' : '')]; }));
+    var bar = h('div', { class: 'pkg-row pkg-filters' }, [
+      h('button', { type: 'button', class: 'btn btn-primary pkg-new-btn', text: '➕ הצעת מחיר חדשה', 'aria-expanded': S.newForm ? 'true' : 'false', onclick: function () { S.newForm = S.newForm ? null : newFormState(); S.error = ''; draw(); } })
+    ].concat(filters.map(function (f) {
+      return h('button', { type: 'button', class: 'btn btn-ghost pkg-chip' + (S.filter === f[0] ? ' pkg-chip-on' : ''), 'aria-pressed': S.filter === f[0] ? 'true' : 'false', text: f[1], onclick: function () { S.filter = f[0]; draw(); } });
+    })));
+    var shown = items.filter(function (r) {
+      var k = crmOf(r);
+      return S.filter === 'all' ? true : S.filter === 'open' ? ['approved', 'rejected', 'expired'].indexOf(k) < 0 : k === S.filter;
+    });
+    var kids = [bar];
+    if (S.newForm) kids.push(newRequestView());
+    if (!items.length) kids.push(h('p', { class: 'muted', text: 'אין בקשות תמחור.' }));
+    else if (!shown.length) kids.push(h('p', { class: 'muted', text: 'אין הצעות במצב הזה.' }));
+    else kids.push(h('div', { class: 'pkg-list' }, shown.map(requestCard)));
+    return h('div', {}, kids);
+  }
+
+  // ---- new offer (Vered): packages, single treatments or both; prices come back from the server only ----
+  function newFormState() {
+    return { requestId: uuid(), target: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
+      validUntil: isoPlus(14), followUpDate: isoPlus(3), assignee: S.signedInName || 'ורד', notes: '', busy: false };
+  }
+  function itemLabel(it) { return pkgName(it.packageKey) + (it.months ? ' · ' + it.months + ' חודשים' : '') + (it.selectedMonthlyAgorot ? ' · ' + formatAgorot(it.selectedMonthlyAgorot) + ' לחודש' : '') + (it.qty > 1 ? ' × ' + it.qty : ''); }
+  function newRequestView() {
+    var F = S.newForm, box = h('div', { class: 'pkg-new card' });
+    var active = S.catalog ? S.catalog.items.filter(function (i) { return i.active; }) : [];
+    var targets = S.targets() || [];
+    function paint() {
+      while (box.firstChild) box.removeChild(box.firstChild);
+      box.appendChild(h('h3', { text: 'הצעת מחיר חדשה' }));
+      // who
+      var tsel = h('select', { 'aria-label': 'לקוח / ליד', onchange: function () { F.target = tsel.value; paint(); } }, [h('option', { value: '', text: 'לקוח/ליד מהמערכת…' })].concat(targets.map(function (t) {
+        return h('option', { value: t.type + ':' + t.id, text: (t.type === 'client' ? 'מטופל · ' : 'ליד · ') + t.name, selected: F.target === t.type + ':' + t.id ? 'selected' : false });
+      })));
+      var nameIn = h('input', { type: 'text', maxlength: '120', placeholder: 'או שם הלקוח (ללא רשומה)', 'aria-label': 'שם הלקוח', value: F.name, oninput: function () { F.name = nameIn.value; } });
+      var phoneIn = h('input', { type: 'tel', maxlength: '20', placeholder: 'טלפון 05X-XXXXXXX', 'aria-label': 'טלפון הלקוח', value: F.phone, oninput: function () { F.phone = phoneIn.value; } });
+      box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'למי ההצעה' }), h('div', { class: 'pkg-row' }, [tsel, F.target ? null : nameIn, F.target ? null : phoneIn])]));
+      // items picker (same visible-buttons pattern as the calculator)
+      var P = F.pick;
+      var order = [], byFam = {};
+      active.forEach(function (i) { if (!byFam[i.family]) { byFam[i.family] = []; order.push(i.family); } byFam[i.family].push(i); });
+      var pickBox = h('div', { class: 'pkg-pick' });
+      order.forEach(function (fam) {
+        pickBox.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: label(FAMILY, fam) }),
+          chips(byFam[fam].map(function (i) { return { value: i.key, text: label(TIER, i.tier) }; }), P.key, function (key) {
+            var it = active.filter(function (x) { return x.key === key; })[0];
+            P.key = key; P.tier = ''; P.quote = null; P.months = it && it.allowedMonths.length ? String(it.allowedMonths[0]) : ''; preview();
+          }, label(FAMILY, fam))]));
+      });
+      var cur = active.filter(function (x) { return x.key === P.key; })[0] || null;
+      if (cur && cur.allowedMonths.length > 1) pickBox.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'משך (חודשים)' }), chips(cur.allowedMonths.map(function (m) { return { value: String(m), text: m + ' חודשים' }; }), P.months, function (v) { P.months = v; preview(); }, 'משך')]));
+      if (cur && cur.unit === 'per_month_range') pickBox.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'מדרגת מחיר חודשי' }), chips(rangeTiers(cur).map(function (t) { return { value: String(t.agorot), text: t.text + ' · ' + formatAgorot(t.agorot) }; }), P.tier, function (v) { P.tier = v; preview(); }, 'מדרגת מחיר חודשי')]));
+      var qtyIn = h('input', { type: 'number', min: '1', max: '20', value: String(P.qty), 'aria-label': 'כמות', class: 'pkg-qty', onchange: function () { P.qty = parseInt(qtyIn.value, 10) || 1; } });
+      var qtxt = !cur ? 'בחרי פריט מהקטלוג (חבילה או טיפול בודד).' : P.quote === null ? '…' : !P.quote.ok ? errorText(P.quote.error) : (P.quote.quote.needsSelection ? 'יש לבחור מדרגת מחיר (מינימום / אמצע / מקסימום).' : 'מחיר ליחידה: ' + formatAgorot(P.quote.quote.grossAgorot) + ' כולל מע״מ');
+      pickBox.appendChild(h('div', { class: 'pkg-row' }, [h('span', { class: 'muted', text: 'כמות' }), qtyIn,
+        h('button', { type: 'button', class: 'btn', text: '➕ הוספה להצעה', disabled: cur && P.quote && P.quote.ok && !P.quote.quote.needsSelection ? false : 'disabled', onclick: function () {
+          F.items.push({ packageKey: cur.key, months: cur.allowedMonths.length ? parseInt(P.months, 10) : undefined, selectedMonthlyAgorot: cur.unit === 'per_month_range' ? parseInt(P.tier, 10) : undefined, qty: P.qty, unitGross: P.quote.quote.grossAgorot });
+          P.key = ''; P.tier = ''; P.months = ''; P.qty = 1; P.quote = null; paint();
+        } }),
+        h('span', { class: 'muted pkg-pick-quote', 'aria-live': 'polite', text: qtxt })]));
+      box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'פריטים' }), pickBox]));
+      // chosen items
+      var total = F.items.reduce(function (a, it) { return a + it.unitGross * it.qty; }, 0);
+      box.appendChild(h('div', { class: 'pkg-items' }, F.items.length ? F.items.map(function (it, idx) {
+        return h('div', { class: 'pkg-item-row' }, [h('span', { text: itemLabel(it) }), h('span', { class: 'pkg-item-sum', text: formatAgorot(it.unitGross * it.qty) }),
+          h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕', 'aria-label': 'הסרת פריט', onclick: function () { F.items.splice(idx, 1); paint(); } })]);
+      }).concat([h('div', { class: 'pkg-total', text: 'סה״כ משוער (כולל מע״מ): ' + formatAgorot(total) + ' — המחיר הסופי מחושב בשרת' })]) : [h('p', { class: 'muted', text: 'עדיין אין פריטים.' })]));
+      // terms
+      var vu = h('input', { type: 'date', value: F.validUntil, 'aria-label': 'תוקף ההצעה', onchange: function () { F.validUntil = vu.value; } });
+      var fu = h('input', { type: 'date', value: F.followUpDate, 'aria-label': 'מועד מעקב', onchange: function () { F.followUpDate = fu.value; } });
+      var asg = h('select', { 'aria-label': 'אחראי/ת', onchange: function () { F.assignee = asg.value; } }, ASSIGNEES.map(function (n) { return h('option', { value: n, text: n, selected: n === F.assignee ? 'selected' : false }); }));
+      var notes = h('input', { type: 'text', maxlength: '500', placeholder: 'הערות (ללא פרטים רפואיים)', 'aria-label': 'הערות', value: F.notes, oninput: function () { F.notes = notes.value; } });
+      box.appendChild(h('div', { class: 'pkg-row pkg-terms' }, [h('label', { class: 'pkg-lbl' }, ['תוקף עד ', vu]), h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]), h('label', { class: 'pkg-lbl' }, ['אחראי/ת ', asg]), notes]));
+      box.appendChild(h('div', { class: 'pkg-row' }, [
+        h('button', { type: 'button', class: 'btn btn-primary pkg-create-btn', text: F.busy ? 'יוצרת…' : 'יצירת הצעה (טיוטה)', disabled: F.busy ? 'disabled' : false, onclick: create }),
+        h('button', { type: 'button', class: 'btn btn-ghost', text: 'ביטול', onclick: function () { S.newForm = null; draw(); } }),
+        h('span', { class: 'muted', text: 'ההצעה נוצרת כטיוטה; אישור התמחור הופך אותה ל«מוכנה לשליחה». אין חיוב ואין תשלום.' })
+      ]));
+    }
+    async function preview() {
+      var P = F.pick, cur = active.filter(function (x) { return x.key === P.key; })[0];
+      paint();
+      if (!cur) return;
+      var f = { packageKey: cur.key };
+      if (cur.allowedMonths.length) f.months = parseInt(P.months, 10);
+      if (cur.unit === 'per_month_range' && P.tier) f.selectedMonthlyAgorot = parseInt(P.tier, 10);
+      var res = await rpc('quote', f).catch(function (e) { return { ok: false, error: e.message }; });
+      if (S.newForm !== F || F.pick.key !== cur.key) return;
+      P.quote = res; paint();
+    }
+    async function create() {
+      if (F.busy) return; // double click = one request (and the same requestId would be replayed anyway)
+      if (!F.items.length) { say(errorText('items_required'), true); return; }
+      if (!F.target && F.name.trim().length < 2) { say(errorText('invalid_patient'), true); return; }
+      F.busy = true; paint();
+      var body = { requestId: F.requestId, items: F.items.map(function (it) { return { packageKey: it.packageKey, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty }; }),
+        validUntil: F.validUntil, followUpDate: F.followUpDate, assignee: F.assignee, notes: F.notes.trim() };
+      if (F.target) { var v = F.target.split(':'); body.targetType = v[0]; body.targetId = v.slice(1).join(':'); } else { body.patientName = F.name.trim(); body.patientPhone = F.phone.trim(); }
+      var res = await rpc('createRequest', body).catch(function (e) { return { ok: false, error: e.message }; });
+      if (res.ok) { say(res.duplicate ? 'ההצעה כבר נוצרה' : 'ההצעה נוצרה כטיוטה'); S.newForm = null; S.filter = 'open'; await loadAll(); draw(); return; }
+      F.busy = false; S.error = errorText(res.error); say(S.error, true); paint();
+    }
+    paint();
+    return box;
   }
 
   function requestCard(r) {
@@ -230,20 +351,110 @@
         priceLines.push(h('div', { class: 'muted', text: 'לפני מע״מ ' + formatAgorot(q.netAgorot) + ' · מע״מ ' + formatAgorot(q.vatAgorot) + ' (מחיר כולל מע״מ)' }));
     }
     if (r.status === 'priced') priceLines.push(h('div', { class: 'pkg-approved', text: 'אושר: ' + formatAgorot(r.approvedTotalAgorot) + ' — טרם שולם' }));
+    var crm = crmOf(r);
+    var items = Array.isArray(r.items) && r.items.length ? r.items : null;
     var kids = [
       h('div', { class: 'pkg-head' }, [
-        h('strong', { text: r.patientName }), h('span', { class: 'chip', text: label(STATUS, r.status) }),
-        h('span', { class: 'muted', text: 'מבקש/ת: ' + label(REQUESTER, r.requesterKey) + (r.patientPhone ? ' · ' + r.patientPhone : '') })
-      ]),
-      h('div', { text: pkgName(r.packageKey) + (r.months ? ' · ' + r.months + ' חודשים' : '') }),
-      h('div', { class: 'pkg-price' }, priceLines)
+        h('strong', { text: r.patientName }), h('span', { class: 'chip pkg-st pkg-st-' + crm, text: label(CRM_STATUS, crm) }),
+        h('span', { class: 'muted', text: 'מבקש/ת: ' + label(REQUESTER, r.requesterKey) + (r.patientPhone ? ' · ' + r.patientPhone : '') + (r.assignee ? ' · אחראי/ת: ' + r.assignee : '') })
+      ])
     ];
+    if (items && (items.length > 1 || items[0].qty > 1)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
+      return h('li', { text: itemLabel({ packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 }) + (it.lineGrossAgorot != null ? ' — ' + formatAgorot(it.lineGrossAgorot) : '') });
+    })));
+    else kids.push(h('div', { text: pkgName(r.packageKey) + (r.months ? ' · ' + r.months + ' חודשים' : '') }));
+    kids.push(h('div', { class: 'pkg-price' }, priceLines));
+    var terms = [];
+    if (r.validUntil) terms.push('תוקף עד ' + fmtDay(r.validUntil));
+    if (r.followUpDate) terms.push('מעקב ב-' + fmtDay(r.followUpDate));
+    if (r.sentAt) terms.push('נשלחה ' + fmtDay(r.sentAt) + (r.sentTo ? (r.sentTo === 'oren' ? ' לאורן' : ' ל-' + r.sentTo) : ''));
+    if (r.decisionAt) terms.push('החלטה ' + fmtDay(r.decisionAt));
+    if (r.attachedType) terms.push('משויך ל' + (r.attachedType === 'client' ? 'מטופל' : 'ליד') + ' (מזהה ' + r.attachedId + ')');
+    if (terms.length) kids.push(h('div', { class: 'muted pkg-terms-line', text: terms.join(' · ') }));
+    if (r.notes) kids.push(h('div', { class: 'muted', text: 'הערות: ' + r.notes }));
     if (r.adjustLog && r.adjustLog.length) kids.push(h('ul', { class: 'pkg-log muted' }, r.adjustLog.map(function (e) {
       return h('li', { text: (e.kind === 'select' ? 'נבחר מחיר חודשי ' + formatAgorot(e.to) : 'תואם מ-' + formatAgorot(e.from) + ' ל-' + formatAgorot(e.to)) + (e.reason ? ' — ' + e.reason : '') + ' (' + e.by + ')' });
     })));
-    if (r.status === 'pending') kids.push(pendingControls(r));
-    if (r.status === 'priced') kids.push(attachControls(r));
-    return h('div', { class: 'pkg-card card' }, kids);
+    if (crm === 'draft') kids.push(pendingControls(r));
+    if (crm !== 'draft' && !r.attachedType && ['approved', 'rejected', 'expired'].indexOf(crm) < 0) kids.push(attachControls(r));
+    if (crm !== 'draft') kids.push(crmControls(r, crm));
+    if (S.wa[r.id]) kids.push(whatsappPanel(r));
+    return h('div', { class: 'pkg-card card pkg-crm-' + crm }, kids);
+  }
+
+  // ---- offer CRM actions (ready_to_send → sent → awaiting_decision → approved | rejected; expired = extend) ----
+  function crmControls(r, crm) {
+    var box = [];
+    var fu = h('input', { type: 'date', value: r.followUpDate || '', 'aria-label': 'מועד מעקב' });
+    var saveFu = h('button', { type: 'button', class: 'btn btn-sm', text: 'עדכון מעקב', onclick: function () { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); } });
+    if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') {
+      box.push(h('button', { type: 'button', class: 'btn', text: '💬 הכן הודעת WhatsApp', 'aria-expanded': S.wa[r.id] ? 'true' : 'false', onclick: function () { S.wa[r.id] = S.wa[r.id] ? null : { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; draw(); } }));
+    }
+    if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () { S.wa[r.id] = S.wa[r.id] || { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; S.wa[r.id].confirm = true; draw(); } }));
+    if (crm === 'sent') box.push(h('button', { type: 'button', class: 'btn', text: '⏳ ממתינה להחלטה', onclick: function () { mutate('setStatus', r, { status: 'awaiting_decision' }, 'סומן: ממתינה להחלטה'); } }));
+    if (crm === 'sent' || crm === 'awaiting_decision') {
+      box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✅ הלקוח אישר', title: 'אישור ההצעה בלבד — ללא חיוב, תשלום או חידוש', onclick: function () { if (confirm('לסמן שהלקוח אישר את ההצעה? (אין חיוב ואין תשלום — הגבייה נעשית בכרטיס המטופל)')) mutate('setStatus', r, { status: 'approved' }, 'ההצעה אושרה — ללא חיוב'); } }));
+    }
+    if (['ready_to_send', 'sent', 'awaiting_decision'].indexOf(crm) >= 0) {
+      box.push(h('button', { type: 'button', class: 'btn btn-danger', text: '✕ נדחתה', onclick: function () { if (confirm('לסמן את ההצעה כנדחתה?')) mutate('setStatus', r, { status: 'rejected' }, 'ההצעה סומנה כנדחתה'); } }));
+      box.push(h('span', { class: 'pkg-row pkg-fu' }, [fu, saveFu]));
+    }
+    if (crm === 'expired') {
+      var vu = h('input', { type: 'date', value: isoPlus(14), 'aria-label': 'תוקף חדש' });
+      box.push(h('span', { class: 'pkg-row pkg-fu' }, [h('span', { class: 'muted', text: 'הארכת תוקף עד' }), vu, h('button', { type: 'button', class: 'btn btn-sm', text: 'הארכה', onclick: function () { mutate('setStatus', r, { validUntil: vu.value }, 'התוקף הוארך'); } })]));
+    }
+    if (!box.length) return null;
+    return h('div', { class: 'pkg-controls pkg-crm-actions' }, [h('div', { class: 'pkg-row' }, box)]);
+  }
+
+  // ---- WhatsApp: a message PREPARED for a human to send from the device's connected WhatsApp account.
+  // wa.me cannot choose the sending number, nothing is sent automatically, and opening WhatsApp never
+  // changes the status — only «סמן כנשלחה» does, recording when / to whom / follow-up. No medical details.
+  function offerMessage(r) {
+    var items = Array.isArray(r.items) && r.items.length ? r.items : [{ packageKey: r.packageKey, months: r.months, qty: 1 }];
+    var lines = ['שלום ' + (r.patientName || '') + ',', 'להלן הצעת המחיר מ-E-ZONE לטיפולי חוץ:'];
+    items.forEach(function (it) { lines.push('• ' + itemLabel({ packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 })); });
+    var total = r.approvedTotalAgorot !== null && r.approvedTotalAgorot !== undefined ? r.approvedTotalAgorot : r.effectiveTotalAgorot;
+    if (total !== null && total !== undefined) lines.push('סה״כ: ' + formatAgorot(total) + ' (כולל מע״מ)');
+    if (r.validUntil) lines.push('ההצעה בתוקף עד ' + fmtDay(r.validUntil) + '.');
+    lines.push('נשמח לעמוד לרשותך לכל שאלה.', 'צוות E-ZONE');
+    return lines.join('\n');
+  }
+  function whatsappPanel(r) {
+    var W = S.wa[r.id];
+    var orenNum = waNumber((S.settings() || {}).orenWhatsapp);
+    var toSel = h('select', { 'aria-label': 'יעד ההודעה', onchange: function () { W.to = toSel.value; draw(); } }, [
+      h('option', { value: '', text: 'בחרי יעד…' }),
+      h('option', { value: 'oren', text: 'אורן' + (orenNum ? '' : ' (מספר לא הוגדר בהגדרות)'), disabled: orenNum ? false : 'disabled', selected: W.to === 'oren' ? 'selected' : false }),
+      h('option', { value: 'custom', text: 'מספר אחר…', selected: W.to === 'custom' ? 'selected' : false })
+    ]);
+    var custom = h('input', { type: 'tel', placeholder: '05X-XXXXXXX', 'aria-label': 'מספר טלפון ליעד', value: W.custom || '', oninput: function () { W.custom = custom.value; } });
+    var msg = h('textarea', { rows: '7', 'aria-label': 'נוסח ההודעה', class: 'pkg-wa-text' }); msg.value = W.text || offerMessage(r);
+    msg.addEventListener('input', function () { W.text = msg.value; });
+    var fu = h('input', { type: 'date', value: W.followUp || '', 'aria-label': 'מועד מעקב אחרי השליחה', onchange: function () { W.followUp = fu.value; } });
+    function targetNumber() { return W.to === 'oren' ? orenNum : W.to === 'custom' ? waNumber(custom.value) : ''; }
+    return h('div', { class: 'pkg-wa card' }, [
+      h('div', { class: 'pkg-fam-title', text: 'הודעת WhatsApp — לאישור אנושי' }),
+      h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null]),
+      msg,
+      h('p', { class: 'muted', text: 'ההודעה תיפתח ב-WhatsApp מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה.' }),
+      h('div', { class: 'pkg-row' }, [
+        h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
+        h('button', { type: 'button', class: 'btn', text: '📲 פתיחת WhatsApp', onclick: function () {
+          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
+          window.open('https://wa.me/' + n + '?text=' + encodeURIComponent(msg.value), '_blank', 'noopener');
+        } }),
+        h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () {
+          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
+          if (!fu.value) { say('יש לקבוע מועד מעקב', true); return; }
+          var fields = { status: 'sent', sentTo: W.to === 'oren' ? 'oren' : ('0' + n.slice(3)), followUpDate: fu.value };
+          if (crmOf(r) !== 'ready_to_send') { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); return; }
+          delete S.wa[r.id];
+          mutate('setStatus', r, fields, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
+        } }),
+        h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { delete S.wa[r.id]; draw(); } })
+      ])
+    ]);
   }
 
   async function mutate(op, r, fields, okMsg) {
@@ -290,8 +501,8 @@
       } })]));
     }
     var canApprove = !(r.needsSelection && r.selectedMonthlyAgorot === null);
-    box.push(h('button', { type: 'button', class: 'btn btn-primary', disabled: canApprove ? false : 'disabled', text: 'אישור תמחור',
-      onclick: function () { mutate('approve', r, {}, 'התמחור אושר'); } }));
+    box.push(h('button', { type: 'button', class: 'btn btn-primary', disabled: canApprove ? false : 'disabled', text: 'אישור תמחור → מוכנה לשליחה',
+      onclick: function () { mutate('approve', r, {}, 'התמחור אושר — ההצעה מוכנה לשליחה'); } }));
     return h('div', { class: 'pkg-controls' }, box);
   }
 
@@ -429,14 +640,15 @@
   function mount(rootEl, opts) {
     var sameRoot = S.root === rootEl; S.root = rootEl; opts = opts || {};
     S.targets = opts.targets || S.targets; S.notify = opts.notify || S.notify; S.onPending = opts.onPending || S.onPending; S.onUnauthorized = opts.onUnauthorized || S.onUnauthorized;
+    S.settings = opts.settings || S.settings; S.signedInName = opts.signedInName || S.signedInName; // display default for the owner select only — authority stays server-side
     if (S.phase === 'loading' || S.phase === 'gate') { boot(); return; }
     // Already showing the admin screen in this very root: keep what the user has open (an edit row, a calculator
     // choice) instead of wiping it on every unrelated re-render of the host app. «רענון» redraws on demand.
     if (sameRoot && rootEl.firstChild && rootEl.querySelector('.pkg-admin')) return;
     draw();
   }
-  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; ops = {}; if (S.root) draw(); }
+  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers,
-    FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, REQUESTER: REQUESTER, ERRORS: ERRORS };
+  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage,
+    FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });
