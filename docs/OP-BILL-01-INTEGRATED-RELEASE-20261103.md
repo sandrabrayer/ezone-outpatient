@@ -23,8 +23,8 @@ The candidate drill includes source-created linked contact/follow-up rows, mixed
 
 Historical `google-operational-drill.gs` SHA256 remains `dbeae05cd7c410268224bf1381a207c2c7ba8a2defc9678e5191b2903141329f`; October native evidence is unchanged. The new runner has a separate filename and refuses execution without an isolated project binding.
 
-- Current Code.gs SHA256: `6f997e4151f0985ec035f2dc0beb8b80fe3e835e2fe8200d77af0d8f5290be15`.
-- Unbound candidate runner SHA256: `081c42fd927874863b29beaeb768ac6dd5dd2c49c68b559c1052439fb81b400c`.
+- Current Code.gs SHA256: `8fb10cd4580f2df7499c40f792363320297b050812b0a688ac16dcef7b91047a` (after the 3 Nov B1/B2 review fixes; was `6f997e41…` before them).
+- Unbound candidate runner SHA256: `b75d17b0929ab14086af6ecbb6b73e1f722a1b359b1c9dbe4c30a430d653bd97` (regenerated from the current source; was `081c42fd…`).
 
 ## Validation
 

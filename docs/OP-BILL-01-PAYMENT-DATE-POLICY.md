@@ -25,3 +25,17 @@ The current app explicitly chooses the due-date-anchored `nextCycleDueDateAfter`
 
 ## Ownership
 Outpatient period logic — E-ZONE One architecture coordinator; Dashboard Code is independently investigating Vered's historical collection-save bug. These are separate repos and must not be collapsed into one unreviewed PR.
+
+## Review fix (2026-11-03): coverage starts on max(paymentDate, cycleDate)
+
+Decided rule for a NEW ordinary monthly receipt: `coverageStart = max(paymentDate, cycleDate)`, `coverageEnd = coverageStart + 1 calendar month − 1 day` (end-of-month clamp), `nextBillingDate = coverageEnd + 1 day`.
+
+| Case | Due cycle | Paid | Coverage | Next collection |
+| --- | --- | --- | --- | --- |
+| Sandra's example | 25 Oct | 25 Oct | 25 Oct – 24 Nov | 25 Nov |
+| Early payment (advance from the due date) | 1 Nov | 28 Oct | 1 Nov – 30 Nov | 1 Dec |
+| Late payment (month from the actual payment) | 1 Nov | 10 Nov | 10 Nov – 9 Dec | 10 Dec |
+
+Why not the pure paid date: with "paid 28 Oct → next 28 Nov" the next collection shares the month key of the cycle it settled, and the payment id `pay::<id>::base::<YYYY-MM>` already exists — the following renewal was refused forever. Under the rule above the next collection always lands in a later month key.
+
+An existing unpaid/partial row of the cycle is settled in place by the journalled renewal (the browser states what it saw; the source pins the observed row and updates it under the lock). Explicit recorded periods and historical rows are untouched. Helpers: `CL.paymentDateCoverage(paymentDate, cycleDate)` ↔ `_finPaidDateCoverage(paymentDate, cycleDate)` (parity-tested).

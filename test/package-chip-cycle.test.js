@@ -213,10 +213,13 @@ test('app.js wiring: mark/unmark key on the cycle row and remember dueDateISO fo
   assert.match(fn, /dueDateISO = cyclePaymentDueDate\(c, todayIso\)/);
   assert.match(fn, /\(prevRemembered && prevRemembered\.dueDateISO\) \|\|\s*\n\s*latestPaidBaseDueDate\(c\) \|\|\s*\n\s*prevCycleDueDateBefore\(c, c\.nextBillingDate\)/);
   assert.match(fn, /dueDateISO: dueDateISO \}/);
-  // NEW verified receipts advance from the actual payment date, not old due day.
-  // Past-due arrears must be reviewed rather than silently skipped.
-  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate\)/);
-  assert.match(fn, /dueDateISO < todayIso/);
+  // NEW verified receipts advance from max(payment date, due cycle) (B1), and
+  // the explicit window is written on the row so the stamped default cannot
+  // be carried over from the live row. An explicitly recorded different
+  // period is never overwritten by a chip click.
+  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate, dueDateISO\)/);
+  assert.match(fn, /updated\.coverageStart = actualWindow\.start/);
+  assert.match(fn, /CL\.recordedCoverage\(base\) && CL\.coverageDiffersFromDefault\(base\)/);
   assert.match(fn, /var advanced = verified\.next/);
   // the revert lands strictly behind today
   assert.match(fn, /\{ nextBillingDate: revertTo, paymentDate: c\.paymentDate \}/);

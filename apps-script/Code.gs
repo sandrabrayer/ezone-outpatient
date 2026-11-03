@@ -4902,16 +4902,24 @@ function _finNext(c, due) {
   return _nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || _finAddMonth(due);
 }
 /* OP-BILL-01: NEW verified monthly receipt default, independent of the old
- * billing-cycle anchor. Existing journal operations still use _finNext. */
-function _finPaidDateCoverage(paymentDate) {
+ * billing-cycle anchor. Existing journal operations still use _finNext.
+ * B1: coverage starts on max(paymentDate, cycleDate) — an early payment is an
+ * advance from the due cycle, a late one covers a month from the actual
+ * payment — so the next collection always lands in a LATER month key than the
+ * cycle it settled. EXACT MIRROR of paymentDateCoverage() in
+ * public/credits-ledger.js (parity-tested). An invalid/blank cycleDate falls
+ * back to the payment date. */
+function _finPaidDateCoverage(paymentDate, cycleDate) {
   var iso = _coverageDateISO(paymentDate);
   if (!iso || String(paymentDate) !== iso) return null;
-  var next = _finAddMonth(iso), p = next.split('-').map(Number);
+  var cycle = _coverageDateISO(cycleDate);
+  var start = (cycle && String(cycleDate) === cycle && cycle > iso) ? cycle : iso;
+  var next = _finAddMonth(start), p = next.split('-').map(Number);
   if (!next || p.length !== 3) return null;
   var prior = new Date(p[0], p[1] - 1, p[2] - 1);
   var end = prior.getFullYear() + '-' + ('0' + (prior.getMonth() + 1)).slice(-2) +
     '-' + ('0' + prior.getDate()).slice(-2);
-  return { start: iso, end: end, next: next };
+  return { start: start, end: end, next: next };
 }
 function _finIntent(payload) {
   var p = payload.payment || {}, patch = payload.patch || {}, out = {};
@@ -4921,9 +4929,58 @@ function _finIntent(payload) {
   var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
   var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
     snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  // OP-BILL-01 B2: settling an EXISTING unpaid/partial row of the same cycle.
+  // The browser states what it saw (id / status / amountPaid); the source
+  // verifies that against the sheet at reserve, pins the full observed row into
+  // the journal (intent.prior) and re-checks it before the guarded in-place
+  // update at apply. Absent -> the renewal must create the row (as before).
+  var pp = payload.priorPayment || payload.priorExpected;  // request, or a stored intent re-canonicalized
+  if (pp && typeof pp === 'object') {
+    intent.priorExpected = { id: String(pp.id == null ? '' : pp.id), status: String(pp.status == null ? '' : pp.status),
+      amountPaid: String(pp.amountPaid == null ? '' : pp.amountPaid) };
+  }
+  // The pinned row survives re-canonicalization of a STORED intent only; a
+  // fresh reserve drops it and pins from the sheet (_reserveRenewal).
+  if (Array.isArray(payload.prior) && payload.prior.length === PAYMENTS_HEADERS.length &&
+      payload.prior.every(function (v) { return typeof v === 'string'; })) intent.prior = payload.prior.slice();
   if (!/^[A-Za-z0-9_-]{12,120}$/.test(intent.opId) || !intent.clientId ||
       !intent.snapshot || JSON.stringify(intent).length > 40000) throw new Error('invalid_renewal_intent');
   return intent;
+}
+/* B2: the stored intent minus the source-captured prior row — what a retried
+ * reserve can reproduce from its payload alone (idempotency comparison). */
+function _finIntentWithoutPrior(intentJson) {
+  var o = JSON.parse(intentJson);
+  if (!_hasOwn(o, 'prior')) return intentJson;
+  delete o.prior;
+  return JSON.stringify(o);
+}
+/* B2: do the payment rows observed for this cycle match what the intent
+ * expects? No prior -> none may exist. Prior -> exactly the pinned row, byte
+ * for byte, still unpaid/partial under the canonical id. Returns '' when they
+ * match, else a reason. */
+function _finPriorMismatch(intent, payments) {
+  if (!intent.prior) return payments.length ? 'payment_exists' : '';
+  if (payments.length !== 1) return 'prior_payment_changed';
+  var seen = JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS));
+  return seen === JSON.stringify(intent.prior) ? '' : 'prior_payment_changed';
+}
+/* B2: validate the browser's expectation against the sheet at RESERVE and pin
+ * the full observed row. Returns an error code or ''. Legacy-id rows
+ * (pay::<client>::<YYYY-MM>) are never updated through here: the renewal
+ * payment carries the canonical id, so the prior must carry it too. */
+function _finPinPrior(intent, payments) {
+  var exp = intent.priorExpected;
+  if (!exp) return payments.length ? 'renewal_payment_exists' : '';
+  var p = intent.payment;
+  if (payments.length !== 1 || String(payments[0].id) !== p.id || exp.id !== p.id) return 'prior_payment_changed';
+  var row = payments[0], status = String(row.status == null ? '' : row.status);
+  if (status === 'paid' || exp.status !== status || exp.amountPaid !== String(row.amountPaid == null ? '' : row.amountPaid)) {
+    return 'prior_payment_changed';
+  }
+  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0) return 'prior_payment_changed';
+  intent.prior = _finRow(row, PAYMENTS_HEADERS);
+  return '';
 }
 function _finIntentError(intent, c, stored) {
   var p = intent.payment, patch = intent.patch;
@@ -4932,13 +4989,17 @@ function _finIntentError(intent, c, stored) {
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.
-  var paidWindow = _finPaidDateCoverage(p.paymentDate);
+  // B1: the window starts on max(paymentDate, cycleDate) — see _finPaidDateCoverage.
+  var paidWindow = _finPaidDateCoverage(p.paymentDate, intent.cycleDate);
   var newPolicy = paidWindow &&
       p.coverageStart === paidWindow.start && p.coverageEnd === paidWindow.end &&
       patch.nextBillingDate === paidWindow.next;
   var legacyReplay = !!stored && patch.nextBillingDate === _finNext(c, intent.cycleDate);
   if (!newPolicy && !legacyReplay) return 'renewal_period_changed';
-  if (!stored && (!paidWindow || paidWindow.start > _todayISODate())) return 'invalid_renewal_payment';
+  // The PAYMENT may not be dated in the future; the window itself may start
+  // later than today when an early payment advances from its due cycle.
+  if (!stored && (!paidWindow || p.paymentDate > _todayISODate())) return 'invalid_renewal_payment';
+  if (intent.priorExpected && (intent.priorExpected.id !== p.id || intent.priorExpected.status === 'paid')) return 'invalid_renewal_payment';
   if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
       p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
       Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||
@@ -4979,14 +5040,16 @@ function _getRenewalState(payload) {
   } finally { lock.releaseLock(); }
 }
 function _reserveRenewal(payload) {
-  var intent = _finIntent(payload), canonical = JSON.stringify(intent), user = _requestUser(payload);
+  var intent = _finIntent(payload), user = _requestUser(payload);
+  delete intent.prior;  // only the source pins the prior row, under the lock
+  var canonical = JSON.stringify(intent);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var journal = _finJournal(), same = journal.ops.filter(function (op) { return op.id === intent.opId; });
     if (same.length) {
-      if (same[0].intent !== canonical) return { ok: false, error: 'operation_payload_mismatch' };
+      if (_finIntentWithoutPrior(same[0].intent) !== canonical) return { ok: false, error: 'operation_payload_mismatch' };
       return { ok: true, operation: _finSummary(same[0]) };
     }
     _finGuard([intent.clientId]);
@@ -4994,7 +5057,9 @@ function _reserveRenewal(payload) {
     if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'renewal_snapshot_changed' };
     var invalid = _finIntentError(intent, c);
     if (invalid) return { ok: false, error: invalid };
-    if (_finPayments(p.id, intent.clientId, intent.cycleDate).length) return { ok: false, error: 'renewal_payment_exists' };
+    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate));
+    if (priorError) return { ok: false, error: priorError };
+    canonical = JSON.stringify(intent);
     var after = Object.assign({}, c, patch);
     _stampRow(after, user);
     var now = new Date().toISOString();
@@ -5021,10 +5086,11 @@ function _applyRenewal(payload) {
     function review(why) { _finWrite(journal, op, 'review', user, why); return { ok: true, operation: _finSummary(op) }; }
     try { c = _finClient(op.clientId); } catch (_) { return review('client_missing_or_duplicate'); }
     var storedHeaders = JSON.parse(op.before).headers;
-    var current = _finSnapshot(c.client, storedHeaders), p = JSON.parse(op.intent).payment;
+    var storedIntent = JSON.parse(op.intent);
+    var current = _finSnapshot(c.client, storedHeaders), p = storedIntent.payment;
     var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
     if (op.state === 'prepared') {
-      if (current !== op.before || payments.length) return review('source_changed_before_apply');
+      if (current !== op.before || _finPriorMismatch(storedIntent, payments)) return review('source_changed_before_apply');
       _finWrite(journal, op, 'client_writing', user);
       // One row, fixed expected stamp, no whole-sheet rewrite. Text-forced first.
       var beforeCells = JSON.parse(op.before).values, afterCells = JSON.parse(op.after).values;
@@ -5048,9 +5114,20 @@ function _applyRenewal(payload) {
     }
     if (current !== op.after) return review('client_changed_after_apply');
     if (op.state === 'client_done') {
-      if (payments.length) return review('payment_appeared_before_apply');
+      if (_finPriorMismatch(storedIntent, payments)) return review('payment_appeared_before_apply');
       _finWrite(journal, op, 'payment_writing', user);
       var sh = _ensurePaymentsSheet(), row = sh.getLastRow() + 1;
+      // B2: a pinned prior row is UPDATED in place (its own row, re-located by
+      // id under the lock) instead of appending a duplicate id.
+      if (storedIntent.prior) {
+        var idIdxB2 = PAYMENTS_HEADERS.indexOf('id'), lastB2 = sh.getLastRow(), found = 0;
+        if (lastB2 > 1) {
+          var idsB2 = sh.getRange(2, idIdxB2 + 1, lastB2 - 1, 1).getValues();
+          for (var rb = 0; rb < idsB2.length; rb++) if (String(idsB2[rb][0]) === p.id) { found = rb + 2; break; }
+        }
+        if (!found) return review('prior_payment_row_missing');
+        row = found;
+      }
       var numericPayment = ['amountDue', 'amountPaid', 'bundleSize', 'sessionsUsed'];
       var paymentValues = PAYMENTS_HEADERS.map(function (h, i) {
         if (numericPayment.indexOf(h) >= 0) return p[h] === '' ? '' : Number(p[h]);

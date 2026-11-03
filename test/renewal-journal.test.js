@@ -9,13 +9,13 @@ test('renewal stores immutable intent before effects, advances due anchor once, 
   assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-02-28');
   assert.equal(f.sb.rows('Payments').length, 0);
   assert.equal(f.apply().operation.state, 'done');
-  assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-03-25');
+  assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-03-28');
   assert.equal(f.sb.rows('Payments').length, 1);
   assert.equal(f.discover().operation.cycleDate, '2026-02-28');
   assert.equal(f.apply().operation.state, 'done');
   assert.equal(f.sb.rows('Payments').length, 1);
   assert.equal(f.ack().operation.state, 'acknowledged');
-  assert.equal(f.discover().cycleDate, '2026-03-25');
+  assert.equal(f.discover().cycleDate, '2026-03-28');
   assert.equal(f.sb.isLocked(), false);
 });
 test('same operation id with changed amount or snapshot refuses; second device cannot reserve another period', () => {
@@ -61,7 +61,7 @@ for (const [sheet, stage, when, expected] of windows) {
     const result = f.apply(); assert.equal(result.ok, true);
     assert.equal(result.operation.state, expected);
     assert.ok(f.sb.rows('Payments').length <= 1);
-    assert.ok(['2026-02-28', '2026-03-25'].includes(f.sb.rows('Clients')[0].nextBillingDate));
+    assert.ok(['2026-02-28', '2026-03-28'].includes(f.sb.rows('Clients')[0].nextBillingDate));
     assert.equal(f.sb.isLocked(), false);
   });
 }
@@ -194,7 +194,7 @@ test('package change and backdated payment retain the original billing cycle and
   f.request.patch.packageChangeDate='2026-02-25';assert.equal(f.reserve().ok,true);assert.equal(f.apply().operation.state,'done');
   const c=f.sb.rows('Clients')[0],p=f.sb.rows('Payments')[0];
   assert.equal(c.sessionsPerWeek,f.request.patch.sessionsPerWeek);assert.equal(c.packageChangeDate,'2026-02-25');
-  assert.equal(c.nextBillingDate,'2026-03-25');assert.equal(c.pricePerSession,600);assert.equal(p.amountPaid,600);
+  assert.equal(c.nextBillingDate,'2026-03-28');assert.equal(c.pricePerSession,600);assert.equal(p.amountPaid,600);
 });
 test('source and executed browser date helpers agree across leap/short months, years, and missing anchors', () => {
   const ui=require('../test-support/financial-ui-fixture.cjs').fixture().ctx;
@@ -214,7 +214,7 @@ test('source and executed browser date helpers agree across leap/short months, y
 test('no-anchor intent remains valid after midnight; the frozen cycle is not recomputed on replay', () => {
   const f=fixture();const c={...client,startDate:'',paymentDate:'',nextBillingDate:'',billingDay:''};
   f.sb.seed('Clients',f.sb.ctx.CLIENTS_HEADERS,[c]);f.sb.ctx._todayISODate=()=> '2026-02-28';
-  f.request.snapshot=f.discover().snapshot;f.request.patch.nextBillingDate='2026-03-25';
+  f.request.snapshot=f.discover().snapshot;f.request.patch.nextBillingDate='2026-03-28';
   assert.equal(f.reserve().ok,true);f.sb.ctx._todayISODate=()=> '2026-03-01';
   assert.equal(f.discover().operation.cycleDate,'2026-02-28');assert.equal(f.apply().operation.state,'done');
 });

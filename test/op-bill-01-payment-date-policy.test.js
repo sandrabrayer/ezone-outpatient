@@ -64,7 +64,8 @@ test('legacy compatibility: packagePaidState alone uses the stored next date, no
 
 test('new renewal contract is anchored to recorded payment date on UI and actual source', () => {
   assert.match(APP_SRC, /nextBillingDate: paidCoverage\.next/);
-  assert.match(SOURCE_SRC, /function _finPaidDateCoverage\(paymentDate\)/);
+  assert.match(SOURCE_SRC, /function _finPaidDateCoverage\(paymentDate, cycleDate\)/);
+  assert.match(SOURCE_SRC, /_finPaidDateCoverage\(p\.paymentDate, intent\.cycleDate\)/);
   assert.match(SOURCE_SRC, /p\.coverageStart === paidWindow\.start/);
   assert.match(SOURCE_SRC, /patch\.nextBillingDate === paidWindow\.next/);
   // The old due-date guard remains ONLY for immutable stored operation replay.
@@ -107,9 +108,11 @@ test('OP-BILL-01: persisted source, card and revenue agree on paid-date renewal 
     assert.equal(JSON.stringify({ clients, payments }), before, 'read models must not rewrite history');
   }
 
-  // Paid Feb 25: 28 service days through Mar 24, regardless of old Feb 28 due date.
-  verify(f.sb, '2026-03-01', '2026-03-24', '2026-03-25', [
-    ['2026-02', 85.71, 4, 28], ['2026-03', 514.29, 24, 28]
+  // Paid Feb 25 for the Feb 28 cycle: an EARLY payment advances from its due
+  // date (B1 rule, max(paymentDate, cycleDate)) — 28 service days Feb 28
+  // through Mar 27, next collection Mar 28 (a LATER month key than the cycle).
+  verify(f.sb, '2026-03-01', '2026-03-27', '2026-03-28', [
+    ['2026-02', 21.43, 1, 28], ['2026-03', 578.57, 27, 28]
   ]);
 
   // Existing explicit two-month advance is saved by the real source and stays
