@@ -5922,7 +5922,9 @@ function _pkgOfferSummary(r) {
 }
 function _pkgOfferSummaries() {
   try {
-    var rows = _readAll(_pkgRequestSheet(), PACKAGE_REQUEST_HEADERS);
+    // read-only: never creates or re-heads the sheet (a boot-time read must have no schema side effect)
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PACKAGE_REQUESTS_SHEET);
+    var rows = sh ? _readAll(sh, PACKAGE_REQUEST_HEADERS) : [];
     rows.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
     return { ok: true, offers: rows.slice(0, 500).map(_pkgOfferSummary) };
   } catch (err) { return { ok: false, error: 'package_error' }; }
