@@ -4422,15 +4422,43 @@ function _getActivity(params, payload) {
   var leadId = String(p.leadId || '').trim(), clientId = String(p.clientId || '').trim();
   var limit = parseInt(p.limit, 10); if (!(limit > 0) || limit > CRM_ACTIVITY_MAX) limit = CRM_ACTIVITY_MAX;
   var ops = _crmOps(payload), out = [];
+  // An operational session never sees the trail of a money task: its
+  // task_created / completed / deferred / reassigned / cancelled events and a
+  // contact that closed it or spawned it carry the task title ("לגבות ₪…").
+  // Decided by the detailsJson money flag written at creation AND, for events
+  // written before the flag existed, by the money tasks on the sheet (read
+  // without creating it).
+  var moneyIds = ops ? _moneyTaskIds() : null;
   for (var i = rows.length - 1; i >= 0 && out.length < limit; i--) {
     var e = rows[i];
     if (!e.eventId) continue;
     if (leadId && String(e.leadId) !== leadId) continue;
     if (clientId && String(e.clientId) !== clientId) continue;
-    if (ops && /collection|payment|money/.test(String(e.kind))) continue;
+    if (ops && _activityIsMoney(e, moneyIds)) continue;
     out.push(e);
   }
   return { ok: true, events: out };
+}
+/* { taskId: true } for every money task on the Tasks sheet (no sheet = none). */
+function _moneyTaskIds() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET);
+  var rows = sh ? _tasksRead(sh) : [], ids = {};
+  for (var i = 0; i < rows.length; i++) if (rows[i].id && _taskMoney(rows[i])) ids[String(rows[i].id)] = true;
+  return ids;
+}
+/* Whether an Activity event belongs to a money task (invisible to ops). */
+function _activityIsMoney(e, moneyIds) {
+  if (/collection|payment|money/.test(String(e.kind))) return true;
+  var d = {};
+  try { d = e.detailsJson ? JSON.parse(e.detailsJson) : {}; } catch (_) { d = {}; }
+  if (!d || typeof d !== 'object') return false;
+  if (d.money === true) return true;
+  var refs = [d.id, d.taskId, d.nextTaskId];
+  for (var i = 0; i < refs.length; i++) {
+    var id = String(refs[i] == null ? '' : refs[i]);
+    if (id && moneyIds && moneyIds[id]) return true;
+  }
+  return false;
 }
 
 function _taskClean(input, actor, nowIso, sid) {
@@ -4475,7 +4503,7 @@ function _createTask(payload) {
     rows.push(v.task);
     _writeAll(sh, TASKS_HEADERS, rows);
     _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
-      _activityEvent('task_created', v.task, actor, 'משימה נוצרה: ' + v.task.title, { id: v.task.id, kind: v.task.kind, dueDate: v.task.dueDate, assignee: v.task.assignee }, 'task_created:' + v.task.id, { nextAction: v.task.title, nextDate: v.task.dueDate }));
+      _activityEvent('task_created', v.task, actor, 'משימה נוצרה: ' + v.task.title, { id: v.task.id, kind: v.task.kind, dueDate: v.task.dueDate, assignee: v.task.assignee, money: _taskMoney(v.task) }, 'task_created:' + v.task.id, { nextAction: v.task.title, nextDate: v.task.dueDate }));
     return { ok: true, task: _taskOut(v.task), created: true };
   } finally { try { lock.releaseLock(); } catch (_) {} }
 }
@@ -4502,8 +4530,10 @@ function _taskMutate(payload, apply, eventKind, summaryOf) {
     if (res && res.ok === false) return res;
     t.updatedAt = nowIso; t.updatedBy = actor;
     _writeAll(sh, TASKS_HEADERS, rows);
+    var details = (res && res.details) || {};
+    details.id = id; details.money = _taskMoney(t); // read-side money filter for ops (getActivity)
     _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
-      _activityEvent(eventKind, t, actor, summaryOf(t, prev), (res && res.details) || {}, eventKind + ':' + id + ':' + nowIso.replace(/[^0-9]/g, '').slice(0, 14),
+      _activityEvent(eventKind, t, actor, summaryOf(t, prev), details, eventKind + ':' + id + ':' + nowIso.replace(/[^0-9]/g, '').slice(0, 14),
         { nextAction: t.status === 'open' || t.status === 'deferred' ? t.title : '', nextDate: t.status === 'open' || t.status === 'deferred' ? t.dueDate : '' }));
     return { ok: true, task: _taskOut(t) };
   } finally { try { lock.releaseLock(); } catch (_) {} }
@@ -4598,16 +4628,24 @@ function _logContact(payload) {
   var subject = { leadId: leadId, clientId: clientId };
   var ev = _activityEvent('contact_logged', subject, actor,
     CONTACT_OUTCOME_HE[outcome] + (summary ? ' · ' + summary.slice(0, 150) : ''),
-    { channel: channel, withWhom: _crmText(c.withWhom, 80), outcome: outcome, summary: summary, taskId: _crmText(c.taskId, 120), nextTaskId: nextTask ? nextTask.id : '', noNext: noNext },
+    { channel: channel, withWhom: _crmText(c.withWhom, 80), outcome: outcome, summary: summary, taskId: _crmText(c.taskId, 120), nextTaskId: nextTask ? nextTask.id : '', noNext: noNext, money: !!(nextTask && _taskMoney(nextTask)) },
     'contact:' + sid, { occurredAt: occurredAt, nextAction: nextTask ? nextTask.title : (noNext ? 'אין המשך: ' + noNext : ''), nextDate: nextTask ? nextTask.dueDate : '' });
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return _crmNo('busy');
   try {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _crmNo('recovery_pending');
-    var wrote = _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS), ev);
     var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
     var rows = _tasksRead(sh), changed = false, completed = null, created = null;
     var tid = _crmText(c.taskId, 120);
+    if (tid) {
+      // a contact that closes a money task is itself money-flagged (ops never sees it)
+      for (var mi = 0; mi < rows.length; mi++) {
+        if (String(rows[mi].id) === tid && _taskMoney(rows[mi])) {
+          var md = JSON.parse(ev.detailsJson); md.money = true; ev.detailsJson = JSON.stringify(md); break;
+        }
+      }
+    }
+    var wrote = _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS), ev);
     if (tid) {
       for (var i = 0; i < rows.length; i++) {
         if (String(rows[i].id) !== tid || !_taskVisible(rows[i], payload)) continue;

@@ -29,3 +29,8 @@ Automated task derivation and the «היום שלי» merge (Phase C — the der
 - `test/crm-activity.test.js` (4): view model, lead-era history, vocabularies mirror Code.gs, wiring guards.
 - `test/crm-activity-browser.test.js` (2, real Chromium; added to the browser CI job): ורד logs a contact with a 2-day follow-up, completes it via ✓, replay creates nothing; דנה logs a task, no collection kind offered, `moneyScope:'ops'` stamped.
 - Full suite 1737/1737 locally.
+
+## Review fix (2026-11-03, on #162): money trail invisible to an operational session
+- `_getActivity` for `moneyScope: 'ops'` previously matched `e.kind` against `collection|payment|money`, which no event kind ever is (`task_*`, `contact_logged`) — every event of a collection task (its free-text title, e.g. «לגבות ₪3,000», in `summary` / `nextAction`) reached דנה.
+- Now: every task event and every contact that closes or spawns a money task writes `money:true` (plus the task `id`) into `detailsJson`; the ops read drops events flagged money OR referencing a money task id (`detailsJson.id` / `taskId` / `nextTaskId`) on the Tasks sheet, read with `getSheetByName` (never created). Full sessions unchanged.
+

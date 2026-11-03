@@ -62,8 +62,40 @@ test('money tasks: an ops session cannot create, see or touch them; a full sessi
   assert.equal(get(sb, { action: 'getTasks' }).tasks.length, 2, 'no scope = legacy full read');
   assert.equal(post(sb, { action: 'completeTask', id: 'task-m3' }, 'דנה', 'ops').error, 'not_found');
   assert.equal(post(sb, { action: 'completeTask', id: 'task-m3' }).ok, true);
+  // Activity: the money task's whole trail (created / completed) is invisible to ops —
+  // its title is free text («לגבות ₪3,000») — while the call task's trail stays.
   const act = get(sb, { action: 'getActivity', moneyScope: 'ops' }).events;
-  assert.equal(act.some((e) => /task-m3/.test(e.detailsJson)), true, 'task_created events are not money-kind events (title only, no amounts)');
+  assert.equal(act.some((e) => /task-m3/.test(e.detailsJson) || /גבייה/.test(e.summary) || /גבייה/.test(e.nextAction)), false, 'no money-task event reaches ops');
+  assert.equal(act.filter((e) => /task-m4/.test(e.detailsJson)).length, 1, 'the call task event is still there');
+  const full = get(sb, { action: 'getActivity', moneyScope: 'full' }).events;
+  assert.equal(full.filter((e) => /task-m3/.test(e.detailsJson)).map((e) => e.kind).sort().join(), 'task_completed,task_created', 'ורד sees the money trail');
+  assert.equal(get(sb, { action: 'getActivity' }).events.length, full.length, 'no scope = legacy full read');
+  for (const e of full) assert.equal(JSON.parse(e.detailsJson).money, /task-m3/.test(e.detailsJson), e.kind + ' carries the money flag');
+});
+
+test('money trail via logContact and legacy (unflagged) events: filtered for ops by the Tasks sheet, kept for ורד', () => {
+  const sb = sandbox();
+  post(sb, { action: 'createTask', submissionId: 'c1', task: Object.assign({}, TASK, { kind: 'collection', title: 'לגבות 3000' }) });
+  // a contact that CLOSES the money task, and one that SPAWNS a money follow-up
+  const r1 = post(sb, { action: 'logContact', submissionId: 'k1', contact: { leadId: 'L1', channel: 'phone', outcome: 'spoke_follow_up', summary: 'הבטיחה לשלם', taskId: 'task-c1' }, next: { none: true, explanation: 'שולם' } });
+  assert.equal(r1.ok, true); assert.equal(r1.completed.status, 'done');
+  const r2 = post(sb, { action: 'logContact', submissionId: 'k2', contact: { leadId: 'L1', channel: 'phone', outcome: 'call_back_later', summary: 'לא ענתה' }, next: { dueDate: '2026-12-01', kind: 'collection', title: 'גבייה חוזרת' } });
+  assert.equal(r2.ok, true); assert.equal(r2.created.kind, 'collection');
+  // a plain contact that must survive
+  post(sb, { action: 'logContact', submissionId: 'k3', contact: { leadId: 'L1', channel: 'whatsapp', outcome: 'no_answer', summary: 'הודעה' }, next: { none: true, explanation: 'ננסה שוב' } });
+  // legacy row: a task_deferred event for the money task written WITHOUT a money flag
+  const act = sb.sheets.Activity;
+  const legacy = act.grid[1].slice();
+  const H = act.grid[0];
+  legacy[H.indexOf('eventId')] = 'legacy-1'; legacy[H.indexOf('kind')] = 'task_deferred'; legacy[H.indexOf('summary')] = 'המשימה נדחתה: לגבות 3000';
+  legacy[H.indexOf('detailsJson')] = JSON.stringify({ prev: '2026-11-03', next: '2026-11-10', id: 'task-c1' });
+  act.grid.push(legacy);
+  const ops = get(sb, { action: 'getActivity', moneyScope: 'ops' }).events;
+  assert.deepEqual(ops.map((e) => e.eventId), ['contact:k3'], 'ops sees only the plain contact');
+  const full = get(sb, { action: 'getActivity', moneyScope: 'full' }).events.map((e) => e.eventId).sort();
+  assert.deepEqual(full, ['contact:k1', 'contact:k2', 'contact:k3', 'legacy-1', 'task_created:task-c1'], 'a logContact follow-up has no task_created event of its own (the contact event carries nextTaskId)');
+  assert.equal(JSON.parse(get(sb, { action: 'getActivity', moneyScope: 'full', limit: 600 }).events.find((e) => e.eventId === 'contact:k1').detailsJson).money, true);
+  assert.equal(sb.sheets.Tasks.grid.length, 3, 'read never writes');
 });
 
 test('complete / defer / reassign / withdraw: state machine, history, no second completion', () => {
@@ -90,7 +122,7 @@ test('complete / defer / reassign / withdraw: state machine, history, no second 
   assert.deepEqual(kinds, ['task_created', 'task_deferred', 'task_reassigned', 'task_completed', 'task_created', 'task_cancelled']);
   const ev = sb.rows('Activity').find((e) => e.kind === 'task_deferred');
   assert.equal(ev.actorName, 'דנה'); assert.equal(ev.leadId, 'L1'); assert.equal(ev.nextDate, '2026-11-10');
-  assert.deepEqual(JSON.parse(ev.detailsJson), { prev: '2026-11-03', next: '2026-11-10', reason: 'ביקשה שבוע' });
+  assert.deepEqual(JSON.parse(ev.detailsJson), { prev: '2026-11-03', next: '2026-11-10', reason: 'ביקשה שבוע', id: 'task-t1', money: false });
 });
 
 test('logContact: one transaction — event + fulfilled task + follow-up; replay writes nothing twice; no default date', () => {

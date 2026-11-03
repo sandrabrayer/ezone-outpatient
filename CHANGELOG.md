@@ -7,6 +7,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### CRM money scope — review fixes on #162 (2026-11-03)
 - **Price table refused for an operational session.** `treatment-map.js` holds the client price table (per-session and per-month amounts incl. VAT), not only the clinical→billing map; it is now in `MONEY_STATIC` → 403 for דנה, like `therapist-pay.js`. `loadProtectedScripts` tolerates that refusal for an ops session (`CHANGELOG-crm-money-scope.md` corrected).
+- **Money-task trail hidden from an operational session.** `getActivity` for ops filtered on an event kind that never occurs; the created / completed / deferred / reassigned / cancelled events of a collection task (free-text title) and the contacts that close or spawn one reached דנה. Events now carry `money:true` + task id in `detailsJson`, and the ops read also drops anything referencing a money task on the Tasks sheet (legacy rows), read without creating it (`CHANGELOG-crm-tasks-activity.md`).
 - Follow-up (not in this change): `MONEY_GET_ACTIONS` / `MONEY_POST_ACTIONS` are a deny-list — a future money action must be added there explicitly or an operational session can call it. An allow-list of permitted actions would fail closed.
 
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
