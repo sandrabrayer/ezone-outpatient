@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Deploy-window guard for operational saves (2026-11-03)
+- `apps-script/Code.gs`: new read-only `getCapabilities` GET (proxy-secret gated, no Sheets access) reporting `{ moneyScope, paidDateCoverage, recoveryHold }`; append-only flags.
+- `lib/backend-capabilities.js` + `server.js`: an ops-scope (דנה) `saveAll` is forwarded only after the live backend reports `capabilities.moneyScope === true`; otherwise `503 { ok:false, error:'backend_upgrade_pending' }` with nothing forwarded. Positive answers cached 5 min in memory; negatives and probe failures fail closed and re-probe. Closes the Railway-first / Apps-Script-second window in which the OLD source would have overwritten every client's stored money with the stripped fields. ורד / אורן unaffected.
+- `public/app.js`: that refusal shows «המערכת בעדכון, נסי שוב בעוד מספר דקות»; forms stay open.
+- Tests: `test/backend-capabilities.test.js` (6). Docs: DEPLOY.md «Node-first window» + «Operational notes», release record step.
+
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
 - Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
 - CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.
