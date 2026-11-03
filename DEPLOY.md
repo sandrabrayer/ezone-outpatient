@@ -158,6 +158,42 @@ For each separately approved release:
 
 A branch advance invalidates the original dispatch target. Do not replace the
 approved SHA with a newer unreviewed one. Recheck ownership and approval scope.
+
+### Node-first window: operational saves are blocked by design
+
+Between step 2 (new Node live) and step 5 (new Apps Script version live) the
+proxy already strips money from an operational session (דנה) while the OLD
+source still ignores `moneyScope`; a full-row `saveAll` from her tab would
+then overwrite every client's stored price / billing / payment fields with
+0 / blank. The proxy therefore probes `action=getCapabilities` (proxy-secret
+gated, read-only) and **refuses an ops-scope `saveAll` with
+`503 { ok:false, error:'backend_upgrade_pending' }`** — nothing is forwarded —
+until the live source answers `capabilities.moneyScope === true`. The app shows
+«המערכת בעדכון, נסי שוב בעוד מספר דקות» and keeps the form open. ורד / אורן
+saves are not gated. A positive answer is cached in memory for 5 minutes; a
+negative or failed probe is re-tried on the next save.
+
+Release steps: tell דנה her saves are blocked until the Apps Script phase
+succeeds; after step 5, confirm the capability before reopening her work —
+`GET <SHEETS_URL>?action=getCapabilities&proxySecret=…` must return
+`{ ok:true, capabilities:{ moneyScope:true, … } }` (an ops save from her tab
+returning 200 is the same proof). If Apps Script is rolled back to a source
+without `getCapabilities`, ops saves close again automatically.
+
+### Operational notes (OP-03 / #162)
+
+- `getHandoffStatus` must not create or relabel sheets (`_ensureSheet` on Tasks /
+  Activity would also trip the backup's "Incomplete CRM operational source
+  pair" check) — addressed separately on #162.
+- A nightly backup killed mid-run (execution limit) leaves
+  `INTEGRITY_ACTIVE_BACKUP` set; every later run then refuses with
+  `backup_busy` and alerts, and `beginOutpatientRecovery` reports
+  `backup_draining`. Operator action: inspect the executions log, confirm no run
+  is active, delete the property. A marker-age check is a follow-up, not part of
+  this release.
+- `INTEGRITY_REQUIRED_SOURCES` records every tab once captured: deleting or
+  renaming any live tab afterwards fails every backup until the property is
+  edited deliberately. Never delete a tab as "cleanup" without that step.
 If dispatch is omitted, source remains at its previous version; keep the release
 open until both phases and acceptance are complete. Serialize releases across
 both runtimes. The workflow's concurrency lock serializes source jobs, but does

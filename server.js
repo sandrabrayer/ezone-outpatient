@@ -7,6 +7,7 @@ const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
 const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const moneyScope = require('./lib/money-scope');
+const backendCaps = require('./lib/backend-capabilities');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -249,6 +250,14 @@ function isCacheStaleButUsable() {
  * happens at response time, never at cache time). */
 function requestMoneyScope(req) { return moneyScope.scopeOf(sessionUserFromRequest(req)); }
 function scoped(req, data) { return requestMoneyScope(req) === moneyScope.SCOPE_OPS ? moneyScope.stripMoney(data) : data; }
+/* Deploy-window guard (lib/backend-capabilities.js): an ops session's
+ * full-row write is forwarded ONLY once the live Code.gs has confirmed it
+ * understands payload.moneyScope; otherwise the OLD source would overwrite
+ * every client's stored money with the stripped (0 / blank) fields. */
+const capabilityGate = backendCaps.createGate({
+  sheetsUrl: SHEETS_URL, proxySecret: OUTPATIENT_PROXY_SECRET,
+  fetch: (...a) => fetch(...a)
+});
 
 function invalidateCache() {
   getDataCache.data = null;
@@ -495,6 +504,10 @@ app.post('/api/sheets', requireSession, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
     }
     body.moneyScope = scope;
+    if (scope === moneyScope.SCOPE_OPS && backendCaps.isFullRowWrite(body.action)) {
+      const ready = await capabilityGate.isReady();
+      if (!ready) return res.status(503).json({ ok: false, error: 'backend_upgrade_pending' });
+    }
     if (body.action === 'saveAll') {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
       body.clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
@@ -862,3 +875,4 @@ module.exports.requestIsHttps = requestIsHttps;
 module.exports.buildSessionCookie = buildSessionCookie;
 module.exports.buildClearedSessionCookie = buildClearedSessionCookie;
 module.exports.SESSION_COOKIE = SESSION_COOKIE;
+module.exports.capabilityGate = capabilityGate;

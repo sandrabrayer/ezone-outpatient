@@ -3107,6 +3107,20 @@ function _flagStop(payload) {
   }
 }
 
+/* ===== Backend capability signal (deploy-window guard) =====================
+ * READ-ONLY, no Sheets access, no properties written. The Node proxy asks
+ * this BEFORE forwarding a full-row saveAll from an operational ('ops')
+ * session: an old Code.gs that does not know payload.moneyScope would write
+ * the stripped money fields (0 / blank) over every client row. The proxy
+ * fails closed (503 backend_upgrade_pending) until this answers with
+ * moneyScope:true. Append-only: never remove or set a flag to false. */
+var BACKEND_CAPABILITIES = { moneyScope: true, paidDateCoverage: true, recoveryHold: true };
+function _getCapabilities() {
+  var caps = {};
+  for (var k in BACKEND_CAPABILITIES) caps[k] = BACKEND_CAPABILITIES[k] === true;
+  return { ok: true, sourceApp: 'ezone-outpatient', capabilities: caps };
+}
+
 function _getStopFlags() {
   var sh = _ensureSheet('StopFlags', STOP_FLAGS_HEADERS);
   return { ok: true, stopFlags: _readAll(sh, STOP_FLAGS_HEADERS) };
@@ -6181,6 +6195,7 @@ var SOURCE_GET_AUTH = {
   getHandoffStatus: 'HANDOFF_STATUS_SECRET',
   scanClientColumns: 'COLUMN_REPAIR_SECRET',
   getStopFlags: 'OUTPATIENT_PROXY_SECRET',
+  getCapabilities: 'OUTPATIENT_PROXY_SECRET',
   getStopAlerts: 'STOP_ALERTS_SECRET',
   getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
@@ -6346,6 +6361,7 @@ function doGet(e) {
       return _json(_scanClientColumns());
     }
     if (action === 'getStopFlags') return _json(_getStopFlags());
+    if (action === 'getCapabilities') return _json(_getCapabilities());
     if (action === 'getStopAlerts') {
       if (!_stopAlertsAuthOk(e && e.parameter)) {
         return _json({ ok: false, error: 'unauthorized' });

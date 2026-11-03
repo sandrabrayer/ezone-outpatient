@@ -525,9 +525,19 @@
     });
     var data = {};
     try { data = await r.json(); } catch (_) {}
+    // Deploy-window guard (server.js / lib/backend-capabilities.js): the
+    // proxy refused to forward this save because the backend has not yet
+    // confirmed the new source. Nothing was written; the form stays open and
+    // the person simply retries in a few minutes.
+    if (r.status === 503 && data && data.error === 'backend_upgrade_pending') {
+      var pending = new Error(BACKEND_UPGRADE_PENDING_MSG);
+      pending.code = 'backend_upgrade_pending';
+      throw pending;
+    }
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  var BACKEND_UPGRADE_PENDING_MSG = 'המערכת בעדכון, נסי שוב בעוד מספר דקות';
 
   // `user` (optional) is the name the picker chose: the server re-issues the
   // cookie with that name inside the signed token (same 7-day TTL), accepting
