@@ -167,7 +167,7 @@ test('browser: conversion preserves an unseen lead and an old tab cannot resurre
   const client = fx.sb.rows('Clients')[0];
   assert.equal(client.fromLead, A.id);
   assert.equal(Number(client.pricePerSession), 1200);
-  assert.equal(client.nextBillingDate, '2026-11-09');
+  assert.equal(client.nextBillingDate, '2026-10-09', 'unpaid intake remains due from treatment start; no paid receipt was created');
   await first.locator('#clientsList .client-card').filter({ hasText: A.name }).waitFor();
   await first.click('.tab[data-view="leads"]');
   await card(first, B.name).waitFor();

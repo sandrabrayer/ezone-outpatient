@@ -1,0 +1,113 @@
+name: Sandbox Drill Push
+
+# Pushes the generated OP-03 native drill to an ISOLATED, standalone Apps
+# Script test project so nobody has to move a 137 KB file through a browser
+# clipboard. It never deploys anything, never touches the production project
+# (the builder rejects the production script ID), and the drill itself refuses
+# to run anywhere but the project ID it was built for. The five phases
+# (prepare → capture → restore → verify → manual) are then run from the Apps
+# Script editor against synthetic workbooks only; the report lands in the
+# synthetic backup workbook's _DrillReport tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sandbox_script_id:
+        description: 'Script ID of the standalone ISOLATED test project (never production)'
+        required: true
+        type: string
+      expected_commit:
+        description: 'Full 40-character SHA of the candidate being drilled (must equal the dispatched ref)'
+        required: true
+        type: string
+
+concurrency:
+  group: sandbox-drill-push
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  push-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refuse anything but the exact candidate and an isolated project
+        env:
+          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -eu
+          if [ "$GITHUB_SHA" != "$EXPECTED_COMMIT" ]; then
+            echo "::error::Dispatched ref ($GITHUB_SHA) is not the expected candidate ($EXPECTED_COMMIT)."; exit 1
+          fi
+          prod="$(node -p "require('./.clasp.json').scriptId")"
+          if [ -z "$SANDBOX_ID" ] || [ "$SANDBOX_ID" = "$prod" ]; then
+            echo "::error::Refusing: the target is empty or is the PRODUCTION script project."; exit 1
+          fi
+          case "$SANDBOX_ID" in *[!A-Za-z0-9_-]*) echo "::error::Malformed script ID."; exit 1;; esac
+
+      - name: Build the bound drill from this exact source
+        env:
+          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
+        run: |
+          set -eu
+          node test-support/build-google-operational-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
+          mkdir -p /tmp/drill
+          cp test-support/google-operational-drill-candidate.gs /tmp/drill/Code.gs
+          printf '%s\n' '{"timeZone":"Asia/Jerusalem","exceptionLogging":"STACKDRIVER","runtimeVersion":"V8"}' > /tmp/drill/appsscript.json
+          printf '{"scriptId":"%s","rootDir":"."}\n' "$SANDBOX_ID" > /tmp/drill/.clasp.json
+          sha256sum /tmp/drill/Code.gs
+          if grep -q "$(node -p "require('./.clasp.json').scriptId")" /tmp/drill/Code.gs; then
+            echo "::error::Generated drill references the production script ID."; exit 1
+          fi
+
+      - name: Verify clasp credential secret is present
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error::Missing secret CLASPRC_JSON (same secret the release workflow uses)."; exit 1
+          fi
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@3.3.0
+
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))"
+
+      - name: Push the drill to the isolated project (no deploy)
+        working-directory: /tmp/drill
+        run: clasp push -f
+
+      - name: Summary
+        run: |
+          {
+            echo '## Sandbox drill pushed'
+            echo
+            echo "Candidate: \`$GITHUB_SHA\`"
+            echo
+            echo '```json'; cat drill-metadata.json; echo '```'
+            echo
+            echo 'Next: in the isolated project run prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill, once each, in order. The report is the `_DrillReport` tab of the synthetic backup workbook.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -f "$HOME/.clasprc.json" /tmp/drill/.clasp.json

@@ -5,6 +5,45 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-BILL-01 review fix B1: coverage starts on max(paymentDate, cycleDate) (draft, 2026-11-03)
+- An ordinary new monthly receipt paid BEFORE its due cycle is an advance from the due date (due 1 Nov, paid 28 Oct → 1 Nov–30 Nov, next 1 Dec); paid on/after it covers one month from the actual payment (due 1 Nov, paid 10 Nov → 10 Nov–9 Dec, next 10 Dec). Paid 25 Oct on a 25 Oct cycle → through 24 Nov, next 25 Nov (unchanged).
+- Why: the pure paid-date rule put an early payment's next collection in the SAME month key as the settled cycle, so the following renewal was refused forever (`pay::<id>::base::<YYYY-MM>` already existed) and the chip refused it as already paid.
+- `CL.paymentDateCoverage(paymentDate, cycleDate)` / `_finPaidDateCoverage(paymentDate, cycleDate)` are exact mirrors (parity-tested incl. month-end/leap clamps). Applied in the renewal modal, the quick chip, עריכה, intake and activation; `withDefaultCoverage` uses the row's own dueDate. The card's paid-through review projects the same window, so a legacy early payment stamped with its due window now reads as confirmed instead of review.
+- Historical rows are not rewritten; stored journal intents replay unchanged. The shared renewal fixture (paid 25 Feb for the 28 Feb cycle) now expects 28 Feb–27 Mar / next 28 Mar. See `docs/OP-BILL-01-PAYMENT-DATE-POLICY.md`.
+
+### OP-BILL-01 review fix B2: settle an existing unpaid/partial cycle row in place (draft, 2026-11-03)
+- The journalled renewal accepts `priorPayment {id, status, amountPaid}` for an existing unpaid/partial row of the same cycle: the source verifies it against the sheet under the lock, pins the full observed row in the journal intent, re-checks it at apply and UPDATES that row (same id) instead of appending or refusing `renewal_payment_exists`. A stale/paid/foreign expectation → `prior_payment_changed` / `invalid_renewal_payment` with no journal write; a row changed mid-flight → review `source_changed_before_apply`. A browser-supplied pinned row is ignored.
+- Quick chip: an OVERDUE unpaid/partial cycle is settleable again (today-based B1 window written explicitly on the row, anchor = window end + 1). A PAID row is still never re-dated, and an explicitly recorded different period is never overwritten.
+- גבייה editor: unpaid/partial → paid for the client's DUE cycle opens the renewal (which settles the row in place); older arrears are settled directly with the B1 window and do not move the anchor. No header change, no legacy-id row rewrite. Regressions in `test/op-bill01-b1-b2-regressions.test.js`.
+
+### CRM money scope — review fixes on #162 (2026-11-03)
+- **Price table refused for an operational session.** `treatment-map.js` holds the client price table (per-session and per-month amounts incl. VAT), not only the clinical→billing map; it is now in `MONEY_STATIC` → 403 for דנה, like `therapist-pay.js`. `loadProtectedScripts` tolerates that refusal for an ops session (`CHANGELOG-crm-money-scope.md` corrected).
+- **Money-task trail hidden from an operational session.** `getActivity` for ops filtered on an event kind that never occurs; the created / completed / deferred / reassigned / cancelled events of a collection task (free-text title) and the contacts that close or spawn one reached דנה. Events now carry `money:true` + task id in `detailsJson`, and the ops read also drops anything referencing a money task on the Tasks sheet (legacy rows), read without creating it (`CHANGELOG-crm-tasks-activity.md`).
+- **`getHandoffStatus` no longer creates or re-heads sheets.** The Dashboard feed read via `_ensureSheet`; it now uses `getSheetByName` and treats a missing sheet as `[]` (`CHANGELOG-crm-handoff-status.md`).
+- **Contact / task modals mint a fresh idempotency key per opening.** A `dataset.sid` left by a timed-out save survived cancel + reopen and made the next patient's contact / task a server-side «replay» (never saved).
+- Follow-up (not in this change): `MONEY_GET_ACTIONS` / `MONEY_POST_ACTIONS` are a deny-list — a future money action must be added there explicitly or an operational session can call it. An allow-list of permitted actions would fail closed.
+
+### Deploy-window guard for operational saves (2026-11-03)
+- `apps-script/Code.gs`: new read-only `getCapabilities` GET (proxy-secret gated, no Sheets access) reporting `{ moneyScope, paidDateCoverage, recoveryHold }`; append-only flags.
+- `lib/backend-capabilities.js` + `server.js`: an ops-scope (דנה) `saveAll` is forwarded only after the live backend reports `capabilities.moneyScope === true`; otherwise `503 { ok:false, error:'backend_upgrade_pending' }` with nothing forwarded. Positive answers cached 5 min in memory; negatives and probe failures fail closed and re-probe. Closes the Railway-first / Apps-Script-second window in which the OLD source would have overwritten every client's stored money with the stripped fields. ורד / אורן unaffected.
+- `public/app.js`: that refusal shows «המערכת בעדכון, נסי שוב בעוד מספר דקות»; forms stay open.
+- Tests: `test/backend-capabilities.test.js` (6). Docs: DEPLOY.md «Node-first window» + «Operational notes», release record step.
+
+### Sandbox drill push workflow (2026-11-03)
+- New dispatch-only `.github/workflows/sandbox-drill-push.yml` builds the OP-03 drill from the exact checked-out source and pushes it with clasp to an ISOLATED standalone Apps Script test project (input script ID). It refuses the production script ID, pins the dispatched ref to `expected_commit`, never deploys and grants `contents: read` only. Guard test `test/sandbox-drill-push-workflow.test.js`. Replaces the failed 137 KB browser clipboard transfer.
+
+### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
+- Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
+- CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.
+- Backup assertions verify exact source inventories across pre/post-CRM schemas. A separate disabled candidate drill exercises nonempty Tasks/Activity recovery and replay. Historical native files and the original generated drill are unchanged.
+- See `docs/OP-BILL-01-INTEGRATED-RELEASE-20261103.md` for validation and the remaining native-execution/approval gates. No production changes.
+
+### OP-BILL-01 release acceptance: retain the missing-receipt action (draft, 2026-11-02)
+- The paid-period review renderer no longer hides #161's guarded historical missing-receipt confirmation. Irregular anchors and already-paid disputed receipts remain read-only review cases.
+- Real-browser regressions cover confirmation, reload, an independent reader, no duplicate receipt and unchanged historical anchor. Six release-transition checks preserve old journal intents and expose the pending-operation rollback boundary.
+- Replaced the policy TODO with a persisted-source → card → revenue acceptance check for an ordinary renewal and explicit two-month prepayment.
+- Current-base, backup metadata, CRM/OP-03 compatibility and exact remaining release gates are recorded in `docs/OP-BILL-01-RELEASE-ACCEPTANCE-20261102.md`. No merge, deploy, permission change or live financial data operation.
+
 ### Fix: «נדרש אימות תשלום» after marking a patient paid (2026-11-02)
 - עריכה: setting the status to «שולם» without changing the paid date saved the client as paid with no payment row. It now records the CURRENT cycle's base row when the anchor is already ahead (anchor not moved).
 - The «נדרש אימות תשלום» chip is now a confirm button for editors: records that cycle's row (package amount, stored paid date) after an explicit confirm; failures show the financial-save warning. SW v22 → v23. No Apps Script change. See `CHANGELOG-payment-verify.md`.
@@ -12,9 +51,97 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fix: «סיים טיפול» did not persist after another edit of the same card (2026-11-02)
 - `saveAll` now returns `stamps` (id → updatedAt, stamps only); `persist()` adopts them, so a second edit of the same row from the same tab is no longer refused as a conflict with the tab's own first edit.
 - Discharge uses `persistClientChange`: a refused save rolls back and shows «סיום הטיפול לא נשמר» instead of a false «סיום נשמר». Real concurrent-edit protection unchanged. SW v21 → v22. Code.gs changed (Deploy Apps Script after merge). See `CHANGELOG-discharge-persist.md`.
+### Landing KPIs back on top (OP-CRM-G, draft 2026-10-31)
+- מטופלים פעילים / הכנסה חודשית (ורד, אורן) / לידים פתוחים above «היום שלי»; breakdowns open by default; clearer card label. See `CHANGELOG-crm-landing-kpis.md`.
+
+### CRM program — acceptance record + release checklist (Phase F, draft 2026-10-31)
+- `docs/crm/ACCEPTANCE-OUTPATIENT.md`, `docs/crm/RELEASE-CHECKLIST.md`; ops sessions skip money reads at boot. See `CHANGELOG-crm-acceptance.md`.
+
+### Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D, draft 2026-10-31)
+- New read-only cross-app action `getHandoffStatus` (fail-closed `HANDOFF_STATUS_SECRET`): by exact `outpatientIds` / `dashboardPatientIds` only → operational state, owner, next action, dates; no money/clinical/phone. See `CHANGELOG-crm-handoff-status.md`.
+
+### «היום שלי» — one task engine, priority order (Phase C, draft 2026-10-31, stacked on 3B)
+- Persisted tasks become rows; derived rows are suppressed when an open task covers the subject; the day is shown in the program's priority order with inline ✓ / 📞 / ⏩; new «משימות לביצוע» / «שיחות להיום» cards (null-not-0). See `CHANGELOG-crm-my-day-tasks.md`.
+
+### Tasks, Activity and contact history (OP-CRM-3B, draft 2026-10-31, stacked on 3A)
+- New append-only `Tasks` + `Activity` sheets and 8 internal actions (`getTasks getActivity createTask completeTask deferTask reassignTask withdrawTask logContact`), idempotent by submissionId, actor from the session; every lead/client card shows last contact, next action, open tasks with direct actions and the history; «יצרתי קשר» form with no default follow-up date; money tasks invisible to an ops session. See `CHANGELOG-crm-tasks-activity.md`.
+
+### Server-side money scope — דנה operational (OP-CRM-3A, draft 2026-10-31)
+- The Node proxy decides each session's money scope from the signed cookie (fail-closed) and enforces it: money actions 403, every `/api/sheets` answer deep-stripped of money for an operational session (fresh/cached/stale), pay constants refused, `saveAll` carries the scope so Apps Script keeps stored money on her saves. UI hides money tabs/fields. See `CHANGELOG-crm-money-scope.md`.
+### Light CRM theme on the Outpatient's own palette (OP-CRM-4, 2026-10-29)
+- Same format as the Dashboard CRM — light page, white surfaces, fixed right-side menu with an icon per screen on desktop — on the Outpatient's own sage/forest palette (not the Dashboard's slate/teal). Token names unchanged; all hard-coded dark colours mapped to light; AA contrast pinned by test. Mobile layout untouched. `theme-color`/manifest updated. SW v21 → v22. No Apps Script change. See `CHANGELOG-crm-theme.md`.
 
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
+
+### OP-03 operational recovery (draft)
+- Add two regressions and runbook clarifications for the uninstalled,
+  default-disabled removed-leads S1:U1 header helper (see
+  `CHANGELOG-removed-leads-header-correction.md`). Tests and documentation only;
+  the helper, runtime and frozen evidence are unchanged. The original
+  three-cell consent remains conditional, there is no new production approval,
+  and the nine native Google runs remain completed and are not rerun.
+- Integrate merged PR133 (`b14db799`) into this draft, preserving its roster,
+  personal-PIN authentication, historical assignees, SW20 and updated tests.
+  Resolve the two documentation conflicts without restoring obsolete release
+  labels. Apps Script, drill tooling and all retained native evidence are
+  unchanged. Record the newly exposed actual base and current integration gate.
+- Record a read-only release-readiness check of the existing source and latest
+  nightly snapshots. Three affected header prefixes match; removed-leads still
+  lacks its final three current headers. Retain the exact correction proposal
+  and the legacy backup-coverage gap without changing production. Refresh the
+  main runbook to recognize the completed native acceptance.
+- Complete a separate synthetic approved-policy acceptance extension for the
+  already completed test project: retained native evidence, isolated namespaces,
+  immutable setup and fixed-policy verifier modules, and measured two-pass finish.
+  Read-only Advanced Sheets observations cover cell formatting and dimension
+  visibility. After the owner's explicit Google API terms consent, activate
+  Sheets v4 in the existing project without changing its Sheets-only scope.
+  Native prepare/capture/restore/verify each pass once
+  (9.226/123.653/106.596/104.427s), with
+  exact packets, three owner-only permission checkpoints and committed evidence
+  binding. The separate fixed verifier refuses a changed policy, passes both
+  finish proofs and the late native comparison, then removes the fixture hold
+  last. Final state is verified and idle; the original five results are unchanged.
+  See the [result addendum](docs/evidence/op03-manual-tabs-2026-10-27-result.md).
+  The production pin stays blank.
+- Harden the acceptance tooling after bounded static review: require a generated
+  evidence-binding block in the exact committed record, three chronological
+  owner-only permission observations with stable identities and creation times,
+  and a cooperative four-minute phase budget checked before hold deletion.
+  Preserve diagnostics on deadline refusal; a single in-flight Google call or
+  hard execution termination remains outside the cooperative guard.
+- Record all five native Google phases passing on integrated candidate 3297311c
+  on October27, using the already prepared project. Verify owner-only files,
+  preferred-house preservation, held-writer refusal and exact retries; preserve
+  original state/artifacts without reruns. Retain separate candidate evidence
+  and measured 35.615/55.475/39.284/45.727/81.587s execution durations.
+- Integrate released PR132 (336c8ef9), keeping its preferred-house UI/SW19.
+  The new writer rechecks recovery hold after acquiring its lock, before even
+  extending headers. Add queued-write and four-schema recovery regressions;
+  regenerate the isolated drill with a nonempty preferred house and hold refusal.
+  Older-width snapshots remain inspection-only; no automatic schema migration.
+  Earlier native evidence stays attributable to 09a00ab5, not this integration.
+- Record five passing native Google drill phases on candidate 09a00ab5 with
+  private synthetic workbooks, exact saved-code comparison and measured timings.
+  Add retained evidence and narrow test-project consent to Sheets only. This is
+  documentation-only; production and approved manual-policy gates remain open.
+- Add a default-disabled, evidence-pinned manual-tab recovery verifier, retaining
+  all known-table/journal/configuration checks and hold-last ordering. Synthetic
+  tests cover exact scope, changed grids/types, formulas, missing evidence and
+  late target edits. No approved real policy yet; the isolated native drill
+  passed on October 26 (see the evidence document).
+- Refresh compatible Express/body-parser/qs lockfile patches after the current
+  audit found GHSA-27r3-jxmh-p828 (body-parser denial of service). See the OP-03
+  changelog for validation; application routes and dependency ranges unchanged.
+- Integrate released base 8b68cd75 without changing its public assets; add an
+  isolated phased Google acceptance runner with explicit project binding,
+  synthetic mixed journals/sessions/packages and local failure-path tests.
+- Integrate released packages and gate recovery completion on whole-run backup
+  drainage; retain marker on uncatchable termination for operator review.
+- Nightly backup now includes session/rate/configuration and operational history,
+  a complete inventory, and guarded recovery verification. Unknown tabs remain
+  explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
 
 ### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
 - Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).

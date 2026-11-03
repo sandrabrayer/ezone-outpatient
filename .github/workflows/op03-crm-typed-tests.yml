@@ -1,0 +1,31 @@
+name: OP03 CRM typed backup synthetic
+
+# No production secrets, Google access, deploy or Apps Script execution.
+# This is a focused proof in addition to the existing strict full-suite
+# historical Google-drill source pin, not a bypass of that release gate.
+on:
+  pull_request:
+    paths:
+      - 'apps-script/Code.gs'
+      - 'test/op03-crm-typed-coverage.test.js'
+      - 'test/nightly-backup-data.test.js'
+      - 'test-support/backup-sandbox.cjs'
+      - '.github/workflows/op03-crm-typed-tests.yml'
+permissions:
+  contents: read
+concurrency:
+  group: op03-crm-typed-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run isolated source-backed CRM backup and existing OP03 regressions
+        run: node --test --test-concurrency=1 test/op03-crm-typed-coverage.test.js test/nightly-backup-data.test.js

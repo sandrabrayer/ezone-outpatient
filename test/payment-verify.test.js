@@ -23,6 +23,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { fixture, settled, named, source } = require('../test-support/financial-ui-fixture.cjs');
+const CreditsLedger = require('../public/credits-ledger.js');
 
 const HELPERS = ['toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey', 'addDays',
   'paymentId', 'legacyBasePaymentId', 'paymentKindFromId', 'findPaymentById', 'basePaymentPaidOn',
@@ -59,12 +60,50 @@ test('A: the stuck card yields the current cycle row, anchor untouched', () => {
   assert.equal(c.nextBillingDate, '2026-11-26', 'never moves the anchor');
 });
 
+test('A2: legacy missing-cycle verification preserves the historical agreed window, not a new default', () => {
+  const c = { ...STUCK };
+  const row = harness().missingCyclePayment(c, TODAY).row;
+  assert.equal(row.coverageStart, '2026-10-26');
+  assert.equal(row.coverageEnd, '2026-11-25');
+  assert.equal(row.paymentDate, '2026-10-22');
+  assert.equal(CreditsLedger.paymentDateCoverage(row.paymentDate).next, '2026-11-22',
+    'ordinary new receipt would differ: historical confirmation is explicit coverage');
+  const preserved = CreditsLedger.withDefaultCoverage(row, { newPaidMonthly: true });
+  assert.equal(preserved.coverageStart, row.coverageStart);
+  assert.equal(preserved.coverageEnd, row.coverageEnd);
+  const ctx = harness([row]);
+  ctx.CL = CreditsLedger;
+  assert.ok(ctx.confirmedPackagePayment(c, c.nextBillingDate, row),
+    'the #161 confirmation must not remain an endless review button after the row is recorded');
+  assert.equal(c.nextBillingDate, '2026-11-26', 'historical client anchor unchanged');
+});
+
 test('A: nothing to record when the cycle is confirmed or the package is not paid-up', () => {
   const confirmed = { id: 'pay::fixture-client-9::base::2026-10', clientId: STUCK.id, billingType: 'monthly',
     dueDate: '2026-10-26', status: 'paid', amountDue: 1234, amountPaid: 1234, paymentDate: '2026-10-22' };
   assert.equal(harness([confirmed]).missingCyclePayment({ ...STUCK }, TODAY), null);
   assert.equal(harness().missingCyclePayment({ ...STUCK, nextBillingDate: '2026-10-26' }, TODAY), null, 'anchor past → normal unpaid flow');
   assert.equal(harness().missingCyclePayment({ ...STUCK, pricePerSession: 0 }, TODAY), null, 'no amount → no row');
+});
+
+test('A3: manually shifted anchor is NOT auto-filled with an invented extended monthly period', () => {
+  const irregular = { ...STUCK, nextBillingDate: '2026-11-25' };
+  assert.equal(harness().missingCyclePayment(irregular, TODAY), null);
+  assert.equal(irregular.nextBillingDate, '2026-11-25', 'no silent anchor edit');
+});
+
+test('A4: disputed already-paid row and short explicit period cannot be overwritten to fake verification', () => {
+  const row = {
+    id: 'pay::fixture-client-9::base::2026-10', clientId: STUCK.id,
+    billingType: 'monthly', dueDate: '2026-10-26', amountDue: 1234,
+    amountPaid: 1234, status: 'paid', paymentDate: '2026-10-22',
+    coverageStart: '2026-10-26', coverageEnd: '2026-11-20'
+  };
+  assert.equal(harness([row]).missingCyclePayment({ ...STUCK }, TODAY), null,
+    'already-paid but mismatched coverage requires review, not rewriting');
+  assert.equal(harness([{ ...row, status: 'unpaid', amountPaid: 0 }])
+    .missingCyclePayment({ ...STUCK }, TODAY), null,
+    'an explicit shorter period cannot be extended by the verification button');
 });
 
 test('A: a future paid date is clamped to today', () => {
@@ -89,7 +128,7 @@ test('B: edit form — status set to «שולם» with an anchor already ahead r
 });
 
 test('C: the review chip is a confirm button for editors only, wired to confirmCyclePayment', () => {
-  assert.match(source, /state\.role === 'editor'\s*\n?\s*\? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment"/);
+  assert.match(source, /state\.role === 'editor' && !!missingCyclePayment\(c, today\(\)\)\s*\n?\s*\? '<button type="button" class="chip chip-payment-review month-pay-btn" data-action="confirm-cycle-payment"/);
   assert.match(source, /\[data-action="confirm-cycle-payment"\]', card\);\s*\n\s*if \(verifyBtn\) verifyBtn\.addEventListener\('click', function \(\) \{ confirmCyclePayment\(c, verifyBtn\); \}\);/);
   const fn = named('confirmCyclePayment');
   assert.match(fn, /if \(state\.role !== 'editor'\) return;/);

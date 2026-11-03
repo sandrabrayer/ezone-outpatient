@@ -234,9 +234,9 @@ test('B: /api/me round-trips the cookie user; legacy cookie -> ""; no cookie -> 
   assert.equal((await request('GET', '/api/me')).status, 401);
   const named = await request('GET', '/api/me', null, { Cookie: cookieOf(await login('אורן')) });
   assert.equal(named.status, 200);
-  assert.deepEqual(named.json, { ok: true, user: 'אורן' });
+  assert.deepEqual(named.json, { ok: true, user: 'אורן', moneyScope: 'full' });
   const legacy = await request('GET', '/api/me', null, { Cookie: cookieOf(await login()) });
-  assert.deepEqual(legacy.json, { ok: true, user: '' });
+  assert.deepEqual(legacy.json, { ok: true, user: '', moneyScope: 'ops' });
 });
 
 test('B: /api/sheets GET + POST, /api/continuation-roster and /api/debug/* are 401 without a cookie (and with a bad one); 200 with', async () => {
@@ -713,7 +713,7 @@ test('E: source-scan — every Clients write path stamps (no writer left behind)
   assert.match(stampAt, /CLIENTS_HEADERS\.indexOf\('updatedBy'\) \+ 1/);
   assert.doesNotMatch(stampAt, /getRange\([^,]+,\s*\d+\)/, 'never a hardcoded column');
   // doPost feeds the proxy-injected user into every internal writer
-  assert.match(GS, /user: _requestUser\(payload\)\n\s*\}\)\);/, 'saveAll receives user');
+  assert.match(GS, /user: _requestUser\(payload\),\n(?:\s*\/\/[^\n]*\n)*\s*moneyScope: payload\.moneyScope\n\s*\}\)\);/, 'saveAll receives user (+ the proxy-decided moneyScope, OP-CRM-3A)');
   assert.match(GS, /_removeLead\(payload\.lead, _requestUser\(payload\)\)/);
 });
 

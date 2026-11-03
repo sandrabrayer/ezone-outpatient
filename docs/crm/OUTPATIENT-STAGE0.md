@@ -66,7 +66,7 @@ Dashboard owner, mapped to a `SESSION_USERS` name or blank), `_createLead`
 accepts it **only if** it is in `SESSION_USERS` (else blank, never rejected —
 the lead must still be created).
 
-### G2 — no status feedback
+### G2 — no status feedback (Outpatient side DONE in Phase D draft: `getHandoffStatus`; Dashboard consumer D-FB-1 pending)
 The Dashboard marks the patient «נשלח לאמבולטורי» at send time and never learns
 «נוצר קשר / נקבעה היכרות / התחיל טיפול / לא רלוונטי». Fix (OP-CRM-2): a
 read-only, shared-secret endpoint on this app (`getLeadStatus` by lead id or
@@ -74,7 +74,7 @@ phone, same auth pattern as the existing cross-app reads, `no-store`) that the
 Dashboard polls when it renders the ambulatory card. No write from the
 Dashboard into Outpatient beyond `createLead`.
 
-### G3 — money separation is client-side only
+### G3 — money separation is client-side only (CLOSED in OP-CRM-3A, draft — see `CHANGELOG-crm-money-scope.md`)
 Same decision as the Dashboard: operational people (דנה) must not receive money
 fields from the server. Fix (OP-CRM-3 or its own PR): `OPS_USER_IDS`-style
 list in `lib/users.js`; the session-gated read routes strip

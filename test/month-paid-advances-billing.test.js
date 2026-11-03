@@ -118,22 +118,21 @@ test('app.js: nextBillingDate is never written as addDays(x, 30) anymore', () =>
 
 test('app.js: renew / intake / activate / agreement / derive all use the cycle rule', () => {
   assert.match(fnSource('deriveNextBillingDates'), /nextCycleDueDateAfter\(c, latest\)/);
-  // renew submit anchors on the billed month (renewalDate), never paidDate
-  assert.match(APP, /nextBillingDate: nextCycleDueDateAfter\(c, renewSourceState\.cycleDate\)/);
-  // direct intake + activate anchor on the startDate cycle
-  const intakeUses = APP.match(/nextCycleDueDateAfter\(\{ billingDay: [^}]*startDate: startDate \}, startDate\)/g) || [];
-  assert.ok(intakeUses.length >= 2, 'intake and activate must both use the cycle rule');
+  // New paid receipts use the actual paid-date coverage policy.
+  assert.match(APP, /nextBillingDate: paidCoverage\.next/);
+  assert.match(APP, /payStatus === 'paid' \? intakeCoverage\.next : startDate/);
+  assert.match(APP, /payStatus === 'paid' \? activateCoverage\.next : startDate/);
   // agreement payment
   assert.match(APP, /lead\.nextBillingDate = nextCycleDueDateAfter\(lead, agPayDate\)/);
 });
 
 test('app.js: the edit modal no longer recomputes nextBillingDate unconditionally', () => {
   assert.doesNotMatch(APP, /if \(client\.paymentDate\) \{\s*\n\s*client\.nextBillingDate/);
-  // The only edit-path recompute sits behind the deliberate paid-date change
-  // (propagatePaid) and anchors on the CYCLE due date — the same
-  // cyclePaymentDueDate the chip settles, resolved before the anchor moves.
-  assert.match(APP,
-    /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';[\s\S]{0,1800}if \(propagatePaid\) \{\s*\n\s*cycleDueISO = cyclePaymentDueDate\(client, today\(\)\);\s*\n\s*client\.nextBillingDate = nextCycleDueDateAfter\(client, cycleDueISO\);/);
+  // Paid-date changes must be verified and cannot rewrite existing receipts.
+  // A new full-month receipt uses paymentDate, not the old due-cycle.
+  assert.match(APP, /hasPriorPaidReceipt/);
+  assert.match(APP, /var propagatePaid = paidDateChanged && client\.paymentStatus === 'paid';/);
+  assert.match(APP, /client\.nextBillingDate = editPaidWindow\.next/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,12 +151,9 @@ function prevCycleBefore(c, anchorIso) {
 }
 function monthPaidClientPatch(c, makePaid, dueDateISO, remembered, todayIso) {
   if (makePaid) {
-    let advanced = nextCycleDueDateAfter(c, dueDateISO);
-    // a multi-cycle-stale anchor must still land the mark strictly ahead
-    if (advanced && advanced <= todayIso) {
-      advanced = nextCycleDueDate(c, addDays(todayIso, 1)) || advanced;
-    }
-    return { nextBillingDate: advanced, paymentDate: todayIso };
+    if (dueDateISO < todayIso) return null; // past-due arrears require human review
+    const covered = require('../public/credits-ledger').paymentDateCoverage(todayIso);
+    return { nextBillingDate: covered.next, paymentDate: todayIso };
   }
   if (remembered) return { nextBillingDate: remembered.nextBillingDate, paymentDate: remembered.paymentDate };
   // the revert must land strictly behind today so the package reads unpaid
@@ -168,7 +164,7 @@ function monthPaidClientPatch(c, makePaid, dueDateISO, remembered, todayIso) {
 test('marking the month paid advances nextBillingDate one cycle and stamps paymentDate', () => {
   const c = { id: 'c1', billingDay: 10, nextBillingDate: '2026-07-10', paymentDate: '2026-07-08' };
   const patch = monthPaidClientPatch(c, true, '2026-09-10', null, '2026-09-01');
-  assert.equal(patch.nextBillingDate, '2026-10-10'); // cycle AFTER the marked month
+  assert.equal(patch.nextBillingDate, '2026-10-01'); // month from actual Sep 1 payment
   assert.equal(patch.paymentDate, '2026-09-01');     // stamped today
 });
 
@@ -178,7 +174,7 @@ test('marking with a MULTI-cycle-stale anchor still lands the anchor after today
   // this the chip stayed לא שולם after a successful click.
   const c = { id: 'c1', billingDay: 10, nextBillingDate: '2026-07-10' };
   const patch = monthPaidClientPatch(c, true, '2026-07-10', null, '2026-09-02');
-  assert.equal(patch.nextBillingDate, '2026-09-10');
+  assert.equal(patch, null, 'overdue cycle requires review rather than silently skipping arrears');
 });
 
 test('unmarking restores the remembered pre-mark values', () => {
@@ -203,7 +199,11 @@ test('unmarking after a reload (nothing remembered) lands the anchor strictly be
 test('app.js wiring: setCurrentMonthPaid advances, remembers, and reloads before persisting', () => {
   const fn = fnSource('setCurrentMonthPaid');
   // the advance mirrors monthPaidClientPatch above
-  assert.match(fn, /nextCycleDueDateAfter\(c, dueDateISO\)/);
+  // B1: the window is cycle-aware (max(paid, due)); an overdue cycle is
+  // settleable by the chip (Vered's normal flow) — only a PAID row is refused.
+  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate, dueDateISO\)/);
+  assert.doesNotMatch(fn, /base\.status === 'paid' \|\| dueDateISO < todayIso/);
+  assert.match(fn, /if \(makePaid && base\.status === 'paid'\)/);
   // the mark stamps today, unless a legacy row already carries the real paid date
   assert.match(fn, /paymentDate: \(!rowNeedsWrite && base\.paymentDate\) \|\| today\(\)/);
   // pre-mark values remembered per client; unmark falls back to the due date

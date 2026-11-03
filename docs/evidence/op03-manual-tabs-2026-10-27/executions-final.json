@@ -1,0 +1,16 @@
+{
+  "observedAt": "2026-10-27T16:14:48.894Z",
+  "displayTimeZone": "America/Los_Angeles",
+  "rows": [
+    "Deployment\n\t\nFunction\n\t\nType\n\t\nStart Time\n\t\nDuration\n\t\nStatus",
+    "Head\tverifyManualPolicyDrill\tEditor\tOct 27, 2026, 9:11:01 AM\t104.427 s\t\nCompleted\n\n",
+    "Head\trestoreManualPolicyDrill\tEditor\tOct 27, 2026, 8:57:05 AM\t106.596 s\t\nCompleted\n\n",
+    "Head\tcaptureManualPolicyDrill\tEditor\tOct 27, 2026, 8:53:19 AM\t123.653 s\t\nCompleted\n\n",
+    "Head\tprepareManualPolicyDrill\tEditor\tOct 27, 2026, 8:50:43 AM\t9.226 s\t\nCompleted\n\n",
+    "Head\tverifyManualTabDrill\tEditor\tOct 27, 2026, 6:28:59 AM\t81.587 s\t\nCompleted\n\n",
+    "Head\tverifyOperationalDrill\tEditor\tOct 27, 2026, 6:27:14 AM\t45.727 s\t\nCompleted\n\n",
+    "Head\trestoreOperationalDrill\tEditor\tOct 27, 2026, 6:25:34 AM\t39.284 s\t\nCompleted\n\n",
+    "Head\tcaptureOperationalDrill\tEditor\tOct 27, 2026, 6:23:43 AM\t55.475 s\t\nCompleted\n\n",
+    "Head\tprepareOperationalDrill\tEditor\tOct 27, 2026, 6:21:42 AM\t35.615 s\t\nCompleted\n\n"
+  ]
+}

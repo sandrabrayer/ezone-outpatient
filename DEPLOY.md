@@ -1,5 +1,12 @@
 # Deploy — E-ZONE Outpatient
 
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> `ops/removed-leads-header-correction.gs` is not part of the deployment root and must not be installed or run without separate authorization: [runbook](docs/removed-leads-header-correction.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> Use the [isolated Google drill](docs/google-operational-drill.md) for runtime
+> evidence. It is not part of deployment and must not use this repo's clasp target.
+
 ## Source authentication — configuration prerequisites
 
 OP-01 was released in PR #115 on 2026-10-17 (Node `76de4cc5`, Apps Script @94).
@@ -98,6 +105,13 @@ Two ordered release phases:
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
 
+## CRM handoff status feed (OP-CRM-2 / G2 — Phase D, draft; values are never committed)
+
+At release only: Apps Script → **Project Settings → Script properties**: add `HANDOFF_STATUS_SECRET`
+(≥ 32 random chars, distinct from every other secret) and configure the same value on the Dashboard side
+(D-FB-1). Until it exists `getHandoffStatus` answers `unauthorized` (fail-closed). No Railway variable is
+needed on this service. See `CHANGELOG-crm-handoff-status.md`.
+
 ## Package catalog configuration (OP-PKG — values are never committed)
 
 Railway → *ezone-outpatient* → **Variables** (applies to deployments started
@@ -111,6 +125,11 @@ duplicate secrets fail closed. To revoke the retired user's shared-PIN knowledge
 rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Personal PINs (2026-10-26): `USER_PIN_OREN` and `USER_PIN_DANA` are separate Railway variables (4–6 digits, distinct from `APP_PIN` and each other); rotate one by changing only its variable. Full
 detail and precise click-paths: `docs/package-release-checklist.md` (single checklist);
 background: `docs/package-catalog.md`. These are PREREQUISITES of enablement, not optional.
+
+## Sandbox drill push (isolated test project, no deploy)
+
+**Workflow:** [`.github/workflows/sandbox-drill-push.yml`](.github/workflows/sandbox-drill-push.yml) — `workflow_dispatch` only.
+Inputs: `sandbox_script_id` (a standalone, isolated Apps Script project; the production ID is refused) and `expected_commit` (must equal the dispatched ref). Uses the same `CLASPRC_JSON` secret, runs `clasp push -f` into the sandbox and nothing else: no deployment, no production project, no Script Properties. Then run the five drill functions from the sandbox editor; the report is the `_DrillReport` tab of the synthetic backup workbook.
 
 ## Apps Script release phase (clasp in GitHub Actions)
 
@@ -144,6 +163,42 @@ For each separately approved release:
 
 A branch advance invalidates the original dispatch target. Do not replace the
 approved SHA with a newer unreviewed one. Recheck ownership and approval scope.
+
+### Node-first window: operational saves are blocked by design
+
+Between step 2 (new Node live) and step 5 (new Apps Script version live) the
+proxy already strips money from an operational session (דנה) while the OLD
+source still ignores `moneyScope`; a full-row `saveAll` from her tab would
+then overwrite every client's stored price / billing / payment fields with
+0 / blank. The proxy therefore probes `action=getCapabilities` (proxy-secret
+gated, read-only) and **refuses an ops-scope `saveAll` with
+`503 { ok:false, error:'backend_upgrade_pending' }`** — nothing is forwarded —
+until the live source answers `capabilities.moneyScope === true`. The app shows
+«המערכת בעדכון, נסי שוב בעוד מספר דקות» and keeps the form open. ורד / אורן
+saves are not gated. A positive answer is cached in memory for 5 minutes; a
+negative or failed probe is re-tried on the next save.
+
+Release steps: tell דנה her saves are blocked until the Apps Script phase
+succeeds; after step 5, confirm the capability before reopening her work —
+`GET <SHEETS_URL>?action=getCapabilities&proxySecret=…` must return
+`{ ok:true, capabilities:{ moneyScope:true, … } }` (an ops save from her tab
+returning 200 is the same proof). If Apps Script is rolled back to a source
+without `getCapabilities`, ops saves close again automatically.
+
+### Operational notes (OP-03 / #162)
+
+- `getHandoffStatus` must not create or relabel sheets (`_ensureSheet` on Tasks /
+  Activity would also trip the backup's "Incomplete CRM operational source
+  pair" check) — addressed separately on #162.
+- A nightly backup killed mid-run (execution limit) leaves
+  `INTEGRITY_ACTIVE_BACKUP` set; every later run then refuses with
+  `backup_busy` and alerts, and `beginOutpatientRecovery` reports
+  `backup_draining`. Operator action: inspect the executions log, confirm no run
+  is active, delete the property. A marker-age check is a follow-up, not part of
+  this release.
+- `INTEGRITY_REQUIRED_SOURCES` records every tab once captured: deleting or
+  renaming any live tab afterwards fails every backup until the property is
+  edited deliberately. Never delete a tab as "cleanup" without that step.
 If dispatch is omitted, source remains at its previous version; keep the release
 open until both phases and acceptance are complete. Serialize releases across
 both runtimes. The workflow's concurrency lock serializes source jobs, but does

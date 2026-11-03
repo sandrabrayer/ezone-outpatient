@@ -1,10 +1,21 @@
 # E-ZONE Outpatient Dashboard
 
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> Uninstalled, default-disabled removed-leads header helper: [runbook](docs/removed-leads-header-correction.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> A phased [isolated Google drill](docs/google-operational-drill.md) is prepared;
+> its checked-in runner refuses execution until a separate test project is pinned.
+
 Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israel.
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
 through an Apps Script Web App.
 
 ## Screens
+
+Light theme since OP-CRM-4 (`CHANGELOG-crm-theme.md`): the Dashboard CRM's format (right-side menu on desktop, white
+surfaces, red = exception / amber = waiting / green = done — always with a word) on this app's own sage/forest palette.
+Tokens live in `public/style.css` `:root`; mobile keeps the top tab strip.
 
 1. **«היום שלי»** (tab id `dashboard`) – the CRM opening screen: summary
    cards, an urgent band and work lists by domain (leads/intros, plans to
@@ -47,6 +58,11 @@ secret-looking is added to it.
   served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
   never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
   See `CHANGELOG-protect-price-constants.md`.
+- **Money scope (OP-CRM-3A).** The server decides per session, from the signed cookie name only and
+  fail-closed, whether money may flow: ורד / אורן `full`; דנה (and any unknown / retired name) `ops` — money
+  `/api/sheets` actions answer 403, every other answer is deep-stripped of money keys (fresh, cached and stale),
+  `therapist-pay.js` is refused, and `saveAll` carries `moneyScope` so Apps Script keeps the stored money fields
+  on her saves. `GET /api/me` reports `moneyScope` for the UI. See `lib/money-scope.js`, `CHANGELOG-crm-money-scope.md`.
 - The former "המשך כצופה בלבד" button was removed (2026-10-20): the PIN screen has only the PIN entry. A stale
   remembered viewer flag is ignored and cleared. The credential is the cookie, never a browser flag.
 - Who/when: every Clients / Leads write stamps `updatedAt` (server time) and
@@ -258,6 +274,10 @@ checkout ever drifts back.
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
 - `GET /api/continuation-roster` — session-gated.
+- CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
+  `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
+  the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
+  tasks from an operational session. Writes are idempotent by a browser `submissionId`. See `CHANGELOG-crm-tasks-activity.md`.
 - The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
   (write) are Apps Script actions the client reaches through the two
   session-gated `/api/sheets` calls above. On `saveCredit` the proxy's
@@ -267,6 +287,11 @@ checkout ever drifts back.
   `session_not_configured` when `SESSION_SECRET` is unset).
 
 ### Cross-app read endpoints (shared-secret, read-only)
+
+- `getHandoffStatus` (`HANDOFF_STATUS_SECRET`, OP-CRM-2 / G2): `?outpatientIds=a,b` and/or
+  `?dashboardPatientIds=…` → `{ results:[{ outpatientId, entity, dashboardPatientId, state, stateDate,
+  assignedTo, nextAction, nextActionDate, lastActionDate, updatedAt }] }`. Exact ids only, no money /
+  clinical / phone. See `CHANGELOG-crm-handoff-status.md`.
 
 - `GET /api/sheets?action=getWinbackSource&secret=<WINBACK_SECRET>` → lost
   leads + discharged clients for the win-back call list. No billing data.

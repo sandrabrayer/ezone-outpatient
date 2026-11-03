@@ -545,12 +545,13 @@ test('F: the server stores a NORMALIZED pair — a Date cell or a timestamp land
   assert.equal(row.coverageEnd, '2026-10-05');
 });
 
-test('F: a blank pair STAYS blank on the server — it means "infer", never a guess', () => {
+test('F: a NEW fully paid monthly base receipt cannot store an ambiguous blank period', () => {
   const { ctx, sheets } = sandbox([]);
-  assert.equal(ctx._upsertPayment(payment({ coverageStart: '', coverageEnd: '' })).ok, true);
-  const row = storedRow(sheets, payment({}).id);
-  assert.equal(row.coverageStart, '');
-  assert.equal(row.coverageEnd, '');
+  const res = ctx._upsertPayment(payment({ coverageStart: '', coverageEnd: '' }));
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'invalid_new_monthly_receipt');
+  assert.equal(storedRow(sheets, payment({}).id), null,
+    'reject before any new receipt is written');
 });
 
 test('F: the server drops a period posted on a one-off charge', () => {
