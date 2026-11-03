@@ -126,7 +126,7 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     await solo.locator('select').selectOption({ index: 1 });
     await solo.getByRole('button', { name: 'בחירת מחיר חודשי' }).click();
     await page.locator('.pkg-card', { hasText: 'מטופל שחר' }).getByRole('button', { name: 'אישור תמחור' }).waitFor();
-    await page.waitForFunction(() => { const b = [...document.querySelectorAll('.pkg-card button')].find((x) => x.textContent === 'אישור תמחור' && x.closest('.pkg-card').textContent.includes('מטופל שחר')); return b && !b.disabled; });
+    await page.waitForFunction(() => { const b = [...document.querySelectorAll('.pkg-card button')].find((x) => x.textContent.indexOf('אישור תמחור') === 0 && x.closest('.pkg-card').textContent.includes('מטופל שחר')); return b && !b.disabled; });
     const oren = page.locator('.pkg-card', { hasText: 'מטופל אורן' });
     await oren.getByLabel('סכום מתואם').fill('3000');
     await oren.getByLabel('סיבת התאמה').fill('הנחת היכרות');
