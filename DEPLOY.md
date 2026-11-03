@@ -126,6 +126,11 @@ rotate `APP_PIN` and `SESSION_SECRET` once (everyone signs in again). Personal P
 detail and precise click-paths: `docs/package-release-checklist.md` (single checklist);
 background: `docs/package-catalog.md`. These are PREREQUISITES of enablement, not optional.
 
+## Sandbox drill push (isolated test project, no deploy)
+
+**Workflow:** [`.github/workflows/sandbox-drill-push.yml`](.github/workflows/sandbox-drill-push.yml) — `workflow_dispatch` only.
+Inputs: `sandbox_script_id` (a standalone, isolated Apps Script project; the production ID is refused) and `expected_commit` (must equal the dispatched ref). Uses the same `CLASPRC_JSON` secret, runs `clasp push -f` into the sandbox and nothing else: no deployment, no production project, no Script Properties. Then run the five drill functions from the sandbox editor; the report is the `_DrillReport` tab of the synthetic backup workbook.
+
 ## Apps Script release phase (clasp in GitHub Actions)
 
 **Workflow:** [`.github/workflows/deploy-apps-script.yml`](.github/workflows/deploy-apps-script.yml)
