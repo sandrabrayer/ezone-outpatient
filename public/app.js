@@ -4762,7 +4762,7 @@
     var sum = p.summary;
     var last = sum && sum.lastContact ? escapeHtml(sum.lastContact.when) + ' · ' + escapeHtml(sum.lastContact.who || '—') + (sum.lastContact.outcome && CA ? ' · ' + escapeHtml(CA.heOf(CA.OUTCOMES, sum.lastContact.outcome)) : '') + (sum.lastContact.summary ? '<br><span class="sub">' + escapeHtml(sum.lastContact.summary) + '</span>' : '') : '<span class="sub">לא תועד קשר</span>';
     var next = sum && sum.nextAction ? '<b>' + escapeHtml(sum.nextAction.title) + '</b> · ' + escapeHtml(sum.nextAction.assignee || '—') + (sum.nextAction.due ? ' · ' + escapeHtml(sum.nextAction.due) : '') + ' <span class="md-chip st-' + escapeHtml(sum.nextAction.state) + '">' + (CA ? CA.stateText(sum.nextAction.state) : '') + '</span>' : '<span class="sub">אין פנייה מתוכננת</span>';
-    var offer = p.offer ? '<button type="button" class="link-btn" data-caction="open-offer">הצעה ' + escapeHtml(p.offer.statusHe || '') + (p.offer.followUpDate ? ' · מעקב ' + escapeHtml(displayDate(p.offer.followUpDate)) : '') + '</button>' : (p.offerRequestId ? '<span class="sub">הצעה מקושרת</span>' : '<span class="sub">לא ניתנה הצעה</span>');
+    var offer = p.offer ? '<button type="button" class="link-btn" data-caction="open-offer">הצעה · ' + escapeHtml(offerStatusHe(p.offer.crmStatus)) + (p.offer.followUpDate ? ' · מעקב ' + escapeHtml(displayDate(p.offer.followUpDate)) : '') + (p.offer.validUntil ? ' · בתוקף עד ' + escapeHtml(displayDate(p.offer.validUntil)) : '') + '</button>' : (p.offerRequestId ? '<span class="sub">הצעה מקושרת (פרטים בלשונית תמחור)</span>' : '<span class="sub">לא ניתנה הצעה</span>');
     var crmLines = '<div class="cont-crm">' +
       '<div class="crm-line"><span class="crm-k">מגע אחרון</span><span>' + last + '</span></div>' +
       '<div class="crm-line"><span class="crm-k">הקשר הבא</span><span>' + next + '</span></div>' +
@@ -4792,6 +4792,10 @@
           '<select data-cfield="outcome">' + options + '</select></label>' +
         '<label class="continuation-ctl continuation-note-ctl">הערה' +
           '<input type="text" data-cfield="note" value="' + escapeHtml(p.note) + '" placeholder="הערה קצרה"></label>' +
+        (Array.isArray(state.offers) ? '<label class="continuation-ctl">הצעת מחיר' +
+          '<select data-cfield="offerRequestId"><option value="">— ללא —</option>' + state.offers.filter(function (o) { return o.id === p.offerRequestId || ['approved', 'rejected'].indexOf(o.crmStatus) < 0; }).slice(0, 60).map(function (o) {
+            return '<option value="' + escapeHtml(o.id) + '"' + (o.id === p.offerRequestId ? ' selected' : '') + '>' + escapeHtml(o.patientName || '—') + ' · ' + escapeHtml(offerStatusHe(o.crmStatus)) + (o.validUntil ? ' · עד ' + escapeHtml(displayDate(o.validUntil)) : '') + '</option>';
+          }).join('') + '</select></label>' : '') +
         '<button type="button" class="btn btn-primary continuation-save" data-caction="save">שמור</button>' +
         (p.ref ? '<button type="button" class="btn continuation-save" data-crm="contact">📞 יצרתי קשר</button>' +
                  '<button type="button" class="btn continuation-save" data-crm="task">➕ משימה</button>' : '') +
@@ -5056,12 +5060,14 @@
     var nEl = rowEl.querySelector('[data-cfield="note"]');
     var sEl = rowEl.querySelector('[data-cfield="crmStatus"]');
     var aEl = rowEl.querySelector('[data-cfield="assignee"]');
+    var offEl = rowEl.querySelector('[data-cfield="offerRequestId"]');
     var patch = {
       meetingDate: mEl ? mEl.value : '',
       outcome: oEl ? oEl.value : '',
       note: nEl ? nEl.value : '',
       crmStatus: sEl ? sEl.value : undefined,
-      assignee: aEl ? aEl.value : undefined
+      assignee: aEl ? aEl.value : undefined,
+      offerRequestId: offEl ? offEl.value : undefined
     };
     // Transition INTO to_outpatient: confirm + create the lead first.
     if (patch.outcome === 'to_outpatient' && vm.outcome !== 'to_outpatient') {

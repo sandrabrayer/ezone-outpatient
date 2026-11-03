@@ -273,7 +273,15 @@ checkout ever drifts back.
   the sheet row is kept and listed in the additive response field
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
-- `GET /api/continuation-roster` — session-gated.
+- `GET /api/continuation-roster` — session-gated. Since the continuation CRM (2026-11-03,
+  `CHANGELOG-continuation-milestones.md`) a FRESH roster answer also makes the server run the Apps Script action
+  `syncContinuationMilestones` with the roster it fetched itself (milestone contact tasks
+  `cont::<ref>::<entryDate>::m1|m2|m3`, +1/+2/+3 calendar months from the entry date, 14 days ahead); a browser
+  cannot call that action (`/api/sheets` refuses it). `POST /api/continuation-sync` re-runs it on demand.
+- `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
+  (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
+  «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`
+  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`).
 - CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
   `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
   the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
