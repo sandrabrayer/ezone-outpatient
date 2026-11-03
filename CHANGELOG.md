@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Sandbox drill push workflow (2026-11-03)
+- New dispatch-only `.github/workflows/sandbox-drill-push.yml` builds the OP-03 drill from the exact checked-out source and pushes it with clasp to an ISOLATED standalone Apps Script test project (input script ID). It refuses the production script ID, pins the dispatched ref to `expected_commit`, never deploys and grants `contents: read` only. Guard test `test/sandbox-drill-push-workflow.test.js`. Replaces the failed 137 KB browser clipboard transfer.
+
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
 - Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
 - CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.
