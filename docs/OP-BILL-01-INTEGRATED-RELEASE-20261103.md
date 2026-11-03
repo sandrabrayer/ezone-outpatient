@@ -13,6 +13,10 @@
 
 Dependencies are incorporated for review in #162, not independently merged, closed or deployed. #157 remains historical staging. Preserve SW v24 above observed live v23, the hotfixes and all #162 acceptance tests. Documentation and browser-workflow unions replace the obsolete per-PR release sequence. Compatible lockfile patches from #139 are reused.
 
+## Review fixes, 3 November (integrated on #162)
+
+Six defects found in the integrated review were fixed inside the same candidate: early payment made the next renewal impossible (same month key) and an existing unpaid/partial row could not be settled — coverage now starts on max(paymentDate, cycleDate) and prior rows are settled in place under the lock; `treatment-map.js` (price table) refused to operational sessions; money-task activity hidden from operational sessions; `getHandoffStatus` is a pure read; operational `saveAll` is refused (503 `backend_upgrade_pending`) until the live Apps Script reports `capabilities.moneyScope`, closing the Node-first deploy window. Details in `CHANGELOG.md` [Unreleased].
+
 ## Integration defects and recovery proof
 
 All six CRM mutation actions could pass the entry hold check, wait for their lock, then write after recovery started. The three shared entry points now recheck `OUTPATIENT_RECOVERY_HOLD` inside the lock before touching any sheet. `getTasks` and `getActivity` now read existing tables only, without creating or expanding them. Twenty regression cases initially produced eight failures; all pass after the fix.
@@ -23,12 +27,12 @@ The candidate drill includes source-created linked contact/follow-up rows, mixed
 
 Historical `google-operational-drill.gs` SHA256 remains `dbeae05cd7c410268224bf1381a207c2c7ba8a2defc9678e5191b2903141329f`; October native evidence is unchanged. The new runner has a separate filename and refuses execution without an isolated project binding.
 
-- Current Code.gs SHA256: `8fb10cd4580f2df7499c40f792363320297b050812b0a688ac16dcef7b91047a` (after the 3 Nov B1/B2 review fixes; was `6f997e41…` before them).
-- Unbound candidate runner SHA256: `b75d17b0929ab14086af6ecbb6b73e1f722a1b359b1c9dbe4c30a430d653bd97` (regenerated from the current source; was `081c42fd…`).
+- Current Code.gs SHA256: `8b477fcfc60d598d8defa5ac3bb379d6a534c1e12239076b164a77d189ac18eb` (after the 3 Nov B1/B2 review fixes; was `6f997e41…` before them).
+- Unbound candidate runner SHA256: `7d527f5a95920d39177a7a3d1bd98a848a3700d219dd25dd434e52e7faeeee4a` (regenerated from the current source; was `081c42fd…`).
 
 ## Validation
 
-Use Node 22, `npm ci` and `TZ=UTC npm test`, with Chromium available for the complete browser run. Focused recovery/CRM integration: **195/195 pass, no skips**. Full combined local suite: **2,069/2,069 pass, no skips/TODO**. Final installed-dependency run and exact-head GitHub CI evidence are recorded on #162; old-head green runs do not certify newer code.
+Use Node 22, `npm ci` and `TZ=UTC npm test`, with Chromium available for the complete browser run. Focused recovery/CRM integration: **195/195 pass, no skips**. Full combined local suite after the 3 November review fixes: **2,099/2,099 pass, no skips/TODO** (2,069 before the fixes). Final installed-dependency run and exact-head GitHub CI evidence are recorded on #162; old-head green runs do not certify newer code.
 
 The suite covers ordinary paid-date months, explicit advances, partial/unpaid and legacy periods, lost replies, independent readers, duplicate prevention and revenue allocation. Existing money-scope tests cover Dana's direct API refusal, fresh/cached/stale field stripping and preservation of stored finance on operational saves. No new permission model was invented.
 
