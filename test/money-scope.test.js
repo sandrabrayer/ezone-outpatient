@@ -46,6 +46,12 @@ global.fetch = async (url, init) => {
   if (failUpstream) throw new Error('down');
   const u = new URL(String(url));
   const body = init && init.body ? JSON.parse(init.body) : null;
+  // The NEW backend answers the deploy-window capability probe; it is not a
+  // business call, so it is kept out of `calls` (the gate itself is covered by
+  // test/backend-capabilities.test.js).
+  if (!body && u.searchParams.get('action') === 'getCapabilities') {
+    return { status: 200, text: async () => JSON.stringify({ ok: true, capabilities: { moneyScope: true } }) };
+  }
   calls.push({ action: body ? body.action : u.searchParams.get('action'), body });
   const r = upstream(body, u);
   return { status: r.status, text: async () => JSON.stringify(r.body) };
