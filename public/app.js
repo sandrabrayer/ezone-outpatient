@@ -5187,6 +5187,11 @@
     crmPending = { subject: subject, taskId: taskId || '' };
     var f = $('#contactForm'); if (!f) return;
     f.reset();
+    // A fresh opening is a NEW submission: drop any idempotency key left by an
+    // earlier attempt (e.g. a save that timed out but was written). Reusing it
+    // for another patient would make the server answer «replayed» and silently
+    // keep that patient's record unsaved. form.reset() does not clear dataset.
+    delete f.dataset.sid;
     $('#contactModalName').textContent = subject.name || '';
     $('#contactChannel').innerHTML = CA.CHANNELS.map(function (c) { return '<option value="' + c.id + '">' + c.he + '</option>'; }).join('');
     $('#contactOutcome').innerHTML = '<option value="">—</option>' + CA.OUTCOMES.map(function (o) { return '<option value="' + o.id + '">' + o.he + '</option>'; }).join('');
@@ -5203,6 +5208,7 @@
     crmPending = { subject: subject };
     var f = $('#taskForm'); if (!f) return;
     f.reset();
+    delete f.dataset.sid; // new opening = new submission key (see openContactModal)
     $('#taskModalName').textContent = subject.name || '';
     $('#taskKind').innerHTML = CA.TASK_KINDS.filter(function (k) { return !(k.money && isOpsScope()); }).map(function (k) { return '<option value="' + k.id + '">' + k.he + '</option>'; }).join('');
     $('#taskAssignee').innerHTML = crmAssigneeOptions(state.user);
