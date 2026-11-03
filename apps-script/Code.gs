@@ -4902,16 +4902,24 @@ function _finNext(c, due) {
   return _nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || _finAddMonth(due);
 }
 /* OP-BILL-01: NEW verified monthly receipt default, independent of the old
- * billing-cycle anchor. Existing journal operations still use _finNext. */
-function _finPaidDateCoverage(paymentDate) {
+ * billing-cycle anchor. Existing journal operations still use _finNext.
+ * B1: coverage starts on max(paymentDate, cycleDate) — an early payment is an
+ * advance from the due cycle, a late one covers a month from the actual
+ * payment — so the next collection always lands in a LATER month key than the
+ * cycle it settled. EXACT MIRROR of paymentDateCoverage() in
+ * public/credits-ledger.js (parity-tested). An invalid/blank cycleDate falls
+ * back to the payment date. */
+function _finPaidDateCoverage(paymentDate, cycleDate) {
   var iso = _coverageDateISO(paymentDate);
   if (!iso || String(paymentDate) !== iso) return null;
-  var next = _finAddMonth(iso), p = next.split('-').map(Number);
+  var cycle = _coverageDateISO(cycleDate);
+  var start = (cycle && String(cycleDate) === cycle && cycle > iso) ? cycle : iso;
+  var next = _finAddMonth(start), p = next.split('-').map(Number);
   if (!next || p.length !== 3) return null;
   var prior = new Date(p[0], p[1] - 1, p[2] - 1);
   var end = prior.getFullYear() + '-' + ('0' + (prior.getMonth() + 1)).slice(-2) +
     '-' + ('0' + prior.getDate()).slice(-2);
-  return { start: iso, end: end, next: next };
+  return { start: start, end: end, next: next };
 }
 function _finIntent(payload) {
   var p = payload.payment || {}, patch = payload.patch || {}, out = {};
@@ -4932,13 +4940,16 @@ function _finIntentError(intent, c, stored) {
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.
-  var paidWindow = _finPaidDateCoverage(p.paymentDate);
+  // B1: the window starts on max(paymentDate, cycleDate) — see _finPaidDateCoverage.
+  var paidWindow = _finPaidDateCoverage(p.paymentDate, intent.cycleDate);
   var newPolicy = paidWindow &&
       p.coverageStart === paidWindow.start && p.coverageEnd === paidWindow.end &&
       patch.nextBillingDate === paidWindow.next;
   var legacyReplay = !!stored && patch.nextBillingDate === _finNext(c, intent.cycleDate);
   if (!newPolicy && !legacyReplay) return 'renewal_period_changed';
-  if (!stored && (!paidWindow || paidWindow.start > _todayISODate())) return 'invalid_renewal_payment';
+  // The PAYMENT may not be dated in the future; the window itself may start
+  // later than today when an early payment advances from its due cycle.
+  if (!stored && (!paidWindow || p.paymentDate > _todayISODate())) return 'invalid_renewal_payment';
   if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
       p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
       Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||

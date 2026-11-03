@@ -199,7 +199,8 @@ test('unmarking after a reload (nothing remembered) lands the anchor strictly be
 test('app.js wiring: setCurrentMonthPaid advances, remembers, and reloads before persisting', () => {
   const fn = fnSource('setCurrentMonthPaid');
   // the advance mirrors monthPaidClientPatch above
-  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate\)/);
+  // B1: the window is cycle-aware (max(paid, due)).
+  assert.match(fn, /CL\.paymentDateCoverage\(updated\.paymentDate, dueDateISO\)/);
   assert.match(fn, /dueDateISO < todayIso/);
   // the mark stamps today, unless a legacy row already carries the real paid date
   assert.match(fn, /paymentDate: \(!rowNeedsWrite && base\.paymentDate\) \|\| today\(\)/);

@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-BILL-01 review fix B1: coverage starts on max(paymentDate, cycleDate) (draft, 2026-11-03)
+- An ordinary new monthly receipt paid BEFORE its due cycle is an advance from the due date (due 1 Nov, paid 28 Oct → 1 Nov–30 Nov, next 1 Dec); paid on/after it covers one month from the actual payment (due 1 Nov, paid 10 Nov → 10 Nov–9 Dec, next 10 Dec). Paid 25 Oct on a 25 Oct cycle → through 24 Nov, next 25 Nov (unchanged).
+- Why: the pure paid-date rule put an early payment's next collection in the SAME month key as the settled cycle, so the following renewal was refused forever (`pay::<id>::base::<YYYY-MM>` already existed) and the chip refused it as already paid.
+- `CL.paymentDateCoverage(paymentDate, cycleDate)` / `_finPaidDateCoverage(paymentDate, cycleDate)` are exact mirrors (parity-tested incl. month-end/leap clamps). Applied in the renewal modal, the quick chip, עריכה, intake and activation; `withDefaultCoverage` uses the row's own dueDate. The card's paid-through review projects the same window, so a legacy early payment stamped with its due window now reads as confirmed instead of review.
+- Historical rows are not rewritten; stored journal intents replay unchanged. The shared renewal fixture (paid 25 Feb for the 28 Feb cycle) now expects 28 Feb–27 Mar / next 28 Mar. See `docs/OP-BILL-01-PAYMENT-DATE-POLICY.md`.
+
 ### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
 - Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
 - CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.

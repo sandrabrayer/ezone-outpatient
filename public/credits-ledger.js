@@ -314,16 +314,28 @@
    * where they are. */
   /* The policy for NEW, ordinary monthly receipts. This does not reinterpret
    * historical rows; callers must opt in explicitly at the new-write boundary.
-   * A coverage period is inclusive; the next collection is the following day. */
-  function paymentDateCoverage(value) {
+   * A coverage period is inclusive; the next collection is the following day.
+   *
+   * OP-BILL-01 B1: coverage starts on max(paymentDate, cycleDate). A payment
+   * made BEFORE its due cycle is an advance from the due date (due 1 Nov, paid
+   * 28 Oct -> 1 Nov–30 Nov, next 1 Dec); a payment on/after the due date covers
+   * one month from the actual payment (due 1 Nov, paid 10 Nov -> 10 Nov–9 Dec,
+   * next 10 Dec). Without this, an early payment's next collection lands in the
+   * SAME month key as the cycle it settled, and the following renewal is
+   * refused forever (pay::<id>::base::<YYYY-MM> already exists). `cycleDate`
+   * is optional: an invalid or blank cycle falls back to the payment date.
+   * EXACT MIRROR of _finPaidDateCoverage() in apps-script/Code.gs. */
+  function paymentDateCoverage(value, cycleDate) {
     var iso = coverageDateISO(value);
     // Canonical date only. A timestamp must not silently change calendar day
     // between browser and Apps Script source verification.
     if (typeof value !== 'string' || value !== iso) return null;
     var d = iso && localDateFromISO(iso);
     if (!d) return null;
-    var next = addMonthsClamped(d, 1);
-    return { start: iso, end: isoFromLocalDate(addDays(next, -1)),
+    var cycle = typeof cycleDate === 'string' && cycleDate === coverageDateISO(cycleDate) ? cycleDate : '';
+    var startIso = cycle && cycle > iso ? cycle : iso;
+    var next = addMonthsClamped(localDateFromISO(startIso), 1);
+    return { start: startIso, end: isoFromLocalDate(addDays(next, -1)),
       next: isoFromLocalDate(next) };
   }
 
@@ -337,7 +349,8 @@
       str(payment.status) === 'paid' && str(payment.billingType) === 'monthly' &&
       Number(payment.amountDue) > 0 &&
       Number(payment.amountPaid) >= Number(payment.amountDue);
-    var win = newPaid && paymentDateCoverage(payment.paymentDate);
+    // The row's own dueDate is its cycle: an early payment advances from it.
+    var win = newPaid && paymentDateCoverage(payment.paymentDate, coverageDateISO(payment.dueDate) || '');
     if (win) return assign({}, payment, {
       coverageStart: win.start, coverageEnd: win.end
     });
@@ -363,9 +376,11 @@
     function asWindow(start, end) {
       return start && end ? { start: isoFromLocalDate(start), end: isoFromLocalDate(end) } : null;
     }
-    function fromPaidDate(v) {
-      var d = localDateFromISO(coverageDateISO(v));
-      return d ? asWindow(d, addDays(addMonthsClamped(d, 1), -1)) : null;
+    // The ordinary-month window a receipt would get under the write policy:
+    // max(paymentDate, dueDate) + 1 calendar month - 1 day (B1 rule).
+    function fromPaidDate(v, due) {
+      var w = paymentDateCoverage(coverageDateISO(v) || '', coverageDateISO(due) || '');
+      return w ? { start: w.start, end: w.end } : null;
     }
     function nextDay(iso) {
       var d = localDateFromISO(iso);
@@ -380,7 +395,7 @@
         id.indexOf('::chg-') < 0 && (id.indexOf('pay::') === 0 || id.indexOf('payment::') === 0);
     }
     var items = payments.filter(isBase).map(function (p) {
-      var proposed = fromPaidDate(p.paymentDate);
+      var proposed = fromPaidDate(p.paymentDate, p.dueDate);
       var rec = recordedCoverage(p), inf = inferredCoverage(p);
       var chosen = rec || inf;
       var win = chosen ? asWindow(chosen.start, chosen.end) : null;

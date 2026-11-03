@@ -23,35 +23,55 @@ function paid(id, date, due, coverageStart = '', coverageEnd = '', extra = {}) {
 function inspect(c, rows, today = now) { return MODEL(c, rows, today); }
 const ui = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 
-test('A: 25 Oct single payment on Nov 1 legacy cycle is UNCERTAIN, with proposed collection Nov 25, not Jan 1', () => {
+// B1 rule (decided 2026-11-03): an ordinary receipt covers max(paymentDate, dueDate)
+// + 1 calendar month - 1 day. An EARLY payment is an advance from its due cycle;
+// a LATE payment covers a month from the actual payment date.
+test('A: 25 Oct payment for the Nov 1 cycle is an advance from Nov 1 (through Nov 30); a Jan 1 anchor is a date conflict, not Jan 1 coverage', () => {
   const p = paid('2026-11', '2026-10-25', '2026-11-01', '2026-11-01', '2026-11-30');
   const r = inspect(client('2027-01-01'), [p]);
   assert.equal(r.state, 'review');
-  assert.equal(r.reason, 'old_cycle_or_unverified_amount');
-  assert.equal(r.candidateEnd, '2026-11-24');
-  assert.equal(r.candidateNext, '2026-11-25');
+  assert.equal(r.reason, 'next_date_conflict');
+  assert.equal(r.confirmedEnd, '2026-11-30');
+  assert.equal(r.nextCollection, '2026-12-01');
   assert.equal(r.registeredNext, '2027-01-01');
   assert.equal(r.paidDate, '2026-10-25');
 });
 
-test('B: 15 Oct payment for old 23rd-day cycle is UNCERTAIN; proposed collection Nov 15', () => {
+test('A2: 25 Oct payment on its own 25 Oct cycle covers through Nov 24, next collection Nov 25 (Sandra\'s example)', () => {
+  const p = paid('2026-10', '2026-10-25', '2026-10-25', '2026-10-25', '2026-11-24');
+  const r = inspect(client('2026-11-25'), [p]);
+  assert.deepEqual(r, { state: 'confirmed', confirmedEnd: '2026-11-24', nextCollection: '2026-11-25',
+    registeredNext: '2026-11-25', paidDate: '2026-10-25' });
+});
+
+test('B: 15 Oct payment BEFORE the 23 Oct cycle is an advance from Oct 23; the legacy due-date window is confirmed', () => {
   const p = paid('2026-10', '2026-10-15', '2026-10-23', '2026-10-23', '2026-11-22');
   const r = inspect(client('2026-11-23'), [p]);
+  assert.equal(r.state, 'confirmed');
+  assert.equal(r.nextCollection, '2026-11-23');
+});
+
+test('B2: 10 Nov LATE payment for the 1 Nov cycle stamped with the old due window is UNCERTAIN; proposed collection Dec 10', () => {
+  const p = paid('2026-11', '2026-11-10', '2026-11-01', '2026-11-01', '2026-11-30');
+  const r = inspect(client('2026-12-01'), [p], '2026-11-12');
   assert.equal(r.state, 'review');
-  assert.equal(r.candidateNext, '2026-11-15');
+  assert.equal(r.reason, 'old_cycle_or_unverified_amount');
+  assert.equal(r.candidateEnd, '2026-12-09');
+  assert.equal(r.candidateNext, '2026-12-10');
 });
 
 test('Month-end proposal clamps Jan 31 to Feb 28 without timezone drift (non-leap year)', () => {
-  const row = paid('2026-02', '2026-01-31', '2026-02-01', '2026-02-01', '2026-02-28');
-  const r = inspect(client('2026-03-01'), [row], '2026-02-01');
+  // LATE payment (cycle Jan 15, paid Jan 31) stamped with the old Jan 15 window.
+  const row = paid('2026-01', '2026-01-31', '2026-01-15', '2026-01-15', '2026-02-14');
+  const r = inspect(client('2026-02-15'), [row], '2026-02-01');
   assert.equal(r.state, 'review');
   assert.equal(r.candidateEnd, '2026-02-27');
   assert.equal(r.candidateNext, '2026-02-28');
 });
 
 test('Month-end proposal clamps Jan 31 to Feb 29 in a leap year', () => {
-  const row = paid('2028-02', '2028-01-31', '2028-02-01', '2028-02-01', '2028-02-29');
-  const r = inspect(client('2028-03-01'), [row], '2028-02-01');
+  const row = paid('2028-01', '2028-01-31', '2028-01-15', '2028-01-15', '2028-02-14');
+  const r = inspect(client('2028-02-15'), [row], '2028-02-01');
   assert.equal(r.state, 'review');
   assert.equal(r.candidateEnd, '2028-02-28');
   assert.equal(r.candidateNext, '2028-02-29');

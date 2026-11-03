@@ -56,7 +56,7 @@ for (const state of ['prepared', 'acknowledged']) {
     const discovered = f.discover();
     assert.equal(discovered.ok, state === 'acknowledged',
       'pending new intent blocks an old-source rollback; acknowledged history remains readable');
-    if (state === 'acknowledged') assert.equal(discovered.cycleDate, '2026-03-25');
+    if (state === 'acknowledged') assert.equal(discovered.cycleDate, '2026-03-28');
     assert.equal(data(f), before);
   });
 }

@@ -37,9 +37,14 @@ test('opt-in stamps a NEW verified monthly receipt, but preserves historical due
   const source = CL.withDefaultCoverage(row);
   assert.equal(source.coverageStart, '2026-10-23');
   assert.equal(source.coverageEnd, '2026-11-22');
+  // B1: paid 15 Oct BEFORE the 23 Oct cycle -> advance from the due date.
   const fresh = CL.withDefaultCoverage(row, { newPaidMonthly: true });
-  assert.equal(fresh.coverageStart, '2026-10-15');
-  assert.equal(fresh.coverageEnd, '2026-11-14');
+  assert.equal(fresh.coverageStart, '2026-10-23');
+  assert.equal(fresh.coverageEnd, '2026-11-22');
+  // Paid 30 Oct AFTER the 23 Oct cycle -> one month from the actual payment.
+  const late = CL.withDefaultCoverage({ ...row, paymentDate: '2026-10-30' }, { newPaidMonthly: true });
+  assert.equal(late.coverageStart, '2026-10-30');
+  assert.equal(late.coverageEnd, '2026-11-29');
   assert.equal(row.coverageStart, undefined, 'no mutation of source object');
   assert.equal(CL.withDefaultCoverage({ ...row, status:'partial', amountPaid: 100 },
     { newPaidMonthly:true }).coverageStart, '2026-10-23');
@@ -79,9 +84,9 @@ test('actual source accepts a verified new renewal exactly once, without a dupli
   assert.equal(f.reserve().operation.state, 'prepared');
   assert.equal(f.apply().operation.state, 'done');
   assert.equal(f.apply().operation.state, 'done');
-  assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-03-25');
+  assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-03-28');
   assert.equal(f.sb.rows('Payments').length, 1);
-  assert.equal(f.sb.rows('Payments')[0].coverageEnd, '2026-03-24');
+  assert.equal(f.sb.rows('Payments')[0].coverageEnd, '2026-03-27');
 });
 
 test('actual source rejects future-paid default and amount mismatch with no journal write', () => {
