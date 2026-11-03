@@ -94,41 +94,75 @@
 
   function say(msg, isErr) { try { S.notify(msg, !!isErr); } catch (_) {} }
 
-  async function call(path, method, body) {
+  // One fetch; a 401 that is NOT the catalog privilege means the base session is gone.
+  async function rawCall(path, method, body) {
     var r = await fetch(path, { method: method || 'GET', cache: 'no-store', credentials: 'same-origin',
       headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
-    if (r.status === 401) {
-      var j401 = null; try { j401 = await r.json(); } catch (_) {}
-      if (j401 && j401.error === 'admin_required') { S.phase = 'loading'; S.catalog = null; S.requests = null; boot(); throw new Error('admin_required'); }
-      S.onUnauthorized();
-      throw new Error('unauthorized');
-    }
     var j = null; try { j = await r.json(); } catch (_) {}
+    if (r.status === 401 && !(j && j.error === 'admin_required')) { S.onUnauthorized(); throw new Error('unauthorized'); }
     if (!j) throw new Error('upstream_unavailable');
+    return j;
+  }
+  /* The catalog privilege is a 15-minute server-side session. SINGLE-FLIGHT: however many callers ask at once
+   * (two mounts during the first load, a click after the privilege expired), ONE status/login round-trip runs.
+   * Two parallel logins would revoke each other (the server keeps one admin session per base session), every
+   * following call would answer 401 and the screen would be redrawn under the user's hands (the 2026-11 "buttons
+   * do nothing" report). Resolves true when the privilege is live. */
+  var adminFlight = null;
+  function ensureAdmin() {
+    if (adminFlight) return adminFlight;
+    adminFlight = (async function () {
+      var st = await rawCall('/api/catalog-admin/status');
+      S.configured = !!st.configured; S.eligible = !!st.eligible;
+      if (st.admin) return true;
+      // Vered's signed-in name is the authorization: no second code. The server decides; this only asks.
+      if (!st.configured || !st.eligible) return false;
+      var r = await rawCall('/api/catalog-admin/login', 'POST', {});
+      return !!(r && r.ok);
+    })().catch(function (e) { if (e.message === 'unauthorized') throw e; return false; })
+      .finally(function () { adminFlight = null; });
+    return adminFlight;
+  }
+  /* A privileged call. When the privilege has lapsed (admin_required) it is renewed ONCE and the same call is
+   * retried, so the click that found an expired privilege still does its work instead of vanishing. */
+  async function call(path, method, body, retried) {
+    var j = await rawCall(path, method, body);
+    if (j && j.error === 'admin_required' && !j.ok) {
+      if (!retried && (await ensureAdmin())) return call(path, method, body, true);
+      S.phase = 'gate'; S.catalog = null; S.requests = null; draw();
+      throw new Error('admin_required');
+    }
     return j;
   }
   function rpc(op, fields) { return call('/api/catalog-admin/rpc', 'POST', Object.assign({ op: op }, fields || {})); }
 
-  async function boot() {
-    try {
-      var st = await call('/api/catalog-admin/status');
-      S.configured = !!st.configured; S.eligible = !!st.eligible;
-      S.phase = st.admin ? 'admin' : 'gate';
-      // Vered's signed-in name is the authorization: no second code. The server decides; this only asks.
-      if (!st.admin && st.configured && st.eligible) {
-        var r = await call('/api/catalog-admin/login', 'POST', {});
-        if (r && r.ok) S.phase = 'admin';
-      }
-    } catch (_) { S.phase = 'gate'; }
-    if (S.phase === 'admin') await loadAll();
-    draw();
+  // Single-flight too: a second mount while the first load is running joins it instead of starting another.
+  var bootFlight = null;
+  function boot() {
+    if (bootFlight) return bootFlight;
+    bootFlight = (async function () {
+      var ok = false;
+      try { ok = await ensureAdmin(); } catch (_) { ok = false; }
+      S.phase = ok ? 'admin' : 'gate';
+      if (ok) await loadAll();
+      draw();
+    })().finally(function () { bootFlight = null; });
+    return bootFlight;
   }
+  /* Loads catalog + requests. A failure is REPORTED (S.loadError, drawn with a retry button) — never shown as an
+   * empty catalog / "no requests", which looked like dead buttons. */
   async function loadAll() {
-    var res = await Promise.all([rpc('catalog'), rpc('list')]).catch(function () { return null; });
-    if (!res) return;
-    S.catalog = res[0].ok ? res[0] : null;
-    S.requests = res[1].ok ? res[1] : null;
-    S.onPending(S.requests ? S.requests.counts.pending : 0);
+    S.loadError = '';
+    try {
+      var res = await Promise.all([rpc('catalog'), rpc('list')]);
+      S.catalog = res[0] && res[0].ok ? res[0] : null;
+      S.requests = res[1] && res[1].ok ? res[1] : null;
+      if (!S.catalog || !S.requests) S.loadError = errorText(((S.catalog ? res[1] : res[0]) || {}).error || 'upstream_unavailable');
+      S.onPending(S.requests ? S.requests.counts.pending : 0);
+    } catch (e) {
+      if (e.message === 'unauthorized' || e.message === 'admin_required') return;
+      S.catalog = null; S.requests = null; S.loadError = errorText(e.message);
+    }
   }
 
   // ---- views -----------------------------------------------------------------
@@ -155,16 +189,20 @@
     var bar = h('div', { class: 'pkg-tabs' }, tabs.map(function (t) {
       return h('button', { type: 'button', class: 'btn' + (S.tab === t[0] ? ' btn-primary' : ''), text: t[1], onclick: function () { S.tab = t[0]; draw(); } });
     }).concat([
-      h('button', { type: 'button', class: 'btn', text: 'רענון', onclick: async function () { await loadAll(); draw(); } }),
+      h('button', { type: 'button', class: 'btn', text: 'רענון', onclick: async function () { S.loading = true; draw(); await loadAll(); S.loading = false; draw(); } }),
       h('button', { type: 'button', class: 'btn', text: 'יציאה מתמחור', onclick: lock })
     ]));
-    var body = S.tab === 'requests' ? requestsView() : S.tab === 'calc' ? calcView() : catalogView();
-    return h('div', { class: 'pkg-admin' }, [bar, S.error ? h('p', { class: 'pkg-msg', role: 'alert', text: S.error }) : null, body]);
+    var body = S.loading ? h('p', { class: 'muted', text: 'טוען…' }) : S.tab === 'requests' ? requestsView() : S.tab === 'calc' ? calcView() : catalogView();
+    var loadErr = S.loadError ? h('div', { class: 'pkg-msg pkg-load-error', role: 'alert' }, [
+      'הנתונים לא נטענו: ' + S.loadError + ' ',
+      h('button', { type: 'button', class: 'btn', text: 'נסי שוב', onclick: async function () { S.loading = true; draw(); await loadAll(); S.loading = false; draw(); } })
+    ]) : null;
+    return h('div', { class: 'pkg-admin' }, [bar, loadErr, S.error ? h('p', { class: 'pkg-msg', role: 'alert', text: S.error }) : null, body]);
   }
 
   async function lock() {
     try { await call('/api/catalog-admin/logout', 'POST', {}); } catch (_) {}
-    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; ops = {}; draw();
+    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; S.loadError = ''; ops = {}; draw();
   }
 
   function pkgName(key) {
@@ -174,7 +212,8 @@
 
   // -- requests --
   function requestsView() {
-    var items = S.requests ? S.requests.items : [];
+    if (!S.requests) return h('p', { class: 'muted', text: 'רשימת הבקשות לא נטענה.' });
+    var items = S.requests.items;
     if (!items.length) return h('p', { class: 'muted', text: 'אין בקשות תמחור.' });
     return h('div', { class: 'pkg-list' }, items.map(requestCard));
   }
@@ -215,7 +254,7 @@
       if (res.ok) { forgetOp(sig); say(okMsg || 'נשמר'); await loadAll(); draw(); return; }
       if (res.error === 'revision_conflict') { forgetOp(sig); await loadAll(); }
       S.error = errorText(res.error); say(S.error, true); draw();
-    } catch (e) { if (e.message !== 'admin_required') { S.error = errorText(e.message); say(S.error, true); draw(); } }
+    } catch (e) { if (e.message !== 'unauthorized') { S.error = errorText(e.message); say(S.error, true); draw(); } }
   }
 
   // Range items (Solo): Vered picks one of three fixed tiers — minimum, midpoint, maximum (whole agorot, midpoint rounded down).
@@ -278,7 +317,8 @@
     }));
   }
   function calcView() {
-    var items = S.catalog ? S.catalog.items.filter(function (i) { return i.active; }) : [];
+    if (!S.catalog) return h('p', { class: 'muted', text: 'הקטלוג לא נטען.' });
+    var items = S.catalog.items.filter(function (i) { return i.active; });
     if (!items.length) return h('p', { class: 'muted', text: 'הקטלוג ריק. עברי ללשונית קטלוג.' });
     var C = S.calc = S.calc || { key: '', months: '', tier: '', out: null };
     var box = h('div', { class: 'pkg-calc card' });
@@ -387,11 +427,15 @@
 
   // ---- public API --------------------------------------------------------------
   function mount(rootEl, opts) {
-    S.root = rootEl; opts = opts || {};
+    var sameRoot = S.root === rootEl; S.root = rootEl; opts = opts || {};
     S.targets = opts.targets || S.targets; S.notify = opts.notify || S.notify; S.onPending = opts.onPending || S.onPending; S.onUnauthorized = opts.onUnauthorized || S.onUnauthorized;
-    if (S.phase === 'loading' || S.phase === 'gate') boot(); else draw();
+    if (S.phase === 'loading' || S.phase === 'gate') { boot(); return; }
+    // Already showing the admin screen in this very root: keep what the user has open (an edit row, a calculator
+    // choice) instead of wiping it on every unrelated re-render of the host app. «רענון» redraws on demand.
+    if (sameRoot && rootEl.firstChild && rootEl.querySelector('.pkg-admin')) return;
+    draw();
   }
-  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; ops = {}; if (S.root) draw(); }
+  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; ops = {}; if (S.root) draw(); }
 
   return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, REQUESTER: REQUESTER, ERRORS: ERRORS };

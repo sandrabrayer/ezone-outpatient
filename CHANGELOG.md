@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «תמחור חבילות» buttons opened nothing (fix, 2026-11-03)
+- `public/package-pricing.js`: single-flight catalog login/boot (two mounts during the load ran two logins that revoked each other → `401 admin_required` → redraw loop); an expired 15-minute privilege is renewed once and the clicked action retried instead of dropped; a failed load shows «הנתונים לא נטענו» + «נסי שוב» instead of an empty catalog; an unrelated host re-render no longer wipes the open screen. Browser regression `test/package-pricing-buttons-browser.test.js` (1280px + 360px). See `CHANGELOG-package-pricing-buttons-fix.md`.
+
 ### OP-BILL-01 review fix B1: coverage starts on max(paymentDate, cycleDate) (draft, 2026-11-03)
 - An ordinary new monthly receipt paid BEFORE its due cycle is an advance from the due date (due 1 Nov, paid 28 Oct → 1 Nov–30 Nov, next 1 Dec); paid on/after it covers one month from the actual payment (due 1 Nov, paid 10 Nov → 10 Nov–9 Dec, next 10 Dec). Paid 25 Oct on a 25 Oct cycle → through 24 Nov, next 25 Nov (unchanged).
 - Why: the pure paid-date rule put an early payment's next collection in the SAME month key as the settled cycle, so the following renewal was refused forever (`pay::<id>::base::<YYYY-MM>` already existed) and the chip refused it as already paid.

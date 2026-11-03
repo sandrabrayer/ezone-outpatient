@@ -105,8 +105,11 @@ test('range items (Solo): Vered chooses min / midpoint / max from a fixed list; 
 
 test('no second code: the pricing tab has no code field and auto-opens only when the SERVER says the signed-in name is eligible', () => {
   assert.doesNotMatch(MODULE, /type: 'password'|pkgPin|קוד תמחור|incorrect_pin/);
-  assert.match(MODULE, /st\.configured && st\.eligible/);
-  assert.match(MODULE, /call\('\/api\/catalog-admin\/login', 'POST', \{\}\)/, 'login carries no secret from the browser');
+  assert.match(MODULE, /!st\.configured \|\| !st\.eligible\) return false/);
+  assert.match(MODULE, /rawCall\('\/api\/catalog-admin\/login', 'POST', \{\}\)/, 'login carries no secret from the browser');
+  // single-flight: however many mounts / expired clicks ask at once, one status/login round-trip (2026-11-03 fix)
+  assert.match(MODULE, /if \(adminFlight\) return adminFlight;/);
+  assert.match(MODULE, /if \(bootFlight\) return bootFlight;/);
 });
 
 test('calculator: every option is visible as a button (packages by family, months, Solo tiers) — no dropdown, quote on every choice, state dropped on reset', () => {
