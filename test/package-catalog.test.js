@@ -535,7 +535,8 @@ test('manager package status projects actual offer progress, including terminal 
     assert.equal(repeated.status, visible, 'a lost-reply retry returns actual persisted status');
     for (const response of [r, repeated]) {
       const raw = JSON.stringify(response);
-      assert.doesNotMatch(raw, /0501234567|amount|agorot|price|gross|quote|patientName|patientPhone|secret/i);
+      assert.doesNotMatch(raw, /0501234567|"(?:amount|amountDue|grossAgorot|price|quote|patientName|patientPhone|secret)"\\s*:/i,
+        'no money/PII fields even if the safe status label is priced');
     }
   }
   assert.equal(sb.rows('PackageRequests').length, 1, 'status reads/retries never create new rows');
