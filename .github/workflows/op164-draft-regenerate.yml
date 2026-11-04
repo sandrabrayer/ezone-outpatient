@@ -1,0 +1,37 @@
+# Temporary branch-only validation job; never deploys or accesses production data.
+name: OP164 draft isolated drill regeneration
+on:
+  push:
+    branches:
+      - codex/out-bill01-advance-duplicate-guard-20261104
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: github.repository == 'sandrabrayer/ezone-outpatient' && github.ref == 'refs/heads/codex/out-bill01-advance-duplicate-guard-20261104'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate exact-source standalone synthetic Google drill
+        run: |
+          npm ci --ignore-scripts
+          node test-support/build-google-operational-drill.cjs
+      - name: Commit ONLY the regenerated disabled synthetic candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test-support/google-operational-drill-candidate.gs
+          if git diff --cached --quiet; then
+            echo "Candidate already current"
+            exit 0
+          fi
+          git commit -m "test(OP164): refresh disabled native drill for exact new Code.gs"
+          git push origin HEAD:refs/heads/codex/out-bill01-advance-duplicate-guard-20261104
