@@ -281,7 +281,11 @@ checkout ever drifts back.
 - `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
   (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
   «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`
-  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`).
+  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`). 2026-11-04: `deleteRequest` /
+  `resetRequest` ops (ורד only — 403 `offer_delete_vered_only` for anyone else, re-checked at the source), a
+  third target type `roster` (Dashboard admitted patient, stable ref), and soft-deleted offers filtered from the
+  feed; clients carry an append-only `billingMode` (`package` | `per_session`, a money key) —
+  `CHANGELOG-crm-followup-2.md`.
 - CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
   `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
   the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money

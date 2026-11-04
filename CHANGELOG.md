@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM follow-up 2 — Sandra's production review (2026-11-04)
+- **Billing mode per client:** `billingMode` ∈ {`package`, `per_session`} — append-only `Clients` column 39 (mirrored on the tombstone; blank = package; no migration). «אופן חיוב» toggle in עריכה / intake; a `per_session` client has no overdue banner, no renewal / collection row, never sits in «תשלומים באיחור», is excluded from the money KPIs and the billing tab's base due list; the card shows «משלם/ת לפי טיפול». One-click suggestion chip «סמן כתשלום לפי טיפול?» for פרטני-only clients without a package. Money key (ops sessions never change it).
+- **«💰 הצעת מחיר» on the client card** (ורד): the same new-offer form, target locked, inside the card; the quote shows on the card at once (`PackagePricing.mountOfferForm`).
+- **Delete / reset a quote** (ורד only, 403 `offer_delete_vered_only` at Node + `vered_only` at the source): soft delete (`deleted`, hidden everywhere, row + trail kept) and reset to an empty draft, both with an in-app confirmation and an `adjustLog` entry.
+- **Target picker:** one search field, three sections — «מטופלים», «מאושפזים» (Dashboard roster, stable ref `roster:<id:…|phone:…>`), «לידים פתוחים»; a roster / lead pick links the quote so it shows on the lead card and in «מסלול המשך».
+- **WhatsApp fix:** «הכן הודעת WhatsApp» did nothing (panel below the fold, recipient select with a disabled default, `window.open`); now two synchronous anchors «שליחה לאורן» / «שליחה למטופל» (`wa.me`, `target=_blank rel=noopener`), inline hint to הגדרות when Oren's number is missing; status still moves only via «סמן כנשלחה», which stores the recipient kind + last four digits only.
+- SW `v26 → v27`. See `CHANGELOG-crm-followup-2.md`.
+
 ### OUT → Therapists request status synchronization (2026-11-04; DRAFT)
 - Manager-originated package requests now return their actual price-free Outpatient CRM milestones to the requesting coordinator: `pending`/`priced` legacy values retained, plus `sent`, `awaiting_decision`, `approved`, `rejected`, `expired`. Before this fix the existing source returned **pending** for every state except literal **priced**, causing an accepted or rejected offer to appear «ממתין לתמחור» in Therapists.
 - No prices, patient data, financial records or source schema are exposed/changed. Exact requester scope and same-ID retry behavior retained; source fixture tests cover all milestones. Requires coordinated Therapists status-label support before a production rollout. See `CHANGELOG-manager-offer-sync-20261104.md`.
