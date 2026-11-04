@@ -35,10 +35,11 @@ test('CONTINUATION_SHEET is named מסלול המשך', () => {
   assert.match(GS, /var CONTINUATION_SHEET = 'מסלול המשך';/);
 });
 
-test('CONTINUATION_HEADERS has the exact order', () => {
+test('CONTINUATION_HEADERS has the exact order (append-only: the five CRM columns of 2026-11-03 come last)', () => {
   assert.deepEqual(headers('CONTINUATION_HEADERS'), [
     'key', 'name', 'house', 'entryDate',
-    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt',
+    'crmStatus', 'assignee', 'offerRequestId', 'patientRef', 'phone'
   ]);
 });
 

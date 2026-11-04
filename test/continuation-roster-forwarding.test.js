@@ -40,21 +40,27 @@ test('requireContinuationConfig fails closed with a 500 when either var is missi
   assert.ok(/ok: false/.test(body), 'does not fail closed with ok:false');
 });
 
+// The upstream call moved into fetchRoster() (shared with POST /api/continuation-sync, 2026-11-03);
+// the route itself still fails closed on config first and surfaces upstream failures as 502.
 test('the roster route guards on config before doing anything', () => {
   const m = SRV.match(/app\.get\('\/api\/continuation-roster',[\s\S]*?\n\}\);/);
   assert.ok(m, '/api/continuation-roster route missing');
   const route = m[0];
   assert.ok(/if \(!requireContinuationConfig\(res\)\) return;/.test(route),
     'route does not fail closed via requireContinuationConfig first');
-  assert.ok(/action=getAdmittedRoster/.test(route), 'route does not call getAdmittedRoster');
-  assert.ok(/secret=' \+ encodeURIComponent\(OCCUPANCY_SECRET\)/.test(route),
-    'route does not forward the secret');
+  assert.ok(/fetchRoster\(forceFresh\)/.test(route), 'route does not go through fetchRoster');
+  const fr = SRV.match(/async function fetchRoster\(forceFresh\) \{[\s\S]*?\n\}/);
+  assert.ok(fr, 'fetchRoster missing');
+  assert.ok(/action=getAdmittedRoster/.test(fr[0]), 'fetchRoster does not call getAdmittedRoster');
+  assert.ok(/secret=' \+ encodeURIComponent\(OCCUPANCY_SECRET\)/.test(fr[0]),
+    'fetchRoster does not forward the secret');
 });
 
 test('non-JSON upstream surfaces as a 502 with a clear roster error', () => {
   const m = SRV.match(/app\.get\('\/api\/continuation-roster',[\s\S]*?\n\}\);/);
   const route = m[0];
-  assert.ok(/Non-JSON from dashboard roster: /.test(route), 'missing non-JSON error text');
+  const fr = SRV.match(/async function fetchRoster\(forceFresh\) \{[\s\S]*?\n\}/)[0];
+  assert.ok(/Non-JSON from dashboard roster: /.test(fr), 'missing non-JSON error text');
   assert.ok(/status\(502\)/.test(route), 'upstream failure is not a 502');
 });
 

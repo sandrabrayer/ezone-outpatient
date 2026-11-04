@@ -77,6 +77,21 @@
     var nameOf = {};
     (leads || []).forEach(function (l) { if (l && l.id) nameOf['lead:' + s(l.id)] = s(l.name); });
     (clients || []).forEach(function (c) { if (c && c.id) nameOf['client:' + s(c.id)] = s(c.name); });
+    // continuation patients (מסלול המשך): their milestone tasks are filed under the stable subject
+    // 'cont:<ref>' — the name comes from the roster / workflow row the host hands in, never from the id
+    var contNames = i.continuationNames && typeof i.continuationNames === 'object' ? i.continuationNames : {};
+    Object.keys(contNames).forEach(function (k) { if (k) nameOf['client:' + k] = s(contNames[k]); });
+    (cont || []).forEach(function (r) { if (r && s(r.patientRef) && !nameOf['client:cont:' + s(r.patientRef)]) nameOf['client:cont:' + s(r.patientRef)] = s(r.name); });
+    // last logged contact per subject (newest first) — shown on every row so «מה היה» sits next to «מה עכשיו»
+    var lastContactOf = {};
+    (activity || []).slice().sort(function (a, b) { return s(b.occurredAt) < s(a.occurredAt) ? -1 : s(b.occurredAt) > s(a.occurredAt) ? 1 : 0; }).forEach(function (e) {
+      if (!e || e.kind !== 'contact_logged') return;
+      var d = {}; try { d = e.detailsJson ? JSON.parse(e.detailsJson) : {}; } catch (_) { d = {}; }
+      ['lead:' + s(e.leadId), 'client:' + s(e.clientId)].forEach(function (k) {
+        if (k === 'lead:' || k === 'client:' || lastContactOf[k]) return;
+        lastContactOf[k] = { when: isoDay(e.occurredAt), who: s(e.actorName), outcome: s(d.outcome), summary: s(e.summary) };
+      });
+    });
     var covered = {}; // subjectKey -> { kind: true }
     openTasks.forEach(function (t) {
       ['lead:' + s(t.leadId), 'client:' + s(t.clientId)].forEach(function (k) {
@@ -98,10 +113,11 @@
       var st = !d ? 'undated' : d < today ? 'late' : d === today ? 'today' : 'wait';
       var subjectKind = s(t.clientId) ? 'client' : 'lead';
       var subjectId = s(t.clientId) || s(t.leadId);
-      rowsBy.tasks.push({ id: 'task:' + s(t.id), kind: 'task', taskId: s(t.id), taskKind: s(t.kind), subjectKind: subjectKind, subjectId: subjectId,
-        leadId: s(t.leadId), clientId: s(t.clientId), name: nameOf[subjectKind + ':' + subjectId] || s(t.subjectName) || '—', sub: TASK_KIND_HE[s(t.kind)] || s(t.kind),
+      var isCont = subjectKind === 'client' && subjectId.indexOf('cont:') === 0; // a continuation (roster) patient
+      rowsBy.tasks.push({ id: 'task:' + s(t.id), kind: 'task', taskId: s(t.id), taskKind: s(t.kind), subjectKind: isCont ? 'continuation' : subjectKind, subjectId: subjectId,
+        leadId: s(t.leadId), clientId: s(t.clientId), name: nameOf[subjectKind + ':' + subjectId] || s(t.subjectName) || '—', sub: (isCont ? 'מסלול המשך · ' : '') + (TASK_KIND_HE[s(t.kind)] || s(t.kind)),
         owner: s(t.assignee), action: s(t.title), why: s(t.reason) || (t.status === 'deferred' ? 'נדחתה מ-' + fmtDate(t.deferredFrom) : ''),
-        when: d, time: tm, state: st, priority: st === 'late' ? 'late' : (st === 'today' && tm ? 'binding' : st), open: subjectKind, money: isMoneyTask(t) });
+        when: d, time: tm, state: st, priority: st === 'late' ? 'late' : (st === 'today' && tm ? 'binding' : st), open: isCont ? 'continuation' : subjectKind, money: isMoneyTask(t) });
     });
 
     (leads || []).forEach(function (l) {
@@ -149,6 +165,35 @@
       if (md && !s(v.outcome)) rowsBy.continuity.push({ id: 'cont:' + s(v.key), kind: 'continuation_meeting', subjectKind: 'continuation', subjectId: s(v.key), name: s(v.name) || '—', sub: s(v.house), owner: '', action: md < today ? 'לעדכן תוצאת פגישת המשך' : 'פגישת המשך טיפול', why: (md < today ? 'הפגישה היתה ב-' : 'ב-') + fmtDate(md), when: md, time: '', state: md < today ? 'late' : (md === today ? 'today' : 'wait'), priority: md < today ? 'exception' : (md === today ? 'today' : 'wait'), open: 'continuation' });
     });
 
+    // package offers (price-free summaries): a SENT offer with a follow-up date is work when that date arrives
+    var offers = Array.isArray(i.offers) ? i.offers : null;
+    (offers || []).forEach(function (o) {
+      if (!o || !s(o.id)) return;
+      var st = s(o.status), fu = isoDay(o.followUpDate);
+      if (['sent', 'awaiting_decision', 'ready_to_send'].indexOf(st) < 0) return;
+      var subjectKind = s(o.attachedType) === 'client' ? 'client' : s(o.attachedType) === 'lead' ? 'lead' : 'offer';
+      var subjectId = s(o.attachedId) || s(o.id);
+      var name = nameOf[subjectKind + ':' + subjectId] || s(o.patientName) || '—';
+      var action = st === 'ready_to_send' ? 'הצעת מחיר מוכנה — לשלוח ללקוח' : 'מעקב אחרי הצעת מחיר שנשלחה';
+      var why = (st === 'sent' && o.sentAt ? 'נשלחה ב-' + fmtDate(o.sentAt) : st === 'awaiting_decision' ? 'ממתינה להחלטת הלקוח' : 'תומחרה ואושרה לשליחה') + (o.validUntil ? ' · בתוקף עד ' + fmtDate(o.validUntil) : '');
+      var state = fu ? stateOf(fu, today) : 'undated';
+      rowsBy.continuity.push({ id: 'offer:' + s(o.id), kind: 'offer_follow_up', offerId: s(o.id), subjectKind: subjectKind, subjectId: subjectId, leadId: subjectKind === 'lead' ? subjectId : '', clientId: subjectKind === 'client' ? subjectId : '',
+        name: name, sub: 'הצעת מחיר', owner: s(o.assignee), action: action, why: why, when: fu, time: '', state: state, priority: state, open: 'offer', money: false });
+    });
+    // one row per (subject, reason): the same patient with the same kind of work appears once
+    Object.keys(rowsBy).forEach(function (k) {
+      var seen = {};
+      rowsBy[k] = rowsBy[k].filter(function (r) {
+        // a persisted task is distinct work by itself (three milestones of one patient are three rows);
+        // derived rows collapse per subject + reason (coveredBy already drops a derived row a task owns)
+        var sig = r.kind === 'task' ? 'task:' + r.taskId : r.subjectKind + ':' + r.subjectId + ':' + r.kind;
+        if (seen[sig]) return false; seen[sig] = true; return true;
+      });
+      rowsBy[k].forEach(function (r) {
+        var lc = lastContactOf[(r.subjectKind === 'continuation' ? 'client' : r.subjectKind) + ':' + r.subjectId] || (r.leadId ? lastContactOf['lead:' + r.leadId] : null) || (r.clientId ? lastContactOf['client:' + r.clientId] : null) || null;
+        r.lastContact = lc;
+      });
+    });
     Object.keys(rowsBy).forEach(function (k) { sortRows(rowsBy[k]); });
     var all = [].concat(rowsBy.tasks, rowsBy.leads, rowsBy.plans, rowsBy.renewals, rowsBy.approvals, rowsBy.continuity);
     var dueNow = function (r) { return r.state === 'late' || r.state === 'today'; };
@@ -175,7 +220,7 @@
       { id: 'intros', label: 'שיחות היכרות היום', rows: take(function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) },
       { id: 'undecided', label: 'היכרויות שעברו ללא החלטה', rows: take(function (r) { return r.kind === 'intro_passed'; }) },
       { id: 'first', label: 'פניות ללא קשר ראשון', rows: take(function (r) { return r.kind === 'lead_new' || r.kind === 'intro_unscheduled'; }) },
-      { id: 'starts', label: 'תחילת טיפול והמשך טיפול', rows: take(function (r) { return r.kind === 'plan_to_activate' || r.kind === 'continuation_meeting' || r.kind === 'lead_waiting'; }) },
+      { id: 'starts', label: 'תחילת טיפול והמשך טיפול', rows: take(function (r) { return r.kind === 'plan_to_activate' || r.kind === 'continuation_meeting' || r.kind === 'lead_waiting' || (r.kind === 'offer_follow_up' && (r.state === 'late' || r.state === 'today')); }) },
       { id: 'approvals', label: 'אישורים וחריגים', rows: take(function (r) { return r.kind === 'stop_flag' || r.kind === 'extra_request'; }) }
     ];
     if (money) sections.push({ id: 'money', label: 'חידושים וגבייה', rows: take(function (r) { return !!r.money || r.kind === 'renewal_overdue' || r.kind === 'renewal_due'; }) });
@@ -184,6 +229,12 @@
     return { today: today, money: money, cards: cards, rowsBy: rowsBy, urgent: urgent, sections: sections, domains: DOMAINS.filter(function (d) { return !d.money || money; }), total: all.length };
   }
 
+  var CONTACT_OUTCOME_HE = { spoke_follow_up: 'שיחה — נדרש המשך', no_answer: 'אין מענה', call_back_later: 'לחזור במועד', awaiting_decision: 'ממתינים להחלטה', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע', bad_contact_details: 'פרטי קשר שגויים', stop_contact: 'ביקש/ה הפסקת פניות' };
+  function lastContactText(r) {
+    var lc = r && r.lastContact;
+    if (!lc) return '';
+    return fmtDate(lc.when) + (lc.outcome ? ' · ' + (CONTACT_OUTCOME_HE[lc.outcome] || lc.outcome) : '');
+  }
   function stateText(r) {
     if (r.priority === 'exception') return '⚠ חריג';
     if (r.state === 'late') return '⏰ באיחור';
@@ -192,5 +243,5 @@
     return '◷ ממתין';
   }
 
-  return { build: build, DOMAINS: DOMAINS, TASK_KIND_HE: TASK_KIND_HE, NO_MONEY_USERS: NO_MONEY_USERS, canSeeMoney: canSeeMoney, stateText: stateText, fmtDate: fmtDate, daysBetween: daysBetween };
+  return { build: build, DOMAINS: DOMAINS, TASK_KIND_HE: TASK_KIND_HE, CONTACT_OUTCOME_HE: CONTACT_OUTCOME_HE, NO_MONEY_USERS: NO_MONEY_USERS, canSeeMoney: canSeeMoney, stateText: stateText, lastContactText: lastContactText, fmtDate: fmtDate, daysBetween: daysBetween };
 }));

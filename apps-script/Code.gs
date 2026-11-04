@@ -428,9 +428,17 @@ var EXTRA_SESSION_HEADERS = [
 var CONTINUATION_SHEET = 'מסלול המשך';
 var CONTINUATION_HEADERS = [
   'key', 'name', 'house', 'entryDate',
-  'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+  'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt',
+  // CRM flow (2026-11-03, APPENDED): stable status key, owner (default ורד), the accepted/sent
+  // offer (PackageRequests id), the stable patient reference the milestone tasks are keyed by,
+  // and the roster phone. Older rows read '' for all five.
+  'crmStatus', 'assignee', 'offerRequestId', 'patientRef', 'phone'
 ];
 var CONTINUATION_OUTCOMES = ['', 'continuing', 'to_outpatient', 'stopping'];
+/* Stable CRM status keys (Hebrew labels are render-time only, in app.js). */
+var CONTINUATION_CRM_STATUSES = ['', 'not_contacted', 'in_progress', 'interested', 'postponed', 'declined', 'converted', 'closed'];
+var CONTINUATION_CRM_TERMINAL = ['declined', 'converted', 'closed'];
+var CONTINUATION_REF_RE = /^(id:[A-Za-z0-9_-]{1,80}|phone:0\d{9})$/;
 
 /* Stop-treatment alerts (התראות עצירת טיפול). The OUTPATIENT app CREATES an alert
  * when Vered decides an unpaid patient's treatment should stop; the E-Zone
@@ -4299,6 +4307,31 @@ function _saveContinuation(payload) {
     return { ok: false, reason: 'invalid_date' };
   }
 
+  // CRM fields (appended columns). Each is validated fail-closed when PRESENT in the payload
+  // and KEPT from the stored row when absent, so an older client that sends only the original
+  // fields never blanks them. The assignee is a care name; '' means «not set» (the UI shows ורד).
+  var crm = {};
+  if (payload && payload.crmStatus !== undefined) {
+    crm.crmStatus = String(payload.crmStatus == null ? '' : payload.crmStatus).trim();
+    if (CONTINUATION_CRM_STATUSES.indexOf(crm.crmStatus) < 0) return { ok: false, reason: 'invalid_crm_status' };
+  }
+  if (payload && payload.assignee !== undefined) {
+    crm.assignee = String(payload.assignee == null ? '' : payload.assignee).trim();
+    if (crm.assignee && !CARE_ASSIGNEES_OK(crm.assignee)) return { ok: false, reason: 'invalid_assignee' };
+  }
+  if (payload && payload.offerRequestId !== undefined) {
+    crm.offerRequestId = String(payload.offerRequestId == null ? '' : payload.offerRequestId).trim().toLowerCase();
+    if (crm.offerRequestId && !PACKAGE_UUID_RE.test(crm.offerRequestId)) return { ok: false, reason: 'invalid_offer' };
+  }
+  if (payload && payload.patientRef !== undefined) {
+    crm.patientRef = String(payload.patientRef == null ? '' : payload.patientRef).trim();
+    if (crm.patientRef && !CONTINUATION_REF_RE.test(crm.patientRef)) return { ok: false, reason: 'invalid_patient_ref' };
+  }
+  if (payload && payload.phone !== undefined) {
+    crm.phone = _contNormalizePhone(payload.phone);
+    if (String(payload.phone == null ? '' : payload.phone).trim() && !crm.phone) return { ok: false, reason: 'invalid_phone' };
+  }
+
   var row = {
     key: key,
     name: String((payload && payload.name) || '').trim(),
@@ -4308,7 +4341,8 @@ function _saveContinuation(payload) {
     outcome: outcome,
     outcomeDate: outcomeDate,
     note: String((payload && payload.note) || '').trim(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    crmStatus: '', assignee: '', offerRequestId: '', patientRef: '', phone: ''
   };
 
   var lock = LockService.getScriptLock();
@@ -4320,17 +4354,172 @@ function _saveContinuation(payload) {
     var found = false;
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i].key || '').trim() === key) {
+        ['crmStatus', 'assignee', 'offerRequestId', 'patientRef', 'phone'].forEach(function (k) {
+          row[k] = crm[k] !== undefined ? crm[k] : String(rows[i][k] == null ? '' : rows[i][k]);
+        });
         rows[i] = row;
         found = true;
         break;
       }
     }
-    if (!found) rows.push(row);
+    if (!found) {
+      ['crmStatus', 'assignee', 'offerRequestId', 'patientRef', 'phone'].forEach(function (k) { if (crm[k] !== undefined) row[k] = crm[k]; });
+      rows.push(row);
+    }
     _writeAll(sh, CONTINUATION_HEADERS, rows);
     return { ok: true, row: row, created: !found };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+}
+
+/* ===== Continuation milestones (CRM, 2026-11-03) ===============================
+ * Offer continuation BEFORE one / two / three months of stay, counted from the ACTUAL
+ * entry date. A contact task opens 14 days before each milestone. Calendar months with
+ * end-of-month clamping, pure ISO arithmetic — the SAME algorithm as
+ * public/continuation-logic.js (milestones / addCalendarMonths / addDays); a guard test
+ * runs both on one vector table. Tasks live in the existing Tasks sheet with the stable
+ * id cont::<ref>::<entryDate>::m1|m2|m3 and the CRM subject clientId 'cont:<ref>', where
+ * <ref> is the Dashboard patient id when the roster carries one, else the normalized
+ * phone — NEVER the name. No entry date → no task. */
+function _contPad2(n) { return (n < 10 ? '0' : '') + n; }
+function _contIsLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+function _contDaysInMonth(y, mo) { return [31, _contIsLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]; }
+function _contParseISO(v) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v == null ? '' : v).trim());
+  if (!m) return null;
+  var y = +m[1], mo = +m[2], d = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > _contDaysInMonth(y, mo)) return null;
+  return { y: y, mo: mo, d: d };
+}
+function _contAddMonths(iso, n) {
+  var a = _contParseISO(iso);
+  if (!a) return null;
+  var total = a.mo - 1 + n;
+  var y = a.y + Math.floor(total / 12), mo = (total % 12 + 12) % 12 + 1;
+  return y + '-' + _contPad2(mo) + '-' + _contPad2(Math.min(a.d, _contDaysInMonth(y, mo)));
+}
+function _contAddDays(iso, n) {
+  var a = _contParseISO(iso);
+  if (!a) return null;
+  var y = a.y, mo = a.mo, d = a.d + n;
+  while (d > _contDaysInMonth(y, mo)) { d -= _contDaysInMonth(y, mo); mo++; if (mo > 12) { mo = 1; y++; } }
+  while (d < 1) { mo--; if (mo < 1) { mo = 12; y--; } d += _contDaysInMonth(y, mo); }
+  return y + '-' + _contPad2(mo) + '-' + _contPad2(d);
+}
+var CONTINUATION_MILESTONE_MONTHS = [1, 2, 3];
+var CONTINUATION_CONTACT_LEAD_DAYS = 14;
+function _contMilestones(entryDate) {
+  if (!_contParseISO(entryDate)) return null;
+  return CONTINUATION_MILESTONE_MONTHS.map(function (n) {
+    var md = _contAddMonths(entryDate, n);
+    return { n: n, suffix: 'm' + n, milestoneDate: md, contactDate: _contAddDays(md, -CONTINUATION_CONTACT_LEAD_DAYS) };
+  });
+}
+function _contNormalizePhone(v) {
+  var digits = String(v == null ? '' : v).replace(/\D/g, '');
+  if (/^972\d{9}$/.test(digits)) digits = '0' + digits.slice(3);
+  return /^0\d{9}$/.test(digits) ? digits : '';
+}
+function _contPatientRef(p) {
+  var id = String((p && (p.id || p.patientId)) || '').trim();
+  if (/^[A-Za-z0-9_-]{1,80}$/.test(id)) return 'id:' + id;
+  var ph = _contNormalizePhone(p && p.phone);
+  return ph ? 'phone:' + ph : '';
+}
+function _contTaskId(ref, entryDate, n) { return 'cont::' + ref + '::' + entryDate + '::m' + n; }
+function _contParseTaskId(id) {
+  var m = /^cont::(.+)::(\d{4}-\d{2}-\d{2})::m([123])$/.exec(String(id == null ? '' : id));
+  return m ? { ref: m[1], entryDate: m[2], n: +m[3] } : null;
+}
+function _contFmt(iso) { var a = _contParseISO(iso); return a ? _contPad2(a.d) + '/' + _contPad2(a.mo) + '/' + a.y : String(iso || ''); }
+
+/* POST action=syncContinuationMilestones { patients:[{name,house,entryDate,phone,id?}], rosterComplete }
+ * Node calls this with the roster it fetched from the Dashboard itself (never a browser list).
+ * Idempotent: every milestone task has one stable id, so a second sync creates nothing; a
+ * corrected entry date UPDATES the open task in place (id, due date, reason) instead of adding
+ * a second one; a patient who left the roster (rosterComplete only) or whose CRM status is
+ * terminal has the open milestone tasks cancelled. Milestones already in the past are not
+ * opened (offering "before month 1" after month 1 is moot). The actor of derived rows is
+ * 'system' — never the requesting user. */
+function _syncContinuationMilestones(payload) {
+  var p = payload || {};
+  var patients = Array.isArray(p.patients) ? p.patients : null;
+  if (!patients) return { ok: false, error: 'missing_patients' };
+  if (patients.length > 2000) return { ok: false, error: 'too_many_patients' };
+  var rosterComplete = p.rosterComplete === true;
+  var today = _crmToday(), nowIso = _crmNow(), actor = 'system';
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return { ok: false, error: 'recovery_pending' };
+    var contSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONTINUATION_SHEET);
+    var contRows = contSh ? _readAll(contSh, CONTINUATION_HEADERS) : [];
+    var statusByRef = {};
+    contRows.forEach(function (r) { var ref = String(r.patientRef || '').trim(); if (ref) statusByRef[ref] = String(r.crmStatus || '').trim(); });
+    var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+    var rows = _tasksRead(sh), changed = false, created = 0, updated = 0, cancelled = 0, skipped = 0;
+    var byId = {}, openByRefN = {};
+    rows.forEach(function (t, i) {
+      var parsed = _contParseTaskId(t.id);
+      if (!parsed) return;
+      byId[String(t.id)] = i;
+      if (t.status === 'open' || t.status === 'deferred') openByRefN[parsed.ref + '|' + parsed.n] = i;
+    });
+    var events = [], liveRefs = {};
+    patients.forEach(function (pt) {
+      var ref = _contPatientRef(pt);
+      var entryDate = String(pt && pt.entryDate != null ? pt.entryDate : '').trim();
+      var name = _crmText(pt && pt.name, 120), house = _crmText(pt && pt.house, 60);
+      if (!ref) { skipped++; return; }
+      liveRefs[ref] = true;
+      var ms = _contMilestones(entryDate);
+      if (!ms) { skipped++; return; }
+      if (CONTINUATION_CRM_TERMINAL.indexOf(statusByRef[ref] || '') >= 0) return; // declined / converted / closed: nothing new
+      ms.forEach(function (m) {
+        var id = _contTaskId(ref, entryDate, m.n);
+        var title = 'הצעת המשך טיפול — לפני חודש ' + m.n + ' בבית';
+        var reason = 'אבן דרך ' + _contFmt(m.milestoneDate) + ' · כניסה ' + _contFmt(entryDate) + (house ? ' · ' + house : '');
+        if (byId[id] !== undefined) return; // already exists (open, done or cancelled) — never a second one
+        var openIdx = openByRefN[ref + '|' + m.n];
+        if (openIdx !== undefined) {
+          // the entry date was corrected: move the open task, do not duplicate it
+          var t = rows[openIdx], from = t.dueDate;
+          delete byId[String(t.id)];
+          t.id = id; t.submissionId = id; t.dueDate = m.contactDate; t.title = title; t.reason = reason; t.updatedAt = nowIso; t.updatedBy = actor;
+          byId[id] = openIdx; changed = true; updated++;
+          events.push(_activityEvent('task_rescheduled', { clientId: 'cont:' + ref }, actor, 'תאריך הכניסה תוקן: מועד הפנייה עבר מ-' + _contFmt(from) + ' ל-' + _contFmt(m.contactDate), { id: id, from: from, to: m.contactDate, reason: 'entry_date_corrected' }, 'task_rescheduled:' + id + ':' + m.contactDate, { nextAction: title, nextDate: m.contactDate, source: 'derived' }));
+          return;
+        }
+        if (m.milestoneDate < today) return; // the milestone already passed when first seen
+        var task = {
+          id: id, kind: 'continuity', leadId: '', clientId: 'cont:' + ref, title: title, reason: reason,
+          assignee: 'ורד', dueDate: m.contactDate, dueTime: '', status: 'open', source: 'derived',
+          createdAt: nowIso, createdBy: actor, updatedAt: nowIso, updatedBy: actor,
+          doneAt: '', doneBy: '', outcome: '', deferredFrom: '', contactEventId: '', submissionId: id, money: ''
+        };
+        rows.push(task); byId[id] = rows.length - 1; openByRefN[ref + '|' + m.n] = rows.length - 1; changed = true; created++;
+        events.push(_activityEvent('task_created', task, actor, 'משימה נוצרה: ' + title + ' (' + name + ')', { id: id, kind: 'continuity', dueDate: m.contactDate, assignee: 'ורד', money: false, milestoneDate: m.milestoneDate, entryDate: entryDate }, 'task_created:' + id, { nextAction: title, nextDate: m.contactDate, source: 'derived' }));
+      });
+    });
+    // discharged (left the roster) or terminal CRM status: close what is still open
+    rows.forEach(function (t) {
+      var parsed = _contParseTaskId(t.id);
+      if (!parsed || !(t.status === 'open' || t.status === 'deferred')) return;
+      var gone = rosterComplete && !liveRefs[parsed.ref];
+      var terminal = CONTINUATION_CRM_TERMINAL.indexOf(statusByRef[parsed.ref] || '') >= 0;
+      if (!gone && !terminal) return;
+      var why = gone ? 'discharged' : statusByRef[parsed.ref];
+      t.status = 'cancelled'; t.outcome = why; t.updatedAt = nowIso; t.updatedBy = actor; changed = true; cancelled++;
+      events.push(_activityEvent('task_cancelled', { clientId: 'cont:' + parsed.ref }, actor, 'משימת המשך נסגרה: ' + (gone ? 'המטופל/ת כבר לא ברשימת המאושפזים' : 'סטטוס ' + why), { id: t.id, reason: why }, 'task_cancelled:' + t.id, { source: 'derived' }));
+    });
+    if (changed) {
+      _writeAll(sh, TASKS_HEADERS, rows);
+      var ash = _ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS);
+      events.forEach(function (ev) { _activityAppend(ash, ev); });
+    }
+    return { ok: true, created: created, updated: updated, cancelled: cancelled, skipped: skipped, today: today };
+  } finally { try { lock.releaseLock(); } catch (_) {} }
 }
 
 
@@ -5314,14 +5503,32 @@ var PACKAGE_REQUEST_HEADERS = [
   'quoteSnapshot', 'adjustedTotalAgorot', 'adjustReason', 'adjustLog',
   'approvedTotalAgorot', 'approvedSnapshot', 'approvedAtIso', 'approvedBy',
   'attachedType', 'attachedId', 'attachedAtIso', 'attachedBy',
-  'opLog', 'createdAtIso', 'updatedAt', 'updatedBy'
+  'opLog', 'createdAtIso', 'updatedAt', 'updatedBy',
+  // Offers CRM (2026-11-03, APPENDED): multi-item snapshot (a legacy row reads as ONE item from
+  // packageKey/months/quoteSnapshot), offer validity, owner, notes, follow-up, the manual «sent»
+  // confirmation and where the request was created. Older rows read '' for all of them.
+  'items', 'validUntil', 'assignee', 'notes', 'followUpDate', 'sentAtIso', 'sentTo', 'decisionAtIso', 'createdFrom'
 ];
 /* Columns Sheets would otherwise coerce (ISO timestamps -> Date, hex hashes ->
  * numbers). Forced to plain text next to PHONE/STAMP columns. */
 var PACKAGE_TEXT_COLUMNS = {
   payloadHash: true, validFromIso: true, createdAtIso: true,
-  approvedAtIso: true, attachedAtIso: true, allowedMonths: true
+  approvedAtIso: true, attachedAtIso: true, allowedMonths: true,
+  validUntil: true, followUpDate: true, sentAtIso: true, decisionAtIso: true, sentTo: true
 };
+/* Offer (CRM) status keys — STABLE English, Hebrew at render time only. The stored `status`
+ * column keeps its two legacy values and gains the CRM ones: pending ≙ draft, priced ≙
+ * ready_to_send (mapped at READ time, rows are never rewritten); sent / awaiting_decision /
+ * approved / rejected are written by adminSetPackageRequestStatus. `expired` is never stored:
+ * it is computed at read time from validUntil. «approved» = the client accepted the offer —
+ * NOT a charge, NOT a payment, NOT a renewal. */
+var PACKAGE_CRM_STATUSES = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'];
+var PACKAGE_STATUS_TRANSITIONS = {
+  priced: { sent: true, rejected: true, awaiting_decision: true },
+  sent: { awaiting_decision: true, approved: true, rejected: true },
+  awaiting_decision: { approved: true, rejected: true }
+};
+var PACKAGE_MAX_ITEMS = 12, PACKAGE_MAX_QTY = 20;
 /* Stable requester keys (Hebrew labels are render-time only, in the UI). */
 var PACKAGE_REQUESTERS = { oren: true, shahar: true };
 var PACKAGE_UNITS = { per_session_pack: true, flat: true, per_month: true, per_month_range: true };
@@ -5331,8 +5538,12 @@ var PACKAGE_MANAGER_ACTIONS = { getPackageCatalogPublic: true, getPackageRequest
 var PACKAGE_ADMIN_ACTIONS = {
   adminGetPackageCatalog: true, adminSeedPackageCatalog: true, adminSavePackageCatalogRow: true,
   adminQuotePackage: true, adminListPackageRequests: true, adminAdjustPackageRequest: true,
-  adminApprovePackageRequest: true, adminAttachPackageRequest: true
+  adminApprovePackageRequest: true, adminAttachPackageRequest: true,
+  adminCreatePackageRequest: true, adminSetPackageRequestStatus: true
 };
+/* Price-FREE offer summaries for «היום שלי» / cards / מסלול המשך (GET, proxy secret, no assertion:
+ * no amount, VAT, discount or price constant ever leaves this function). */
+var PACKAGE_SUMMARY_ACTIONS = { getPackageOfferSummaries: true };
 var PACKAGE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /* Initial catalog = the supplied PDF "קטלוג שירותים איזון 2026" (version 2.0,
@@ -5674,8 +5885,49 @@ function _pkgAdminItem(r) {
     approvedTotalAgorot: r.approvedTotalAgorot === '' ? null : _pkgInt(r.approvedTotalAgorot),
     approved: as, approvedAt: String(r.approvedAtIso || ''), approvedBy: String(r.approvedBy || ''),
     attachedType: String(r.attachedType || ''), attachedId: String(r.attachedId || ''),
-    attachedAt: String(r.attachedAtIso || ''), createdAt: String(r.createdAtIso || '')
+    attachedAt: String(r.attachedAtIso || ''), createdAt: String(r.createdAtIso || ''),
+    items: _pkgItemsOf(r), validUntil: String(r.validUntil || ''), assignee: String(r.assignee || ''),
+    notes: String(r.notes || ''), followUpDate: String(r.followUpDate || ''), sentAt: String(r.sentAtIso || ''),
+    sentTo: String(r.sentTo || ''), decisionAt: String(r.decisionAtIso || ''), createdFrom: String(r.createdFrom || 'manager'),
+    crmStatus: _pkgCrmStatus(r)
   };
+}
+/* Stored status -> CRM key, with «expired» computed at read time from the offer validity. */
+function _pkgCrmStatus(r) {
+  var st = String(r.status || '');
+  var crm = st === 'pending' ? 'draft' : st === 'priced' ? 'ready_to_send' : (PACKAGE_CRM_STATUSES.indexOf(st) >= 0 ? st : 'draft');
+  var vu = String(r.validUntil || '');
+  if (vu && /^\d{4}-\d{2}-\d{2}$/.test(vu) && vu < _crmToday() && ['draft', 'ready_to_send', 'sent', 'awaiting_decision'].indexOf(crm) >= 0) return 'expired';
+  return crm;
+}
+/* The items of a request: the appended JSON snapshot, or ONE item built from the legacy columns. */
+function _pkgItemsOf(r) {
+  var items = null;
+  try { items = r.items ? JSON.parse(r.items) : null; } catch (_) { items = null; }
+  if (Array.isArray(items) && items.length) return items;
+  var qs = null; try { qs = r.quoteSnapshot ? JSON.parse(r.quoteSnapshot) : null; } catch (_) {}
+  return [{ packageKey: String(r.packageKey || ''), months: _pkgInt(r.months), qty: 1, family: qs ? qs.family : '', tier: qs ? qs.tier : '', unit: qs ? qs.unit : '',
+    selectedMonthlyAgorot: r.selectedMonthlyAgorot === '' || r.selectedMonthlyAgorot === undefined ? null : _pkgInt(r.selectedMonthlyAgorot),
+    lineGrossAgorot: qs && qs.grossAgorot !== null && qs.grossAgorot !== undefined ? qs.grossAgorot : null }];
+}
+/* Price-free summary (no amounts anywhere). */
+function _pkgOfferSummary(r) {
+  return {
+    id: String(r.id), status: String(r.status), crmStatus: _pkgCrmStatus(r), requesterKey: String(r.requesterKey),
+    patientName: String(r.patientName), attachedType: String(r.attachedType || ''), attachedId: String(r.attachedId || ''),
+    validUntil: String(r.validUntil || ''), followUpDate: String(r.followUpDate || ''), assignee: String(r.assignee || ''),
+    sentAt: String(r.sentAtIso || ''), sentTo: String(r.sentTo || '') ? 'set' : '', createdAt: String(r.createdAtIso || ''), createdFrom: String(r.createdFrom || 'manager'),
+    itemCount: _pkgItemsOf(r).length
+  };
+}
+function _pkgOfferSummaries() {
+  try {
+    // read-only: never creates or re-heads the sheet (a boot-time read must have no schema side effect)
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PACKAGE_REQUESTS_SHEET);
+    var rows = sh ? _readAll(sh, PACKAGE_REQUEST_HEADERS) : [];
+    rows.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
+    return { ok: true, offers: rows.slice(0, 500).map(_pkgOfferSummary) };
+  } catch (err) { return { ok: false, error: 'package_error' }; }
 }
 function _pkgAdminCatalogItem(r) {
   return {
@@ -5949,7 +6201,7 @@ function _pkgAdminApprove(payload) {
 function _pkgAdminAttach(payload) {
   var p = payload || {};
   return _pkgMutate(payload, function (rec, user, now) {
-    if (String(rec.status) !== 'priced') return { ok: false, error: 'not_priced' };
+    if (String(rec.status) === 'pending') return { ok: false, error: 'not_priced' }; // priced or any later CRM state
     var type = String(p.targetType == null ? '' : p.targetType);
     var tid = String(p.targetId == null ? '' : p.targetId);
     if ((type !== 'client' && type !== 'lead') || !tid || tid.length > 80) return { ok: false, error: 'invalid_target' };
@@ -5969,9 +6221,171 @@ function _pkgAdminAttach(payload) {
   });
 }
 
+/* ---------- Offers CRM: create from the Outpatient app, status flow (2026-11-03) ---------- */
+function _pkgIsoDate(v) { var t = String(v == null ? '' : v).trim(); return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : (t === '' ? '' : null); }
+
+/* Price one item list against the ACTIVE catalog. Returns { ok, items:[snapshot…], gross, net, vat, vatRateBp }
+ * or { ok:false, error }. Every amount is computed HERE from the catalog row — a browser amount is never read. */
+function _pkgPriceItems(cat, rawItems, now) {
+  if (!Array.isArray(rawItems) || !rawItems.length) return { ok: false, error: 'items_required' };
+  if (rawItems.length > PACKAGE_MAX_ITEMS) return { ok: false, error: 'too_many_items' };
+  var out = [], gross = 0, vatBp = null;
+  for (var i = 0; i < rawItems.length; i++) {
+    var it = rawItems[i] && typeof rawItems[i] === 'object' ? rawItems[i] : {};
+    var key = String(it.packageKey == null ? '' : it.packageKey);
+    if (!/^[a-z][a-z0-9_]{2,40}$/.test(key)) return { ok: false, error: 'invalid_package' };
+    var row = _pkgActiveRowByKey(cat, key);
+    if (!row) return { ok: false, error: 'invalid_package' };            // inactive / unknown package is refused
+    var qty = it.qty === undefined || it.qty === null || it.qty === '' ? 1 : it.qty;
+    if (!_pkgIsIntInRange(qty, 1, PACKAGE_MAX_QTY)) return { ok: false, error: 'invalid_quantity' };
+    var months = it.months === undefined || it.months === null || it.months === '' ? 0 : it.months;
+    if (typeof months !== 'number') return { ok: false, error: 'invalid_months' };
+    var sel = it.selectedMonthlyAgorot === undefined || it.selectedMonthlyAgorot === '' ? null : it.selectedMonthlyAgorot;
+    if (sel !== null && !_pkgIsIntInRange(sel, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'selection_out_of_range' };
+    var q = _pkgComputeQuote(row, months, sel);
+    if (!q.ok) return { ok: false, error: q.error };
+    if (q.needsSelection) return { ok: false, error: 'selection_required' };  // Solo: Vered picks min / mid / max
+    var snap = _pkgSnapshot(row, q, now);
+    snap.qty = qty; snap.lineGrossAgorot = q.grossAgorot * qty; snap.packageKey = String(row.key);
+    snap.selectedMonthlyAgorot = sel;
+    gross += snap.lineGrossAgorot;
+    if (vatBp === null) vatBp = q.vatRateBp;
+    out.push(snap);
+  }
+  if (!_pkgIsIntInRange(gross, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+  var split = _pkgSplitVat(gross, vatBp);
+  return { ok: true, items: out, grossAgorot: gross, netAgorot: split.netAgorot, vatAgorot: split.vatAgorot, vatRateBp: vatBp };
+}
+
+/* adminCreatePackageRequest { requestId, items:[{packageKey, months?, selectedMonthlyAgorot?, qty?}], patientName?,
+ *   patientPhone?, targetType?, targetId?, validUntil?, assignee?, notes?, followUpDate?, user }
+ * Vered creates a draft offer in the Outpatient app (packages, single treatments or both). Idempotent by
+ * requestId (a double click = one request). Starts as 'pending' (= draft) so the existing adjust (discount,
+ * reason mandatory) / approve (→ ready_to_send) flow applies unchanged. Attaches the target reference when given. */
+function _pkgAdminCreate(payload) {
+  try {
+    var p = payload || {};
+    var requestId = String(p.requestId == null ? '' : p.requestId).toLowerCase();
+    if (!PACKAGE_UUID_RE.test(requestId)) return { ok: false, error: 'invalid_request_id' };
+    var user = _requestUser(payload) || 'catalog-admin';
+    var type = String(p.targetType == null ? '' : p.targetType), tid = String(p.targetId == null ? '' : p.targetId);
+    if (type && ((type !== 'client' && type !== 'lead') || !tid || tid.length > 80)) return { ok: false, error: 'invalid_target' };
+    var name = _pkgText(p.patientName, 120);
+    var phone = _recoverPhone(p.patientPhone);
+    if (phone && !/^0\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
+    var validUntil = _pkgIsoDate(p.validUntil), followUp = _pkgIsoDate(p.followUpDate);
+    if (validUntil === null || followUp === null) return { ok: false, error: 'invalid_date' };
+    var assignee = String(p.assignee == null ? '' : p.assignee).trim();
+    if (assignee && !CARE_ASSIGNEES_OK(assignee)) return { ok: false, error: 'invalid_assignee' };
+    var notes = _pkgText(p.notes, 500);
+    var lock = _pkgLock(10000);
+    if (!lock) return { ok: false, error: 'busy' };
+    try {
+      if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return { ok: false, error: 'recovery_pending' };
+      var reqSh = _pkgRequestSheet();
+      var existing = _pkgFindRowById(_readAll(reqSh, PACKAGE_REQUEST_HEADERS), requestId);
+      if (existing) return { ok: true, duplicate: true, request: _pkgAdminItem(existing) };
+      // the target (if any) must exist; its name / phone fill the request when not given
+      if (type) {
+        var found = null;
+        if (type === 'client') _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === tid) found = c; });
+        else _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS).forEach(function (l) { if (String(l.id) === tid) found = l; });
+        if (!found) return { ok: false, error: 'target_not_found' };
+        if (!name) name = _pkgText(found.name, 120);
+        if (!phone) { phone = _recoverPhone(found.phone); if (phone && !/^0\d{9}$/.test(phone)) phone = ''; }
+      }
+      if (name.length < 2) return { ok: false, error: 'invalid_patient' };
+      var cat = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
+      var epoch = _pkgMaxEpoch(cat);
+      var now = _pkgNow();
+      var priced = _pkgPriceItems(cat, p.items, now);
+      if (!priced.ok) return priced;
+      var first = priced.items[0];
+      var aggregate = {
+        multi: true, itemCount: priced.items.length, unit: first.unit, sessions: first.sessions, months: priced.items.length === 1 ? first.months : 0,
+        monthlyAgorot: priced.items.length === 1 ? first.monthlyAgorot : null, commitmentMonths: priced.items.length === 1 ? first.commitmentMonths : null,
+        grossAgorot: priced.grossAgorot, netAgorot: priced.netAgorot, vatAgorot: priced.vatAgorot,
+        vatBasis: 'inclusive', vatRateBp: priced.vatRateBp, needsSelection: false, computedAtIso: now,
+        rowId: first.rowId, key: first.key, version: first.version, epoch: epoch, family: first.family, tier: first.tier
+      };
+      var rec = {
+        id: requestId, payloadHash: _pkgSha256Hex(_pkgCanonicalJson({ requestId: requestId, items: priced.items.map(function (x) { return { k: x.packageKey, m: x.months, q: x.qty, s: x.selectedMonthlyAgorot }; }) })),
+        status: 'pending', revision: 1,
+        requesterKey: 'outpatient', patientName: name, patientPhone: phone,
+        packageKey: first.packageKey, months: first.months, catalogRowId: String(first.rowId), catalogEpoch: epoch,
+        selectedMonthlyAgorot: priced.items.length === 1 && first.selectedMonthlyAgorot !== null ? first.selectedMonthlyAgorot : '',
+        quoteSnapshot: JSON.stringify(aggregate),
+        adjustedTotalAgorot: '', adjustReason: '', adjustLog: '[]',
+        approvedTotalAgorot: '', approvedSnapshot: '', approvedAtIso: '', approvedBy: '',
+        attachedType: type || '', attachedId: type ? tid : '', attachedAtIso: type ? now : '', attachedBy: type ? user : '',
+        opLog: '[]', createdAtIso: now, updatedAt: now, updatedBy: user,
+        items: JSON.stringify(priced.items), validUntil: validUntil, assignee: assignee || user, notes: notes, followUpDate: followUp,
+        sentAtIso: '', sentTo: '', decisionAtIso: '', createdFrom: 'outpatient'
+      };
+      reqSh.appendRow(_pkgRowToCells(PACKAGE_REQUEST_HEADERS, rec));
+      return { ok: true, duplicate: false, request: _pkgAdminItem(rec) };
+    } finally { _pkgUnlock(lock); }
+  } catch (err) { return { ok: false, error: 'package_error' }; }
+}
+
+/* adminSetPackageRequestStatus { requestId, opId, expectedRevision, status?, followUpDate?, sentTo?, notes? }
+ * Forward-only CRM transitions (see PACKAGE_STATUS_TRANSITIONS); a draft must be approved for pricing first.
+ * «sent» is a MANUAL confirmation (opening WhatsApp never sets it) and records when / to whom; «approved»
+ * records the decision and creates NO charge, payment or renewal. followUpDate / notes alone may be updated
+ * in any non-terminal state. An Activity event is written for sent / approved / rejected so the trail shows
+ * on the lead / client card. */
+function _pkgAdminSetStatus(payload) {
+  var p = payload || {};
+  var events = [];
+  var res = _pkgMutate(payload, function (rec, user, now) {
+    var current = String(rec.status || '');
+    var crm = _pkgCrmStatus(rec);
+    var next = String(p.status == null ? '' : p.status).trim();
+    var changed = false;
+    if (p.followUpDate !== undefined) {
+      var fu = _pkgIsoDate(p.followUpDate); if (fu === null) return { ok: false, error: 'invalid_date' };
+      if (fu !== String(rec.followUpDate || '')) { rec.followUpDate = fu; changed = true; }
+    }
+    if (p.notes !== undefined) {
+      var notes = _pkgText(p.notes, 500);
+      if (notes !== String(rec.notes || '')) { rec.notes = notes; changed = true; }
+    }
+    if (p.validUntil !== undefined) {
+      var vu = _pkgIsoDate(p.validUntil); if (vu === null) return { ok: false, error: 'invalid_date' };
+      if (vu !== String(rec.validUntil || '')) { rec.validUntil = vu; changed = true; }
+    }
+    if (next && next !== current) {
+      if (current === 'pending') return { ok: false, error: 'not_priced' };          // approve the pricing first (→ ready_to_send)
+      if (crm === 'approved' || crm === 'rejected') return { ok: false, error: 'offer_closed' };
+      var allowed = PACKAGE_STATUS_TRANSITIONS[current] || {};
+      if (!allowed[next]) return { ok: false, error: 'invalid_transition' };
+      if (next === 'sent') {
+        var to = String(p.sentTo == null ? '' : p.sentTo).trim();
+        var toPhone = _contNormalizePhone(to);
+        if (to !== 'oren' && !toPhone) return { ok: false, error: 'invalid_recipient' };
+        rec.sentTo = to === 'oren' ? 'oren' : toPhone; rec.sentAtIso = now;
+      }
+      if (next === 'approved' || next === 'rejected') rec.decisionAtIso = now;
+      rec.status = next; changed = true;
+      var subject = { leadId: rec.attachedType === 'lead' ? String(rec.attachedId) : '', clientId: rec.attachedType === 'client' ? String(rec.attachedId) : '' };
+      var he = { sent: 'הצעת מחיר נשלחה', awaiting_decision: 'הצעת מחיר ממתינה להחלטה', approved: 'הצעת מחיר אושרה על ידי הלקוח (ללא חיוב)', rejected: 'הצעת מחיר נדחתה' }[next];
+      events.push(_activityEvent('offer_' + next, subject, user, he + ' · ' + String(rec.patientName), { requestId: String(rec.id), status: next, sentTo: next === 'sent' ? (rec.sentTo === 'oren' ? 'oren' : 'phone') : '', followUpDate: String(rec.followUpDate || ''), money: true }, 'offer_' + next + ':' + rec.id + ':' + rec.revision, { nextAction: next === 'sent' ? 'מעקב אחרי ההצעה' : '', nextDate: next === 'sent' ? String(rec.followUpDate || '') : '' }));
+    } else if (next && next === current) {
+      // same status: only the fields above may have changed
+    }
+    if (!changed) return { ok: true, noop: true };
+    return { ok: true };
+  });
+  if (res && res.ok && !res.noop && !res.replay && events.length) {
+    try { var ash = _ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS); events.forEach(function (ev) { _activityAppend(ash, ev); }); } catch (_) {}
+  }
+  return res;
+}
+
 function _pkgIsPackageAction(action) {
   return Object.prototype.hasOwnProperty.call(PACKAGE_MANAGER_ACTIONS, action) ||
-    Object.prototype.hasOwnProperty.call(PACKAGE_ADMIN_ACTIONS, action);
+    Object.prototype.hasOwnProperty.call(PACKAGE_ADMIN_ACTIONS, action) ||
+    Object.prototype.hasOwnProperty.call(PACKAGE_SUMMARY_ACTIONS, action);
 }
 
 
@@ -6200,6 +6614,7 @@ var SOURCE_GET_AUTH = {
   getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
+  getPackageOfferSummaries: 'OUTPATIENT_PROXY_SECRET',
   getTasks: 'OUTPATIENT_PROXY_SECRET',
   getActivity: 'OUTPATIENT_PROXY_SECRET',
   getCredits: 'OUTPATIENT_PROXY_SECRET',
@@ -6250,6 +6665,7 @@ var SOURCE_POST_AUTH = {
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   saveContinuation: 'OUTPATIENT_PROXY_SECRET',
+  syncContinuationMilestones: 'OUTPATIENT_PROXY_SECRET',
   getTasks: 'OUTPATIENT_PROXY_SECRET',
   getActivity: 'OUTPATIENT_PROXY_SECRET',
   createTask: 'OUTPATIENT_PROXY_SECRET',
@@ -6287,7 +6703,9 @@ var SOURCE_POST_AUTH = {
   adminListPackageRequests: 'OUTPATIENT_PROXY_SECRET',
   adminAdjustPackageRequest: 'OUTPATIENT_PROXY_SECRET',
   adminApprovePackageRequest: 'OUTPATIENT_PROXY_SECRET',
-  adminAttachPackageRequest: 'OUTPATIENT_PROXY_SECRET'
+  adminAttachPackageRequest: 'OUTPATIENT_PROXY_SECRET',
+  adminCreatePackageRequest: 'OUTPATIENT_PROXY_SECRET',
+  adminSetPackageRequestStatus: 'OUTPATIENT_PROXY_SECRET'
 };
 
 function _sourceAuthOk(action, method, params, payload) {
@@ -6375,6 +6793,7 @@ function doGet(e) {
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
+    if (action === 'getPackageOfferSummaries') return _json(_pkgOfferSummaries());
     if (action === 'getTasks') return _json(_getTasks(e && e.parameter, { moneyScope: e && e.parameter && e.parameter.moneyScope }));
     if (action === 'getActivity') return _json(_getActivity(e && e.parameter, { moneyScope: e && e.parameter && e.parameter.moneyScope }));
     // INTERNAL dashboard read (same trust level as getData): the credits /
@@ -6590,6 +7009,7 @@ function doPost(e) {
     if (action === 'getSessionLog') return _json(_getSessionLog());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
+    if (action === 'syncContinuationMilestones') return _json(_syncContinuationMilestones(payload));
     if (action === 'getTasks') return _json(_getTasks(payload, payload));
     if (action === 'getActivity') return _json(_getActivity(payload, payload));
     if (action === 'createTask') return _json(_createTask(payload));
@@ -6678,6 +7098,8 @@ function doPost(e) {
     if (action === 'adminListPackageRequests') return _json(_pkgAdminList());
     if (action === 'adminAdjustPackageRequest') return _json(_pkgAdminAdjust(payload));
     if (action === 'adminApprovePackageRequest') return _json(_pkgAdminApprove(payload));
+    if (action === 'adminCreatePackageRequest') return _json(_pkgAdminCreate(payload));
+    if (action === 'adminSetPackageRequestStatus') return _json(_pkgAdminSetStatus(payload));
     if (action === 'adminAttachPackageRequest') return _json(_pkgAdminAttach(payload));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {

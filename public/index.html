@@ -51,11 +51,12 @@
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="revenue">הכנסות חודשיות</button>
-        <button class="tab" data-view="retention">שימור לידים</button>
-        <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
-        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
         <button class="tab" data-view="continuation">מסלול המשך</button>
         <button class="tab" data-view="packages" id="packagesTab">תמחור חבילות</button>
+        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
+        <!-- Archive-like views last (CRM nav order, 2026-11-03): win-back of lost leads, then inactive patients. -->
+        <button class="tab" data-view="retention">שימור לידים</button>
+        <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
       </nav>
       <div class="topbar-right">
         <span id="sessionUser" class="session-user" hidden>מחובר/ת כ: <b id="sessionUserName"></b> · <button type="button" id="switchUserBtn" class="link-btn">החלף</button></span>
@@ -226,7 +227,7 @@
           <label class="billing-date-label">חודש
             <input id="revenueMonth" type="month" />
           </label>
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">
+          <h2 class="view-title">
             הכנסות חודשיות <span id="revenueMonthLabel" class="panel-sub"></span>
           </h2>
           <div class="revenue-vat-note">כל הסכומים ללא מע״מ</div>
@@ -288,7 +289,7 @@
       <section id="view-retention" class="view">
         <div class="toolbar">
           <input id="retentionSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">שימור לידים — לא רלוונטים</h2>
+          <h2 class="view-title">שימור לידים — לא רלוונטים</h2>
         </div>
         <div id="retentionList"></div>
       </section>
@@ -300,7 +301,7 @@
       <section id="view-inactive" class="view">
         <div class="toolbar">
           <input id="inactiveSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
+          <h2 class="view-title">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
         </div>
         <div id="inactiveList"></div>
       </section>
@@ -312,7 +313,7 @@
           <label class="billing-date-label">חודש
             <input id="payoutMonth" type="month" />
           </label>
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">תשלומי מטפלים — סיכום חודשי</h2>
+          <h2 class="view-title">תשלומי מטפלים — סיכום חודשי</h2>
           <div style="margin-inline-start:auto;display:flex;gap:8px;">
             <button type="button" class="btn edit-only" id="payoutAddSessionBtn">+ הוסף סשן חסר</button>
             <button type="button" class="btn btn-primary" id="payoutExportBtn">ייצוא לאקסל</button>
@@ -331,7 +332,7 @@
       <section id="view-continuation" class="view">
         <div class="toolbar">
           <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
+          <h2 class="view-title">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
         </div>
         <div id="continuationList" class="continuation-list"></div>
       </section>
@@ -536,6 +537,8 @@
           <label>סניף<input name="bankBranch" type="text" /></label>
           <label>מספר חשבון<input name="bankAccount" type="text" /></label>
           <label>ע"ש (שם בעל החשבון)<input name="bankHolder" type="text" /></label>
+          <div class="wide form-section-title">הצעות מחיר — WhatsApp</div>
+          <label class="wide">WhatsApp של אורן (05X-XXXXXXX)<input name="orenWhatsapp" type="tel" inputmode="tel" placeholder="05X-XXXXXXX" /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="settingsSubmit">שמור</button>

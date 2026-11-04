@@ -73,7 +73,9 @@
  */
 // v21 (2026-10-29): «היום שלי» CRM opening tab — index.html shell changed (CHANGELOG-my-day.md).
 // v24 (draft OP-BILL-01): payment-date coverage card and source policy; v23 is deployed.
-var CACHE = 'ezone-outpatient-v24';
+// v25 (2026-11-03, E-ZONE One CRM): index.html (menu order, settings WhatsApp field), app.js, style.css,
+//   my-day.js, continuation-logic.js, package-pricing.js changed. LIVE v24 (#162 merge 8d61cc32) verified before this bump.
+var CACHE = 'ezone-outpatient-v25';
 var SHELL = [
   './',
   './index.html',

@@ -188,6 +188,7 @@
     continuationRoster: null, // admitted-patient roster (from dashboard); null = not yet fetched
     continuationRows: [],     // מסלול המשך workflow rows (from getContinuation)
     tasks: null,              // CRM tasks (getTasks); null = not loaded / unavailable (OP-CRM-3B)
+    offers: null,             // price-free package-offer summaries (GET /api/offers); null = not loaded / not for this session
     activity: null,           // CRM activity events, newest first (getActivity); null = unavailable
     continuationLoading: false,
     continuationError: '',
@@ -568,7 +569,7 @@
     return typeof data.user === 'string' ? data.user : '';
   }
   var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink'];
-  var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון'];
+  var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון', 'הצעות מחיר — WhatsApp'];
   function isOpsScope() { return state.moneyScope !== 'full'; }
   /* Operational session: hide the money tabs / settings, and take the money
    * inputs out of every form (disabled inputs are not serialized, so the save
@@ -603,6 +604,17 @@
     return Array.isArray(data.users) ? data.users.filter(function (u) { return typeof u === 'string' && u; }) : [];
   }
 
+  // Price-free offer summaries (GET /api/offers): full-money-scope sessions only; null = unavailable.
+  async function apiGetOffers() {
+    var r = await apiFetch('/api/offers', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return Array.isArray(data.offers) ? data.offers : [];
+  }
+  function offersReload() {
+    if (isOpsScope()) { state.offers = null; return Promise.resolve(null); }
+    return apiGetOffers().then(function (o) { state.offers = o; return o; }).catch(function (e) { console.warn('[ezone] offers failed:', e.message); state.offers = null; return null; });
+  }
   async function apiLoadSettings() {
     try {
       var r = await apiFetch('/api/sheets?action=getSettings', { cache: 'no-store' });
@@ -1437,7 +1449,12 @@
     window.PackagePricing.mount($('#packagesRoot'), {
       notify: toast,
       onUnauthorized: handleUnauthorized,
-      onPending: function (n) { var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות'; },
+      settings: function () { return state.settings || {}; },
+      signedInName: state.user || '',
+      onPending: function (n) {
+        var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות';
+        offersReload(); // the price-free summaries the cards / «היום שלי» read follow every offer change
+      },
       targets: function () {
         return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '' }; })
           .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '' }; }));
@@ -1502,9 +1519,11 @@
   function renderMyDay() {
     var box = $('#myDay');
     if (!box || !window.MyDay) return;
+    var CLm = window.ContinuationLogic, contNames = {};
+    if (CLm && Array.isArray(state.continuationRoster)) state.continuationRoster.forEach(function (p) { var sid = CLm.subjectId(CLm.patientRef(p)); if (sid) contNames[sid] = String(p.name || '').trim(); });
     var m = window.MyDay.build({
       leads: state.leads, clients: state.clients, stopFlags: state.stopFlags, extraRequests: state.extraRequests,
-      continuation: state.continuationRows, tasks: state.tasks, activity: state.activity,
+      continuation: state.continuationRows, continuationNames: contNames, offers: state.offers, tasks: state.tasks, activity: state.activity,
       today: today(), user: state.user, renewalInfo: renewalInfo
     });
     var dayName = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'][new Date(today() + 'T12:00:00').getDay()];
@@ -1527,12 +1546,13 @@
         '<span><b>' + escapeHtml(r.action) + '</b>' + (r.why ? '<br><span class="sub">' + escapeHtml(r.why) + '</span>' : '') + '</span>' +
         '<span>' + (r.when ? escapeHtml(window.MyDay.fmtDate(r.when) + (r.time ? ' ' + r.time : '')) : '—') + '<br><span class="md-chip st-' + escapeHtml(r.priority === 'exception' ? 'exception' : r.state) + '">' + escapeHtml(window.MyDay.stateText(r)) + '</span></span>' +
         '<span>' + escapeHtml(r.owner || '—') + '</span>' +
-        '<span class="md-actions">' + taskBtns + '<button type="button" class="btn btn-primary btn-sm" data-md-go="1">' + (r.open === 'lead' ? 'פתיחת הליד' : r.open === 'client' ? 'כרטיס' : 'לפעולה') + '</button></span></div>';
+        '<span class="md-last">' + (r.lastContact ? escapeHtml(window.MyDay.lastContactText(r)) + (r.lastContact.summary ? '<br><span class="sub">' + escapeHtml(r.lastContact.summary.slice(0, 60)) + '</span>' : '') : '<span class="sub">—</span>') + '</span>' +
+        '<span class="md-actions">' + taskBtns + '<button type="button" class="btn btn-primary btn-sm" data-md-go="1">' + (r.open === 'lead' ? 'פתיחת הליד' : r.open === 'client' ? 'כרטיס' : r.open === 'continuation' ? 'מסלול המשך' : r.open === 'offer' ? 'להצעה' : 'לפעולה') + '</button></span></div>';
     };
     var block = function (rows, cap) {
       if (!rows.length) return '<p class="md-empty">אין פריטים.</p>';
       var list = cap ? rows.slice(0, cap) : rows;
-      return '<div class="md-rows"><div class="md-row h"><span>מי</span><span>הפעולה ולמה עכשיו</span><span>מועד ומצב</span><span>אחראי</span><span></span></div>' + list.map(row).join('') + '</div>' +
+      return '<div class="md-rows"><div class="md-row h"><span>מי</span><span>הפעולה ולמה עכשיו</span><span>מועד ומצב</span><span>אחראי</span><span>קשר אחרון ותוצאה</span><span></span></div>' + list.map(row).join('') + '</div>' +
         (cap && rows.length > cap ? '<p class="md-empty">מוצגים ' + cap + ' מתוך ' + rows.length + '</p>' : '');
     };
     var html = '<div class="md-head"><h2>היום שלי</h2><span class="sub">יום ' + dayName + ', ' + escapeHtml(window.MyDay.fmtDate(m.today)) + (state.user ? ' · ' + escapeHtml(state.user) : '') + '</span></div>';
@@ -1567,6 +1587,8 @@
     } else if (kind === 'continuation') {
       state.continuationSearch = name; var ci = $('#continuationSearch'); if (ci) ci.value = name;
       setView('continuation');
+    } else if (kind === 'offer') {
+      setView('packages');
     }
   }
 
@@ -3717,15 +3739,15 @@
   // ---- Retention view (not_relevant + finished clients)
   function retRow(label, val) {
     if (!val) return '';
-    return '<div style="display:flex;gap:12px;padding:5px 0;border-bottom:1px solid #1e3a56;font-size:0.85rem;">' +
-      '<span style="color:#7a9bbf;font-weight:600;min-width:110px;flex-shrink:0;">' + label + '</span>' +
-      '<span style="color:#c5d5e8;">' + val + '</span>' +
-      '</div>';
+    return '<div class="arc-row"><span class="arc-k">' + label + '</span><span class="arc-v">' + val + '</span></div>';
+  }
+  function arcHeading(text) {
+    var h = document.createElement('div');
+    h.className = 'arc-heading';
+    h.textContent = text;
+    return h;
   }
 
-  // Leads ONLY — a lead is someone who has not started treatment. Patients who
-  // left (discharged or cross-app deactivated) live in the dedicated
-  // מטופלים לא פעילים tab (renderInactive), not here.
   function renderRetention() {
     var list = $('#retentionList');
     list.innerHTML = '';
@@ -3743,16 +3765,14 @@
     }
 
     if (notRel.length) {
-      var h1 = document.createElement('div');
-      h1.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      h1.textContent = 'לא רלוונטים';
-      list.appendChild(h1);
+      list.appendChild(arcHeading('לא רלוונטים'));
       notRel.forEach(function (l) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(l.name) + '</span>' +
-          '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#f8d7da;color:#721c24;font-weight:600;">לא רלוונטי</span>' +
+        card.className = 'panel arc-card';
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(l.name) + '</span>' +
+          '<span class="chip status-done">לא רלוונטי</span>' +
+          (l.assignedTo ? '<span class="chip">אחראי/ת: ' + escapeHtml(l.assignedTo) + '</span>' : '') +
           '</div>';
         var body = retRow('טלפון', l.phone ? escapeHtml(String(l.phone)) : '') +
           retRow('סוג טיפול', l.serviceType ? escapeHtml(formatServices(parseServices(l.serviceType))) : '') +
@@ -3762,7 +3782,10 @@
           retRow('סיבה', escapeHtml(notRelevantReasonLabel(l.not_relevant_reason))) +
           retRow('פירוט', escapeHtml(l.not_relevant_note)) +
           retRow('הערה', l.note ? escapeHtml(l.note) : '');
-        card.innerHTML = header + body;
+        // CRM follow-up for win-back (2026-11-03): last contact, outcome, next contact, owner — the same
+        // Tasks/Activity block as the lead card. A lead without a planned action is NOT an urgent task
+        // (my-day.js skips not_relevant leads; only a real task on it reaches «היום שלי»).
+        card.innerHTML = header + body + crmBlockHtml('lead', l);
         if (state.role === 'editor') {
           var restoreBtn = document.createElement('button');
           restoreBtn.className = 'btn btn-ghost';
@@ -4292,15 +4315,12 @@
 
     function inactiveSection(title, patients, badgeHtml, extraRowsFor, withCredits) {
       if (!patients.length) return;
-      var h = document.createElement('div');
-      h.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      h.textContent = title;
-      list.appendChild(h);
+      list.appendChild(arcHeading(title));
       patients.forEach(function (c) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(c.name) + '</span>' +
+        card.className = 'panel arc-card';
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(c.name) + '</span>' +
           badgeHtml +
           '</div>';
         var body = retRow('טלפון', c.phone ? escapeHtml(String(c.phone)) : '') +
@@ -4349,16 +4369,13 @@
     // (the server copies the tombstone back to Clients), not the status-based
     // restore modal.
     if (removedRows.length) {
-      var rh = document.createElement('div');
-      rh.style.cssText = 'font-size:0.95rem;font-weight:700;color:#9fcfcf;padding:18px 4px 8px;border-bottom:2px solid #2a3f5a;margin-bottom:12px;';
-      rh.textContent = 'מטופלים שנמחקו';
-      list.appendChild(rh);
+      list.appendChild(arcHeading('מטופלים שנמחקו'));
       removedRows.forEach(function (t) {
         var card = document.createElement('div');
-        card.style.cssText = 'background:#1a2e4a;border:1px solid #2a3f5a;border-radius:10px;padding:16px 20px;margin-bottom:12px;display:block;';
+        card.className = 'panel arc-card';
         var viaLabel = t.removedVia === 'explicit-delete' ? 'נמחק ידנית (✕)' : 'נשמט בשמירה — שחזור זמין';
-        var header = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
-          '<span style="font-weight:700;font-size:1rem;color:#fff;">' + escapeHtml(t.name || '') + '</span>' +
+        var header = '<div class="arc-head">' +
+          '<span class="arc-name">' + escapeHtml(t.name || '') + '</span>' +
           '<span style="font-size:0.72rem;padding:2px 10px;border-radius:20px;background:#e2d6f8;color:#4a2a80;font-weight:600;">נמחק</span>' +
           '</div>';
         var body = retRow('טלפון', t.phone ? escapeHtml(String(t.phone)) : '') +
@@ -4620,6 +4637,12 @@
     { v: 'to_outpatient', he: 'מועבר לטיפול חוץ' },
     { v: 'stopping',      he: 'מפסיק טיפול' }
   ];
+  // CRM status of the continuation flow (stable keys, Hebrew at render time only — 2026-11-03).
+  var CONTINUATION_CRM_LABELS = {
+    not_contacted: 'טרם נוצר קשר', in_progress: 'בטיפול', interested: 'מעוניין/ת', postponed: 'נדחה למועד אחר',
+    declined: 'סירב/ה', converted: 'עבר/ה לטיפול המשך', closed: 'נסגר'
+  };
+  var CONTINUATION_DEFAULT_ASSIGNEE = 'ורד';
 
   // key -> patient view-model, rebuilt each render so save handlers can look up
   // the roster fields (name/phone/house/entryDate) a row was rendered from.
@@ -4657,6 +4680,8 @@
       state.continuationRows = res[1].rows;
       state.continuationLoading = false;
       if (state.view === 'continuation') renderContinuation();
+      // the server synced the milestone tasks while answering the roster: pick them up
+      return crmReload().catch(function () {});
     });
   }
 
@@ -4669,31 +4694,82 @@
 
   function continuationTenureBadge(p) {
     if (p.months == null) {
-      return '<span class="chip continuation-tenure continuation-tenure-0">—</span>';
+      return '<span class="chip continuation-tenure continuation-tenure-0">חסר תאריך כניסה</span>';
     }
     var label = p.months === 1 ? '1 חודש' : (p.months + ' חודשים');
     return '<span class="chip continuation-tenure continuation-tenure-' + p.bucket + '">' +
       escapeHtml(label) + '</span>';
   }
 
+  /* Milestone strip: month 1 / 2 / 3 from the ENTRY date, each with its contact date and the state of
+   * its task (done / late / today / upcoming / cancelled / not opened). No entry date → one clear
+   * «חסר תאריך כניסה» and no task (business rule, CHANGELOG-continuation-milestones.md). */
+  function continuationMilestonesHtml(p, editor) {
+    var CL = window.ContinuationLogic, CA = window.CrmActivity;
+    if (!p.milestones) return '<div class="cont-ms cont-ms-missing">⚠ חסר תאריך כניסה — לא נפתחות משימות המשך עד שיוזן בדשבורד</div>';
+    var todayISO = today();
+    return '<div class="cont-ms">' + p.milestones.map(function (m) {
+      var t = p.tasksById[m.id] || null;
+      var st, txt;
+      if (t && t.status === 'done') { st = 'done'; txt = '✓ בוצע' + (t.outcome ? ' · ' + t.outcome : ''); }
+      else if (t && t.status === 'cancelled') { st = 'closed'; txt = '— נסגר'; }
+      else if (t) { st = CA ? CA.dueState(t, todayISO) : 'wait'; txt = CA ? CA.stateText(st) : ''; }
+      else if (m.milestoneDate < todayISO) { st = 'past'; txt = 'עבר'; }
+      else { st = 'pending'; txt = 'טרם נפתחה'; }
+      var btn = (editor && t && (t.status === 'open' || t.status === 'deferred'))
+        ? ' <button type="button" class="btn btn-sm btn-primary" data-crm="contact" data-task-id="' + escapeHtml(t.id) + '" title="תיעוד הפנייה (סוגר את המשימה)">📞 פנייה</button>'
+        : '';
+      return '<div class="cont-ms-item st-' + st + '">' +
+        '<div class="cont-ms-title">חודש ' + m.n + ' <span class="sub">' + escapeHtml(displayDate(m.milestoneDate)) + '</span></div>' +
+        '<div class="cont-ms-when">פנייה עד ' + escapeHtml(displayDate(m.contactDate)) + '</div>' +
+        '<div class="cont-ms-state"><span class="md-chip st-' + escapeHtml(st) + '">' + escapeHtml(txt) + '</span>' + btn + '</div>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  function continuationLinkChip(p) {
+    var lk = p.link || { state: 'none' };
+    if (lk.state === 'linked' && lk.clientId) return '<button type="button" class="chip chip-btn" data-caction="open-client" title="פתיחת כרטיס המטופל">👥 מטופל/ת קיים/ת</button>';
+    if (lk.state === 'linked' && lk.leadId) return '<button type="button" class="chip chip-btn" data-caction="open-lead" title="פתיחת הליד">📥 ליד קיים</button>';
+    if (lk.state === 'ambiguous') return '<span class="chip status-pause" title="כמה רשומות עם אותו טלפון — לא קושר אוטומטית">⚠ לבדיקה ידנית (' + (lk.matches || 0) + ' התאמות)</span>';
+    if (!p.ref) return '<span class="chip status-pause" title="אין מזהה או טלפון תקין ברוסטר — לא ניתן לפתוח משימות">⚠ חסר טלפון/מזהה</span>';
+    return '';
+  }
+
   function continuationRowHtml(p, editor) {
+    var CA = window.CrmActivity;
     var badge = continuationTenureBadge(p);
-    // Admission date beside the tenure badge (dd/mm/yyyy), blank when the roster
-    // carries no entryDate. Reuses the app-wide displayDate() helper.
     var entryHtml = p.entryDate
-      ? '<span class="continuation-entrydate">' + escapeHtml(displayDate(p.entryDate)) + '</span>'
+      ? '<span class="continuation-entrydate">כניסה ' + escapeHtml(displayDate(p.entryDate)) + '</span>'
       : '';
     var outcomeChip = p.outcome
       ? '<span class="chip continuation-outcome-chip continuation-oc-' + p.outcome + '">' +
           escapeHtml(CONTINUATION_OUTCOME_LABELS[p.outcome]) + '</span>'
       : '';
+    var crmStatus = p.crmStatus || 'not_contacted';
+    var statusChip = '<span class="chip cont-st cont-st-' + escapeHtml(crmStatus) + '">' + escapeHtml(CONTINUATION_CRM_LABELS[crmStatus] || crmStatus) + '</span>';
     var keyAttr = escapeHtml(p.key);
     var phoneHtml = p.phone
       ? '<a class="continuation-phone" href="tel:' + escapeHtml(p.phone) + '">' + escapeHtml(p.phone) + '</a>'
       : '';
     var head = '<div class="continuation-main">' +
       '<span class="continuation-name">' + escapeHtml(p.name) + '</span>' +
-      phoneHtml + badge + entryHtml + outcomeChip +
+      phoneHtml + badge + entryHtml + statusChip + outcomeChip + continuationLinkChip(p) +
+    '</div>';
+    var ms = continuationMilestonesHtml(p, editor);
+
+    // CRM line: last contact + outcome, next contact, owner, offer (Tasks / Activity of the subject cont:<ref>)
+    var sum = p.summary;
+    var last = sum && sum.lastContact ? escapeHtml(sum.lastContact.when) + ' · ' + escapeHtml(sum.lastContact.who || '—') + (sum.lastContact.outcome && CA ? ' · ' + escapeHtml(CA.heOf(CA.OUTCOMES, sum.lastContact.outcome)) : '') + (sum.lastContact.summary ? '<br><span class="sub">' + escapeHtml(sum.lastContact.summary) + '</span>' : '') : '<span class="sub">לא תועד קשר</span>';
+    var next = sum && sum.nextAction ? '<b>' + escapeHtml(sum.nextAction.title) + '</b> · ' + escapeHtml(sum.nextAction.assignee || '—') + (sum.nextAction.due ? ' · ' + escapeHtml(sum.nextAction.due) : '') + ' <span class="md-chip st-' + escapeHtml(sum.nextAction.state) + '">' + (CA ? CA.stateText(sum.nextAction.state) : '') + '</span>' : '<span class="sub">אין פנייה מתוכננת</span>';
+    var offer = p.offer ? '<button type="button" class="link-btn" data-caction="open-offer">הצעה · ' + escapeHtml(offerStatusHe(p.offer.crmStatus)) + (p.offer.followUpDate ? ' · מעקב ' + escapeHtml(displayDate(p.offer.followUpDate)) : '') + (p.offer.validUntil ? ' · בתוקף עד ' + escapeHtml(displayDate(p.offer.validUntil)) : '') + '</button>' : (p.offerRequestId ? '<span class="sub">הצעה מקושרת (פרטים בלשונית תמחור)</span>' : '<span class="sub">לא ניתנה הצעה</span>');
+    var crmLines = '<div class="cont-crm">' +
+      '<div class="crm-line"><span class="crm-k">מגע אחרון</span><span>' + last + '</span></div>' +
+      '<div class="crm-line"><span class="crm-k">הקשר הבא</span><span>' + next + '</span></div>' +
+      '<div class="crm-line"><span class="crm-k">הצעה</span><span>' + offer + '</span></div>' +
+      (sum && sum.timeline && sum.timeline.length ? '<details class="crm-history"><summary>היסטוריית פעולות (' + sum.timeline.length + ')</summary><ul class="crm-timeline">' + sum.timeline.slice(0, 30).map(function (e) {
+        return '<li><span class="t">' + escapeHtml(e.when) + ' · ' + escapeHtml(e.who || '—') + ' · ' + escapeHtml(e.kindHe) + '</span><br>' + escapeHtml(e.summary) + '</li>';
+      }).join('') + '</ul></details>' : '') +
     '</div>';
 
     var body;
@@ -4702,22 +4778,37 @@
         return '<option value="' + o.v + '"' + (o.v === p.outcome ? ' selected' : '') + '>' +
           escapeHtml(o.he) + '</option>';
       }).join('');
+      var stOptions = Object.keys(CONTINUATION_CRM_LABELS).map(function (k) {
+        return '<option value="' + k + '"' + (k === crmStatus ? ' selected' : '') + '>' + escapeHtml(CONTINUATION_CRM_LABELS[k]) + '</option>';
+      }).join('');
       body = '<div class="continuation-controls">' +
+        '<label class="continuation-ctl">סטטוס' +
+          '<select data-cfield="crmStatus">' + stOptions + '</select></label>' +
+        '<label class="continuation-ctl">אחראי/ת' +
+          '<select data-cfield="assignee">' + crmAssigneeOptions(p.assignee || CONTINUATION_DEFAULT_ASSIGNEE) + '</select></label>' +
         '<label class="continuation-ctl">תאריך לפגישה' +
           '<input type="date" data-cfield="meetingDate" value="' + escapeHtml(p.meetingDate) + '"></label>' +
         '<label class="continuation-ctl">תוצאת פגישה' +
           '<select data-cfield="outcome">' + options + '</select></label>' +
         '<label class="continuation-ctl continuation-note-ctl">הערה' +
           '<input type="text" data-cfield="note" value="' + escapeHtml(p.note) + '" placeholder="הערה קצרה"></label>' +
+        (Array.isArray(state.offers) ? '<label class="continuation-ctl">הצעת מחיר' +
+          '<select data-cfield="offerRequestId"><option value="">— ללא —</option>' + state.offers.filter(function (o) { return o.id === p.offerRequestId || ['approved', 'rejected'].indexOf(o.crmStatus) < 0; }).slice(0, 60).map(function (o) {
+            return '<option value="' + escapeHtml(o.id) + '"' + (o.id === p.offerRequestId ? ' selected' : '') + '>' + escapeHtml(o.patientName || '—') + ' · ' + escapeHtml(offerStatusHe(o.crmStatus)) + (o.validUntil ? ' · עד ' + escapeHtml(displayDate(o.validUntil)) : '') + '</option>';
+          }).join('') + '</select></label>' : '') +
         '<button type="button" class="btn btn-primary continuation-save" data-caction="save">שמור</button>' +
+        (p.ref ? '<button type="button" class="btn continuation-save" data-crm="contact">📞 יצרתי קשר</button>' +
+                 '<button type="button" class="btn continuation-save" data-crm="task">➕ משימה</button>' : '') +
       '</div>';
     } else {
       var ro = [];
-      if (p.meetingDate) ro.push('פגישה: ' + escapeHtml(p.meetingDate));
+      if (p.meetingDate) ro.push('פגישה: ' + escapeHtml(displayDate(p.meetingDate)));
       if (p.note) ro.push(escapeHtml(p.note));
       body = ro.length ? '<div class="continuation-controls-ro">' + ro.join(' · ') + '</div>' : '';
     }
-    return '<div class="continuation-row" data-key="' + keyAttr + '">' + head + body + '</div>';
+    // data-crm-* make the shared CRM handlers (📞 / ➕ / ✓) file contacts and tasks under the patient's stable subject
+    var crmAttrs = p.ref ? ' data-crm-lead="" data-crm-client="' + escapeHtml(p.subjectId) + '" data-crm-name="' + escapeHtml(p.name) + '"' : '';
+    return '<div class="continuation-row cont-card" data-key="' + keyAttr + '"' + crmAttrs + '>' + head + ms + crmLines + body + '</div>';
   }
 
   function continuationCollapsedGroup(kind, title, rows, editor) {
@@ -4790,6 +4881,11 @@
     });
 
     continuationVM = {};
+    var CA = window.CrmActivity;
+    var tasksById = {};
+    (state.tasks || []).forEach(function (t) { if (t && t.id) tasksById[String(t.id)] = t; });
+    var offersById = {};
+    (state.offers || []).forEach(function (o) { if (o && o.id) offersById[String(o.id)] = o; });
     var patients = state.continuationRoster.map(function (p) {
       var name = String(p.name || '').trim();
       var house = String(p.house || '').trim();
@@ -4797,13 +4893,26 @@
       var key = CL.buildKey(name, house, entryDate);
       var row = byKey[key] || {};
       var months = CL.monthsSince(entryDate, todayISO);
+      var ref = CL.patientRef(p);
+      var subjectId = CL.subjectId(ref);
+      var ms = ref ? CL.milestones(entryDate) : null;
+      if (ms) ms.forEach(function (m) { m.id = CL.milestoneTaskId(ref, entryDate, m.n); });
       var vm = {
-        key: key, name: name, phone: String(p.phone || '').trim(),
+        key: key, name: name, phone: CL.normalizePhone(p.phone) || String(p.phone || '').trim(),
         house: house, entryDate: entryDate,
         months: months, bucket: CL.bucketOf(months),
         meetingDate: row.meetingDate || '',
         outcome: CL.isValidOutcome(row.outcome) ? row.outcome : '',
-        note: row.note || ''
+        note: row.note || '',
+        crmStatus: CL.isCrmStatus(row.crmStatus) ? row.crmStatus : 'not_contacted',
+        assignee: row.assignee || '',
+        offerRequestId: row.offerRequestId || '',
+        offer: row.offerRequestId ? (offersById[String(row.offerRequestId)] || null) : null,
+        ref: ref, subjectId: subjectId,
+        milestones: (ref && !ms) ? null : (ms || null),
+        tasksById: tasksById,
+        link: CL.linkPatient(p, state.clients, state.leads),
+        summary: (CA && subjectId && (state.tasks || state.activity)) ? CA.summarize(state.tasks || [], state.activity || [], { clientId: subjectId }, todayISO) : null
       };
       continuationVM[key] = vm;
       return vm;
@@ -4838,19 +4947,33 @@
     var vm = continuationVM[key];
     if (!vm) return;
     var outcome = CONTINUATION_OUTCOME_LABELS[patch.outcome] !== undefined ? patch.outcome : '';
+    var CL = window.ContinuationLogic;
+    var crmStatus = CL && CL.isCrmStatus(patch.crmStatus) ? patch.crmStatus : (vm.crmStatus || 'not_contacted');
+    // a patient moved to outpatient is «converted» unless another terminal status was chosen explicitly
+    if (outcome === 'to_outpatient' && !(CL && CL.isTerminalStatus(crmStatus))) crmStatus = 'converted';
     var row = {
       key: key,
       name: vm.name, house: vm.house, entryDate: vm.entryDate,
       meetingDate: patch.meetingDate || '',
       outcome: outcome,
       outcomeDate: outcome ? today() : '',
-      note: patch.note || ''
+      note: patch.note || '',
+      crmStatus: crmStatus,
+      assignee: patch.assignee !== undefined ? patch.assignee : (vm.assignee || CONTINUATION_DEFAULT_ASSIGNEE),
+      offerRequestId: patch.offerRequestId !== undefined ? patch.offerRequestId : (vm.offerRequestId || ''),
+      patientRef: vm.ref || '',
+      phone: vm.phone && /^0\d{9}$/.test(vm.phone) ? vm.phone : ''
     };
     var prevRows = state.continuationRows.slice();
     upsertContinuationLocal(row);
     renderContinuation();
+    var wasTerminal = CL && CL.isTerminalStatus(vm.crmStatus), nowTerminal = CL && CL.isTerminalStatus(crmStatus);
     persistContinuationRow(row)
-      .then(function () { toast('נשמר'); })
+      .then(function () {
+        toast('נשמר');
+        // a terminal status closes the open milestone tasks server-side; refresh them
+        if (nowTerminal && !wasTerminal) return continuationSync().then(crmReload).catch(function () {});
+      })
       .catch(function (err) {
         state.continuationRows = prevRows;
         renderContinuation();
@@ -4913,22 +5036,38 @@
     pendingContinuationLead = null;
   }
 
+  // POST /api/continuation-sync: open / move / close the milestone tasks from the roster the server holds.
+  function continuationSync() {
+    return apiFetch('/api/continuation-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { return r.json().catch(function () { return {}; }); });
+  }
   function handleContinuationListClick(e) {
-    var btn = e.target.closest ? e.target.closest('[data-caction="save"]') : null;
-    if (!btn) return;
-    if (state.role !== 'editor') return;
+    var act = e.target.closest ? e.target.closest('[data-caction]') : null;
+    if (!act) return;
     var rowEl = e.target.closest('.continuation-row');
     if (!rowEl) return;
     var key = rowEl.getAttribute('data-key');
     var vm = continuationVM[key];
     if (!vm) return;
+    var what = act.getAttribute('data-caction');
+    if (what === 'open-client') { dashOpenInTab({ tab: 'clients', name: vm.name }); return; }
+    if (what === 'open-lead') { var l = state.leads.find(function (x) { return String(x.id) === vm.link.leadId; }); if (l) openLeadModal(l); return; }
+    if (what === 'open-offer') { setView('packages'); return; }
+    if (what !== 'save') return;
+    if (state.role !== 'editor') return;
     var mEl = rowEl.querySelector('[data-cfield="meetingDate"]');
     var oEl = rowEl.querySelector('[data-cfield="outcome"]');
     var nEl = rowEl.querySelector('[data-cfield="note"]');
+    var sEl = rowEl.querySelector('[data-cfield="crmStatus"]');
+    var aEl = rowEl.querySelector('[data-cfield="assignee"]');
+    var offEl = rowEl.querySelector('[data-cfield="offerRequestId"]');
     var patch = {
       meetingDate: mEl ? mEl.value : '',
       outcome: oEl ? oEl.value : '',
-      note: nEl ? nEl.value : ''
+      note: nEl ? nEl.value : '',
+      crmStatus: sEl ? sEl.value : undefined,
+      assignee: aEl ? aEl.value : undefined,
+      offerRequestId: offEl ? offEl.value : undefined
     };
     // Transition INTO to_outpatient: confirm + create the lead first.
     if (patch.outcome === 'to_outpatient' && vm.outcome !== 'to_outpatient') {
@@ -5146,7 +5285,8 @@
   function crmReload() {
     return Promise.all([
       apiGetTasks().catch(function () { return state.tasks; }),
-      apiGetActivity().catch(function () { return state.activity; })
+      apiGetActivity().catch(function () { return state.activity; }),
+      offersReload()
     ]).then(function (res) { state.tasks = res[0]; state.activity = res[1]; render(); });
   }
   var CRM_ERROR_HE = {
@@ -5165,6 +5305,16 @@
   function crmSubjectFor(kind, row) {
     // a client carries its lead-era history (fromLead) along
     return kind === 'lead' ? { leadId: row.id, clientId: '' } : { leadId: row.fromLead || '', clientId: row.id };
+  }
+  // Offer CRM status → Hebrew (render time only; keys from the server's crmStatus)
+  var OFFER_STATUS_HE = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף' };
+  function offerStatusHe(k) { return OFFER_STATUS_HE[k] || String(k || ''); }
+  function offersFor(subj) {
+    if (!Array.isArray(state.offers) || !subj) return [];
+    return state.offers.filter(function (o) {
+      return (subj.clientId && o.attachedType === 'client' && String(o.attachedId) === String(subj.clientId)) ||
+        (subj.leadId && o.attachedType === 'lead' && String(o.attachedId) === String(subj.leadId));
+    });
   }
   function crmAssigneeOptions(selected) {
     return ['ורד', 'אורן', 'דנה'].map(function (n) { return '<option value="' + n + '"' + (n === selected ? ' selected' : '') + '>' + n + '</option>'; }).join('');
@@ -5187,6 +5337,13 @@
       (sum.lastContact ? '<span>' + escapeHtml(sum.lastContact.when) + ' · ' + escapeHtml(sum.lastContact.who || '—') + (sum.lastContact.channel ? ' · ' + escapeHtml(sum.lastContact.channel) : '') + '<br><span class="sub">' + escapeHtml(sum.lastContact.summary) + '</span></span>' : '<span class="sub">לא תועד קשר</span>') + '</div>';
     html += '<div class="crm-line"><span class="crm-k">הפעולה הבאה</span>' +
       (sum.nextAction ? '<span><b>' + escapeHtml(sum.nextAction.title) + '</b> · ' + escapeHtml(sum.nextAction.assignee || '—') + (sum.nextAction.due ? ' · ' + escapeHtml(sum.nextAction.due) + (sum.nextAction.dueTime ? ' ' + escapeHtml(sum.nextAction.dueTime) : '') : ' · ללא מועד') + ' <span class="md-chip st-' + sum.nextAction.state + '">' + CA.stateText(sum.nextAction.state) + '</span></span>' : '<span class="sub">אין פעולה פתוחה</span>') + '</div>';
+    var offers = offersFor(subj);
+    if (offers.length) {
+      html += '<div class="crm-line"><span class="crm-k">הצעת מחיר</span><span>' + offers.slice(0, 3).map(function (o) {
+        return '<button type="button" class="link-btn" data-offer-open="' + escapeHtml(o.id) + '">' + escapeHtml(offerStatusHe(o.crmStatus)) + '</button>' +
+          (o.followUpDate ? ' · מעקב ' + escapeHtml(displayDate(o.followUpDate)) : '') + (o.validUntil ? ' · בתוקף עד ' + escapeHtml(displayDate(o.validUntil)) : '') + (o.assignee ? ' · ' + escapeHtml(o.assignee) : '');
+      }).join('<br>') + '</span></div>';
+    }
     if (sum.openTasks.length) {
       html += '<div class="crm-tasks">' + sum.openTasks.map(function (t) {
         return '<div class="crm-task" data-task-id="' + escapeHtml(t.id) + '">' +
@@ -5262,6 +5419,8 @@
     });
   }
   function handleCrmClick(e) {
+    var off = e.target.closest ? e.target.closest('[data-offer-open]') : null;
+    if (off) { setView('packages'); return; }
     var btn = e.target.closest ? e.target.closest('[data-crm]') : null;
     if (!btn || state.role !== 'editor') return;
     var subject = crmSubjectOf(btn);
@@ -6787,6 +6946,7 @@
     form.bankBranch.value = s.bankBranch || '';
     form.bankAccount.value = s.bankAccount || '';
     form.bankHolder.value = s.bankHolder || '';
+    if (form.orenWhatsapp) form.orenWhatsapp.value = s.orenWhatsapp || '';
     $('#settingsModal').hidden = false;
   }
   function closeSettingsModal() { $('#settingsModal').hidden = true; }
@@ -7000,10 +7160,13 @@
         }),
         // CRM (OP-CRM-3B): soft — a failed read shows «המידע אינו זמין», never 0.
         apiGetTasks().catch(function (te) { console.warn('[ezone] getTasks failed:', te.message); return null; }),
-        apiGetActivity().catch(function (ae) { console.warn('[ezone] getActivity failed:', ae.message); return null; })
+        apiGetActivity().catch(function (ae) { console.warn('[ezone] getActivity failed:', ae.message); return null; }),
+        // Offers CRM (2026-11-03): price-free summaries for «היום שלי» / cards; an ops session never asks
+        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { console.warn('[ezone] offers failed:', oe.message); return null; })
       ]);
       state.tasks = results[7];
       state.activity = results[8];
+      state.offers = results[9];
       // The main read succeeded, so the session is valid: only now fetch the price / pay
       // constants (a signed-out page never even requests them). Render below needs them.
       await loadProtectedScripts();
@@ -7041,7 +7204,8 @@
         bankName: s.bankName || '',
         bankBranch: s.bankBranch || '',
         bankAccount: s.bankAccount || '',
-        bankHolder: s.bankHolder || ''
+        bankHolder: s.bankHolder || '',
+        orenWhatsapp: s.orenWhatsapp || ''
       };
       // This app's own stop/resume alerts (minimal fields) — sent-state source of
       // truth across sessions. Replaces any in-session optimistic entries with the
@@ -7049,6 +7213,9 @@
       state.myStopAlerts = (results[6].myStopAlerts || []).filter(function (a) { return a && a.clientId; });
       state.loaded = true;
       render();
+      // Continuation CRM (2026-11-03): fetch the admitted roster right after boot (cached ≤60s server-side) so the
+      // server opens / moves / closes the milestone tasks and «היום שלי» can name them — not only when the tab is opened.
+      if (state.continuationRoster === null) ensureContinuationLoaded();
     } catch (e) {
       // A 401 already flipped to the PIN screen (apiFetch) — no error toast
       // on top of it; every other failure is surfaced as before.
@@ -7970,8 +8137,11 @@
         bankName: (fd.get('bankName') || '').trim(),
         bankBranch: (fd.get('bankBranch') || '').trim(),
         bankAccount: (fd.get('bankAccount') || '').trim(),
-        bankHolder: (fd.get('bankHolder') || '').trim()
+        bankHolder: (fd.get('bankHolder') || '').trim(),
+        // Oren's WhatsApp for offer messages — a setting, never a constant in code (CHANGELOG-offer-whatsapp.md)
+        orenWhatsapp: (fd.get('orenWhatsapp') || '').trim()
       };
+      if (next.orenWhatsapp && !/^0\d{9}$/.test(next.orenWhatsapp.replace(/\D/g, '').replace(/^972/, '0'))) { toast('מספר WhatsApp של אורן לא תקין (05X-XXXXXXX)', true); submit.disabled = false; return; }
       apiSaveSettings(next)
         .then(function () {
           state.settings = next;

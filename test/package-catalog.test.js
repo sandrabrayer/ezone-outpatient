@@ -132,7 +132,9 @@ test('headers: both package sheets are append-only (guard pins the exact current
     'id', 'payloadHash', 'status', 'revision', 'requesterKey', 'patientName', 'patientPhone', 'packageKey', 'months',
     'catalogRowId', 'catalogEpoch', 'selectedMonthlyAgorot', 'quoteSnapshot', 'adjustedTotalAgorot', 'adjustReason',
     'adjustLog', 'approvedTotalAgorot', 'approvedSnapshot', 'approvedAtIso', 'approvedBy', 'attachedType', 'attachedId',
-    'attachedAtIso', 'attachedBy', 'opLog', 'createdAtIso', 'updatedAt', 'updatedBy']));
+    'attachedAtIso', 'attachedBy', 'opLog', 'createdAtIso', 'updatedAt', 'updatedBy',
+    // offers CRM (2026-11-03) — APPENDED
+    'items', 'validUntil', 'assignee', 'notes', 'followUpDate', 'sentAtIso', 'sentTo', 'decisionAtIso', 'createdFrom']));
 });
 
 test('seed: every PDF family is imported once, idempotently, each row with a PDF page reference', () => {

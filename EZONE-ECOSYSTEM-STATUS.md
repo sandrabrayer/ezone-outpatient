@@ -1,3 +1,24 @@
+# Outpatient — E-ZONE One CRM (draft PR, 2026-11-03, base = #162 merge 8d61cc32)
+
+One PR on top of the live #162 production: (1) **fix** — «תמחור חבילות» buttons died on concurrent
+catalog logins / an expired 15-minute privilege / silent load failures (`CHANGELOG-package-pricing-buttons-fix.md`);
+(2) **menu order** — win-back and inactive patients last, win-back leads carry the CRM block
+(`CHANGELOG-crm-nav-order.md`); (3) **מסלול המשך as a CRM flow** — milestones +1/+2/+3 calendar months from
+the ACTUAL entry date, contact task 14 days before each, stable ids `cont::<ref>::<entryDate>::m1|m2|m3` in
+the existing Tasks sheet (ref = Dashboard id or normalized phone, never the name), server-only idempotent
+sync run by Node from its own roster fetch, status / owner / last & next contact / offer per patient,
+phone-only linking, five APPENDED columns on the workflow sheet (`CHANGELOG-continuation-milestones.md`);
+(4) **offers CRM** — new multi-item offer from the pricing tab, statuses draft → ready_to_send → sent →
+awaiting_decision → approved | rejected (+ read-time expired), prices computed by the source only,
+«approved» ≠ charge/payment, price-free `GET /api/offers` for cards / «היום שלי» / continuation, nine
+APPENDED `PackageRequests` columns (`CHANGELOG-offers-crm.md`); (5) **WhatsApp** hand-off — prepared
+message to Oren (number in Settings) or another number via `wa.me`, manual «סמן כנשלחה» only
+(`CHANGELOG-offer-whatsapp.md`). «היום שלי» shows last contact + outcome per row, one row per task,
+future items in «בהמשך». SW v24 → **v25**. Code.gs changed → Apps Script release phase after the approved
+merge (Deploy Apps Script with the merge SHA). No `*_HEADERS` reorder; billing / renewals / payments /
+`TherapistRates` untouched. Dashboard feed unchanged (name/phone/house/entryDate; an `id` is picked up if
+the Dashboard ever adds one). Manual step for Sandra after release: ⚙️ הגדרות → «WhatsApp של אורן».
+
 # Outpatient integrated candidate — 2026-11-03
 
 The sole #162 draft now qualifies the existing CRM #142–148 and OP-03 #139/#160 together with paid-date billing, #158/#161 and the 2 November acceptance fix. The previous 40 fixture failures were resolved through exact old/new inventories and a separate current-source drill; historical native evidence is untouched. CRM queued writes also required a real recovery-hold fix, and reads now have no schema side effects. See `docs/OP-BILL-01-INTEGRATED-RELEASE-20261103.md` for final validation and release gates.
