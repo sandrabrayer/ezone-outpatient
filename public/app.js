@@ -1558,11 +1558,11 @@
     var html = '<div class="md-head"><h2>היום שלי</h2><span class="sub">יום ' + dayName + ', ' + escapeHtml(window.MyDay.fmtDate(m.today)) + (state.user ? ' · ' + escapeHtml(state.user) : '') + '</span></div>';
     html += '<div class="md-cards">' + m.cards.map(card).join('') + '</div>';
     if (!myDayDomain) {
-      // Phase C: the day in priority order — overdue/dated commitments, calls today,
+      // Phase C: the day in priority order — overdue payments, dated follow-ups/tasks, calls today,
       // intros today, undecided intros, first contact, starts/continuation, approvals,
       // (money), later. Every row appears once; the cards count the same rows.
       m.sections.forEach(function (sec, idx) {
-        html += '<section class="md-domain md-sec-' + escapeHtml(sec.id) + (sec.id === 'critical' ? ' md-urgent' : '') + '"><div class="md-title"><strong>' + (idx + 1) + '. ' + escapeHtml(sec.label) + '</strong> <span class="md-n">' + sec.rows.length + '</span></div>' + block(sec.rows, 8) + '</section>';
+        html += '<section class="md-domain md-sec-' + escapeHtml(sec.id) + (sec.id === 'overdue_payments' || sec.id === 'dated' ? ' md-urgent' : '') + '"><div class="md-title"><strong>' + (idx + 1) + '. ' + escapeHtml(sec.label) + '</strong> <span class="md-n">' + sec.rows.length + '</span></div>' + block(sec.rows, 8) + '</section>';
       });
     } else {
       m.domains.forEach(function (d) {

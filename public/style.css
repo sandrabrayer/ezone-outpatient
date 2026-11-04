@@ -1240,6 +1240,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .md-card .l2 { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .acc-leads { --acc: #579BFC; } .acc-intros { --acc: #A25DDC; } .acc-plans { --acc: #00C875; } .acc-renewals { --acc: #FDAB3D; } .acc-approvals { --acc: #E2445C; } .acc-continuity { --acc: #0073EA; }
 .md-urgent { border: 1px solid #a33; background: rgba(226, 68, 92, 0.12); border-radius: 10px; padding: 4px 12px 10px; margin-bottom: 12px; }
+.md-sec-dated.md-urgent { border-color: #C98A1A; background: rgba(226, 160, 40, 0.10); } /* dated follow-ups/tasks: amber, under «תשלומים באיחור» */
 .md-domain { margin-bottom: 14px; }
 .md-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 15px; }
 .md-domain .md-title strong { border-inline-start: 4px solid var(--acc, var(--green)); padding-inline-start: 8px; }

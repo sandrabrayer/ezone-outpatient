@@ -227,7 +227,8 @@ test('server: the sync action is server-only (403 from /api/sheets); routes exis
     ], activity: [{ eventId: 'e1', kind: 'contact_logged', occurredAt: '2026-10-30T10:00:00Z', actorName: 'ורד', clientId: 'cont:phone:0501234567', summary: 'שיחה', detailsJson: '{"outcome":"no_answer"}' }],
     continuationNames: { 'cont:phone:0501234567': 'נועה לוי' }, today: '2026-11-03', user: 'ורד', renewalInfo: () => ({ status: 'unknown' })
   });
-  const late = m.sections.find((x) => x.id === 'critical').rows;
+  const late = m.sections.find((x) => x.id === 'dated').rows;
+  assert.equal(m.sections.some((x) => x.id === 'overdue_payments'), false, 'a continuation milestone is never a payment row');
   assert.equal(late.length, 1); assert.equal(late[0].name, 'נועה לוי'); assert.equal(late[0].open, 'continuation'); assert.equal(late[0].state, 'late');
   assert.equal(MyDay.lastContactText(late[0]), '30/10/2026 · אין מענה');
   const later = m.sections.find((x) => x.id === 'later').rows;
