@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OUT → Therapists request status synchronization (2026-11-04; DRAFT)
+- Manager-originated package requests now return their actual price-free Outpatient CRM milestones to the requesting coordinator: `pending`/`priced` legacy values retained, plus `sent`, `awaiting_decision`, `approved`, `rejected`, `expired`. Before this fix the existing source returned **pending** for every state except literal **priced**, causing an accepted or rejected offer to appear «ממתין לתמחור» in Therapists.
+- No prices, patient data, financial records or source schema are exposed/changed. Exact requester scope and same-ID retry behavior retained; source fixture tests cover all milestones. Requires coordinated Therapists status-label support before a production rollout. See `CHANGELOG-manager-offer-sync-20261104.md`.
+
 ### CRM follow-up 1 — Sandra's production review (2026-11-04)
 - «היום שלי»: the first section is now **«תשלומים באיחור»** and holds ONLY overdue payment / collection rows (unpaid cycle, collection task past its date); every other late or dated item (continuation offers, offer follow-ups, contacts, today's tasks) moved to the new **«מעקבים ומשימות במועד»** right below it. The «חידושים וגבייה» card hint counts the same rows (`overduePayments`).
 - Offer form («הצעת מחיר חדשה»): the «למי ההצעה» picker is a full-width searchable field (name or phone → matches with name · phone · house/type); «שם לקוח לא רשום» + phone on their own row beneath. No horizontal scroll at 360px.
