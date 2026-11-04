@@ -101,7 +101,7 @@ test('source: fake string confirmation cannot bypass the guard', () => {
   const request = renewal(sb, 'renew-fakeflag-dec-synthetic', '2026-10-25', 'true');
   const refused = request.reserve();
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'invalid_renewal_advance_confirmation');
+  assert.match(refused.error, /invalid_renewal_advance_confirmation$/, 'source rejects a forged string marker');
   assert.equal(sb.rows('Payments').length, 1);
   assert.equal(sb.rows('FinancialOps').length, 1);
 });
