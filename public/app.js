@@ -1491,24 +1491,58 @@
   // decides: without the separately-verified catalog-admin cookie every
   // call answers 401 and the module shows its PIN gate. A name picked at login
   // grants nothing here.
-  function renderPackages() {
-    if (!window.PackagePricing) return;
-    window.PackagePricing.mount($('#packagesRoot'), {
+  /* The targets the «למי ההצעה» picker searches — three sources, one field (2026-11-04):
+   *   מטופלים   = outpatient clients (name · phone · serviceType · house)
+   *   מאושפזים  = the Dashboard admitted roster — the SAME fetch «מסלול המשך» uses (state.continuationRoster);
+   *               id = ContinuationLogic.patientRef (stable), sub = house
+   *   לידים פתוחים = leads that are neither not_relevant nor active (sub = source: the referring house / «חיצוני»)
+   * No money, no notes. The roster is loaded on demand the first time the picker needs it. */
+  // a lead's source for the picker: the referring house (house_of_origin) or its service type
+  function leadSourceLabel(l) { return houseOfOriginLabel(l.house_of_origin) || l.serviceType || ''; }
+  function offerTargets() {
+    var sub = function (x) { return [x.serviceType, x.location].filter(Boolean).join(' · '); };
+    var CLm = window.ContinuationLogic || null;
+    if (state.continuationRoster === null && !state.continuationLoading) ensureContinuationLoaded();
+    var roster = (Array.isArray(state.continuationRoster) && CLm) ? state.continuationRoster.map(function (p) {
+      var ref = CLm.patientRef(p); if (!ref) return null;
+      return { type: 'roster', id: ref, name: String(p.name || '').trim(), phone: CLm.normalizePhone(p.phone) || String(p.phone || '').trim(), sub: continuationHouseLabel(String(p.house || '').trim()) };
+    }).filter(Boolean) : [];
+    return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '', phone: c.phone || '', sub: sub(c) }; })
+      .concat(roster)
+      .concat(state.leads.filter(function (l) { return l.stage !== 'not_relevant' && l.stage !== 'active'; }).map(function (l) { return { type: 'lead', id: l.id, name: l.name || '', phone: l.phone || '', sub: leadSourceLabel(l) }; }));
+  }
+  function pricingOpts() {
+    return {
       notify: toast,
       onUnauthorized: handleUnauthorized,
       settings: function () { return state.settings || {}; },
       signedInName: state.user || '',
+      openSettings: function () { openSettingsModal(); },
       onPending: function (n) {
         var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות';
         offersReload(); // the price-free summaries the cards / «היום שלי» read follow every offer change
       },
-      targets: function () {
-        // name · phone · house/type feed the searchable «למי ההצעה» picker (no money, no notes)
-        var sub = function (x) { return [x.serviceType, x.location].filter(Boolean).join(' · '); };
-        return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '', phone: c.phone || '', sub: sub(c) }; })
-          .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '', phone: l.phone || '', sub: sub(l) }; }));
+      targets: offerTargets
+    };
+  }
+  function renderPackages() {
+    if (!window.PackagePricing) return;
+    window.PackagePricing.mount($('#packagesRoot'), pricingOpts());
+  }
+  /* «💰 הצעת מחיר» on a client card (ורד): the SAME new-offer form, target locked to this client, inside the
+   * card. When the quote is created the price-free summaries are re-read and the card shows it at once. */
+  function toggleCardOfferForm(card, c) {
+    var host = $('.cc-offer-host', card);
+    if (!host || !window.PackagePricing) return;
+    if (!host.hidden) { if (host._offerForm) host._offerForm.close(); host.hidden = true; return; }
+    host.hidden = false;
+    host._offerForm = window.PackagePricing.mountOfferForm(host, Object.assign(pricingOpts(), {
+      target: 'client:' + c.id,
+      onDone: function (created) {
+        host.hidden = true; host._offerForm = null;
+        if (created) offersReload().then(function () { render(); });
       }
-    });
+    }));
   }
 
   // ---- Dashboard
@@ -6021,6 +6055,22 @@
       addChargeBtn.title = 'הוסף חיוב חד-פעמי או חודשי';
       addChargeBtn.onclick = function () { openAddChargeModal(c); };
       actions.appendChild(addChargeBtn);
+
+      // «💰 הצעת מחיר» — ורד only (display rule; the server's catalog privilege decides): the shared new-offer
+      // form opens INSIDE the card with this client locked as the target.
+      if (state.user === 'ורד' && !isOpsScope() && window.PackagePricing) {
+        var offerBtn = document.createElement('button');
+        offerBtn.className = 'btn btn-ghost edit-only cc-offer-btn';
+        offerBtn.textContent = '💰 הצעת מחיר';
+        offerBtn.title = 'הצעת מחיר חדשה למטופל/ת זה/זו (נפתחת כאן בכרטיס)';
+        offerBtn.setAttribute('aria-expanded', 'false');
+        offerBtn.onclick = function () { toggleCardOfferForm(card, c); offerBtn.setAttribute('aria-expanded', $('.cc-offer-host', card).hidden ? 'false' : 'true'); };
+        actions.appendChild(offerBtn);
+        var offerHost = document.createElement('div');
+        offerHost.className = 'cc-offer-host pkg-root';
+        offerHost.hidden = true;
+        card.appendChild(offerHost);
+      }
 
       // Wire × buttons on the inline charge list.
       $$('[data-charge-remove]', card).forEach(function (btn) {
