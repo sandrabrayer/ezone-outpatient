@@ -83,7 +83,11 @@
 // v28 (2026-11-04, CRM follow-up 2): index.html, app.js, style.css, my-day.js, package-pricing.js changed
 //   (billing mode, card offer form, delete/reset, three-source picker, WhatsApp links). Bumped from the LIVE
 //   value v27 (hotfix #168 merge ba9a53a3).
-var CACHE = 'ezone-outpatient-v28';
+// v29 (2026-11-04, patient search + offer-picker browse): index.html (the «חיפוש מטופל» box and the new
+//   global-search.js script tag), app.js, style.css and package-pricing.js changed. Bumped from the
+//   deploy-branch value v28 (a367fb74, Apps Script v106); the LIVE /sw.js was not reachable from this
+//   sandbox (egress blocked) — re-check it serves v28 before release.
+var CACHE = 'ezone-outpatient-v29';
 var SHELL = [
   './',
   './index.html',
