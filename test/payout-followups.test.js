@@ -82,11 +82,11 @@ test('html: payouts + retention headings are not dark-on-dark', () => {
 const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 
 test('app: loadAll fires its six reads in parallel (Promise.all), not serially', () => {
-  const m = APP.match(/async function loadAll\(\)[\s\S]*?\n  }/);
+  const m = APP.match(/async function loadAll\(opts\)[\s\S]*?\n  }/);
   assert.ok(m, 'loadAll not found');
   const fn = m[0];
   assert.match(fn, /Promise\.all\(\[/, 'reads must be parallel');
   assert.doesNotMatch(fn, /await apiGetPayments/, 'no serial awaits per read');
-  assert.match(fn, /apiLoad\(\)/);
+  assert.match(fn, /apiLoad\(!!\(opts && opts\.fresh\)\)/);
   assert.match(fn, /apiLoadSettings\(\)/);
 });

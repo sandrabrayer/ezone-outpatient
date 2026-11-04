@@ -512,8 +512,10 @@
     if (r.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
     return r;
   }
-  async function apiLoad() {
-    var r = await apiFetch('/api/sheets', { cache: 'no-store' });
+  // fresh: bypass the proxy's 60s getData cache (?fresh=1) — used by the
+  // reload after a stale-save conflict, where the tab's picture is known wrong.
+  async function apiLoad(fresh) {
+    var r = await apiFetch(fresh ? '/api/sheets?fresh=1' : '/api/sheets', { cache: 'no-store' });
     var data = await r.json();
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -869,7 +871,7 @@
     var conflictMsg = conflictsMessage(data);
     if (conflictMsg) {
       showConflictBanner(conflictMsg);
-      var conflictReload = loadAll().catch(function (e) { console.warn('[ezone] conflict reload failed:', e.message); });
+      var conflictReload = loadAll({ fresh: true }).catch(function (e) { console.warn('[ezone] conflict reload failed:', e.message); });
       if (opts && opts.requireIds) await conflictReload;
       // saveAll can accept other rows in the same request. Only a refusal of
       // this flow's prerequisites blocks its dependent financial write.
@@ -885,7 +887,7 @@
     hideConflictBanner();
     if (data && data.staleSave) {
       toast('הנתונים עודכנו ממכשיר אחר — רענני לראות את המצב המלא');
-      var staleReload = loadAll().catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
+      var staleReload = loadAll({ fresh: true }).catch(function (e) { console.warn('[ezone] stale-save reload failed:', e.message); });
       if (opts && opts.requireIds) await staleReload;
     }
   }
@@ -7128,7 +7130,7 @@
     });
   }
 
-  async function loadAll() {
+  async function loadAll(opts) {
     try {
       // All six reads are independent Apps Script round-trips (~1-3s each).
       // Fired in PARALLEL: total load = slowest call, not the sum (was serial,
@@ -7138,7 +7140,7 @@
       // server would answer 403); three fewer round-trips at boot for דנה.
       var ops = isOpsScope();
       var results = await Promise.all([
-        apiLoad(),
+        apiLoad(!!(opts && opts.fresh)),
         ops ? Promise.resolve({ payments: [] }) : apiGetPayments().catch(function (pe) {
           console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
           return { payments: [] };

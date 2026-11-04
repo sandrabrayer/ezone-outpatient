@@ -74,17 +74,40 @@
   function conflictsMessage(res) {
     var list = conflictsOf(res);
     if (!list.length) return '';
-    var names = uniqueNonBlank(list.map(function (c) {
+    // Hotfix 2026-11-04: a row refused because a renewal / extra-charge
+    // operation is still OPEN on it (reason 'financial_operation_pending', the
+    // journal reservation) is not a case of someone saving first — telling ורד
+    // "ורד עדכן/ה קודם" sent her to retry forever. Name the real cause and
+    // the way out (open the operation from the card and confirm its close).
+    var pending = list.filter(function (c) { return c.reason === PENDING_REASON; });
+    var stale = list.filter(function (c) { return c.reason !== PENDING_REASON; });
+    var parts = [];
+    if (stale.length) {
+      var editors = uniqueNonBlank(stale.map(function (c) { return c.sheetUpdatedBy; }));
+      var who = editors.length ? editors.join(' / ') : UNKNOWN_EDITOR;
+      parts.push('השינוי ל־' + namesOf(stale).join(', ') + ' לא נשמר — ' + who + ' עדכן/ה קודם. הנתונים רועננו.');
+    }
+    if (pending.length) {
+      parts.push('השינוי ל־' + namesOf(pending).join(', ') + ' לא נשמר — יש פעולה כספית פתוחה (חידוש ותשלום / הוסף טיפול) על הכרטיס. יש לפתוח אותה מהכרטיס, לאשר את ההשלמה ואז לשמור שוב.');
+    }
+    return parts.join(' ');
+  }
+
+  /* The server's reason for a row refused by the financial-journal reservation
+   * (apps-script/Code.gs _saveAll: `pendingConflict.reason`). */
+  var PENDING_REASON = 'financial_operation_pending';
+
+  /* The refused rows' names ("id" when a row has no name), unique. */
+  function namesOf(list) {
+    return uniqueNonBlank(list.map(function (c) {
       var n = String(c.name == null ? '' : c.name).trim();
       return n || String(c.id == null ? '' : c.id).trim();
     }));
-    var editors = uniqueNonBlank(list.map(function (c) { return c.sheetUpdatedBy; }));
-    var who = editors.length ? editors.join(' / ') : UNKNOWN_EDITOR;
-    return 'השינוי ל־' + names.join(', ') + ' לא נשמר — ' + who + ' עדכן/ה קודם. הנתונים רועננו.';
   }
 
   return {
     UNKNOWN_EDITOR: UNKNOWN_EDITOR,
+    PENDING_REASON: PENDING_REASON,
     conflictsOf: conflictsOf,
     conflictsMessage: conflictsMessage
   };

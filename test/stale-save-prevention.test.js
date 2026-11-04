@@ -273,7 +273,7 @@ test('app.js: persist echoes the version, re-syncs from the response, and handle
   assert.match(body, /state\.dataVersion = Number\(data\.dataVersion\)/,
     'a successful save must adopt the new version so the SAME tab is not flagged next save');
   assert.match(body, /data\.staleSave/, 'persist must inspect the staleSave flag');
-  assert.match(body, /loadAll\(\)/, 'a stale save must trigger a reload of server truth');
+  assert.match(body, /loadAll\(\{ fresh: true \}\)/, 'a stale save must trigger a reload of server truth, bypassing the proxy cache');
 });
 
 test('app.js: the stale-save toast carries the exact Hebrew message', () => {
