@@ -4,7 +4,7 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
-const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
+const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const moneyScope = require('./lib/money-scope');
 const backendCaps = require('./lib/backend-capabilities');
@@ -783,11 +783,30 @@ app.post('/api/catalog-admin/logout', (req, res) => {
  * from a per-op allowlist (never the raw browser body), the actor comes from
  * the signed session, and Apps Script gets a short-lived HMAC assertion bound
  * to this exact body. */
-app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (req, res) => {
+/* Pricing flexibility (2026-11-04): a custom line or a manual unit-price override inside a new offer is
+ * allowed for PRICE_OVERRIDE_USERS (ורד) only — decided from the SIGNED session name, never from the body,
+ * and checked before the admin privilege so any other session is told 403 regardless of its cookies. */
+function requirePricingPrivilege(req, res, next) {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  if (body.op === 'createRequest' && catalogAdmin.itemsNeedPricingPrivilege(body.items)) {
+    const user = sessionUserFromRequest(req);
+    if (!user || PRICE_OVERRIDE_USERS.indexOf(user) < 0 || RETIRED_SESSION_USERS.indexOf(user) >= 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(403).json({ ok: false, error: 'pricing_override_vered_only' });
+    }
+  }
+  return next();
+}
+
+app.post('/api/catalog-admin/rpc', requireSession, requirePricingPrivilege, requireCatalogAdmin, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
   const op = req.body && req.body.op;
   const built = catalogAdmin.buildAdminUpstream(op, req.body, sessionUserFromRequest(req));
   if (built.error) return res.status(400).json({ ok: false, error: built.error });
+  if (op === 'createRequest') {
+    const bad = catalogAdmin.validatePricingItems(built.body.items);
+    if (bad) return res.status(400).json({ ok: false, error: bad }); // e.g. an override without a reason
+  }
   try {
     const upstream = Object.assign({ action: built.action }, built.body, {
       proxySecret: OUTPATIENT_PROXY_SECRET,

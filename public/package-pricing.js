@@ -46,7 +46,9 @@
     invalid_package: 'חבילה לא פעילה או לא קיימת', invalid_months: 'משך לא מותר לחבילה זו', invalid_patient: 'יש לבחור לקוח או להזין שם',
     invalid_phone: 'טלפון לא תקין', invalid_date: 'תאריך לא תקין', invalid_assignee: 'אחראי/ת לא מוכר/ת', not_found: 'הבקשה לא נמצאה',
     invalid_transition: 'המעבר הזה לא אפשרי במצב הנוכחי', offer_closed: 'ההצעה כבר נסגרה', invalid_recipient: 'יש לבחור יעד תקין (אורן או מספר 05X)',
-    recovery_pending: 'המערכת בשחזור — נסי מאוחר יותר'
+    recovery_pending: 'המערכת בשחזור — נסי מאוחר יותר',
+    invalid_amount: 'מחיר לא תקין', invalid_custom_item: 'יש להזין שם טיפול (2 תווים לפחות) ומחיר ליחידה',
+    pricing_override_vered_only: 'פריט מותאם / מחיר ידני — ורד בלבד'
   };
   var MAX_SHEKELS_DIGITS = 7;
 
@@ -253,9 +255,24 @@
   // ---- new offer (Vered): packages, single treatments or both; prices come back from the server only ----
   function newFormState() {
     return { requestId: uuid(), target: '', search: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
+      custom: { title: '', qty: 1, price: '' }, overrideIdx: -1,
       validUntil: isoPlus(14), followUpDate: isoPlus(3), assignee: S.signedInName || 'ורד', notes: '', busy: false };
   }
-  function itemLabel(it) { return pkgName(it.packageKey) + (it.months ? ' · ' + it.months + ' חודשים' : '') + (it.selectedMonthlyAgorot ? ' · ' + formatAgorot(it.selectedMonthlyAgorot) + ' לחודש' : '') + (it.qty > 1 ? ' × ' + it.qty : ''); }
+  function itemLabel(it) {
+    if (it.custom) return String(it.title || 'פריט מותאם') + (it.qty > 1 ? ' × ' + it.qty : '');
+    return pkgName(it.packageKey) + (it.months ? ' · ' + it.months + ' חודשים' : '') + (it.selectedMonthlyAgorot ? ' · ' + formatAgorot(it.selectedMonthlyAgorot) + ' לחודש' : '') + (it.qty > 1 ? ' × ' + it.qty : '');
+  }
+  /* Display rule only (the server decides): custom lines / manual overrides are offered to ורד. */
+  var PRICE_OVERRIDE_USERS = ['ורד'];
+  function canOverridePrices() { return PRICE_OVERRIDE_USERS.indexOf(S.signedInName) >= 0; }
+  function lineUnit(it) { return it.custom ? it.unitAgorot : (it.overrideUnitAgorot !== undefined ? it.overrideUnitAgorot : it.unitGross); }
+  /* Browser ESTIMATE of the form's lines (18% VAT-inclusive split, integer agorot). Never sent: the server recomputes. */
+  var VAT_BP_DISPLAY = 1800;
+  function estimateTotals(items) {
+    var gross = (items || []).reduce(function (a, it) { return a + lineUnit(it) * it.qty; }, 0);
+    var denom = 10000 + VAT_BP_DISPLAY, net = Math.floor((gross * 10000 + Math.floor(denom / 2)) / denom);
+    return { gross: gross, net: net, vat: gross - net };
+  }
   function newRequestView() {
     var F = S.newForm, box = h('div', { class: 'pkg-new card' });
     var active = S.catalog ? S.catalog.items.filter(function (i) { return i.active; }) : [];
@@ -288,13 +305,47 @@
           P.key = ''; P.tier = ''; P.months = ''; P.qty = 1; P.quote = null; paint();
         } }),
         h('span', { class: 'muted pkg-pick-quote', 'aria-live': 'polite', text: qtxt })]));
+      // custom line (ורד only — the server refuses anyone else): a treatment that is not in the catalog
+      if (canOverridePrices()) {
+        var C = F.custom;
+        var cTitle = h('input', { type: 'text', maxlength: '120', placeholder: 'שם הטיפול (לא בקטלוג)', 'aria-label': 'שם טיפול מותאם', value: C.title, oninput: function () { C.title = cTitle.value; } });
+        var cQty = h('input', { type: 'number', min: '1', max: '20', value: String(C.qty), 'aria-label': 'כמות (פריט מותאם)', class: 'pkg-qty pkg-custom-qty', onchange: function () { C.qty = parseInt(cQty.value, 10) || 1; } });
+        var cPrice = h('input', { type: 'text', inputmode: 'decimal', maxlength: '10', placeholder: 'מחיר ליחידה ₪ (כולל מע״מ)', 'aria-label': 'מחיר ליחידה (פריט מותאם)', value: C.price, oninput: function () { C.price = cPrice.value; } });
+        pickBox.appendChild(h('div', { class: 'pkg-fam pkg-custom' }, [h('div', { class: 'pkg-fam-title', text: 'פריט מותאם (לא בקטלוג) — ורד בלבד' }),
+          h('div', { class: 'pkg-row' }, [cTitle, h('span', { class: 'muted', text: 'כמות' }), cQty, cPrice,
+            h('button', { type: 'button', class: 'btn pkg-custom-add', text: '➕ הוספת פריט מותאם', onclick: function () {
+              var agorot = parseShekels(C.price);
+              if (C.title.trim().length < 2) { say(errorText('invalid_custom_item'), true); return; }
+              if (agorot === null || agorot < 1) { say(errorText('invalid_amount'), true); return; }
+              F.items.push({ custom: true, title: C.title.trim(), qty: C.qty, unitAgorot: agorot, unitGross: agorot });
+              F.custom = { title: '', qty: 1, price: '' }; paint();
+            } })])]));
+      }
       box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'פריטים' }), pickBox]));
-      // chosen items
-      var total = F.items.reduce(function (a, it) { return a + it.unitGross * it.qty; }, 0);
+      // chosen items — each line: label, catalog price (struck through when overridden), effective line sum, ✏️ / ✕
+      var est = estimateTotals(F.items);
       box.appendChild(h('div', { class: 'pkg-items' }, F.items.length ? F.items.map(function (it, idx) {
-        return h('div', { class: 'pkg-item-row' }, [h('span', { text: itemLabel(it) }), h('span', { class: 'pkg-item-sum', text: formatAgorot(it.unitGross * it.qty) }),
-          h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕', 'aria-label': 'הסרת פריט', onclick: function () { F.items.splice(idx, 1); paint(); } })]);
-      }).concat([h('div', { class: 'pkg-total', text: 'סה״כ משוער (כולל מע״מ): ' + formatAgorot(total) + ' — המחיר הסופי מחושב בשרת' })]) : [h('p', { class: 'muted', text: 'עדיין אין פריטים.' })]));
+        var unit = lineUnit(it), overridden = !it.custom && it.overrideUnitAgorot !== undefined;
+        var kids = [h('span', { class: 'pkg-item-label' }, [h('span', { text: itemLabel(it) }), it.custom ? h('span', { class: 'chip pkg-chip-custom', text: 'מותאם' }) : null,
+          overridden ? h('span', { class: 'muted pkg-item-why', text: ' — ' + it.overrideReason }) : null]),
+          h('span', { class: 'pkg-item-sum' }, [overridden ? h('s', { class: 'pkg-item-catalog', text: formatAgorot(it.unitGross * it.qty) }) : null, h('span', { text: formatAgorot(unit * it.qty) })])];
+        if (canOverridePrices() && !it.custom) kids.push(h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-override-btn', text: '✏️ מחיר ידני', 'aria-label': 'מחיר ידני לפריט', 'aria-expanded': F.overrideIdx === idx ? 'true' : 'false', onclick: function () { F.overrideIdx = F.overrideIdx === idx ? -1 : idx; paint(); } }));
+        kids.push(h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕', 'aria-label': 'הסרת פריט', onclick: function () { F.items.splice(idx, 1); F.overrideIdx = -1; paint(); } }));
+        var row = h('div', { class: 'pkg-item-row' + (overridden ? ' pkg-item-overridden' : '') }, kids);
+        if (F.overrideIdx !== idx || it.custom) return row;
+        // inline override editor: new unit price + mandatory reason (server rejects a missing reason with 400)
+        var oPrice = h('input', { type: 'text', inputmode: 'decimal', maxlength: '10', placeholder: 'מחיר ליחידה ₪ (כולל מע״מ)', 'aria-label': 'מחיר ידני ליחידה', value: it.overrideUnitAgorot !== undefined ? String(it.overrideUnitAgorot / 100) : '' });
+        var oWhy = h('input', { type: 'text', maxlength: '200', placeholder: 'סיבה (חובה) — הנחה / מחיר חבילה', 'aria-label': 'סיבת המחיר הידני', value: it.overrideReason || '' });
+        return h('div', { class: 'pkg-item-wrap' }, [row, h('div', { class: 'pkg-row pkg-override' }, [h('span', { class: 'muted', text: 'מחיר קטלוג ליחידה ' + formatAgorot(it.unitGross) }), oPrice, oWhy,
+          h('button', { type: 'button', class: 'btn btn-primary btn-sm pkg-override-save', text: 'אישור מחיר ידני', onclick: function () {
+            var agorot = parseShekels(oPrice.value);
+            if (agorot === null) { say(errorText('invalid_amount'), true); return; }
+            if (oWhy.value.trim().length < 2) { say(errorText('reason_required'), true); return; }
+            it.overrideUnitAgorot = agorot; it.overrideReason = oWhy.value.trim(); F.overrideIdx = -1; paint();
+          } }),
+          it.overrideUnitAgorot !== undefined ? h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'חזרה למחיר קטלוג', onclick: function () { delete it.overrideUnitAgorot; delete it.overrideReason; F.overrideIdx = -1; paint(); } }) : null])]);
+      }).concat([h('div', { class: 'pkg-total' }, [h('div', { text: 'סה״כ משוער (כולל מע״מ): ' + formatAgorot(est.gross) + ' — המחיר הסופי מחושב בשרת' }),
+        h('div', { class: 'muted pkg-total-split', text: 'לפני מע״מ ' + formatAgorot(est.net) + ' · מע״מ 18% ' + formatAgorot(est.vat) + ' · סה״כ ' + formatAgorot(est.gross) })])]) : [h('p', { class: 'muted', text: 'עדיין אין פריטים.' })]));
       // terms
       var vu = h('input', { type: 'date', value: F.validUntil, 'aria-label': 'תוקף ההצעה', onchange: function () { F.validUntil = vu.value; } });
       var fu = h('input', { type: 'date', value: F.followUpDate, 'aria-label': 'מועד מעקב', onchange: function () { F.followUpDate = fu.value; } });
@@ -323,7 +374,13 @@
       if (!F.items.length) { say(errorText('items_required'), true); return; }
       if (!F.target && F.name.trim().length < 2) { say(errorText('invalid_patient'), true); return; }
       F.busy = true; paint();
-      var body = { requestId: F.requestId, items: F.items.map(function (it) { return { packageKey: it.packageKey, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty }; }),
+      // lines only — no total ever travels (the server derives before-VAT / VAT / total from the lines it priced)
+      var body = { requestId: F.requestId, items: F.items.map(function (it) {
+        if (it.custom) return { custom: true, title: it.title, qty: it.qty, unitAgorot: it.unitAgorot };
+        var line = { packageKey: it.packageKey, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty };
+        if (it.overrideUnitAgorot !== undefined) { line.overrideUnitAgorot = it.overrideUnitAgorot; line.overrideReason = it.overrideReason; }
+        return line;
+      }),
         validUntil: F.validUntil, followUpDate: F.followUpDate, assignee: F.assignee, notes: F.notes.trim() };
       if (F.target) { var v = F.target.split(':'); body.targetType = v[0]; body.targetId = v.slice(1).join(':'); } else { body.patientName = F.name.trim(); body.patientPhone = F.phone.trim(); }
       var res = await rpc('createRequest', body).catch(function (e) { return { ok: false, error: e.message }; });
@@ -406,8 +463,15 @@
         h('span', { class: 'muted', text: 'מבקש/ת: ' + label(REQUESTER, r.requesterKey) + (r.patientPhone ? ' · ' + r.patientPhone : '') + (r.assignee ? ' · אחראי/ת: ' + r.assignee : '') })
       ])
     ];
-    if (items && (items.length > 1 || items[0].qty > 1)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
-      return h('li', { text: itemLabel({ packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 }) + (it.lineGrossAgorot != null ? ' — ' + formatAgorot(it.lineGrossAgorot) : '') });
+    if (items && (items.length > 1 || items[0].qty > 1 || items[0].custom || items[0].overrideReason)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
+      var overridden = !it.custom && it.catalogUnitAgorot != null && it.grossAgorot != null && it.catalogUnitAgorot !== it.grossAgorot;
+      return h('li', { class: overridden ? 'pkg-item-overridden' : (it.custom ? 'pkg-item-custom' : '') }, [
+        h('span', { text: itemLabel({ custom: !!it.custom, title: it.title, packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 }) + ' — ' }),
+        overridden ? h('s', { class: 'pkg-item-catalog', text: formatAgorot(it.catalogUnitAgorot * (it.qty || 1)) }) : null,
+        overridden ? ' ' : null,
+        h('span', { text: it.lineGrossAgorot != null ? formatAgorot(it.lineGrossAgorot) : '' }),
+        it.custom ? h('span', { class: 'chip pkg-chip-custom', text: 'מותאם' }) : null,
+        it.overrideReason ? h('span', { class: 'muted', text: ' · ' + it.overrideReason }) : null]);
     })));
     else kids.push(h('div', { text: pkgName(r.packageKey) + (r.months ? ' · ' + r.months + ' חודשים' : '') }));
     kids.push(h('div', { class: 'pkg-price' }, priceLines));
@@ -420,7 +484,11 @@
     if (terms.length) kids.push(h('div', { class: 'muted pkg-terms-line', text: terms.join(' · ') }));
     if (r.notes) kids.push(h('div', { class: 'muted', text: 'הערות: ' + r.notes }));
     if (r.adjustLog && r.adjustLog.length) kids.push(h('ul', { class: 'pkg-log muted' }, r.adjustLog.map(function (e) {
-      return h('li', { text: (e.kind === 'select' ? 'נבחר מחיר חודשי ' + formatAgorot(e.to) : 'תואם מ-' + formatAgorot(e.from) + ' ל-' + formatAgorot(e.to)) + (e.reason ? ' — ' + e.reason : '') + ' (' + e.by + ')' });
+      var what = e.kind === 'select' ? 'נבחר מחיר חודשי ' + formatAgorot(e.to)
+        : e.kind === 'override' ? 'מחיר ידני ל' + pkgName(e.item) + ': ' + formatAgorot(e.from) + ' → ' + formatAgorot(e.to) + ' ליחידה'
+        : e.kind === 'custom' ? 'פריט מותאם «' + String(e.item || '') + '» ' + formatAgorot(e.to) + ' ליחידה' + (e.qty > 1 ? ' × ' + e.qty : '')
+        : 'תואם מ-' + formatAgorot(e.from) + ' ל-' + formatAgorot(e.to);
+      return h('li', { text: what + (e.reason ? ' — ' + e.reason : '') + ' (' + e.by + (e.at ? ' · ' + fmtDay(e.at) : '') + ')' });
     })));
     if (crm === 'draft') kids.push(pendingControls(r));
     if (crm !== 'draft' && !r.attachedType && ['approved', 'rejected', 'expired'].indexOf(crm) < 0) kids.push(attachControls(r));
@@ -460,7 +528,7 @@
   function offerMessage(r) {
     var items = Array.isArray(r.items) && r.items.length ? r.items : [{ packageKey: r.packageKey, months: r.months, qty: 1 }];
     var lines = ['שלום ' + (r.patientName || '') + ',', 'להלן הצעת המחיר מ-E-ZONE לטיפולי חוץ:'];
-    items.forEach(function (it) { lines.push('• ' + itemLabel({ packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 })); });
+    items.forEach(function (it) { lines.push('• ' + itemLabel({ custom: !!it.custom, title: it.title, packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 })); });
     var total = r.approvedTotalAgorot !== null && r.approvedTotalAgorot !== undefined ? r.approvedTotalAgorot : r.effectiveTotalAgorot;
     if (total !== null && total !== undefined) lines.push('סה״כ: ' + formatAgorot(total) + ' (כולל מע״מ)');
     if (r.validUntil) lines.push('ההצעה בתוקף עד ' + fmtDay(r.validUntil) + '.');
@@ -696,6 +764,6 @@
   }
   function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage, matchTargets: matchTargets,
+  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage, matchTargets: matchTargets, estimateTotals: estimateTotals, lineUnit: lineUnit,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });

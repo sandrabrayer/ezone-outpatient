@@ -1403,7 +1403,23 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-items { display: flex; flex-direction: column; gap: 4px; }
 .pkg-item-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .pkg-item-row > span:first-child { flex: 1; }
-.pkg-item-sum { font-weight: 600; white-space: nowrap; }
+.pkg-item-sum { font-weight: 600; white-space: nowrap; display: inline-flex; gap: 6px; align-items: baseline; }
+/* pricing flexibility (2026-11-04, ורד): custom lines + manual overrides — catalog price struck through */
+.pkg-item-label { flex: 1; display: inline-flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.pkg-item-catalog { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+.pkg-item-overridden .pkg-item-sum > span:last-child { color: var(--amber); }
+.pkg-chip-custom { font-size: 11px; padding: 1px 8px; background: #EEF3FF; color: var(--blue-deep); border-color: #B8C8F0; }
+.pkg-item-wrap { display: flex; flex-direction: column; gap: 6px; }
+.pkg-override { padding: 6px 8px 8px; background: var(--bg-elev); border-radius: 8px; }
+.pkg-root .pkg-override input, .pkg-root .pkg-custom input[type="text"] { flex: 1 1 180px; }
+.pkg-total-split { font-weight: 400; font-size: 13px; }
+.pkg-item-why { font-size: 13px; }
+.pkg-override-btn { white-space: nowrap; }
+@media (max-width: 480px) {
+  .pkg-item-row { flex-wrap: wrap; }
+  .pkg-item-row > span.pkg-item-label:first-child { flex: 1 1 100%; }
+  .pkg-item-row .pkg-item-sum { margin-inline-end: auto; }
+}
 .pkg-lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .pkg-items-list { margin: 0; padding-inline-start: 18px; }
 .pkg-terms-line { font-size: 13px; }
