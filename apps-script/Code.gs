@@ -5737,19 +5737,19 @@ function _pkgPublicItem(r) {
  * returned to the requesting coordinator as 'pending'. Preserve the old
  * pending/priced wire values for legacy clients, allow only known states,
  * and never project a price, note, phone or unauthorized requester's row. */
-function _pkgManagerStatus(req) {
+function _pkgManagerStatusView(req) {
   var stored = String(req && req.status || '');
   if (stored === 'priced' || stored === 'ready_to_send') return 'priced';
   if (stored === 'pending' || stored === 'draft') return 'pending';
   return ['sent', 'awaiting_decision', 'approved', 'rejected', 'expired'].indexOf(stored) >= 0 ? stored : 'pending';
 }
 function _pkgSubmitView(req, duplicate) {
-  return { ok: true, requestId: String(req.id), status: _pkgManagerStatus(req), duplicate: duplicate === true };
+  return { ok: true, requestId: String(req.id), status: _pkgManagerStatusView(req), duplicate: duplicate === true };
 }
 function _pkgStatusItem(req) {
   return {
     requestId: String(req.id),
-    status: _pkgManagerStatus(req),
+    status: _pkgManagerStatusView(req),
     packageKey: String(req.packageKey),
     months: _pkgInt(req.months),
     createdAt: String(req.createdAtIso)
