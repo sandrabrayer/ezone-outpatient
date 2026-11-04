@@ -32,6 +32,7 @@
   // target kinds of an offer (stable keys): outpatient client · Dashboard admitted-roster patient · open lead
   var TARGET_HE = { client: 'מטופל', roster: 'מאושפז/ת', lead: 'ליד' };
   var TARGET_SECTIONS = [['client', 'מטופלים'], ['roster', 'מאושפזים'], ['lead', 'לידים פתוחים']];
+  var BROWSE_PER_TYPE = 15;   // rows per section when nothing is typed (the list scrolls)
   var CRM_ORDER = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'];
   var REQUESTER = { oren: 'אורן', shahar: 'שחר', outpatient: 'ורד (טיפולי חוץ)' };
   var ASSIGNEES = ['ורד', 'אורן', 'דנה'];
@@ -421,14 +422,22 @@
       return wrap;
     }
     var list = h('div', { class: 'pkg-who-list', role: 'listbox', 'aria-label': 'תוצאות חיפוש' });
+    // Closed only by Esc / a click outside. Vered must be able to OPEN the field and
+    // BROWSE (the pre-#167 <select> behaviour she lost); so the list is NOT hidden
+    // just because nothing is typed yet.
+    var dismissed = false;
     var input = h('input', { type: 'search', class: 'pkg-who-input', autocomplete: 'off', maxlength: '60', placeholder: 'חיפוש מטופל, מאושפז או ליד פתוח — שם או טלפון…', 'aria-label': 'חיפוש מטופל / מאושפז / ליד', value: F.search || '',
-      oninput: function () { F.search = input.value; fill(); } });
+      oninput: function () { F.search = input.value; dismissed = false; fill(); },
+      onfocus: function () { dismissed = false; fill(); },
+      onkeydown: function (e) { if (e.key === 'Escape') { dismissed = true; fill(); } } });
     function fill() {
       while (list.firstChild) list.removeChild(list.firstChild);
       var q = String(F.search || '').trim();
-      if (q.length < 2) { list.hidden = true; return; }
-      // ONE search field, three sources with section headers: מטופלים · מאושפזים · לידים פתוחים
-      var groups = matchTargetsGrouped(targets, q, 6);
+      if (dismissed) { list.hidden = true; return; }
+      // ONE search field, three sources with section headers: מטופלים · מאושפזים · לידים פתוחים.
+      // Empty query = BROWSE: every source, more rows per section, the list scrolls.
+      var browsing = !q;
+      var groups = matchTargetsGrouped(targets, q, browsing ? BROWSE_PER_TYPE : 6);
       list.hidden = false;
       if (!groups.length) { list.appendChild(h('div', { class: 'muted pkg-who-none', text: 'לא נמצא — אפשר להזין שם וטלפון למטה (לקוח שאינו במערכת)' })); return; }
       groups.forEach(function (g) {
@@ -439,7 +448,19 @@
             h('span', { class: 'muted', text: [t.phone, targetText(t)].filter(Boolean).join(' · ') })
           ]));
         });
+        // the section holds more than is drawn: say how to reach the rest
+        if (g.truncated) list.appendChild(h('div', { class: 'muted pkg-who-more', 'data-more': g.type, text: 'הקלידי שם או טלפון לסינון…' }));
       });
+    }
+    // a click anywhere outside the picker closes the list (the listener dies with the form:
+    // it is removed on the next repaint, which rebuilds this picker from scratch)
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      var outside = function (e) {
+        if (!wrap.isConnected) { document.removeEventListener('click', outside, true); return; }
+        if (wrap.contains(e.target)) return;
+        dismissed = true; fill();
+      };
+      document.addEventListener('click', outside, true);
     }
     fill();
     wrap.appendChild(input); wrap.appendChild(list);
@@ -448,14 +469,35 @@
     wrap.appendChild(h('div', { class: 'pkg-who-manual' }, [h('span', { class: 'muted pkg-who-or', text: 'או לקוח שאינו במערכת (פנייה חד-פעמית בלבד):' }), nameIn, phoneIn]));
     return wrap;
   }
-  /* Pure: the matches of ONE query grouped by source, in the fixed section order (clients, roster, leads), each
-   * capped at `perType`; a section with no match is omitted. `total` is the uncapped count of that section. */
+  /* Pure: targets grouped by source, in the fixed section order (clients, roster, leads), each capped at
+   * `perType`; a section with no row is omitted. `total` is the uncapped count of that section and
+   * `truncated` says the cap hid some of it.
+   *
+   * CONTRACT (2026-11-04, Sandra's production report): an EMPTY query browses — it returns every target
+   * grouped, so clicking the field opens a scannable list (the pre-#167 <select> she lost). `matchTargets`
+   * keeps its own contract: a blank query there still matches nothing. */
   function matchTargetsGrouped(targets, query, perType) {
-    var all = matchTargets(targets, query, Infinity);
+    var cap = perType || 6;
+    var all = String(query == null ? '' : query).trim()
+      ? matchTargets(targets, query, Infinity)
+      : browseTargets(targets);
     return TARGET_SECTIONS.map(function (sec) {
       var items = all.filter(function (t) { return t.type === sec[0]; });
-      return { type: sec[0], label: sec[1], total: items.length, items: items.slice(0, perType || 6) };
+      return { type: sec[0], label: sec[1], total: items.length, truncated: items.length > cap, items: items.slice(0, cap) };
     }).filter(function (g) { return g.items.length; });
+  }
+  /* Pure: EVERY target, in the picker's own order (clients, roster, leads; then by name, he locale).
+   * This is the browse path — no query, no filtering, no money. */
+  function browseTargets(targets) {
+    var out = (targets || []).filter(function (t) { return !!t; });
+    out.sort(targetOrder);
+    return out;
+  }
+  var TARGET_RANK = { client: 0, roster: 1, lead: 2 };
+  function targetOrder(a, b) {
+    var ra = TARGET_RANK[a.type] === undefined ? 9 : TARGET_RANK[a.type];
+    var rb = TARGET_RANK[b.type] === undefined ? 9 : TARGET_RANK[b.type];
+    return (ra - rb) || String(a.name || '').localeCompare(String(b.name || ''), 'he');
   }
   /* Pure: targets matching a typed name (case-insensitive substring) or phone (digits, 3+). Clients before leads, then by name. */
   function matchTargets(targets, query, limit) {
@@ -468,8 +510,7 @@
       if (byPhone) return String(t.phone || '').replace(/\D/g, '').indexOf(digits) >= 0;
       return String(t.name || '').toLowerCase().indexOf(q) >= 0;
     });
-    var rank = { client: 0, roster: 1, lead: 2 };
-    out.sort(function (a, b) { return ((rank[a.type] === undefined ? 9 : rank[a.type]) - (rank[b.type] === undefined ? 9 : rank[b.type])) || String(a.name || '').localeCompare(String(b.name || ''), 'he'); });
+    out.sort(targetOrder);
     return limit === Infinity ? out : out.slice(0, limit || 8);
   }
 
@@ -889,6 +930,6 @@
   }
   function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; S.confirm = {}; embedded = []; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, mountOfferForm: mountOfferForm, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, waHref: waHref, offerMessage: offerMessage, matchTargets: matchTargets, matchTargetsGrouped: matchTargetsGrouped, sentToText: sentToText, estimateTotals: estimateTotals, lineUnit: lineUnit, TARGET_HE: TARGET_HE, TARGET_SECTIONS: TARGET_SECTIONS,
+  return { mount: mount, mountOfferForm: mountOfferForm, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, waHref: waHref, offerMessage: offerMessage, matchTargets: matchTargets, matchTargetsGrouped: matchTargetsGrouped, browseTargets: browseTargets, BROWSE_PER_TYPE: BROWSE_PER_TYPE, sentToText: sentToText, estimateTotals: estimateTotals, lineUnit: lineUnit, TARGET_HE: TARGET_HE, TARGET_SECTIONS: TARGET_SECTIONS,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });
