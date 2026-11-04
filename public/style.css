@@ -1387,7 +1387,7 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 /* «למי ההצעה» (2026-11-04): a large full-width searchable picker, the unregistered-client row beneath */
 .pkg-who-box { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .pkg-root .pkg-who-input { width: 100%; flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 46px; }
-.pkg-who-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 4px; }
+.pkg-who-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 4px; }
 .pkg-who-list[hidden] { display: none; }
 .pkg-who-opt, .pkg-who-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; text-align: start; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
 .pkg-who-opt:hover, .pkg-who-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
@@ -1395,6 +1395,7 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-who-picked .btn { margin-inline-start: auto; }
 .pkg-who-name { font-weight: 600; font-size: 15px; }
 .pkg-who-none { padding: 8px 12px; }
+.pkg-who-more { padding: 6px 12px; font-size: 12px; font-style: italic; }
 .pkg-who-manual { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
 .pkg-root .pkg-who-manual input { flex: 1 1 200px; min-height: 42px; }
 .pkg-who-or { flex: 0 0 100%; font-size: 13px; }
