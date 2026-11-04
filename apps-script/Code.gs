@@ -5738,10 +5738,10 @@ function _pkgPublicItem(r) {
  * pending/priced wire values for legacy clients, allow only known states,
  * and never project a price, note, phone or unauthorized requester's row. */
 function _pkgManagerStatus(req) {
-  var crm = _pkgCrmStatus(req);
-  if (crm === 'ready_to_send') return 'priced';
-  if (crm === 'draft') return 'pending';
-  return ['sent', 'awaiting_decision', 'approved', 'rejected', 'expired'].indexOf(crm) >= 0 ? crm : 'pending';
+  var stored = String(req && req.status || '');
+  if (stored === 'priced' || stored === 'ready_to_send') return 'priced';
+  if (stored === 'pending' || stored === 'draft') return 'pending';
+  return ['sent', 'awaiting_decision', 'approved', 'rejected', 'expired'].indexOf(stored) >= 0 ? stored : 'pending';
 }
 function _pkgSubmitView(req, duplicate) {
   return { ok: true, requestId: String(req.id), status: _pkgManagerStatus(req), duplicate: duplicate === true };
