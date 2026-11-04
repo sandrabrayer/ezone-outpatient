@@ -4,7 +4,7 @@
 Outpatient #163 added stages `sent`, `awaiting_decision`, `approved`, `rejected`, `expired` to the existing `PackageRequests` workflow. The deployed `_pkgStatusItem` and `_pkgSubmitView` still return `priced` only for literal source status `priced`, otherwise `pending`. A manager who opens a previously sent/approved/rejected request in Therapists sees the false status "waiting for pricing"; this is a data-contract mismatch, not a database synchronization outage.
 
 ## Changes / no changes
-- Reuse the already present `_pkgCrmStatus` source reader to translate legacy `pending → pending`, `priced → priced`, new `ready_to_send → priced`, and keep the remaining five documented CRM milestones as-is.
+- Use the new isolated `_pkgManagerStatusView` source allowlist (without shadowing the existing `_pkgManagerStatus` action handler) to translate legacy `pending → pending`, `priced → priced`, new `ready_to_send → priced`, and keep the remaining five documented CRM milestones as-is.
 - Both request read and exact request-id retry use this safe projection. The shared-secret manager feed stays requester-scoped and allowlisted: only the existing fields `requestId,status,packageKey,months,createdAt`; no amount, notes, phone, price, clinical data or client write.
 - No new schema, no writes, no changes to billing or the main CRM engine.
 - Synthetic test pins each status and verifies no duplicate requests, immutable request ID, and no money/PII.
