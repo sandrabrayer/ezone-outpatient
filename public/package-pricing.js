@@ -28,7 +28,7 @@
   var UNIT = { per_session_pack: 'חבילת טיפולים', flat: 'מחיר כולל קבוע', per_month: 'מחיר חודשי', per_month_range: 'טווח חודשי (בחירה)' };
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
   // Offer CRM statuses (stable keys; pending ≙ draft and priced ≙ ready_to_send are mapped by the server at read time)
-  var CRM_STATUS = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף' };
+  var CRM_STATUS = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף', deleted: 'נמחקה' };
   // target kinds of an offer (stable keys): outpatient client · Dashboard admitted-roster patient · open lead
   var TARGET_HE = { client: 'מטופל', roster: 'מאושפז/ת', lead: 'ליד' };
   var TARGET_SECTIONS = [['client', 'מטופלים'], ['roster', 'מאושפזים'], ['lead', 'לידים פתוחים']];
@@ -51,7 +51,8 @@
     invalid_transition: 'המעבר הזה לא אפשרי במצב הנוכחי', offer_closed: 'ההצעה כבר נסגרה', invalid_recipient: 'יש לבחור יעד תקין (אורן או מספר 05X)',
     recovery_pending: 'המערכת בשחזור — נסי מאוחר יותר',
     invalid_amount: 'מחיר לא תקין', invalid_custom_item: 'יש להזין שם טיפול (2 תווים לפחות) ומחיר ליחידה',
-    pricing_override_vered_only: 'פריט מותאם / מחיר ידני — ורד בלבד'
+    pricing_override_vered_only: 'פריט מותאם / מחיר ידני — ורד בלבד',
+    offer_delete_vered_only: 'מחיקה / איפוס של הצעה — ורד בלבד', items_required_reset: 'ההצעה אופסה ואין בה פריטים'
   };
   var MAX_SHEKELS_DIGITS = 7;
 
@@ -492,7 +493,9 @@
         h('span', { class: 'muted', text: 'מבקש/ת: ' + label(REQUESTER, r.requesterKey) + (r.patientPhone ? ' · ' + r.patientPhone : '') + (r.assignee ? ' · אחראי/ת: ' + r.assignee : '') })
       ])
     ];
-    if (items && (items.length > 1 || items[0].qty > 1 || items[0].custom || items[0].overrideReason)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
+    var emptyDraft = crm === 'draft' && Array.isArray(r.items) && !r.items.length && !r.packageKey; // after «↺ איפוס»
+    if (emptyDraft) kids.push(h('div', { class: 'pkg-reset-note muted', text: 'ההצעה אופסה — אין בה פריטים. אפשר ליצור הצעה חדשה לאותו לקוח או למחוק אותה.' }));
+    else if (items && (items.length > 1 || items[0].qty > 1 || items[0].custom || items[0].overrideReason)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
       var overridden = !it.custom && it.catalogUnitAgorot != null && it.grossAgorot != null && it.catalogUnitAgorot !== it.grossAgorot;
       return h('li', { class: overridden ? 'pkg-item-overridden' : (it.custom ? 'pkg-item-custom' : '') }, [
         h('span', { text: itemLabel({ custom: !!it.custom, title: it.title, packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 }) + ' — ' }),
@@ -503,7 +506,7 @@
         it.overrideReason ? h('span', { class: 'muted', text: ' · ' + it.overrideReason }) : null]);
     })));
     else kids.push(h('div', { text: pkgName(r.packageKey) + (r.months ? ' · ' + r.months + ' חודשים' : '') }));
-    kids.push(h('div', { class: 'pkg-price' }, priceLines));
+    if (!emptyDraft) kids.push(h('div', { class: 'pkg-price' }, priceLines));
     var terms = [];
     if (r.validUntil) terms.push('תוקף עד ' + fmtDay(r.validUntil));
     if (r.followUpDate) terms.push('מעקב ב-' + fmtDay(r.followUpDate));
@@ -514,17 +517,49 @@
     if (r.notes) kids.push(h('div', { class: 'muted', text: 'הערות: ' + r.notes }));
     if (r.adjustLog && r.adjustLog.length) kids.push(h('ul', { class: 'pkg-log muted' }, r.adjustLog.map(function (e) {
       var what = e.kind === 'select' ? 'נבחר מחיר חודשי ' + formatAgorot(e.to)
+        : e.kind === 'deleted' ? 'ההצעה נמחקה'
+        : e.kind === 'reset' ? 'ההצעה אופסה לטיוטה (הפריטים נמחקו)'
         : e.kind === 'override' ? 'מחיר ידני ל' + pkgName(e.item) + ': ' + formatAgorot(e.from) + ' → ' + formatAgorot(e.to) + ' ליחידה'
         : e.kind === 'custom' ? 'פריט מותאם «' + String(e.item || '') + '» ' + formatAgorot(e.to) + ' ליחידה' + (e.qty > 1 ? ' × ' + e.qty : '')
         : 'תואם מ-' + formatAgorot(e.from) + ' ל-' + formatAgorot(e.to);
       return h('li', { text: what + (e.reason ? ' — ' + e.reason : '') + ' (' + e.by + (e.at ? ' · ' + fmtDay(e.at) : '') + ')' });
     })));
-    if (crm === 'draft') kids.push(pendingControls(r));
+    if (crm === 'draft' && !emptyDraft) kids.push(pendingControls(r));
+    if (emptyDraft && r.attachedType) kids.push(h('div', { class: 'pkg-controls' }, [h('button', { type: 'button', class: 'btn btn-primary pkg-redo-btn', text: '➕ הצעה חדשה לאותו לקוח', onclick: function () { S.newForm = newFormState(r.attachedType + ':' + r.attachedId, false); S.error = ''; draw(); window.scrollTo(0, 0); } })]));
     if (crm !== 'draft' && !r.attachedType && ['approved', 'rejected', 'expired'].indexOf(crm) < 0) kids.push(attachControls(r));
     if (crm !== 'draft') kids.push(crmControls(r, crm));
     if (S.wa[r.id]) kids.push(whatsappPanel(r));
+    if (canDeleteOffers()) kids.push(deleteResetControls(r, crm));
+    if (S.confirm[r.id]) kids.push(confirmBox(r));
     return h('div', { class: 'pkg-card card pkg-crm-' + crm, 'data-request-id': r.id }, kids);
   }
+  // ---- soft delete / reset (display rule: ורד; the server refuses anyone else with 403 / vered_only) ----
+  var OFFER_DELETE_USERS = ['ורד'];
+  function canDeleteOffers() { return OFFER_DELETE_USERS.indexOf(S.signedInName) >= 0; }
+  function deleteResetControls(r, crm) {
+    return h('div', { class: 'pkg-row pkg-danger-zone' }, [
+      h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-delete-btn', text: '🗑 מחיקה', 'aria-expanded': S.confirm[r.id] && S.confirm[r.id].kind === 'delete' ? 'true' : 'false', onclick: function () { S.confirm[r.id] = S.confirm[r.id] && S.confirm[r.id].kind === 'delete' ? null : { kind: 'delete', reason: '' }; draw(); } }),
+      crm === 'draft' && Array.isArray(r.items) && !r.items.length ? null
+        : h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-reset-btn', text: '↺ איפוס', 'aria-expanded': S.confirm[r.id] && S.confirm[r.id].kind === 'reset' ? 'true' : 'false', onclick: function () { S.confirm[r.id] = S.confirm[r.id] && S.confirm[r.id].kind === 'reset' ? null : { kind: 'reset', reason: '' }; draw(); } })
+    ]);
+  }
+  /* In-app confirmation (never window.confirm): what will happen, an optional reason, confirm / cancel. */
+  function confirmBox(r) {
+    var C = S.confirm[r.id], del = C.kind === 'delete';
+    var why = h('input', { type: 'text', maxlength: '200', placeholder: 'סיבה (רשות)', 'aria-label': 'סיבת ה' + (del ? 'מחיקה' : 'איפוס'), value: C.reason || '', oninput: function () { C.reason = why.value; } });
+    return h('div', { class: 'pkg-confirm card', role: 'alertdialog', 'aria-label': del ? 'אישור מחיקת הצעה' : 'אישור איפוס הצעה' }, [
+      h('div', { class: 'pkg-fam-title', text: del ? 'למחוק את ההצעה של ' + (r.patientName || '') + '?' : 'לאפס את ההצעה של ' + (r.patientName || '') + '?' }),
+      h('p', { class: 'muted', text: del ? 'ההצעה תוסתר מכל הרשימות, הכרטיסים ו«היום שלי». הרשומה נשמרת בגיליון עם תיעוד מי / מתי / למה. אין חיוב, תשלום או חידוש שמושפעים.'
+        : 'ההצעה תחזור לטיוטה ריקה: הפריטים, התמחור, האישור והשליחה יימחקו (מתועד). הלקוח, התוקף והמעקב נשארים.' }),
+      h('div', { class: 'pkg-row' }, [why,
+        h('button', { type: 'button', class: 'btn ' + (del ? 'btn-danger' : 'btn-primary') + ' pkg-confirm-ok', text: del ? 'אישור מחיקה' : 'אישור איפוס', onclick: function () {
+          delete S.confirm[r.id];
+          mutate(del ? 'deleteRequest' : 'resetRequest', r, { reason: (C.reason || '').trim() }, del ? 'ההצעה נמחקה' : 'ההצעה אופסה לטיוטה');
+        } }),
+        h('button', { type: 'button', class: 'btn btn-ghost pkg-confirm-cancel', text: 'ביטול', onclick: function () { delete S.confirm[r.id]; draw(); } })])
+    ]);
+  }
+
   // ---- offer CRM actions (ready_to_send → sent → awaiting_decision → approved | rejected; expired = extend) ----
   function crmControls(r, crm) {
     var box = [];

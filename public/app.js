@@ -4991,7 +4991,8 @@
         crmStatus: CL.isCrmStatus(row.crmStatus) ? row.crmStatus : 'not_contacted',
         assignee: row.assignee || '',
         offerRequestId: row.offerRequestId || '',
-        offer: row.offerRequestId ? (offersById[String(row.offerRequestId)] || null) : null,
+        // the workflow row's explicit link first, else a quote created FOR this roster patient (attachedType 'roster')
+        offer: (row.offerRequestId ? (offersById[String(row.offerRequestId)] || null) : null) || (ref ? ((state.offers || []).filter(function (o) { return o && o.attachedType === 'roster' && String(o.attachedId) === ref; })[0] || null) : null),
         ref: ref, subjectId: subjectId,
         milestones: (ref && !ms) ? null : (ms || null),
         tasksById: tasksById,

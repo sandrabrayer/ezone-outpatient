@@ -171,9 +171,11 @@
       if (!o || !s(o.id)) return;
       var st = s(o.status), fu = isoDay(o.followUpDate);
       if (['sent', 'awaiting_decision', 'ready_to_send'].indexOf(st) < 0) return;
-      var subjectKind = s(o.attachedType) === 'client' ? 'client' : s(o.attachedType) === 'lead' ? 'lead' : 'offer';
-      var subjectId = s(o.attachedId) || s(o.id);
-      var name = nameOf[subjectKind + ':' + subjectId] || s(o.patientName) || '—';
+      // a quote for a Dashboard admitted patient (attachedType 'roster') is filed under the continuation subject cont:<ref>
+      var isRoster = s(o.attachedType) === 'roster';
+      var subjectKind = s(o.attachedType) === 'client' ? 'client' : s(o.attachedType) === 'lead' ? 'lead' : isRoster ? 'continuation' : 'offer';
+      var subjectId = isRoster ? 'cont:' + s(o.attachedId) : (s(o.attachedId) || s(o.id));
+      var name = nameOf[(isRoster ? 'client' : subjectKind) + ':' + subjectId] || s(o.patientName) || '—';
       var action = st === 'ready_to_send' ? 'הצעת מחיר מוכנה — לשלוח ללקוח' : 'מעקב אחרי הצעת מחיר שנשלחה';
       var why = (st === 'sent' && o.sentAt ? 'נשלחה ב-' + fmtDate(o.sentAt) : st === 'awaiting_decision' ? 'ממתינה להחלטת הלקוח' : 'תומחרה ואושרה לשליחה') + (o.validUntil ? ' · בתוקף עד ' + fmtDate(o.validUntil) : '');
       var state = fu ? stateOf(fu, today) : 'undated';
