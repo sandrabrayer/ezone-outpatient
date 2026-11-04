@@ -510,7 +510,7 @@
     var terms = [];
     if (r.validUntil) terms.push('תוקף עד ' + fmtDay(r.validUntil));
     if (r.followUpDate) terms.push('מעקב ב-' + fmtDay(r.followUpDate));
-    if (r.sentAt) terms.push('נשלחה ' + fmtDay(r.sentAt) + (r.sentTo ? (r.sentTo === 'oren' ? ' לאורן' : ' ל-' + r.sentTo) : ''));
+    if (r.sentAt) terms.push('נשלחה ' + fmtDay(r.sentAt) + sentToText(r.sentTo));
     if (r.decisionAt) terms.push('החלטה ' + fmtDay(r.decisionAt));
     if (r.attachedType) terms.push('משויך ל' + label(TARGET_HE, r.attachedType) + ' (מזהה ' + r.attachedId + ')');
     if (terms.length) kids.push(h('div', { class: 'muted pkg-terms-line', text: terms.join(' · ') }));
@@ -528,11 +528,21 @@
     if (emptyDraft && r.attachedType) kids.push(h('div', { class: 'pkg-controls' }, [h('button', { type: 'button', class: 'btn btn-primary pkg-redo-btn', text: '➕ הצעה חדשה לאותו לקוח', onclick: function () { S.newForm = newFormState(r.attachedType + ':' + r.attachedId, false); S.error = ''; draw(); window.scrollTo(0, 0); } })]));
     if (crm !== 'draft' && !r.attachedType && ['approved', 'rejected', 'expired'].indexOf(crm) < 0) kids.push(attachControls(r));
     if (crm !== 'draft') kids.push(crmControls(r, crm));
-    if (S.wa[r.id]) kids.push(whatsappPanel(r));
+    if (S.wa[r.id] && S.wa[r.id].panel && crm === 'ready_to_send') kids.push(whatsappPanel(r));
     if (canDeleteOffers()) kids.push(deleteResetControls(r, crm));
     if (S.confirm[r.id]) kids.push(confirmBox(r));
     return h('div', { class: 'pkg-card card pkg-crm-' + crm, 'data-request-id': r.id }, kids);
   }
+  /* «נשלחה … לאורן / למטופל (…1234) / למספר אחר (…1234)» — the row keeps the kind + last four digits only. */
+  function sentToText(sentTo) {
+    var v = String(sentTo || '');
+    if (!v) return '';
+    if (v === 'oren') return ' לאורן';
+    var m = /^(patient|other):(\d{4})$/.exec(v);
+    if (m) return (m[1] === 'patient' ? ' למטופל/ת' : ' למספר אחר') + ' (…' + m[2] + ')';
+    return ' ל-' + v; // a legacy row that stored a full number
+  }
+
   // ---- soft delete / reset (display rule: ורד; the server refuses anyone else with 403 / vered_only) ----
   var OFFER_DELETE_USERS = ['ורד'];
   function canDeleteOffers() { return OFFER_DELETE_USERS.indexOf(S.signedInName) >= 0; }
@@ -565,10 +575,9 @@
     var box = [];
     var fu = h('input', { type: 'date', value: r.followUpDate || '', 'aria-label': 'מועד מעקב' });
     var saveFu = h('button', { type: 'button', class: 'btn btn-sm', text: 'עדכון מעקב', onclick: function () { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); } });
-    if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') {
-      box.push(h('button', { type: 'button', class: 'btn', text: '💬 הכן הודעת WhatsApp', 'aria-expanded': S.wa[r.id] ? 'true' : 'false', onclick: function () { S.wa[r.id] = S.wa[r.id] ? null : { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; draw(); } }));
-    }
-    if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () { S.wa[r.id] = S.wa[r.id] || { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; S.wa[r.id].confirm = true; draw(); } }));
+    var waBlock = null;
+    if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') waBlock = whatsappLinks(r, crm);
+    if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-btn', text: '✔ סמן כנשלחה', 'aria-expanded': S.wa[r.id] && S.wa[r.id].panel ? 'true' : 'false', onclick: function () { var W = waState(r); W.panel = !W.panel; draw(); } }));
     if (crm === 'sent') box.push(h('button', { type: 'button', class: 'btn', text: '⏳ ממתינה להחלטה', onclick: function () { mutate('setStatus', r, { status: 'awaiting_decision' }, 'סומן: ממתינה להחלטה'); } }));
     if (crm === 'sent' || crm === 'awaiting_decision') {
       box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✅ הלקוח אישר', title: 'אישור ההצעה בלבד — ללא חיוב, תשלום או חידוש', onclick: function () { if (confirm('לסמן שהלקוח אישר את ההצעה? (אין חיוב ואין תשלום — הגבייה נעשית בכרטיס המטופל)')) mutate('setStatus', r, { status: 'approved' }, 'ההצעה אושרה — ללא חיוב'); } }));
@@ -581,8 +590,40 @@
       var vu = h('input', { type: 'date', value: isoPlus(14), 'aria-label': 'תוקף חדש' });
       box.push(h('span', { class: 'pkg-row pkg-fu' }, [h('span', { class: 'muted', text: 'הארכת תוקף עד' }), vu, h('button', { type: 'button', class: 'btn btn-sm', text: 'הארכה', onclick: function () { mutate('setStatus', r, { validUntil: vu.value }, 'התוקף הוארך'); } })]));
     }
-    if (!box.length) return null;
-    return h('div', { class: 'pkg-controls pkg-crm-actions' }, [h('div', { class: 'pkg-row' }, box)]);
+    if (!box.length && !waBlock) return null;
+    return h('div', { class: 'pkg-controls pkg-crm-actions' }, [waBlock, box.length ? h('div', { class: 'pkg-row' }, box) : null]);
+  }
+
+  /* WhatsApp (2026-11-04 fix). Sandra: «הכן הודעת WhatsApp» did nothing — the old button only toggled a panel that
+   * landed BELOW the fold on a phone, and its «פתיחת WhatsApp» refused silently until a recipient was picked from a
+   * select whose only preset (אורן) was disabled when the setting was empty; window.open from an async-feeling
+   * click was also blocked in the installed PWA. Now: two explicit, SYNCHRONOUS links rendered as <a target=_blank
+   * rel=noopener> right under the status — «שליחה לאורן» (number from the orenWhatsapp setting; a clear inline
+   * hint linking to ⚙️ הגדרות when it is empty) and «שליחה למטופל» (the offer target's phone, normalised; disabled
+   * with the reason when there is none). Opening WhatsApp changes NOTHING: the status moves only via «סמן כנשלחה». */
+  function waHref(number, text) { return 'https://wa.me/' + number + '?text=' + encodeURIComponent(text); }
+  function waState(r) { return S.wa[r.id] || (S.wa[r.id] = { to: '', custom: '', followUp: r.followUpDate || isoPlus(3), text: '', editing: false, panel: false }); }
+  function whatsappLinks(r, crm) {
+    var W = S.wa[r.id] || {};
+    var text = W.text || offerMessage(r);
+    var orenNum = waNumber((S.settings() || {}).orenWhatsapp);
+    var patientNum = waNumber(r.patientPhone);
+    var kids = [h('span', { class: 'muted pkg-wa-cap', text: '💬 WhatsApp:' })];
+    if (orenNum) kids.push(h('a', { class: 'btn btn-wa pkg-wa-oren', href: waHref(orenNum, text), target: '_blank', rel: 'noopener', 'data-wa-to': 'oren', text: 'שליחה לאורן' }));
+    else kids.push(h('span', { class: 'pkg-wa-missing' }, [h('span', { class: 'btn pkg-wa-oren', 'aria-disabled': 'true', text: 'שליחה לאורן' }),
+      h('span', { class: 'muted', text: ' מספר ה-WhatsApp של אורן לא הוגדר — ' }),
+      h('button', { type: 'button', class: 'link-btn pkg-open-settings', text: '⚙️ הגדרות', onclick: function () { if (typeof S.openSettings === 'function') S.openSettings(); } })]));
+    if (patientNum) kids.push(h('a', { class: 'btn btn-wa pkg-wa-patient', href: waHref(patientNum, text), target: '_blank', rel: 'noopener', 'data-wa-to': 'patient', text: 'שליחה למטופל' }));
+    else kids.push(h('span', { class: 'btn pkg-wa-patient', 'aria-disabled': 'true', title: 'אין מספר טלפון תקין למטופל/ת בהצעה', text: 'שליחה למטופל — אין טלפון' }));
+    kids.push(h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-wa-edit', text: W.editing ? 'סגירת הנוסח' : '✏️ נוסח ההודעה', 'aria-expanded': W.editing ? 'true' : 'false', onclick: function () { var st = waState(r); st.editing = !st.editing; draw(); } }));
+    var out = [h('div', { class: 'pkg-row pkg-wa-links' }, kids),
+      h('p', { class: 'muted pkg-wa-note', text: crm === 'ready_to_send' ? 'פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה — אחרי השליחה לחצי «סמן כנשלחה».' : 'פתיחת WhatsApp אינה משנה את מצב ההצעה.' })];
+    if (W.editing) {
+      var msg = h('textarea', { rows: '7', 'aria-label': 'נוסח ההודעה', class: 'pkg-wa-text' }); msg.value = text;
+      msg.addEventListener('input', function () { waState(r).text = msg.value; var links = S.root ? S.root.querySelectorAll('[data-request-id="' + r.id + '"] a[data-wa-to]') : []; Array.prototype.forEach.call(links, function (a) { a.href = waHref(a.getAttribute('data-wa-to') === 'oren' ? orenNum : patientNum, msg.value); }); });
+      out.push(msg);
+    }
+    return h('div', { class: 'pkg-wa-block' }, out);
   }
 
   // ---- WhatsApp: a message PREPARED for a human to send from the device's connected WhatsApp account.
@@ -599,38 +640,29 @@
     return lines.join('\n');
   }
   function whatsappPanel(r) {
-    var W = S.wa[r.id];
+    var W = waState(r);
     var orenNum = waNumber((S.settings() || {}).orenWhatsapp);
-    var toSel = h('select', { 'aria-label': 'יעד ההודעה', onchange: function () { W.to = toSel.value; draw(); } }, [
-      h('option', { value: '', text: 'בחרי יעד…' }),
-      h('option', { value: 'oren', text: 'אורן' + (orenNum ? '' : ' (מספר לא הוגדר בהגדרות)'), disabled: orenNum ? false : 'disabled', selected: W.to === 'oren' ? 'selected' : false }),
-      h('option', { value: 'custom', text: 'מספר אחר…', selected: W.to === 'custom' ? 'selected' : false })
+    var patientNum = waNumber(r.patientPhone);
+    var toSel = h('select', { 'aria-label': 'למי נשלחה ההצעה', onchange: function () { W.to = toSel.value; draw(); } }, [
+      h('option', { value: '', text: 'למי נשלחה?' }),
+      h('option', { value: 'oren', text: 'לאורן' + (orenNum ? '' : ' (מספר לא הוגדר בהגדרות)'), disabled: orenNum ? false : 'disabled', selected: W.to === 'oren' ? 'selected' : false }),
+      h('option', { value: 'patient', text: 'למטופל/ת' + (patientNum ? '' : ' (אין טלפון)'), disabled: patientNum ? false : 'disabled', selected: W.to === 'patient' ? 'selected' : false }),
+      h('option', { value: 'custom', text: 'למספר אחר…', selected: W.to === 'custom' ? 'selected' : false })
     ]);
     var custom = h('input', { type: 'tel', placeholder: '05X-XXXXXXX', 'aria-label': 'מספר טלפון ליעד', value: W.custom || '', oninput: function () { W.custom = custom.value; } });
-    var msg = h('textarea', { rows: '7', 'aria-label': 'נוסח ההודעה', class: 'pkg-wa-text' }); msg.value = W.text || offerMessage(r);
-    msg.addEventListener('input', function () { W.text = msg.value; });
     var fu = h('input', { type: 'date', value: W.followUp || '', 'aria-label': 'מועד מעקב אחרי השליחה', onchange: function () { W.followUp = fu.value; } });
-    function targetNumber() { return W.to === 'oren' ? orenNum : W.to === 'custom' ? waNumber(custom.value) : ''; }
+    function recipient() { return W.to === 'oren' ? 'oren' : W.to === 'patient' ? 'patient' : W.to === 'custom' ? ('0' + waNumber(custom.value).slice(3)) : ''; }
     return h('div', { class: 'pkg-wa card' }, [
-      h('div', { class: 'pkg-fam-title', text: 'הודעת WhatsApp — לאישור אנושי' }),
-      h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null]),
-      msg,
-      h('p', { class: 'muted', text: 'ההודעה תיפתח ב-WhatsApp מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה.' }),
-      h('div', { class: 'pkg-row' }, [
-        h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
-        h('button', { type: 'button', class: 'btn', text: '📲 פתיחת WhatsApp', onclick: function () {
-          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
-          window.open('https://wa.me/' + n + '?text=' + encodeURIComponent(msg.value), '_blank', 'noopener');
-        } }),
-        h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () {
-          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
+      h('div', { class: 'pkg-fam-title', text: 'סימון ההצעה כנשלחה — אישור אנושי' }),
+      h('p', { class: 'muted', text: 'ההודעה נשלחת מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). כאן רק מתועד למי ומתי נשלחה; נשמרות ארבע הספרות האחרונות בלבד.' }),
+      h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null, h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
+        h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-ok', text: '✔ סמן כנשלחה', onclick: function () {
+          var to = recipient(); if (!to || to === '0') { say(errorText('invalid_recipient'), true); return; }
           if (!fu.value) { say('יש לקבוע מועד מעקב', true); return; }
-          var fields = { status: 'sent', sentTo: W.to === 'oren' ? 'oren' : ('0' + n.slice(3)), followUpDate: fu.value };
-          if (crmOf(r) !== 'ready_to_send') { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); return; }
           delete S.wa[r.id];
-          mutate('setStatus', r, fields, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
+          mutate('setStatus', r, { status: 'sent', sentTo: to, followUpDate: fu.value }, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
         } }),
-        h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { delete S.wa[r.id]; draw(); } })
+        h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { W.panel = false; draw(); } })
       ])
     ]);
   }
@@ -857,6 +889,6 @@
   }
   function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; S.confirm = {}; embedded = []; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, mountOfferForm: mountOfferForm, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage, matchTargets: matchTargets, matchTargetsGrouped: matchTargetsGrouped, estimateTotals: estimateTotals, lineUnit: lineUnit, TARGET_HE: TARGET_HE, TARGET_SECTIONS: TARGET_SECTIONS,
+  return { mount: mount, mountOfferForm: mountOfferForm, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, waHref: waHref, offerMessage: offerMessage, matchTargets: matchTargets, matchTargetsGrouped: matchTargetsGrouped, sentToText: sentToText, estimateTotals: estimateTotals, lineUnit: lineUnit, TARGET_HE: TARGET_HE, TARGET_SECTIONS: TARGET_SECTIONS,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });

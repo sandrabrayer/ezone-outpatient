@@ -161,7 +161,8 @@ test('flow: draft → (discount with reason, Vered) → approve = ready_to_send 
   assert.equal((await lastReq()).crmStatus, 'ready_to_send', 'a refused send changed nothing');
   const sent = await rpc('setStatus', { requestId: r.id, opId: opId(), expectedRevision: r.revision, status: 'sent', sentTo: '050-333-3333', followUpDate: '2026-11-12' });
   assert.equal(sent.json.ok, true); r = sent.json.request;
-  assert.equal(r.crmStatus, 'sent'); assert.equal(r.sentTo, '0503333333'); assert.equal(r.followUpDate, '2026-11-12'); assert.ok(r.sentAt);
+  // 2026-11-04: only the recipient KIND + the last four digits are stored — never a full number on the row
+  assert.equal(r.crmStatus, 'sent'); assert.equal(r.sentTo, 'other:3333'); assert.equal(r.followUpDate, '2026-11-12'); assert.ok(r.sentAt);
   // the same op id again = replay, no second event
   const replay = await rpc('setStatus', { requestId: r.id, opId: upstream.at(-1).opId, expectedRevision: r.revision - 1, status: 'sent', sentTo: '0503333333' });
   assert.equal(replay.json.replay, true);
@@ -245,18 +246,19 @@ test('static guards: allowlist, dispatch, UI wiring, WhatsApp rules', () => {
   const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const UI = fs.readFileSync(path.join(__dirname, '..', 'public', 'package-pricing.js'), 'utf8');
   const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  assert.deepEqual(Object.keys(catalogAdmin.ADMIN_OPS).sort(), ['adjust', 'approve', 'attach', 'catalog', 'createRequest', 'list', 'quote', 'saveRow', 'seed', 'setStatus']);
+  assert.deepEqual(Object.keys(catalogAdmin.ADMIN_OPS).sort(), ['adjust', 'approve', 'attach', 'catalog', 'createRequest', 'deleteRequest', 'list', 'quote', 'resetRequest', 'saveRow', 'seed', 'setStatus']);
   assert.deepEqual(catalogAdmin.ITEM_FIELDS, ['packageKey', 'months', 'selectedMonthlyAgorot', 'qty', 'custom', 'title', 'unitAgorot', 'overrideUnitAgorot', 'overrideReason'], 'append-only');
-  assert.match(GS, /var PACKAGE_CRM_STATUSES = \['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'\]/);
+  assert.match(GS, /var PACKAGE_CRM_STATUSES = \['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired', 'deleted'\]/);
   assert.match(GS, /adminCreatePackageRequest: true, adminSetPackageRequestStatus: true/);
   assert.match(GS, /if \(action === 'adminCreatePackageRequest'\) return _json\(_pkgAdminCreate\(payload\)\);/);
   assert.match(GS, /if \(action === 'getPackageOfferSummaries'\) return _json\(_pkgOfferSummaries\(\)\);/);
   // the Hebrew labels live in the UI only; the UI never writes HTML strings and never computes a price it sends
   assert.match(UI, /var CRM_STATUS = \{ draft: 'טיוטה'/);
   assert.ok(!/innerHTML|insertAdjacentHTML/.test(UI));
-  assert.match(UI, /https:\/\/wa\.me\/' \+ n \+ '\?text=' \+ encodeURIComponent/);
+  assert.match(UI, /function waHref\(number, text\) \{ return 'https:\/\/wa\.me\/' \+ number \+ '\?text=' \+ encodeURIComponent\(text\); \}/);
   assert.match(UI, /פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה/);
-  assert.match(UI, /status: 'sent', sentTo: W\.to === 'oren' \? 'oren' : /, 'only «סמן כנשלחה» moves to sent');
+  assert.match(UI, /mutate\('setStatus', r, \{ status: 'sent', sentTo: to, followUpDate: fu\.value \}/, 'only «סמן כנשלחה» moves to sent');
+  assert.ok(!/window\.open\(/.test(UI), 'WhatsApp opens through a synchronous <a target=_blank>, never window.open');
   assert.ok(!/0\d{2}-?\d{7}|9725\d{8}/.test(UI), 'no phone number in the code: Oren\'s number is a setting');
   assert.match(APP, /orenWhatsapp: \(fd\.get\('orenWhatsapp'\)/);
   assert.match(APP, /function offersFor\(subj\)/);
@@ -387,5 +389,6 @@ test('«למי ההצעה» picker: matches by name or phone, clients first, cap
   assert.ok(!/aria-label': 'לקוח \/ ליד'/.test(UI), 'the cramped <select> is gone');
   assert.match(UI, /class: 'pkg-who-input'/); assert.match(UI, /placeholder: 'שם לקוח לא רשום'/);
   assert.match(APP, /phone: c\.phone \|\| '', sub: sub\(c\)/);
-  assert.match(APP, /phone: l\.phone \|\| '', sub: sub\(l\)/);
+  assert.match(APP, /type: 'lead', id: l\.id, name: l\.name \|\| '', phone: l\.phone \|\| '', sub: leadSourceLabel\(l\)/, 'open leads carry their source');
+  assert.match(APP, /type: 'roster', id: ref, name: String\(p\.name \|\| ''\)\.trim\(\), phone: CLm\.normalizePhone\(p\.phone\)/, 'roster patients carry name, phone, house');
 });

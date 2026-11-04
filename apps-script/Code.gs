@@ -6456,14 +6456,21 @@ function _pkgAdminSetStatus(payload) {
       var allowed = PACKAGE_STATUS_TRANSITIONS[current] || {};
       if (!allowed[next]) return { ok: false, error: 'invalid_transition' };
       if (next === 'sent') {
+        // recipient: 'oren' | 'patient' (the offer target's own phone) | a typed 05X number. Only the kind and the
+        // LAST FOUR digits are stored (2026-11-04) — never a full number on the request row.
         var to = String(p.sentTo == null ? '' : p.sentTo).trim();
         var toPhone = _contNormalizePhone(to);
-        if (to !== 'oren' && !toPhone) return { ok: false, error: 'invalid_recipient' };
-        rec.sentTo = to === 'oren' ? 'oren' : toPhone; rec.sentAtIso = now;
+        var patientPhone = _contNormalizePhone(rec.patientPhone);
+        if (to === 'oren') rec.sentTo = 'oren';
+        else if (to === 'patient' && patientPhone) rec.sentTo = 'patient:' + patientPhone.slice(-4);
+        else if (toPhone) rec.sentTo = (patientPhone && toPhone === patientPhone ? 'patient:' : 'other:') + toPhone.slice(-4);
+        else return { ok: false, error: 'invalid_recipient' };
+        rec.sentAtIso = now;
       }
       if (next === 'approved' || next === 'rejected') rec.decisionAtIso = now;
       rec.status = next; changed = true;
-      var subject = { leadId: rec.attachedType === 'lead' ? String(rec.attachedId) : '', clientId: rec.attachedType === 'client' ? String(rec.attachedId) : '' };
+      // a roster (admitted) patient is filed under the continuation subject cont:<ref>, like the milestone tasks
+      var subject = { leadId: rec.attachedType === 'lead' ? String(rec.attachedId) : '', clientId: rec.attachedType === 'client' ? String(rec.attachedId) : (rec.attachedType === 'roster' ? 'cont:' + String(rec.attachedId) : '') };
       var he = { sent: 'הצעת מחיר נשלחה', awaiting_decision: 'הצעת מחיר ממתינה להחלטה', approved: 'הצעת מחיר אושרה על ידי הלקוח (ללא חיוב)', rejected: 'הצעת מחיר נדחתה' }[next];
       events.push(_activityEvent('offer_' + next, subject, user, he + ' · ' + String(rec.patientName), { requestId: String(rec.id), status: next, sentTo: next === 'sent' ? (rec.sentTo === 'oren' ? 'oren' : 'phone') : '', followUpDate: String(rec.followUpDate || ''), money: true }, 'offer_' + next + ':' + rec.id + ':' + rec.revision, { nextAction: next === 'sent' ? 'מעקב אחרי ההצעה' : '', nextDate: next === 'sent' ? String(rec.followUpDate || '') : '' }));
     } else if (next && next === current) {
