@@ -1,0 +1,32 @@
+# Temporary branch-only synthetic artifact refresh. Never deploys or touches live data.
+name: OUT-TH offer-status draft drill refresh
+on:
+  push:
+    branches:
+      - codex/out-therapists-offer-status-compat-20261104
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.repository == 'sandrabrayer/ezone-outpatient' && github.ref == 'refs/heads/codex/out-therapists-offer-status-compat-20261104'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm ci --ignore-scripts
+          node test-support/build-google-operational-drill.cjs
+      - name: Publish exact-source disabled synthetic fixture only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test-support/google-operational-drill-candidate.gs
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "test(sync): refresh disabled exact-source OUT-TH drill"
+          git push origin HEAD:refs/heads/codex/out-therapists-offer-status-compat-20261104
