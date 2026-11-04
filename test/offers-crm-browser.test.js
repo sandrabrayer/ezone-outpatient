@@ -111,8 +111,26 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     await page.locator('.pkg-new-btn').waitFor();
     await page.locator('.pkg-new-btn').click();
     await page.waitForSelector('.pkg-new');
-    // who: the existing lead
-    await page.locator('.pkg-new select[aria-label="לקוח / ליד"]').selectOption({ label: 'ליד · ליד להצעה' });
+    // who: a full-width searchable picker — by phone, then by name; the unregistered row sits beneath it
+    const who = page.locator('.pkg-new .pkg-who-input');
+    const formW = (await page.locator('.pkg-new').boundingBox()).width;
+    const whoBox = await who.boundingBox();
+    assert.ok(whoBox.width >= formW - 48, 'picker spans the form (' + whoBox.width + ' of ' + formW + ')');
+    assert.ok(whoBox.height >= 40, 'picker is large (' + whoBox.height + 'px)');
+    const manualBox = await page.locator('.pkg-new .pkg-who-manual').boundingBox();
+    assert.ok(manualBox.y > whoBox.y + whoBox.height - 1, 'name/phone row is beneath the picker');
+    const nameBox = await page.locator('.pkg-new input[aria-label="שם הלקוח"]').boundingBox();
+    assert.ok(nameBox.y >= manualBox.y, 'the unregistered name input lives in that row');
+    await who.fill('0500000021');
+    await page.locator('.pkg-new .pkg-who-opt').first().waitFor();
+    assert.match(await page.locator('.pkg-new .pkg-who-opt').first().textContent(), /מטופל חבילה.*050-?000-?0021|מטופל חבילה.*0500000021/, 'phone search finds the client with name · phone');
+    assert.match(await page.locator('.pkg-new .pkg-who-opt').first().textContent(), /פרטני · רעננה הפרדס/, 'house/type shown');
+    await who.fill('ליד להצ');
+    await page.locator('.pkg-new .pkg-who-opt', { hasText: 'ליד להצעה' }).waitFor();
+    assert.equal(await page.locator('.pkg-new .pkg-who-opt').count(), 1);
+    await page.locator('.pkg-new .pkg-who-opt', { hasText: 'ליד להצעה' }).click();
+    await page.locator('.pkg-new .pkg-who-picked[data-target="lead:lead-1"]').waitFor();
+    assert.equal(await page.locator('.pkg-new input[aria-label="שם הלקוח"]').count(), 0, 'a picked target hides the unregistered row');
     // item 1: EMDR Core × 2
     await page.locator('.pkg-new .pkg-chip', { hasText: 'Core' }).first().click();
     await page.locator('.pkg-new .pkg-pick-quote', { hasText: 'מחיר ליחידה' }).waitFor();

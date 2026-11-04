@@ -1456,8 +1456,10 @@
         offersReload(); // the price-free summaries the cards / «היום שלי» read follow every offer change
       },
       targets: function () {
-        return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '' }; })
-          .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '' }; }));
+        // name · phone · house/type feed the searchable «למי ההצעה» picker (no money, no notes)
+        var sub = function (x) { return [x.serviceType, x.location].filter(Boolean).join(' · '); };
+        return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '', phone: c.phone || '', sub: sub(c) }; })
+          .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '', phone: l.phone || '', sub: sub(l) }; }));
       }
     });
   }

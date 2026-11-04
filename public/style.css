@@ -1384,6 +1384,20 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-chip-on { background: var(--panel-2); border-color: var(--green-deep); color: var(--green-2); font-weight: 600; }
 .pkg-new { display: flex; flex-direction: column; gap: 10px; }
 .pkg-new h3 { margin: 0; font-size: 16px; color: var(--green-2); }
+/* «למי ההצעה» (2026-11-04): a large full-width searchable picker, the unregistered-client row beneath */
+.pkg-who-box { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-input { width: 100%; flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.pkg-who-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 4px; }
+.pkg-who-list[hidden] { display: none; }
+.pkg-who-opt, .pkg-who-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; text-align: start; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.pkg-who-opt:hover, .pkg-who-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.pkg-who-picked { cursor: default; border-color: var(--green-deep); background: var(--panel-2); }
+.pkg-who-picked .btn { margin-inline-start: auto; }
+.pkg-who-name { font-weight: 600; font-size: 15px; }
+.pkg-who-none { padding: 8px 12px; }
+.pkg-who-manual { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-manual input { flex: 1 1 200px; min-height: 42px; }
+.pkg-who-or { flex: 0 0 100%; font-size: 13px; }
 .pkg-pick { display: flex; flex-direction: column; gap: 6px; }
 .pkg-qty { max-width: 80px; flex: 0 0 80px; }
 .pkg-items { display: flex; flex-direction: column; gap: 4px; }

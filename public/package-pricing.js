@@ -252,7 +252,7 @@
 
   // ---- new offer (Vered): packages, single treatments or both; prices come back from the server only ----
   function newFormState() {
-    return { requestId: uuid(), target: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
+    return { requestId: uuid(), target: '', search: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
       validUntil: isoPlus(14), followUpDate: isoPlus(3), assignee: S.signedInName || 'ורד', notes: '', busy: false };
   }
   function itemLabel(it) { return pkgName(it.packageKey) + (it.months ? ' · ' + it.months + ' חודשים' : '') + (it.selectedMonthlyAgorot ? ' · ' + formatAgorot(it.selectedMonthlyAgorot) + ' לחודש' : '') + (it.qty > 1 ? ' × ' + it.qty : ''); }
@@ -263,13 +263,8 @@
     function paint() {
       while (box.firstChild) box.removeChild(box.firstChild);
       box.appendChild(h('h3', { text: 'הצעת מחיר חדשה' }));
-      // who
-      var tsel = h('select', { 'aria-label': 'לקוח / ליד', onchange: function () { F.target = tsel.value; paint(); } }, [h('option', { value: '', text: 'לקוח/ליד מהמערכת…' })].concat(targets.map(function (t) {
-        return h('option', { value: t.type + ':' + t.id, text: (t.type === 'client' ? 'מטופל · ' : 'ליד · ') + t.name, selected: F.target === t.type + ':' + t.id ? 'selected' : false });
-      })));
-      var nameIn = h('input', { type: 'text', maxlength: '120', placeholder: 'או שם הלקוח (ללא רשומה)', 'aria-label': 'שם הלקוח', value: F.name, oninput: function () { F.name = nameIn.value; } });
-      var phoneIn = h('input', { type: 'tel', maxlength: '20', placeholder: 'טלפון 05X-XXXXXXX', 'aria-label': 'טלפון הלקוח', value: F.phone, oninput: function () { F.phone = phoneIn.value; } });
-      box.appendChild(h('div', { class: 'pkg-fam' }, [h('div', { class: 'pkg-fam-title', text: 'למי ההצעה' }), h('div', { class: 'pkg-row' }, [tsel, F.target ? null : nameIn, F.target ? null : phoneIn])]));
+      // who — a large full-width searchable picker (name or phone), then the unregistered-client row beneath
+      box.appendChild(h('div', { class: 'pkg-fam pkg-who' }, [h('div', { class: 'pkg-fam-title', text: 'למי ההצעה' }), whoPicker(F, targets, paint)]));
       // items picker (same visible-buttons pattern as the calculator)
       var P = F.pick;
       var order = [], byFam = {};
@@ -337,6 +332,58 @@
     }
     paint();
     return box;
+  }
+
+  // ---- target picker: type a name or a phone, pick from the matches (name · phone · house/type) ----
+  function targetText(t) { return (t.type === 'client' ? 'מטופל' : 'ליד') + (t.sub ? ' · ' + t.sub : ''); }
+  function whoPicker(F, targets, repaint) {
+    var picked = F.target ? targets.filter(function (t) { return t.type + ':' + t.id === F.target; })[0] : null;
+    var wrap = h('div', { class: 'pkg-who-box' });
+    if (picked) {
+      wrap.appendChild(h('div', { class: 'pkg-who-picked', 'data-target': F.target }, [
+        h('span', { class: 'pkg-who-name', text: picked.name || '—' }),
+        h('span', { class: 'muted', text: [picked.phone, targetText(picked)].filter(Boolean).join(' · ') }),
+        h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕ החלפה', 'aria-label': 'ביטול הבחירה', onclick: function () { F.target = ''; F.search = ''; repaint(); } })
+      ]));
+      return wrap;
+    }
+    var list = h('div', { class: 'pkg-who-list', role: 'listbox', 'aria-label': 'תוצאות חיפוש' });
+    var input = h('input', { type: 'search', class: 'pkg-who-input', autocomplete: 'off', maxlength: '60', placeholder: 'חיפוש לקוח או ליד — שם או טלפון…', 'aria-label': 'חיפוש לקוח / ליד', value: F.search || '',
+      oninput: function () { F.search = input.value; fill(); } });
+    function fill() {
+      while (list.firstChild) list.removeChild(list.firstChild);
+      var q = String(F.search || '').trim();
+      if (q.length < 2) { list.hidden = true; return; }
+      var hits = matchTargets(targets, q, 8);
+      list.hidden = false;
+      if (!hits.length) { list.appendChild(h('div', { class: 'muted pkg-who-none', text: 'לא נמצא — אפשר להזין שם וטלפון למטה' })); return; }
+      hits.forEach(function (t) {
+        list.appendChild(h('button', { type: 'button', role: 'option', class: 'pkg-who-opt', 'data-target': t.type + ':' + t.id, onclick: function () { F.target = t.type + ':' + t.id; F.search = ''; repaint(); } }, [
+          h('span', { class: 'pkg-who-name', text: t.name || '—' }),
+          h('span', { class: 'muted', text: [t.phone, targetText(t)].filter(Boolean).join(' · ') })
+        ]));
+      });
+    }
+    fill();
+    wrap.appendChild(input); wrap.appendChild(list);
+    var nameIn = h('input', { type: 'text', maxlength: '120', placeholder: 'שם לקוח לא רשום', 'aria-label': 'שם הלקוח', value: F.name, oninput: function () { F.name = nameIn.value; } });
+    var phoneIn = h('input', { type: 'tel', maxlength: '20', placeholder: 'טלפון 05X-XXXXXXX', 'aria-label': 'טלפון הלקוח', value: F.phone, oninput: function () { F.phone = phoneIn.value; } });
+    wrap.appendChild(h('div', { class: 'pkg-who-manual' }, [h('span', { class: 'muted pkg-who-or', text: 'או לקוח שאינו במערכת:' }), nameIn, phoneIn]));
+    return wrap;
+  }
+  /* Pure: targets matching a typed name (case-insensitive substring) or phone (digits, 3+). Clients before leads, then by name. */
+  function matchTargets(targets, query, limit) {
+    var q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q) return [];
+    var digits = q.replace(/\D/g, '');
+    var byPhone = digits.length >= 3 && /^[\d\s\-+()]+$/.test(q);
+    var out = (targets || []).filter(function (t) {
+      if (!t) return false;
+      if (byPhone) return String(t.phone || '').replace(/\D/g, '').indexOf(digits) >= 0;
+      return String(t.name || '').toLowerCase().indexOf(q) >= 0;
+    });
+    out.sort(function (a, b) { return (a.type === b.type ? 0 : a.type === 'client' ? -1 : 1) || String(a.name || '').localeCompare(String(b.name || ''), 'he'); });
+    return out.slice(0, limit || 8);
   }
 
   function requestCard(r) {
@@ -649,6 +696,6 @@
   }
   function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage,
+  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage, matchTargets: matchTargets,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });

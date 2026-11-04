@@ -269,3 +269,26 @@ test('static guards: allowlist, dispatch, UI wiring, WhatsApp rules', () => {
   assert.match(msg, /6,800 ₪/); assert.match(msg, /30\/11\/2026/);
   assert.ok(!/אבחנה|תרופ|פסיכיאט/.test(msg), 'no medical detail in the prepared message');
 });
+
+test('«למי ההצעה» picker: matches by name or phone, clients first, capped; the UI feeds it name · phone · house/type', () => {
+  const PP = require('../public/package-pricing.js');
+  const T = [
+    { type: 'lead', id: 'l1', name: 'דנה כהן', phone: '052-111-2233', sub: 'פרטני' },
+    { type: 'client', id: 'c1', name: 'אבי כהן', phone: '0501112233', sub: 'קבוצתי · רעננה הפרדס' },
+    { type: 'client', id: 'c2', name: 'רות לוי', phone: '', sub: '' },
+    null
+  ];
+  assert.deepEqual(PP.matchTargets(T, 'כהן').map((t) => t.id), ['c1', 'l1'], 'name substring, clients before leads');
+  assert.deepEqual(PP.matchTargets(T, ' 1112233 ').map((t) => t.id), ['c1', 'l1'], 'digits match a formatted phone too');
+  assert.deepEqual(PP.matchTargets(T, '052').map((t) => t.id), ['l1']);
+  assert.deepEqual(PP.matchTargets(T, 'לוי', 8).map((t) => t.id), ['c2']);
+  assert.deepEqual(PP.matchTargets(T, ''), []);
+  assert.deepEqual(PP.matchTargets(T, 'xx'), []);
+  assert.equal(PP.matchTargets([{ name: 'א' }, { name: 'א' }, { name: 'א' }], 'א', 2).length, 2, 'capped');
+  const UI = fs.readFileSync(path.join(__dirname, '..', 'public', 'package-pricing.js'), 'utf8');
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(!/aria-label': 'לקוח \/ ליד'/.test(UI), 'the cramped <select> is gone');
+  assert.match(UI, /class: 'pkg-who-input'/); assert.match(UI, /placeholder: 'שם לקוח לא רשום'/);
+  assert.match(APP, /phone: c\.phone \|\| '', sub: sub\(c\)/);
+  assert.match(APP, /phone: l\.phone \|\| '', sub: sub\(l\)/);
+});
