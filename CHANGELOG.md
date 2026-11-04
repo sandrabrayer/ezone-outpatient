@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-BILL-01 — prevent accidental second future-cycle payment on retry (2026-11-04; DRAFT)
+- A fresh «חידוש ותשלום» for a **future** cycle that reuses the client's already-recorded payment date requires explicit confirmation that a separate additional payment was actually received. Cancelling creates no record. Source `reserveRenewal` enforces this under the financial lock; boolean acknowledgement is preserved in the existing FinancialOps intent. Legitimate deliberately confirmed two-month advance remains supported. Older journals, historic coverage and payments are not rewritten. Five synthetic tests plus the current full suite; no production merge/release. See `CHANGELOG-op-bill01-advance-confirmation.md`.
+
 ### Offers CRM in «תמחור חבילות» + WhatsApp (2026-11-03)
 - «➕ הצעת מחיר חדשה» (lead/client, packages + single treatments + quantities, Solo tier, validity, follow-up, owner, notes; double click = one request); statuses draft · ready_to_send · sent · awaiting_decision · approved · rejected · expired (legacy mapped at read, expired computed at read); prices from the catalog server-side only; discount = existing adjust with reason; «אושרה» creates no charge/payment. Price-free `GET /api/offers` feeds the cards, «היום שלי» and «מסלול המשך»; דנה 403. Nine appended `PackageRequests` columns.
 - WhatsApp: prepared message to אורן (number in Settings) or another number, opened via `wa.me` for human sending; only «סמן כנשלחה» moves the offer to `sent` (date, recipient, follow-up). See `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`.
