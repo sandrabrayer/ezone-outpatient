@@ -5731,13 +5731,25 @@ function _pkgPublicItem(r) {
     sortOrder: _pkgInt(r.sortOrder)
   };
 }
+/* Manager-visible status (price-free). The 03-Nov offers CRM now persists
+ * sent/awaiting_decision/approved/rejected as distinct stages. Before this
+ * adapter, EVERY post-pricing status except literal 'priced' was incorrectly
+ * returned to the requesting coordinator as 'pending'. Preserve the old
+ * pending/priced wire values for legacy clients, allow only known states,
+ * and never project a price, note, phone or unauthorized requester's row. */
+function _pkgManagerStatusView(req) {
+  var stored = String(req && req.status || '');
+  if (stored === 'priced' || stored === 'ready_to_send') return 'priced';
+  if (stored === 'pending' || stored === 'draft') return 'pending';
+  return ['sent', 'awaiting_decision', 'approved', 'rejected', 'expired'].indexOf(stored) >= 0 ? stored : 'pending';
+}
 function _pkgSubmitView(req, duplicate) {
-  return { ok: true, requestId: String(req.id), status: String(req.status) === 'priced' ? 'priced' : 'pending', duplicate: duplicate === true };
+  return { ok: true, requestId: String(req.id), status: _pkgManagerStatusView(req), duplicate: duplicate === true };
 }
 function _pkgStatusItem(req) {
   return {
     requestId: String(req.id),
-    status: String(req.status) === 'priced' ? 'priced' : 'pending',
+    status: _pkgManagerStatusView(req),
     packageKey: String(req.packageKey),
     months: _pkgInt(req.months),
     createdAt: String(req.createdAtIso)
