@@ -56,7 +56,9 @@ function fixture(fields = {}) {
   vm.createContext(ctx);
   // בית מועדף helper the submit handlers call (real list + function).
   vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
-  for (const name of ['preferredHouseOrBlank', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
+  // אופן חיוב helpers the intake / edit handlers call (real list + functions).
+  vm.runInContext(source.match(/var BILLING_MODES = \[[^\]]*\];/)[0], ctx);
+  for (const name of ['preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);

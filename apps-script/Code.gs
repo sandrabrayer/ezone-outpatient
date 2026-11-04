@@ -149,8 +149,26 @@ var CLIENTS_HEADERS = [
   //     row (like paymentAmountOverrides) and only seeds a brand-new client from
   //     its validated payload value (the lead's createLead value on activation).
   //     Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  //   billingMode (אופן חיוב, 2026-11-04): APPEND-ONLY, physically unwritten on
+  //     the live sheet so it lands at the very END (position 39) with no
+  //     migration. One of BILLING_MODES — 'package' (חבילה / חודשי: the monthly
+  //     renewal cycle, every existing client) or 'per_session' (תשלום לפי
+  //     טיפול: pays for each single session before it — no renewal cycle, no
+  //     overdue row, no collection task, no KPI count). Blank / legacy reads as
+  //     'package'. Carried in the saveAll payload like plannedExitDate: a
+  //     payload WITHOUT the key keeps the sheet value; a sent value is validated
+  //     (_billingModeOrBlank). A money key (OPS_CLIENT_MONEY_KEYS): an ops
+  //     session never changes it. NO data migration flips an existing client.
+  'billingMode'
 ];
+/* Stable billing-mode keys (Hebrew labels are render-time only in the UI). */
+var BILLING_MODES = ['package', 'per_session'];
+/* Validate a billingMode at a write boundary: one of BILLING_MODES, or '' (legacy = package). Never coerced. */
+function _billingModeOrBlank(v) {
+  var s = String(v == null ? '' : v).trim();
+  return BILLING_MODES.indexOf(s) >= 0 ? s : '';
+}
 
 /* Meta columns of the Clients sheet — identity, who/when audit, and the two
  * SERVER-MANAGED cell-level columns (creditsOwed / paymentAmountOverrides are
@@ -215,7 +233,9 @@ var CLIENTS_REMOVED_HEADERS = [
   // so a tombstoned row keeps it and restoreRemovedClient copies it back.
   'plannedExitDate',
   // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
-  'preferredHouse'
+  'preferredHouse',
+  // APPEND-ONLY mirror of the Clients billing mode (billingMode), same reason.
+  'billingMode'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -578,7 +598,7 @@ function _requestUser(payload) {
  * blank (new row). Mirrors MONEY_KEYS in lib/money-scope.js — append-only. */
 var OPS_CLIENT_MONEY_KEYS = [
   'pricePerSession', 'billingType', 'billingDay', 'bundleSize', 'bundlePrice', 'bundlePaid',
-  'paymentStatus', 'paymentDate', 'nextBillingDate', 'paymentLink'
+  'paymentStatus', 'paymentDate', 'nextBillingDate', 'paymentLink', 'billingMode'
 ];
 var OPS_LEAD_MONEY_KEYS = ['pricePerSession'];
 function _isOpsScope(payload) {
@@ -1488,6 +1508,12 @@ function _saveAll(payload) {
       clients[i].preferredHouse = existingRow
         ? (existingRow.preferredHouse == null ? '' : existingRow.preferredHouse)
         : (_preferredHouseOrNull(clients[i].preferredHouse) || '');
+      // billingMode (2026-11-04): like plannedExitDate — a payload WITHOUT the key
+      // (pre-column tab) carries the sheet's value; a sent value is validated and
+      // anything but a BILLING_MODES key is stored blank (= package). Never migrated.
+      clients[i].billingMode = (clients[i] && _hasOwn(clients[i], 'billingMode'))
+        ? _billingModeOrBlank(clients[i].billingMode)
+        : (existingRow ? _billingModeOrBlank(existingRow.billingMode) : '');
       // OP-CRM-3A: an operational session (moneyScope 'ops', decided by the Node
       // proxy from the signed cookie — never by the browser) never saw the money
       // fields, so its snapshot cannot change them: existing rows keep the

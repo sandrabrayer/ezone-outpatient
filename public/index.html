@@ -439,6 +439,12 @@
           </label>
           <div class="wide sessions-host" data-host="activateSessions"></div>
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
 
           <!-- Payment fields -->
@@ -506,6 +512,12 @@
           <div class="wide sessions-host" data-host="directSessions"></div>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <!-- Payment fields -->
           <div class="wide form-section-title">פרטי תשלום חבילה</div>
@@ -591,6 +603,12 @@
           </label>
           <label>תאריך תשלום אחרון<input name="paymentDate" type="date" /></label>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <div class="wide form-section-title">פרטים נוספים</div>
           <label>בית מוצא

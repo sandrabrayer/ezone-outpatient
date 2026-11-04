@@ -95,8 +95,10 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
     'updatedAt', 'updatedBy',
     // planned discharge date — appended after the stamps
     'plannedExitDate',
-    // preferred house (בית מועדף) — appended last
-    'preferredHouse'
+    // preferred house (בית מועדף) — appended
+    'preferredHouse',
+    // billing mode (אופן חיוב) — appended last
+    'billingMode'
   ]);
 });
 
