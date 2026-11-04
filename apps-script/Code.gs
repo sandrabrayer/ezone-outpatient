@@ -149,8 +149,26 @@ var CLIENTS_HEADERS = [
   //     row (like paymentAmountOverrides) and only seeds a brand-new client from
   //     its validated payload value (the lead's createLead value on activation).
   //     Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  //   billingMode (אופן חיוב, 2026-11-04): APPEND-ONLY, physically unwritten on
+  //     the live sheet so it lands at the very END (position 39) with no
+  //     migration. One of BILLING_MODES — 'package' (חבילה / חודשי: the monthly
+  //     renewal cycle, every existing client) or 'per_session' (תשלום לפי
+  //     טיפול: pays for each single session before it — no renewal cycle, no
+  //     overdue row, no collection task, no KPI count). Blank / legacy reads as
+  //     'package'. Carried in the saveAll payload like plannedExitDate: a
+  //     payload WITHOUT the key keeps the sheet value; a sent value is validated
+  //     (_billingModeOrBlank). A money key (OPS_CLIENT_MONEY_KEYS): an ops
+  //     session never changes it. NO data migration flips an existing client.
+  'billingMode'
 ];
+/* Stable billing-mode keys (Hebrew labels are render-time only in the UI). */
+var BILLING_MODES = ['package', 'per_session'];
+/* Validate a billingMode at a write boundary: one of BILLING_MODES, or '' (legacy = package). Never coerced. */
+function _billingModeOrBlank(v) {
+  var s = String(v == null ? '' : v).trim();
+  return BILLING_MODES.indexOf(s) >= 0 ? s : '';
+}
 
 /* Meta columns of the Clients sheet — identity, who/when audit, and the two
  * SERVER-MANAGED cell-level columns (creditsOwed / paymentAmountOverrides are
@@ -215,7 +233,9 @@ var CLIENTS_REMOVED_HEADERS = [
   // so a tombstoned row keeps it and restoreRemovedClient copies it back.
   'plannedExitDate',
   // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
-  'preferredHouse'
+  'preferredHouse',
+  // APPEND-ONLY mirror of the Clients billing mode (billingMode), same reason.
+  'billingMode'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -578,7 +598,7 @@ function _requestUser(payload) {
  * blank (new row). Mirrors MONEY_KEYS in lib/money-scope.js — append-only. */
 var OPS_CLIENT_MONEY_KEYS = [
   'pricePerSession', 'billingType', 'billingDay', 'bundleSize', 'bundlePrice', 'bundlePaid',
-  'paymentStatus', 'paymentDate', 'nextBillingDate', 'paymentLink'
+  'paymentStatus', 'paymentDate', 'nextBillingDate', 'paymentLink', 'billingMode'
 ];
 var OPS_LEAD_MONEY_KEYS = ['pricePerSession'];
 function _isOpsScope(payload) {
@@ -1488,6 +1508,12 @@ function _saveAll(payload) {
       clients[i].preferredHouse = existingRow
         ? (existingRow.preferredHouse == null ? '' : existingRow.preferredHouse)
         : (_preferredHouseOrNull(clients[i].preferredHouse) || '');
+      // billingMode (2026-11-04): like plannedExitDate — a payload WITHOUT the key
+      // (pre-column tab) carries the sheet's value; a sent value is validated and
+      // anything but a BILLING_MODES key is stored blank (= package). Never migrated.
+      clients[i].billingMode = (clients[i] && _hasOwn(clients[i], 'billingMode'))
+        ? _billingModeOrBlank(clients[i].billingMode)
+        : (existingRow ? _billingModeOrBlank(existingRow.billingMode) : '');
       // OP-CRM-3A: an operational session (moneyScope 'ops', decided by the Node
       // proxy from the signed cookie — never by the browser) never saw the money
       // fields, so its snapshot cannot change them: existing rows keep the
@@ -5522,7 +5548,14 @@ var PACKAGE_TEXT_COLUMNS = {
  * approved / rejected are written by adminSetPackageRequestStatus. `expired` is never stored:
  * it is computed at read time from validUntil. «approved» = the client accepted the offer —
  * NOT a charge, NOT a payment, NOT a renewal. */
-var PACKAGE_CRM_STATUSES = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'];
+var PACKAGE_CRM_STATUSES = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired', 'deleted'];
+/* Soft delete (2026-11-04): a 'deleted' request stays in the sheet with its full trail but is hidden from the
+ * admin list, the price-free summaries, the cards and «היום שלי». Delete / reset are ורד-only at BOTH layers
+ * (lib/users.js OFFER_DELETE_USERS is the Node twin); nothing else about the row or any other sheet is touched. */
+var PACKAGE_DELETE_USERS = ['ורד'];
+/* Stable target refs of a package offer: an outpatient client id, a lead id, or a Dashboard admitted-roster
+ * patient ('roster', ref = ContinuationLogic.patientRef: id:<dashboard id> | phone:05XXXXXXXX). */
+var PACKAGE_ROSTER_REF_RE = /^(id:[A-Za-z0-9_-]{1,80}|phone:0\d{9})$/;
 var PACKAGE_STATUS_TRANSITIONS = {
   priced: { sent: true, rejected: true, awaiting_decision: true },
   sent: { awaiting_decision: true, approved: true, rejected: true },
@@ -5543,7 +5576,8 @@ var PACKAGE_ADMIN_ACTIONS = {
   adminGetPackageCatalog: true, adminSeedPackageCatalog: true, adminSavePackageCatalogRow: true,
   adminQuotePackage: true, adminListPackageRequests: true, adminAdjustPackageRequest: true,
   adminApprovePackageRequest: true, adminAttachPackageRequest: true,
-  adminCreatePackageRequest: true, adminSetPackageRequestStatus: true
+  adminCreatePackageRequest: true, adminSetPackageRequestStatus: true,
+  adminDeletePackageRequest: true, adminResetPackageRequest: true
 };
 /* Price-FREE offer summaries for «היום שלי» / cards / מסלול המשך (GET, proxy secret, no assertion:
  * no amount, VAT, discount or price constant ever leaves this function). */
@@ -5920,7 +5954,7 @@ function _pkgCrmStatus(r) {
 function _pkgItemsOf(r) {
   var items = null;
   try { items = r.items ? JSON.parse(r.items) : null; } catch (_) { items = null; }
-  if (Array.isArray(items) && items.length) return items;
+  if (Array.isArray(items)) return items; // '[]' after «איפוס» is really empty; only a BLANK cell is a legacy row
   var qs = null; try { qs = r.quoteSnapshot ? JSON.parse(r.quoteSnapshot) : null; } catch (_) {}
   return [{ packageKey: String(r.packageKey || ''), months: _pkgInt(r.months), qty: 1, family: qs ? qs.family : '', tier: qs ? qs.tier : '', unit: qs ? qs.unit : '',
     selectedMonthlyAgorot: r.selectedMonthlyAgorot === '' || r.selectedMonthlyAgorot === undefined ? null : _pkgInt(r.selectedMonthlyAgorot),
@@ -5940,7 +5974,7 @@ function _pkgOfferSummaries() {
   try {
     // read-only: never creates or re-heads the sheet (a boot-time read must have no schema side effect)
     var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PACKAGE_REQUESTS_SHEET);
-    var rows = sh ? _readAll(sh, PACKAGE_REQUEST_HEADERS) : [];
+    var rows = (sh ? _readAll(sh, PACKAGE_REQUEST_HEADERS) : []).filter(function (r) { return String(r.status) !== 'deleted'; });
     rows.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
     return { ok: true, offers: rows.slice(0, 500).map(_pkgOfferSummary) };
   } catch (err) { return { ok: false, error: 'package_error' }; }
@@ -6093,7 +6127,7 @@ function _pkgAdminQuote(payload) {
 
 function _pkgAdminList() {
   try {
-    var rows = _readAll(_pkgRequestSheet(), PACKAGE_REQUEST_HEADERS);
+    var rows = _readAll(_pkgRequestSheet(), PACKAGE_REQUEST_HEADERS).filter(function (r) { return String(r.status) !== 'deleted'; });
     rows.sort(function (a, b) { return String(b.createdAtIso) < String(a.createdAtIso) ? -1 : 1; });
     var pending = 0, priced = 0;
     rows.forEach(function (r) { if (String(r.status) === 'priced') priced++; else pending++; });
@@ -6162,6 +6196,7 @@ function _pkgAdminAdjust(payload) {
     var log = [];
     try { log = rec.adjustLog ? JSON.parse(rec.adjustLog) : []; } catch (_) { log = []; }
     var reason = _pkgText(p.reason, 200);
+    if (!rec.quoteSnapshot) return { ok: false, error: 'items_required' }; // a reset draft has no lines to price
     var snap = null;
     try { snap = JSON.parse(rec.quoteSnapshot); } catch (_) { return { ok: false, error: 'package_error' }; }
     if (hasSel) {
@@ -6192,6 +6227,7 @@ function _pkgAdminAdjust(payload) {
 function _pkgAdminApprove(payload) {
   return _pkgMutate(payload, function (rec, user, now) {
     if (String(rec.status) !== 'pending') return { ok: false, error: 'already_priced' };
+    if (!rec.quoteSnapshot) return { ok: false, error: 'items_required' }; // a reset draft has no lines to approve
     var snap = null;
     try { snap = JSON.parse(rec.quoteSnapshot); } catch (_) { return { ok: false, error: 'package_error' }; }
     if (snap.needsSelection) return { ok: false, error: 'selection_required' };
@@ -6220,15 +6256,15 @@ function _pkgAdminAttach(payload) {
     if (String(rec.status) === 'pending') return { ok: false, error: 'not_priced' }; // priced or any later CRM state
     var type = String(p.targetType == null ? '' : p.targetType);
     var tid = String(p.targetId == null ? '' : p.targetId);
-    if ((type !== 'client' && type !== 'lead') || !tid || tid.length > 80) return { ok: false, error: 'invalid_target' };
+    if (!_pkgTargetOk(type, tid)) return { ok: false, error: 'invalid_target' };
     if (rec.attachedType) {
       if (rec.attachedType === type && String(rec.attachedId) === tid) return { ok: true, noop: true };
       return { ok: false, error: 'already_attached' };
     }
-    var exists = false;
+    var exists = type === 'roster'; // a roster ref is a stable Dashboard reference — this source has no roster to check it against
     if (type === 'client') {
       _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === tid) exists = true; });
-    } else {
+    } else if (type === 'lead') {
       _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS).forEach(function (l) { if (String(l.id) === tid) exists = true; });
     }
     if (!exists) return { ok: false, error: 'target_not_found' };
@@ -6327,7 +6363,7 @@ function _pkgAdminCreate(payload) {
     if (!PACKAGE_UUID_RE.test(requestId)) return { ok: false, error: 'invalid_request_id' };
     var user = _requestUser(payload) || 'catalog-admin';
     var type = String(p.targetType == null ? '' : p.targetType), tid = String(p.targetId == null ? '' : p.targetId);
-    if (type && ((type !== 'client' && type !== 'lead') || !tid || tid.length > 80)) return { ok: false, error: 'invalid_target' };
+    if (type && !_pkgTargetOk(type, tid)) return { ok: false, error: 'invalid_target' };
     var name = _pkgText(p.patientName, 120);
     var phone = _recoverPhone(p.patientPhone);
     if (phone && !/^0\d{9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
@@ -6344,7 +6380,7 @@ function _pkgAdminCreate(payload) {
       var existing = _pkgFindRowById(_readAll(reqSh, PACKAGE_REQUEST_HEADERS), requestId);
       if (existing) return { ok: true, duplicate: true, request: _pkgAdminItem(existing) };
       // the target (if any) must exist; its name / phone fill the request when not given
-      if (type) {
+      if (type === 'client' || type === 'lead') {
         var found = null;
         if (type === 'client') _readAll(_ensureSheet('Clients', CLIENTS_HEADERS), CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === tid) found = c; });
         else _readAll(_ensureSheet('Leads', LEADS_HEADERS), LEADS_HEADERS).forEach(function (l) { if (String(l.id) === tid) found = l; });
@@ -6420,14 +6456,21 @@ function _pkgAdminSetStatus(payload) {
       var allowed = PACKAGE_STATUS_TRANSITIONS[current] || {};
       if (!allowed[next]) return { ok: false, error: 'invalid_transition' };
       if (next === 'sent') {
+        // recipient: 'oren' | 'patient' (the offer target's own phone) | a typed 05X number. Only the kind and the
+        // LAST FOUR digits are stored (2026-11-04) — never a full number on the request row.
         var to = String(p.sentTo == null ? '' : p.sentTo).trim();
         var toPhone = _contNormalizePhone(to);
-        if (to !== 'oren' && !toPhone) return { ok: false, error: 'invalid_recipient' };
-        rec.sentTo = to === 'oren' ? 'oren' : toPhone; rec.sentAtIso = now;
+        var patientPhone = _contNormalizePhone(rec.patientPhone);
+        if (to === 'oren') rec.sentTo = 'oren';
+        else if (to === 'patient' && patientPhone) rec.sentTo = 'patient:' + patientPhone.slice(-4);
+        else if (toPhone) rec.sentTo = (patientPhone && toPhone === patientPhone ? 'patient:' : 'other:') + toPhone.slice(-4);
+        else return { ok: false, error: 'invalid_recipient' };
+        rec.sentAtIso = now;
       }
       if (next === 'approved' || next === 'rejected') rec.decisionAtIso = now;
       rec.status = next; changed = true;
-      var subject = { leadId: rec.attachedType === 'lead' ? String(rec.attachedId) : '', clientId: rec.attachedType === 'client' ? String(rec.attachedId) : '' };
+      // a roster (admitted) patient is filed under the continuation subject cont:<ref>, like the milestone tasks
+      var subject = { leadId: rec.attachedType === 'lead' ? String(rec.attachedId) : '', clientId: rec.attachedType === 'client' ? String(rec.attachedId) : (rec.attachedType === 'roster' ? 'cont:' + String(rec.attachedId) : '') };
       var he = { sent: 'הצעת מחיר נשלחה', awaiting_decision: 'הצעת מחיר ממתינה להחלטה', approved: 'הצעת מחיר אושרה על ידי הלקוח (ללא חיוב)', rejected: 'הצעת מחיר נדחתה' }[next];
       events.push(_activityEvent('offer_' + next, subject, user, he + ' · ' + String(rec.patientName), { requestId: String(rec.id), status: next, sentTo: next === 'sent' ? (rec.sentTo === 'oren' ? 'oren' : 'phone') : '', followUpDate: String(rec.followUpDate || ''), money: true }, 'offer_' + next + ':' + rec.id + ':' + rec.revision, { nextAction: next === 'sent' ? 'מעקב אחרי ההצעה' : '', nextDate: next === 'sent' ? String(rec.followUpDate || '') : '' }));
     } else if (next && next === current) {
@@ -6440,6 +6483,48 @@ function _pkgAdminSetStatus(payload) {
     try { var ash = _ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS); events.forEach(function (ev) { _activityAppend(ash, ev); }); } catch (_) {}
   }
   return res;
+}
+
+/* Target reference validation shared by create / attach. */
+function _pkgTargetOk(type, tid) {
+  if (!tid || tid.length > 90) return false;
+  if (type === 'client' || type === 'lead') return true;
+  if (type === 'roster') return PACKAGE_ROSTER_REF_RE.test(tid);
+  return false;
+}
+
+/* adminDeletePackageRequest { requestId, opId, expectedRevision, reason? } — SOFT delete, ורד only (both layers):
+ * status 'deleted', the row and its trail stay in the sheet, an adjustLog entry records actor / time / reason.
+ * Hidden from every list, card and «היום שלי» afterwards. No other row, sheet, charge or payment is touched. */
+function _pkgAdminDelete(payload) {
+  var p = payload || {};
+  if (PACKAGE_DELETE_USERS.indexOf(String(_requestUser(payload) || '')) < 0) return { ok: false, error: 'vered_only' };
+  return _pkgMutate(payload, function (rec, user, now) {
+    if (String(rec.status) === 'deleted') return { ok: true, noop: true };
+    var log = []; try { log = rec.adjustLog ? JSON.parse(rec.adjustLog) : []; } catch (_) { log = []; }
+    log.push({ at: now, by: user, kind: 'deleted', from: String(rec.status), to: 'deleted', reason: _pkgText(p.reason, 200) });
+    rec.adjustLog = JSON.stringify(log);
+    rec.status = 'deleted';
+    return { ok: true };
+  });
+}
+
+/* adminResetPackageRequest { requestId, opId, expectedRevision, reason? } — back to a clean DRAFT, ורד only:
+ * items cleared, pricing / approval / sent / decision fields blanked, target and terms kept, logged. */
+function _pkgAdminReset(payload) {
+  var p = payload || {};
+  if (PACKAGE_DELETE_USERS.indexOf(String(_requestUser(payload) || '')) < 0) return { ok: false, error: 'vered_only' };
+  return _pkgMutate(payload, function (rec, user, now) {
+    var log = []; try { log = rec.adjustLog ? JSON.parse(rec.adjustLog) : []; } catch (_) { log = []; }
+    log.push({ at: now, by: user, kind: 'reset', from: String(rec.status), to: 'pending', reason: _pkgText(p.reason, 200) });
+    rec.adjustLog = JSON.stringify(log);
+    rec.status = 'pending';
+    rec.items = '[]'; rec.quoteSnapshot = ''; rec.packageKey = ''; rec.months = ''; rec.catalogRowId = ''; rec.selectedMonthlyAgorot = '';
+    rec.adjustedTotalAgorot = ''; rec.adjustReason = '';
+    rec.approvedTotalAgorot = ''; rec.approvedSnapshot = ''; rec.approvedAtIso = ''; rec.approvedBy = '';
+    rec.sentAtIso = ''; rec.sentTo = ''; rec.decisionAtIso = '';
+    return { ok: true };
+  });
 }
 
 function _pkgIsPackageAction(action) {
@@ -6765,7 +6850,9 @@ var SOURCE_POST_AUTH = {
   adminApprovePackageRequest: 'OUTPATIENT_PROXY_SECRET',
   adminAttachPackageRequest: 'OUTPATIENT_PROXY_SECRET',
   adminCreatePackageRequest: 'OUTPATIENT_PROXY_SECRET',
-  adminSetPackageRequestStatus: 'OUTPATIENT_PROXY_SECRET'
+  adminSetPackageRequestStatus: 'OUTPATIENT_PROXY_SECRET',
+  adminDeletePackageRequest: 'OUTPATIENT_PROXY_SECRET',
+  adminResetPackageRequest: 'OUTPATIENT_PROXY_SECRET'
 };
 
 function _sourceAuthOk(action, method, params, payload) {
@@ -7161,6 +7248,8 @@ function doPost(e) {
     if (action === 'adminCreatePackageRequest') return _json(_pkgAdminCreate(payload));
     if (action === 'adminSetPackageRequestStatus') return _json(_pkgAdminSetStatus(payload));
     if (action === 'adminAttachPackageRequest') return _json(_pkgAdminAttach(payload));
+    if (action === 'adminDeletePackageRequest') return _json(_pkgAdminDelete(payload));
+    if (action === 'adminResetPackageRequest') return _json(_pkgAdminReset(payload));
     return _json({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
     return _json({ ok: false, error: _pkgIsPackageAction(action) ? 'package_error' : String(err) });

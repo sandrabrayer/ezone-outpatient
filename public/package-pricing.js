@@ -28,7 +28,10 @@
   var UNIT = { per_session_pack: 'חבילת טיפולים', flat: 'מחיר כולל קבוע', per_month: 'מחיר חודשי', per_month_range: 'טווח חודשי (בחירה)' };
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
   // Offer CRM statuses (stable keys; pending ≙ draft and priced ≙ ready_to_send are mapped by the server at read time)
-  var CRM_STATUS = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף' };
+  var CRM_STATUS = { draft: 'טיוטה', ready_to_send: 'מוכנה לשליחה', sent: 'נשלחה', awaiting_decision: 'ממתינה להחלטה', approved: 'אושרה', rejected: 'נדחתה', expired: 'פג תוקף', deleted: 'נמחקה' };
+  // target kinds of an offer (stable keys): outpatient client · Dashboard admitted-roster patient · open lead
+  var TARGET_HE = { client: 'מטופל', roster: 'מאושפז/ת', lead: 'ליד' };
+  var TARGET_SECTIONS = [['client', 'מטופלים'], ['roster', 'מאושפזים'], ['lead', 'לידים פתוחים']];
   var CRM_ORDER = ['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'];
   var REQUESTER = { oren: 'אורן', shahar: 'שחר', outpatient: 'ורד (טיפולי חוץ)' };
   var ASSIGNEES = ['ורד', 'אורן', 'דנה'];
@@ -48,7 +51,8 @@
     invalid_transition: 'המעבר הזה לא אפשרי במצב הנוכחי', offer_closed: 'ההצעה כבר נסגרה', invalid_recipient: 'יש לבחור יעד תקין (אורן או מספר 05X)',
     recovery_pending: 'המערכת בשחזור — נסי מאוחר יותר',
     invalid_amount: 'מחיר לא תקין', invalid_custom_item: 'יש להזין שם טיפול (2 תווים לפחות) ומחיר ליחידה',
-    pricing_override_vered_only: 'פריט מותאם / מחיר ידני — ורד בלבד'
+    pricing_override_vered_only: 'פריט מותאם / מחיר ידני — ורד בלבד',
+    offer_delete_vered_only: 'מחיקה / איפוס של הצעה — ורד בלבד', items_required_reset: 'ההצעה אופסה ואין בה פריטים'
   };
   var MAX_SHEKELS_DIGITS = 7;
 
@@ -102,7 +106,10 @@
   // ---- state -----------------------------------------------------------------
   var S = { onUnauthorized: function () {}, root: null, phase: 'loading', tab: 'requests', configured: true, catalog: null, requests: null, error: '',
     targets: function () { return []; }, notify: function () {}, onPending: function () {}, settings: function () { return {}; }, signedInName: '',
-    filter: 'open', newForm: null, wa: {} };
+    filter: 'open', newForm: null, wa: {}, confirm: {}, openSettings: null };
+  /* Offer forms embedded in a client card («💰 הצעת מחיר», app.js): hostEl -> { F, onDone }. The SAME
+   * newRequestView renders there with the target locked; nothing is duplicated. */
+  var embedded = [];
   // yyyy-mm-dd of today (+n days), local calendar (the server validates; display only)
   function isoPlus(n) { var d = new Date(); d.setDate(d.getDate() + (n || 0)); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fmtDay(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
@@ -219,7 +226,7 @@
 
   async function lock() {
     try { await call('/api/catalog-admin/logout', 'POST', {}); } catch (_) {}
-    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; S.loadError = ''; S.newForm = null; S.wa = {}; ops = {}; draw();
+    S.catalog = null; S.requests = null; S.calc = null; S.phase = 'gate'; S.error = ''; S.loadError = ''; S.newForm = null; S.wa = {}; S.confirm = {}; ops = {}; draw();
   }
 
   function pkgName(key) {
@@ -245,7 +252,7 @@
       return S.filter === 'all' ? true : S.filter === 'open' ? ['approved', 'rejected', 'expired'].indexOf(k) < 0 : k === S.filter;
     });
     var kids = [bar];
-    if (S.newForm) kids.push(newRequestView());
+    if (S.newForm) kids.push(newRequestView(S.newForm, function () { S.newForm = null; S.filter = 'open'; draw(); }));
     if (!items.length) kids.push(h('p', { class: 'muted', text: 'אין בקשות תמחור.' }));
     else if (!shown.length) kids.push(h('p', { class: 'muted', text: 'אין הצעות במצב הזה.' }));
     else kids.push(h('div', { class: 'pkg-list' }, shown.map(requestCard)));
@@ -253,10 +260,10 @@
   }
 
   // ---- new offer (Vered): packages, single treatments or both; prices come back from the server only ----
-  function newFormState() {
-    return { requestId: uuid(), target: '', search: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
+  function newFormState(target, locked) {
+    return { requestId: uuid(), target: target || '', locked: !!(target && locked), search: '', name: '', phone: '', items: [], pick: { key: '', months: '', tier: '', qty: 1, quote: null },
       custom: { title: '', qty: 1, price: '' }, overrideIdx: -1,
-      validUntil: isoPlus(14), followUpDate: isoPlus(3), assignee: S.signedInName || 'ורד', notes: '', busy: false };
+      validUntil: isoPlus(14), followUpDate: isoPlus(3), assignee: S.signedInName || 'ורד', notes: '', busy: false, closed: false };
   }
   function itemLabel(it) {
     if (it.custom) return String(it.title || 'פריט מותאם') + (it.qty > 1 ? ' × ' + it.qty : '');
@@ -273,8 +280,10 @@
     var denom = 10000 + VAT_BP_DISPLAY, net = Math.floor((gross * 10000 + Math.floor(denom / 2)) / denom);
     return { gross: gross, net: net, vat: gross - net };
   }
-  function newRequestView() {
-    var F = S.newForm, box = h('div', { class: 'pkg-new card' });
+  /* ONE form implementation: the pricing tab («➕ הצעת מחיר חדשה») and the client card («💰 הצעת מחיר», target
+   * locked) both render it. `done(created)` runs when the form closes (created = the server's request, or null). */
+  function newRequestView(F, done) {
+    var box = h('div', { class: 'pkg-new card' + (F.locked ? ' pkg-new-embedded' : '') });
     var active = S.catalog ? S.catalog.items.filter(function (i) { return i.active; }) : [];
     var targets = S.targets() || [];
     function paint() {
@@ -354,7 +363,7 @@
       box.appendChild(h('div', { class: 'pkg-row pkg-terms' }, [h('label', { class: 'pkg-lbl' }, ['תוקף עד ', vu]), h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]), h('label', { class: 'pkg-lbl' }, ['אחראי/ת ', asg]), notes]));
       box.appendChild(h('div', { class: 'pkg-row' }, [
         h('button', { type: 'button', class: 'btn btn-primary pkg-create-btn', text: F.busy ? 'יוצרת…' : 'יצירת הצעה (טיוטה)', disabled: F.busy ? 'disabled' : false, onclick: create }),
-        h('button', { type: 'button', class: 'btn btn-ghost', text: 'ביטול', onclick: function () { S.newForm = null; draw(); } }),
+        h('button', { type: 'button', class: 'btn btn-ghost', text: 'ביטול', onclick: function () { F.closed = true; done(null); } }),
         h('span', { class: 'muted', text: 'ההצעה נוצרת כטיוטה; אישור התמחור הופך אותה ל«מוכנה לשליחה». אין חיוב ואין תשלום.' })
       ]));
     }
@@ -366,7 +375,7 @@
       if (cur.allowedMonths.length) f.months = parseInt(P.months, 10);
       if (cur.unit === 'per_month_range' && P.tier) f.selectedMonthlyAgorot = parseInt(P.tier, 10);
       var res = await rpc('quote', f).catch(function (e) { return { ok: false, error: e.message }; });
-      if (S.newForm !== F || F.pick.key !== cur.key) return;
+      if (F.closed || F.pick.key !== cur.key) return;
       P.quote = res; paint();
     }
     async function create() {
@@ -382,9 +391,15 @@
         return line;
       }),
         validUntil: F.validUntil, followUpDate: F.followUpDate, assignee: F.assignee, notes: F.notes.trim() };
-      if (F.target) { var v = F.target.split(':'); body.targetType = v[0]; body.targetId = v.slice(1).join(':'); } else { body.patientName = F.name.trim(); body.patientPhone = F.phone.trim(); }
+      if (F.target) {
+        var v = F.target.split(':'); body.targetType = v[0]; body.targetId = v.slice(1).join(':');
+        // a roster (admitted) patient lives in the Dashboard: this source cannot look the name / phone up, so the
+        // picked roster values travel with the request (the server still validates the phone shape)
+        var picked = targets.filter(function (t) { return t.type + ':' + t.id === F.target; })[0];
+        if (picked && v[0] === 'roster') { body.patientName = picked.name || ''; body.patientPhone = picked.phone || ''; }
+      } else { body.patientName = F.name.trim(); body.patientPhone = F.phone.trim(); }
       var res = await rpc('createRequest', body).catch(function (e) { return { ok: false, error: e.message }; });
-      if (res.ok) { say(res.duplicate ? 'ההצעה כבר נוצרה' : 'ההצעה נוצרה כטיוטה'); S.newForm = null; S.filter = 'open'; await loadAll(); draw(); return; }
+      if (res.ok) { say(res.duplicate ? 'ההצעה כבר נוצרה' : 'ההצעה נוצרה כטיוטה'); F.closed = true; await loadAll(); done(res.request || null); return; }
       F.busy = false; S.error = errorText(res.error); say(S.error, true); paint();
     }
     paint();
@@ -392,41 +407,55 @@
   }
 
   // ---- target picker: type a name or a phone, pick from the matches (name · phone · house/type) ----
-  function targetText(t) { return (t.type === 'client' ? 'מטופל' : 'ליד') + (t.sub ? ' · ' + t.sub : ''); }
+  function targetText(t) { return label(TARGET_HE, t.type) + (t.sub ? ' · ' + t.sub : ''); }
   function whoPicker(F, targets, repaint) {
     var picked = F.target ? targets.filter(function (t) { return t.type + ':' + t.id === F.target; })[0] : null;
     var wrap = h('div', { class: 'pkg-who-box' });
     if (picked) {
-      wrap.appendChild(h('div', { class: 'pkg-who-picked', 'data-target': F.target }, [
+      wrap.appendChild(h('div', { class: 'pkg-who-picked' + (F.locked ? ' pkg-who-locked' : ''), 'data-target': F.target }, [
         h('span', { class: 'pkg-who-name', text: picked.name || '—' }),
         h('span', { class: 'muted', text: [picked.phone, targetText(picked)].filter(Boolean).join(' · ') }),
-        h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕ החלפה', 'aria-label': 'ביטול הבחירה', onclick: function () { F.target = ''; F.search = ''; repaint(); } })
+        // from a client card the target is fixed: no «החלפה»
+        F.locked ? null : h('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: '✕ החלפה', 'aria-label': 'ביטול הבחירה', onclick: function () { F.target = ''; F.search = ''; repaint(); } })
       ]));
       return wrap;
     }
     var list = h('div', { class: 'pkg-who-list', role: 'listbox', 'aria-label': 'תוצאות חיפוש' });
-    var input = h('input', { type: 'search', class: 'pkg-who-input', autocomplete: 'off', maxlength: '60', placeholder: 'חיפוש לקוח או ליד — שם או טלפון…', 'aria-label': 'חיפוש לקוח / ליד', value: F.search || '',
+    var input = h('input', { type: 'search', class: 'pkg-who-input', autocomplete: 'off', maxlength: '60', placeholder: 'חיפוש מטופל, מאושפז או ליד פתוח — שם או טלפון…', 'aria-label': 'חיפוש מטופל / מאושפז / ליד', value: F.search || '',
       oninput: function () { F.search = input.value; fill(); } });
     function fill() {
       while (list.firstChild) list.removeChild(list.firstChild);
       var q = String(F.search || '').trim();
       if (q.length < 2) { list.hidden = true; return; }
-      var hits = matchTargets(targets, q, 8);
+      // ONE search field, three sources with section headers: מטופלים · מאושפזים · לידים פתוחים
+      var groups = matchTargetsGrouped(targets, q, 6);
       list.hidden = false;
-      if (!hits.length) { list.appendChild(h('div', { class: 'muted pkg-who-none', text: 'לא נמצא — אפשר להזין שם וטלפון למטה' })); return; }
-      hits.forEach(function (t) {
-        list.appendChild(h('button', { type: 'button', role: 'option', class: 'pkg-who-opt', 'data-target': t.type + ':' + t.id, onclick: function () { F.target = t.type + ':' + t.id; F.search = ''; repaint(); } }, [
-          h('span', { class: 'pkg-who-name', text: t.name || '—' }),
-          h('span', { class: 'muted', text: [t.phone, targetText(t)].filter(Boolean).join(' · ') })
-        ]));
+      if (!groups.length) { list.appendChild(h('div', { class: 'muted pkg-who-none', text: 'לא נמצא — אפשר להזין שם וטלפון למטה (לקוח שאינו במערכת)' })); return; }
+      groups.forEach(function (g) {
+        list.appendChild(h('div', { class: 'pkg-who-section', role: 'presentation', 'data-section': g.type, text: g.label + ' (' + g.total + ')' }));
+        g.items.forEach(function (t) {
+          list.appendChild(h('button', { type: 'button', role: 'option', class: 'pkg-who-opt pkg-who-opt-' + t.type, 'data-target': t.type + ':' + t.id, onclick: function () { F.target = t.type + ':' + t.id; F.search = ''; repaint(); } }, [
+            h('span', { class: 'pkg-who-name', text: t.name || '—' }),
+            h('span', { class: 'muted', text: [t.phone, targetText(t)].filter(Boolean).join(' · ') })
+          ]));
+        });
       });
     }
     fill();
     wrap.appendChild(input); wrap.appendChild(list);
     var nameIn = h('input', { type: 'text', maxlength: '120', placeholder: 'שם לקוח לא רשום', 'aria-label': 'שם הלקוח', value: F.name, oninput: function () { F.name = nameIn.value; } });
     var phoneIn = h('input', { type: 'tel', maxlength: '20', placeholder: 'טלפון 05X-XXXXXXX', 'aria-label': 'טלפון הלקוח', value: F.phone, oninput: function () { F.phone = phoneIn.value; } });
-    wrap.appendChild(h('div', { class: 'pkg-who-manual' }, [h('span', { class: 'muted pkg-who-or', text: 'או לקוח שאינו במערכת:' }), nameIn, phoneIn]));
+    wrap.appendChild(h('div', { class: 'pkg-who-manual' }, [h('span', { class: 'muted pkg-who-or', text: 'או לקוח שאינו במערכת (פנייה חד-פעמית בלבד):' }), nameIn, phoneIn]));
     return wrap;
+  }
+  /* Pure: the matches of ONE query grouped by source, in the fixed section order (clients, roster, leads), each
+   * capped at `perType`; a section with no match is omitted. `total` is the uncapped count of that section. */
+  function matchTargetsGrouped(targets, query, perType) {
+    var all = matchTargets(targets, query, Infinity);
+    return TARGET_SECTIONS.map(function (sec) {
+      var items = all.filter(function (t) { return t.type === sec[0]; });
+      return { type: sec[0], label: sec[1], total: items.length, items: items.slice(0, perType || 6) };
+    }).filter(function (g) { return g.items.length; });
   }
   /* Pure: targets matching a typed name (case-insensitive substring) or phone (digits, 3+). Clients before leads, then by name. */
   function matchTargets(targets, query, limit) {
@@ -439,8 +468,9 @@
       if (byPhone) return String(t.phone || '').replace(/\D/g, '').indexOf(digits) >= 0;
       return String(t.name || '').toLowerCase().indexOf(q) >= 0;
     });
-    out.sort(function (a, b) { return (a.type === b.type ? 0 : a.type === 'client' ? -1 : 1) || String(a.name || '').localeCompare(String(b.name || ''), 'he'); });
-    return out.slice(0, limit || 8);
+    var rank = { client: 0, roster: 1, lead: 2 };
+    out.sort(function (a, b) { return ((rank[a.type] === undefined ? 9 : rank[a.type]) - (rank[b.type] === undefined ? 9 : rank[b.type])) || String(a.name || '').localeCompare(String(b.name || ''), 'he'); });
+    return limit === Infinity ? out : out.slice(0, limit || 8);
   }
 
   function requestCard(r) {
@@ -463,7 +493,9 @@
         h('span', { class: 'muted', text: 'מבקש/ת: ' + label(REQUESTER, r.requesterKey) + (r.patientPhone ? ' · ' + r.patientPhone : '') + (r.assignee ? ' · אחראי/ת: ' + r.assignee : '') })
       ])
     ];
-    if (items && (items.length > 1 || items[0].qty > 1 || items[0].custom || items[0].overrideReason)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
+    var emptyDraft = crm === 'draft' && Array.isArray(r.items) && !r.items.length && !r.packageKey; // after «↺ איפוס»
+    if (emptyDraft) kids.push(h('div', { class: 'pkg-reset-note muted', text: 'ההצעה אופסה — אין בה פריטים. אפשר ליצור הצעה חדשה לאותו לקוח או למחוק אותה.' }));
+    else if (items && (items.length > 1 || items[0].qty > 1 || items[0].custom || items[0].overrideReason)) kids.push(h('ul', { class: 'pkg-items-list' }, items.map(function (it) {
       var overridden = !it.custom && it.catalogUnitAgorot != null && it.grossAgorot != null && it.catalogUnitAgorot !== it.grossAgorot;
       return h('li', { class: overridden ? 'pkg-item-overridden' : (it.custom ? 'pkg-item-custom' : '') }, [
         h('span', { text: itemLabel({ custom: !!it.custom, title: it.title, packageKey: it.packageKey || it.key, months: it.months, selectedMonthlyAgorot: it.selectedMonthlyAgorot, qty: it.qty || 1 }) + ' — ' }),
@@ -474,27 +506,68 @@
         it.overrideReason ? h('span', { class: 'muted', text: ' · ' + it.overrideReason }) : null]);
     })));
     else kids.push(h('div', { text: pkgName(r.packageKey) + (r.months ? ' · ' + r.months + ' חודשים' : '') }));
-    kids.push(h('div', { class: 'pkg-price' }, priceLines));
+    if (!emptyDraft) kids.push(h('div', { class: 'pkg-price' }, priceLines));
     var terms = [];
     if (r.validUntil) terms.push('תוקף עד ' + fmtDay(r.validUntil));
     if (r.followUpDate) terms.push('מעקב ב-' + fmtDay(r.followUpDate));
-    if (r.sentAt) terms.push('נשלחה ' + fmtDay(r.sentAt) + (r.sentTo ? (r.sentTo === 'oren' ? ' לאורן' : ' ל-' + r.sentTo) : ''));
+    if (r.sentAt) terms.push('נשלחה ' + fmtDay(r.sentAt) + sentToText(r.sentTo));
     if (r.decisionAt) terms.push('החלטה ' + fmtDay(r.decisionAt));
-    if (r.attachedType) terms.push('משויך ל' + (r.attachedType === 'client' ? 'מטופל' : 'ליד') + ' (מזהה ' + r.attachedId + ')');
+    if (r.attachedType) terms.push('משויך ל' + label(TARGET_HE, r.attachedType) + ' (מזהה ' + r.attachedId + ')');
     if (terms.length) kids.push(h('div', { class: 'muted pkg-terms-line', text: terms.join(' · ') }));
     if (r.notes) kids.push(h('div', { class: 'muted', text: 'הערות: ' + r.notes }));
     if (r.adjustLog && r.adjustLog.length) kids.push(h('ul', { class: 'pkg-log muted' }, r.adjustLog.map(function (e) {
       var what = e.kind === 'select' ? 'נבחר מחיר חודשי ' + formatAgorot(e.to)
+        : e.kind === 'deleted' ? 'ההצעה נמחקה'
+        : e.kind === 'reset' ? 'ההצעה אופסה לטיוטה (הפריטים נמחקו)'
         : e.kind === 'override' ? 'מחיר ידני ל' + pkgName(e.item) + ': ' + formatAgorot(e.from) + ' → ' + formatAgorot(e.to) + ' ליחידה'
         : e.kind === 'custom' ? 'פריט מותאם «' + String(e.item || '') + '» ' + formatAgorot(e.to) + ' ליחידה' + (e.qty > 1 ? ' × ' + e.qty : '')
         : 'תואם מ-' + formatAgorot(e.from) + ' ל-' + formatAgorot(e.to);
       return h('li', { text: what + (e.reason ? ' — ' + e.reason : '') + ' (' + e.by + (e.at ? ' · ' + fmtDay(e.at) : '') + ')' });
     })));
-    if (crm === 'draft') kids.push(pendingControls(r));
+    if (crm === 'draft' && !emptyDraft) kids.push(pendingControls(r));
+    if (emptyDraft && r.attachedType) kids.push(h('div', { class: 'pkg-controls' }, [h('button', { type: 'button', class: 'btn btn-primary pkg-redo-btn', text: '➕ הצעה חדשה לאותו לקוח', onclick: function () { S.newForm = newFormState(r.attachedType + ':' + r.attachedId, false); S.error = ''; draw(); window.scrollTo(0, 0); } })]));
     if (crm !== 'draft' && !r.attachedType && ['approved', 'rejected', 'expired'].indexOf(crm) < 0) kids.push(attachControls(r));
     if (crm !== 'draft') kids.push(crmControls(r, crm));
-    if (S.wa[r.id]) kids.push(whatsappPanel(r));
-    return h('div', { class: 'pkg-card card pkg-crm-' + crm }, kids);
+    if (S.wa[r.id] && S.wa[r.id].panel && crm === 'ready_to_send') kids.push(whatsappPanel(r));
+    if (canDeleteOffers()) kids.push(deleteResetControls(r, crm));
+    if (S.confirm[r.id]) kids.push(confirmBox(r));
+    return h('div', { class: 'pkg-card card pkg-crm-' + crm, 'data-request-id': r.id }, kids);
+  }
+  /* «נשלחה … לאורן / למטופל (…1234) / למספר אחר (…1234)» — the row keeps the kind + last four digits only. */
+  function sentToText(sentTo) {
+    var v = String(sentTo || '');
+    if (!v) return '';
+    if (v === 'oren') return ' לאורן';
+    var m = /^(patient|other):(\d{4})$/.exec(v);
+    if (m) return (m[1] === 'patient' ? ' למטופל/ת' : ' למספר אחר') + ' (…' + m[2] + ')';
+    return ' ל-' + v; // a legacy row that stored a full number
+  }
+
+  // ---- soft delete / reset (display rule: ורד; the server refuses anyone else with 403 / vered_only) ----
+  var OFFER_DELETE_USERS = ['ורד'];
+  function canDeleteOffers() { return OFFER_DELETE_USERS.indexOf(S.signedInName) >= 0; }
+  function deleteResetControls(r, crm) {
+    return h('div', { class: 'pkg-row pkg-danger-zone' }, [
+      h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-delete-btn', text: '🗑 מחיקה', 'aria-expanded': S.confirm[r.id] && S.confirm[r.id].kind === 'delete' ? 'true' : 'false', onclick: function () { S.confirm[r.id] = S.confirm[r.id] && S.confirm[r.id].kind === 'delete' ? null : { kind: 'delete', reason: '' }; draw(); } }),
+      crm === 'draft' && Array.isArray(r.items) && !r.items.length ? null
+        : h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-reset-btn', text: '↺ איפוס', 'aria-expanded': S.confirm[r.id] && S.confirm[r.id].kind === 'reset' ? 'true' : 'false', onclick: function () { S.confirm[r.id] = S.confirm[r.id] && S.confirm[r.id].kind === 'reset' ? null : { kind: 'reset', reason: '' }; draw(); } })
+    ]);
+  }
+  /* In-app confirmation (never window.confirm): what will happen, an optional reason, confirm / cancel. */
+  function confirmBox(r) {
+    var C = S.confirm[r.id], del = C.kind === 'delete';
+    var why = h('input', { type: 'text', maxlength: '200', placeholder: 'סיבה (רשות)', 'aria-label': 'סיבת ה' + (del ? 'מחיקה' : 'איפוס'), value: C.reason || '', oninput: function () { C.reason = why.value; } });
+    return h('div', { class: 'pkg-confirm card', role: 'alertdialog', 'aria-label': del ? 'אישור מחיקת הצעה' : 'אישור איפוס הצעה' }, [
+      h('div', { class: 'pkg-fam-title', text: del ? 'למחוק את ההצעה של ' + (r.patientName || '') + '?' : 'לאפס את ההצעה של ' + (r.patientName || '') + '?' }),
+      h('p', { class: 'muted', text: del ? 'ההצעה תוסתר מכל הרשימות, הכרטיסים ו«היום שלי». הרשומה נשמרת בגיליון עם תיעוד מי / מתי / למה. אין חיוב, תשלום או חידוש שמושפעים.'
+        : 'ההצעה תחזור לטיוטה ריקה: הפריטים, התמחור, האישור והשליחה יימחקו (מתועד). הלקוח, התוקף והמעקב נשארים.' }),
+      h('div', { class: 'pkg-row' }, [why,
+        h('button', { type: 'button', class: 'btn ' + (del ? 'btn-danger' : 'btn-primary') + ' pkg-confirm-ok', text: del ? 'אישור מחיקה' : 'אישור איפוס', onclick: function () {
+          delete S.confirm[r.id];
+          mutate(del ? 'deleteRequest' : 'resetRequest', r, { reason: (C.reason || '').trim() }, del ? 'ההצעה נמחקה' : 'ההצעה אופסה לטיוטה');
+        } }),
+        h('button', { type: 'button', class: 'btn btn-ghost pkg-confirm-cancel', text: 'ביטול', onclick: function () { delete S.confirm[r.id]; draw(); } })])
+    ]);
   }
 
   // ---- offer CRM actions (ready_to_send → sent → awaiting_decision → approved | rejected; expired = extend) ----
@@ -502,10 +575,9 @@
     var box = [];
     var fu = h('input', { type: 'date', value: r.followUpDate || '', 'aria-label': 'מועד מעקב' });
     var saveFu = h('button', { type: 'button', class: 'btn btn-sm', text: 'עדכון מעקב', onclick: function () { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); } });
-    if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') {
-      box.push(h('button', { type: 'button', class: 'btn', text: '💬 הכן הודעת WhatsApp', 'aria-expanded': S.wa[r.id] ? 'true' : 'false', onclick: function () { S.wa[r.id] = S.wa[r.id] ? null : { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; draw(); } }));
-    }
-    if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () { S.wa[r.id] = S.wa[r.id] || { to: '', custom: '', followUp: r.followUpDate || isoPlus(3) }; S.wa[r.id].confirm = true; draw(); } }));
+    var waBlock = null;
+    if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') waBlock = whatsappLinks(r, crm);
+    if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-btn', text: '✔ סמן כנשלחה', 'aria-expanded': S.wa[r.id] && S.wa[r.id].panel ? 'true' : 'false', onclick: function () { var W = waState(r); W.panel = !W.panel; draw(); } }));
     if (crm === 'sent') box.push(h('button', { type: 'button', class: 'btn', text: '⏳ ממתינה להחלטה', onclick: function () { mutate('setStatus', r, { status: 'awaiting_decision' }, 'סומן: ממתינה להחלטה'); } }));
     if (crm === 'sent' || crm === 'awaiting_decision') {
       box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✅ הלקוח אישר', title: 'אישור ההצעה בלבד — ללא חיוב, תשלום או חידוש', onclick: function () { if (confirm('לסמן שהלקוח אישר את ההצעה? (אין חיוב ואין תשלום — הגבייה נעשית בכרטיס המטופל)')) mutate('setStatus', r, { status: 'approved' }, 'ההצעה אושרה — ללא חיוב'); } }));
@@ -518,8 +590,40 @@
       var vu = h('input', { type: 'date', value: isoPlus(14), 'aria-label': 'תוקף חדש' });
       box.push(h('span', { class: 'pkg-row pkg-fu' }, [h('span', { class: 'muted', text: 'הארכת תוקף עד' }), vu, h('button', { type: 'button', class: 'btn btn-sm', text: 'הארכה', onclick: function () { mutate('setStatus', r, { validUntil: vu.value }, 'התוקף הוארך'); } })]));
     }
-    if (!box.length) return null;
-    return h('div', { class: 'pkg-controls pkg-crm-actions' }, [h('div', { class: 'pkg-row' }, box)]);
+    if (!box.length && !waBlock) return null;
+    return h('div', { class: 'pkg-controls pkg-crm-actions' }, [waBlock, box.length ? h('div', { class: 'pkg-row' }, box) : null]);
+  }
+
+  /* WhatsApp (2026-11-04 fix). Sandra: «הכן הודעת WhatsApp» did nothing — the old button only toggled a panel that
+   * landed BELOW the fold on a phone, and its «פתיחת WhatsApp» refused silently until a recipient was picked from a
+   * select whose only preset (אורן) was disabled when the setting was empty; window.open from an async-feeling
+   * click was also blocked in the installed PWA. Now: two explicit, SYNCHRONOUS links rendered as <a target=_blank
+   * rel=noopener> right under the status — «שליחה לאורן» (number from the orenWhatsapp setting; a clear inline
+   * hint linking to ⚙️ הגדרות when it is empty) and «שליחה למטופל» (the offer target's phone, normalised; disabled
+   * with the reason when there is none). Opening WhatsApp changes NOTHING: the status moves only via «סמן כנשלחה». */
+  function waHref(number, text) { return 'https://wa.me/' + number + '?text=' + encodeURIComponent(text); }
+  function waState(r) { return S.wa[r.id] || (S.wa[r.id] = { to: '', custom: '', followUp: r.followUpDate || isoPlus(3), text: '', editing: false, panel: false }); }
+  function whatsappLinks(r, crm) {
+    var W = S.wa[r.id] || {};
+    var text = W.text || offerMessage(r);
+    var orenNum = waNumber((S.settings() || {}).orenWhatsapp);
+    var patientNum = waNumber(r.patientPhone);
+    var kids = [h('span', { class: 'muted pkg-wa-cap', text: '💬 WhatsApp:' })];
+    if (orenNum) kids.push(h('a', { class: 'btn btn-wa pkg-wa-oren', href: waHref(orenNum, text), target: '_blank', rel: 'noopener', 'data-wa-to': 'oren', text: 'שליחה לאורן' }));
+    else kids.push(h('span', { class: 'pkg-wa-missing' }, [h('span', { class: 'btn pkg-wa-oren', 'aria-disabled': 'true', text: 'שליחה לאורן' }),
+      h('span', { class: 'muted', text: ' מספר ה-WhatsApp של אורן לא הוגדר — ' }),
+      h('button', { type: 'button', class: 'link-btn pkg-open-settings', text: '⚙️ הגדרות', onclick: function () { if (typeof S.openSettings === 'function') S.openSettings(); } })]));
+    if (patientNum) kids.push(h('a', { class: 'btn btn-wa pkg-wa-patient', href: waHref(patientNum, text), target: '_blank', rel: 'noopener', 'data-wa-to': 'patient', text: 'שליחה למטופל' }));
+    else kids.push(h('span', { class: 'btn pkg-wa-patient', 'aria-disabled': 'true', title: 'אין מספר טלפון תקין למטופל/ת בהצעה', text: 'שליחה למטופל — אין טלפון' }));
+    kids.push(h('button', { type: 'button', class: 'btn btn-ghost btn-sm pkg-wa-edit', text: W.editing ? 'סגירת הנוסח' : '✏️ נוסח ההודעה', 'aria-expanded': W.editing ? 'true' : 'false', onclick: function () { var st = waState(r); st.editing = !st.editing; draw(); } }));
+    var out = [h('div', { class: 'pkg-row pkg-wa-links' }, kids),
+      h('p', { class: 'muted pkg-wa-note', text: crm === 'ready_to_send' ? 'פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה — אחרי השליחה לחצי «סמן כנשלחה».' : 'פתיחת WhatsApp אינה משנה את מצב ההצעה.' })];
+    if (W.editing) {
+      var msg = h('textarea', { rows: '7', 'aria-label': 'נוסח ההודעה', class: 'pkg-wa-text' }); msg.value = text;
+      msg.addEventListener('input', function () { waState(r).text = msg.value; var links = S.root ? S.root.querySelectorAll('[data-request-id="' + r.id + '"] a[data-wa-to]') : []; Array.prototype.forEach.call(links, function (a) { a.href = waHref(a.getAttribute('data-wa-to') === 'oren' ? orenNum : patientNum, msg.value); }); });
+      out.push(msg);
+    }
+    return h('div', { class: 'pkg-wa-block' }, out);
   }
 
   // ---- WhatsApp: a message PREPARED for a human to send from the device's connected WhatsApp account.
@@ -536,38 +640,29 @@
     return lines.join('\n');
   }
   function whatsappPanel(r) {
-    var W = S.wa[r.id];
+    var W = waState(r);
     var orenNum = waNumber((S.settings() || {}).orenWhatsapp);
-    var toSel = h('select', { 'aria-label': 'יעד ההודעה', onchange: function () { W.to = toSel.value; draw(); } }, [
-      h('option', { value: '', text: 'בחרי יעד…' }),
-      h('option', { value: 'oren', text: 'אורן' + (orenNum ? '' : ' (מספר לא הוגדר בהגדרות)'), disabled: orenNum ? false : 'disabled', selected: W.to === 'oren' ? 'selected' : false }),
-      h('option', { value: 'custom', text: 'מספר אחר…', selected: W.to === 'custom' ? 'selected' : false })
+    var patientNum = waNumber(r.patientPhone);
+    var toSel = h('select', { 'aria-label': 'למי נשלחה ההצעה', onchange: function () { W.to = toSel.value; draw(); } }, [
+      h('option', { value: '', text: 'למי נשלחה?' }),
+      h('option', { value: 'oren', text: 'לאורן' + (orenNum ? '' : ' (מספר לא הוגדר בהגדרות)'), disabled: orenNum ? false : 'disabled', selected: W.to === 'oren' ? 'selected' : false }),
+      h('option', { value: 'patient', text: 'למטופל/ת' + (patientNum ? '' : ' (אין טלפון)'), disabled: patientNum ? false : 'disabled', selected: W.to === 'patient' ? 'selected' : false }),
+      h('option', { value: 'custom', text: 'למספר אחר…', selected: W.to === 'custom' ? 'selected' : false })
     ]);
     var custom = h('input', { type: 'tel', placeholder: '05X-XXXXXXX', 'aria-label': 'מספר טלפון ליעד', value: W.custom || '', oninput: function () { W.custom = custom.value; } });
-    var msg = h('textarea', { rows: '7', 'aria-label': 'נוסח ההודעה', class: 'pkg-wa-text' }); msg.value = W.text || offerMessage(r);
-    msg.addEventListener('input', function () { W.text = msg.value; });
     var fu = h('input', { type: 'date', value: W.followUp || '', 'aria-label': 'מועד מעקב אחרי השליחה', onchange: function () { W.followUp = fu.value; } });
-    function targetNumber() { return W.to === 'oren' ? orenNum : W.to === 'custom' ? waNumber(custom.value) : ''; }
+    function recipient() { return W.to === 'oren' ? 'oren' : W.to === 'patient' ? 'patient' : W.to === 'custom' ? ('0' + waNumber(custom.value).slice(3)) : ''; }
     return h('div', { class: 'pkg-wa card' }, [
-      h('div', { class: 'pkg-fam-title', text: 'הודעת WhatsApp — לאישור אנושי' }),
-      h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null]),
-      msg,
-      h('p', { class: 'muted', text: 'ההודעה תיפתח ב-WhatsApp מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה.' }),
-      h('div', { class: 'pkg-row' }, [
-        h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
-        h('button', { type: 'button', class: 'btn', text: '📲 פתיחת WhatsApp', onclick: function () {
-          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
-          window.open('https://wa.me/' + n + '?text=' + encodeURIComponent(msg.value), '_blank', 'noopener');
-        } }),
-        h('button', { type: 'button', class: 'btn btn-primary', text: '✔ סמן כנשלחה', onclick: function () {
-          var n = targetNumber(); if (!n) { say(errorText('invalid_recipient'), true); return; }
+      h('div', { class: 'pkg-fam-title', text: 'סימון ההצעה כנשלחה — אישור אנושי' }),
+      h('p', { class: 'muted', text: 'ההודעה נשלחת מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). כאן רק מתועד למי ומתי נשלחה; נשמרות ארבע הספרות האחרונות בלבד.' }),
+      h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null, h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
+        h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-ok', text: '✔ סמן כנשלחה', onclick: function () {
+          var to = recipient(); if (!to || to === '0') { say(errorText('invalid_recipient'), true); return; }
           if (!fu.value) { say('יש לקבוע מועד מעקב', true); return; }
-          var fields = { status: 'sent', sentTo: W.to === 'oren' ? 'oren' : ('0' + n.slice(3)), followUpDate: fu.value };
-          if (crmOf(r) !== 'ready_to_send') { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); return; }
           delete S.wa[r.id];
-          mutate('setStatus', r, fields, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
+          mutate('setStatus', r, { status: 'sent', sentTo: to, followUpDate: fu.value }, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
         } }),
-        h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { delete S.wa[r.id]; draw(); } })
+        h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { W.panel = false; draw(); } })
       ])
     ]);
   }
@@ -622,10 +717,10 @@
   }
 
   function attachControls(r) {
-    if (r.attachedType) return h('div', { class: 'muted', text: 'משויך ל' + (r.attachedType === 'client' ? 'מטופל' : 'ליד') + ' (מזהה ' + r.attachedId + ')' });
+    if (r.attachedType) return h('div', { class: 'muted', text: 'משויך ל' + label(TARGET_HE, r.attachedType) + ' (מזהה ' + r.attachedId + ')' });
     var targets = S.targets() || [];
     var sel = h('select', { 'aria-label': 'שיוך למטופל' }, [h('option', { value: '', text: 'שיוך למטופל/ליד…' })].concat(targets.map(function (t) {
-      return h('option', { value: t.type + ':' + t.id, text: (t.type === 'client' ? 'מטופל · ' : 'ליד · ') + t.name });
+      return h('option', { value: t.type + ':' + t.id, text: label(TARGET_HE, t.type) + ' · ' + t.name });
     })));
     return h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'שיוך (ללא חיוב)', onclick: function () {
       var v = sel.value.split(':'); if (v.length < 2) { say('בחרי מטופל או ליד', true); return; }
@@ -752,18 +847,48 @@
   }
 
   // ---- public API --------------------------------------------------------------
-  function mount(rootEl, opts) {
-    var sameRoot = S.root === rootEl; S.root = rootEl; opts = opts || {};
+  function applyOpts(opts) {
+    opts = opts || {};
     S.targets = opts.targets || S.targets; S.notify = opts.notify || S.notify; S.onPending = opts.onPending || S.onPending; S.onUnauthorized = opts.onUnauthorized || S.onUnauthorized;
     S.settings = opts.settings || S.settings; S.signedInName = opts.signedInName || S.signedInName; // display default for the owner select only — authority stays server-side
+    S.openSettings = opts.openSettings || S.openSettings;
+  }
+  /* «💰 הצעת מחיר» on a client card (app.js): render the SAME new-offer form into `hostEl` with the target
+   * locked to `opts.target` ('client:<id>'). Loads the catalog (privilege + data) if the pricing tab never did.
+   * `opts.onDone(created)` fires when the form closes; the host re-reads the price-free summaries. */
+  function mountOfferForm(hostEl, opts) {
+    applyOpts(opts);
+    while (hostEl.firstChild) hostEl.removeChild(hostEl.firstChild);
+    var F = newFormState(opts.target, true);
+    var entry = { host: hostEl, F: F };
+    embedded.push(entry);
+    hostEl.appendChild(h('p', { class: 'muted', text: 'טוען תמחור…' }));
+    (async function () {
+      var ok = false;
+      try { ok = await ensureAdmin(); } catch (_) { ok = false; }
+      if (ok && !S.catalog) await loadAll();
+      if (F.closed) return;
+      while (hostEl.firstChild) hostEl.removeChild(hostEl.firstChild);
+      if (!ok || !S.catalog) { hostEl.appendChild(h('p', { class: 'pkg-msg', role: 'alert', text: !ok ? errorText('vered_only') : (S.loadError || errorText('upstream_unavailable')) })); return; }
+      hostEl.appendChild(newRequestView(F, function (created) {
+        embedded = embedded.filter(function (e) { return e !== entry; });
+        while (hostEl.firstChild) hostEl.removeChild(hostEl.firstChild);
+        if (typeof opts.onDone === 'function') opts.onDone(created);
+      }));
+    })();
+    return { close: function () { F.closed = true; embedded = embedded.filter(function (e) { return e !== entry; }); while (hostEl.firstChild) hostEl.removeChild(hostEl.firstChild); } };
+  }
+  function mount(rootEl, opts) {
+    var sameRoot = S.root === rootEl; S.root = rootEl;
+    applyOpts(opts);
     if (S.phase === 'loading' || S.phase === 'gate') { boot(); return; }
     // Already showing the admin screen in this very root: keep what the user has open (an edit row, a calculator
     // choice) instead of wiping it on every unrelated re-render of the host app. «רענון» redraws on demand.
     if (sameRoot && rootEl.firstChild && rootEl.querySelector('.pkg-admin')) return;
     draw();
   }
-  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; ops = {}; if (S.root) draw(); }
+  function reset() { S.phase = 'loading'; S.catalog = null; S.requests = null; S.calc = null; S.error = ''; S.loadError = ''; S.loading = false; S.newForm = null; S.wa = {}; S.confirm = {}; embedded = []; ops = {}; if (S.root) draw(); }
 
-  return { mount: mount, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, offerMessage: offerMessage, matchTargets: matchTargets, estimateTotals: estimateTotals, lineUnit: lineUnit,
+  return { mount: mount, mountOfferForm: mountOfferForm, reset: reset, formatAgorot: formatAgorot, parseShekels: parseShekels, label: label, rangeTiers: rangeTiers, waNumber: waNumber, waHref: waHref, offerMessage: offerMessage, matchTargets: matchTargets, matchTargetsGrouped: matchTargetsGrouped, sentToText: sentToText, estimateTotals: estimateTotals, lineUnit: lineUnit, TARGET_HE: TARGET_HE, TARGET_SECTIONS: TARGET_SECTIONS,
     FAMILY: FAMILY, TIER: TIER, UNIT: UNIT, STATUS: STATUS, CRM_STATUS: CRM_STATUS, CRM_ORDER: CRM_ORDER, REQUESTER: REQUESTER, ASSIGNEES: ASSIGNEES, ERRORS: ERRORS };
 });

@@ -46,12 +46,12 @@ test('A: plannedExitDate is appended after the stamps on Clients and on the tomb
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
   const R = plain(ctx.CLIENTS_REMOVED_HEADERS);
-  // preferredHouse (position 38) was appended after it later — see
-  // test/preferred-house.test.js.
-  assert.equal(H.length, 38);
+  // preferredHouse (position 38) and billingMode (position 39) were appended
+  // after it later — see test/preferred-house.test.js, test/billing-mode.test.js.
+  assert.equal(H.length, 39);
   assert.equal(H[36], 'plannedExitDate');
-  assert.deepEqual(H.slice(-4), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
-  assert.deepEqual(R.slice(-2), ['plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(H.slice(-5), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.deepEqual(R.slice(-3), ['plannedExitDate', 'preferredHouse', 'billingMode']);
   assert.equal(H.indexOf('exitDate'), 8, 'existing exitDate column untouched');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
@@ -184,7 +184,7 @@ test('D: app.js loads, prefills, saves (set or clear) and rolls back plannedExit
   assert.match(APP, /plannedExitDate: fmtDate\(row\.plannedExitDate\)/, 'read from sheet');
   assert.match(APP, /plannedExitDate: c\.plannedExitDate \|\| ''/, 'always sent on save');
   assert.match(APP, /form\.plannedExitDate\.value = client\.plannedExitDate \|\| ''/, 'prefilled');
-  assert.match(APP, /plannedExitDate: client\.plannedExitDate\n\s*\};/, 'captured in prev for rollback');
+  assert.match(APP, /plannedExitDate: client\.plannedExitDate,\n\s*billingMode: client\.billingMode\n\s*\};/, 'captured in prev for rollback');
   assert.match(APP, /client\.plannedExitDate = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(ped\) \? ped : ''/, 'validated on submit');
 });
 

@@ -47,6 +47,32 @@
     var s = v.trim();
     return PREFERRED_HOUSES.indexOf(s) >= 0 ? s : '';
   }
+  // אופן חיוב (billingMode, 2026-11-04): stable keys, Hebrew at render time.
+  // 'package' = חבילה / חודשי (the renewal cycle — every legacy / blank row);
+  // 'per_session' = תשלום לפי טיפול (pays before each single session: no renewal
+  // cycle, never overdue, no collection row, excluded from the money KPIs).
+  // Mirrors BILLING_MODES in apps-script/Code.gs; the server re-validates.
+  var BILLING_MODES = ['package', 'per_session'];
+  var BILLING_MODE_HE = { package: 'חבילה / חודשי', per_session: 'תשלום לפי טיפול' };
+  function billingModeOf(v) { var s = typeof v === 'string' ? v.trim() : ''; return BILLING_MODES.indexOf(s) >= 0 ? s : 'package'; }
+  // the STORED form: a legacy / blank cell stays blank (never rewritten to 'package' by a save — no migration)
+  function billingModeStored(v) { var s = typeof v === 'string' ? v.trim() : ''; return BILLING_MODES.indexOf(s) >= 0 ? s : ''; }
+  function isPerSession(c) { return !!c && billingModeOf(c.billingMode) === 'per_session'; }
+  // Suggestion rule for the one-click chip «סמן כתשלום לפי טיפול?» (NO automatic
+  // flip, no migration): an active client whose ONLY service is פרטני, still billed
+  // as a package, with no package evidence — no monthly amount AND no paid monthly
+  // base payment row at all. A client with a monthly amount is never suggested
+  // (Vered flips those by hand in עריכה if they really pay per visit).
+  function suggestPerSession(c) {
+    if (!c || isPerSession(c) || c.status === 'סיים טיפול' || c.status === 'לא פעיל') return false;
+    var services = parseServices(c.serviceType);
+    if (services.length !== 1 || services[0] !== 'פרטני') return false;
+    if (toNum(c.pricePerSession) > 0) return false;
+    var paidPackage = (state.payments || []).some(function (p) {
+      return p && p.clientId === c.id && p.status === 'paid' && p.billingType === 'monthly' && paymentKindFromId(p.id).kind === 'base';
+    });
+    return !paidPackage;
+  }
 
   var HOUSE_OF_ORIGIN_LABELS = {
     raanana_pardes: 'רעננה הפרדס',
@@ -372,6 +398,10 @@
     // so a collection state cannot be derived for it — never show a false
     // «לא שולם» / «עצור טיפול» from stripped data.
     if (isOpsScope()) return { status: 'unknown' };
+    // תשלום לפי טיפול: no renewal cycle at all — never overdue / due_soon, no
+    // collection row, no «תשלומים באיחור», no money KPI. The package math below is
+    // untouched for every package client.
+    if (isPerSession(c)) return { status: 'per_session' };
     var renewal = nextRenewalDueDate(c);
     if (!renewal) return { status: 'unknown' };
     var daysLeft = daysBetween(today(), renewal);
@@ -570,7 +600,7 @@
     applyMoneyScopeUI();
     return typeof data.user === 'string' ? data.user : '';
   }
-  var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink'];
+  var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink', 'billingMode'];
   var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון', 'הצעות מחיר — WhatsApp'];
   function isOpsScope() { return state.moneyScope !== 'full'; }
   /* Operational session: hide the money tabs / settings, and take the money
@@ -725,7 +755,9 @@
       // the edit modal. Distinct from exitDate (the ACTUAL discharge date).
       plannedExitDate: fmtDate(row.plannedExitDate),
       // בית מועדף ('' = none). Edited via the single-cell setPreferredHouse action.
-      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse),
+      // אופן חיוב: '' (legacy = package), 'package' or 'per_session'. Kept as the stable key, blank stays blank.
+      billingMode: billingModeStored(row.billingMode)
     };
   }
 
@@ -835,7 +867,11 @@
       plannedExitDate: c.plannedExitDate || '',
       // בית מועדף: seeds a brand-new client only; for an existing row the server
       // keeps its on-sheet value (edits go through setPreferredHouse).
-      preferredHouse: c.preferredHouse || ''
+      preferredHouse: c.preferredHouse || '',
+      // אופן חיוב: always sent (blank stays blank — a save never migrates a legacy row
+      // to 'package'); the server validates; a pre-column tab that omits the key
+      // leaves the sheet value alone.
+      billingMode: billingModeStored(c.billingMode)
     };
   }
 
@@ -941,6 +977,17 @@
   // retain their existing conflict-banner behavior.
   function persistClientChange(client) {
     return persist({ requireIds: [String(client.id)] });
+  }
+  // אופן חיוב: flip ONE client (the card chip / the edit modal). Optimistic render,
+  // rolled back when the save fails. Touches no payment, charge or renewal anchor.
+  function setBillingMode(client, mode) {
+    var next = billingModeOf(mode), prev = billingModeStored(client.billingMode);
+    if (next === billingModeOf(prev)) return Promise.resolve();
+    client.billingMode = next;
+    render();
+    return persistClientChange(client)
+      .then(function () { toast(next === 'per_session' ? 'סומן: תשלום לפי טיפול' : 'סומן: חבילה / חודשי'); })
+      .catch(function (e) { client.billingMode = prev; render(); toast('שמירה נכשלה: ' + e.message, true); });
   }
 
   function rememberConfirmedPayment(payment) {
@@ -1446,24 +1493,58 @@
   // decides: without the separately-verified catalog-admin cookie every
   // call answers 401 and the module shows its PIN gate. A name picked at login
   // grants nothing here.
-  function renderPackages() {
-    if (!window.PackagePricing) return;
-    window.PackagePricing.mount($('#packagesRoot'), {
+  /* The targets the «למי ההצעה» picker searches — three sources, one field (2026-11-04):
+   *   מטופלים   = outpatient clients (name · phone · serviceType · house)
+   *   מאושפזים  = the Dashboard admitted roster — the SAME fetch «מסלול המשך» uses (state.continuationRoster);
+   *               id = ContinuationLogic.patientRef (stable), sub = house
+   *   לידים פתוחים = leads that are neither not_relevant nor active (sub = source: the referring house / «חיצוני»)
+   * No money, no notes. The roster is loaded on demand the first time the picker needs it. */
+  // a lead's source for the picker: the referring house (house_of_origin) or its service type
+  function leadSourceLabel(l) { return houseOfOriginLabel(l.house_of_origin) || l.serviceType || ''; }
+  function offerTargets() {
+    var sub = function (x) { return [x.serviceType, x.location].filter(Boolean).join(' · '); };
+    var CLm = window.ContinuationLogic || null;
+    if (state.continuationRoster === null && !state.continuationLoading) ensureContinuationLoaded();
+    var roster = (Array.isArray(state.continuationRoster) && CLm) ? state.continuationRoster.map(function (p) {
+      var ref = CLm.patientRef(p); if (!ref) return null;
+      return { type: 'roster', id: ref, name: String(p.name || '').trim(), phone: CLm.normalizePhone(p.phone) || String(p.phone || '').trim(), sub: continuationHouseLabel(String(p.house || '').trim()) };
+    }).filter(Boolean) : [];
+    return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '', phone: c.phone || '', sub: sub(c) }; })
+      .concat(roster)
+      .concat(state.leads.filter(function (l) { return l.stage !== 'not_relevant' && l.stage !== 'active'; }).map(function (l) { return { type: 'lead', id: l.id, name: l.name || '', phone: l.phone || '', sub: leadSourceLabel(l) }; }));
+  }
+  function pricingOpts() {
+    return {
       notify: toast,
       onUnauthorized: handleUnauthorized,
       settings: function () { return state.settings || {}; },
       signedInName: state.user || '',
+      openSettings: function () { openSettingsModal(); },
       onPending: function (n) {
         var t = $('#packagesTab'); if (t) t.textContent = n ? 'תמחור חבילות (' + n + ')' : 'תמחור חבילות';
         offersReload(); // the price-free summaries the cards / «היום שלי» read follow every offer change
       },
-      targets: function () {
-        // name · phone · house/type feed the searchable «למי ההצעה» picker (no money, no notes)
-        var sub = function (x) { return [x.serviceType, x.location].filter(Boolean).join(' · '); };
-        return state.clients.map(function (c) { return { type: 'client', id: c.id, name: c.name || '', phone: c.phone || '', sub: sub(c) }; })
-          .concat(state.leads.map(function (l) { return { type: 'lead', id: l.id, name: l.name || '', phone: l.phone || '', sub: sub(l) }; }));
+      targets: offerTargets
+    };
+  }
+  function renderPackages() {
+    if (!window.PackagePricing) return;
+    window.PackagePricing.mount($('#packagesRoot'), pricingOpts());
+  }
+  /* «💰 הצעת מחיר» on a client card (ורד): the SAME new-offer form, target locked to this client, inside the
+   * card. When the quote is created the price-free summaries are re-read and the card shows it at once. */
+  function toggleCardOfferForm(card, c) {
+    var host = $('.cc-offer-host', card);
+    if (!host || !window.PackagePricing) return;
+    if (!host.hidden) { if (host._offerForm) host._offerForm.close(); host.hidden = true; return; }
+    host.hidden = false;
+    host._offerForm = window.PackagePricing.mountOfferForm(host, Object.assign(pricingOpts(), {
+      target: 'client:' + c.id,
+      onDone: function (created) {
+        host.hidden = true; host._offerForm = null;
+        if (created) offersReload().then(function () { render(); });
       }
-    });
+    }));
   }
 
   // ---- Dashboard
@@ -2713,7 +2794,8 @@
       // advances), NOT a billing-day calendar match. The base row lookup then
       // resolves to the cycle row automatically (dueDate = the anchor).
       // Mirrors dueItemsOn in public/charges-logic.js — keep both in sync.
-      if (fmtDate(c.nextBillingDate) === dateISO) {
+      // תשלום לפי טיפול: no monthly package row is ever due (extra charges still are).
+      if (!isPerSession(c) && fmtDate(c.nextBillingDate) === dateISO) {
         out.push({ client: c, kind: 'base', dueDate: dateISO, amount: clientAmountDue(c) });
       }
       // Extra charges
@@ -4911,7 +4993,8 @@
         crmStatus: CL.isCrmStatus(row.crmStatus) ? row.crmStatus : 'not_contacted',
         assignee: row.assignee || '',
         offerRequestId: row.offerRequestId || '',
-        offer: row.offerRequestId ? (offersById[String(row.offerRequestId)] || null) : null,
+        // the workflow row's explicit link first, else a quote created FOR this roster patient (attachedType 'roster')
+        offer: (row.offerRequestId ? (offersById[String(row.offerRequestId)] || null) : null) || (ref ? ((state.offers || []).filter(function (o) { return o && o.attachedType === 'roster' && String(o.attachedId) === ref; })[0] || null) : null),
         ref: ref, subjectId: subjectId,
         milestones: (ref && !ms) ? null : (ms || null),
         tasksById: tasksById,
@@ -5881,15 +5964,34 @@
     // the monthly package amount + paid chip + dated rows AND the extra-charge
     // rows (חד-פעמי/חודשי chips with paid-toggle + edit/remove). Nothing financial
     // renders in the left plan panel anymore.
-    var moneyPanel =
-      '<div class="cc-panel cc-money">' +
-        '<div class="cc-panel-title">כספים</div>' +
-        '<div class="cc-amount">' + money(c.pricePerSession) +
-          '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
-        (paidChipHtml ? '<div class="cc-chips">' + paidChipHtml + '</div>' : '') +
-        paidOnRow + nextBillRow + startRow +
-        chargesHtml +
-      '</div>';
+    var moneyPanel;
+    if (isPerSession(c)) {
+      // תשלום לפי טיפול: no package cycle — no paid / unpaid chip, no «גבייה הבאה»,
+      // no overdue banner. The amount (if any) is the price of ONE session.
+      moneyPanel =
+        '<div class="cc-panel cc-money cc-money-per-session">' +
+          '<div class="cc-panel-title">כספים</div>' +
+          '<div class="cc-chips"><span class="chip chip-per-session" title="משלם/ת לפני כל טיפול — ללא מחזור חידוש, ללא גבייה חודשית">משלם/ת לפי טיפול</span></div>' +
+          (toNum(c.pricePerSession) > 0 ? '<div class="cc-amount">' + money(c.pricePerSession) + '<span class="cc-amount-sub">מחיר לטיפול</span></div>' : '') +
+          startRow +
+          chargesHtml +
+        '</div>';
+    } else {
+      // One-click SUGGESTION only (never automatic): a פרטני-only client with no paid
+      // package cycle may really be paying per visit — Vered decides.
+      var suggestChip = state.role === 'editor' && !isOpsScope() && suggestPerSession(c)
+        ? '<button type="button" class="chip chip-suggest-per-session" data-action="suggest-per-session" title="מטופל/ת פרטני ללא חבילה ששולמה — לסמן כתשלום לפי טיפול?">סמן כתשלום לפי טיפול?</button>'
+        : '';
+      moneyPanel =
+        '<div class="cc-panel cc-money">' +
+          '<div class="cc-panel-title">כספים</div>' +
+          '<div class="cc-amount">' + money(c.pricePerSession) +
+            '<span class="cc-amount-sub">חבילה חודשית</span></div>' +
+          ((paidChipHtml || suggestChip) ? '<div class="cc-chips">' + paidChipHtml + suggestChip + '</div>' : '') +
+          paidOnRow + nextBillRow + startRow +
+          chargesHtml +
+        '</div>';
+    }
 
     // תוכנית טיפול (left): treatment-type rows, session credit, בית מוצא. Purely
     // clinical/plan content — money moved out to the right כספים panel.
@@ -5957,6 +6059,22 @@
       addChargeBtn.onclick = function () { openAddChargeModal(c); };
       actions.appendChild(addChargeBtn);
 
+      // «💰 הצעת מחיר» — ורד only (display rule; the server's catalog privilege decides): the shared new-offer
+      // form opens INSIDE the card with this client locked as the target.
+      if (state.user === 'ורד' && !isOpsScope() && window.PackagePricing) {
+        var offerBtn = document.createElement('button');
+        offerBtn.className = 'btn btn-ghost edit-only cc-offer-btn';
+        offerBtn.textContent = '💰 הצעת מחיר';
+        offerBtn.title = 'הצעת מחיר חדשה למטופל/ת זה/זו (נפתחת כאן בכרטיס)';
+        offerBtn.setAttribute('aria-expanded', 'false');
+        offerBtn.onclick = function () { toggleCardOfferForm(card, c); offerBtn.setAttribute('aria-expanded', $('.cc-offer-host', card).hidden ? 'false' : 'true'); };
+        actions.appendChild(offerBtn);
+        var offerHost = document.createElement('div');
+        offerHost.className = 'cc-offer-host pkg-root';
+        offerHost.hidden = true;
+        card.appendChild(offerHost);
+      }
+
       // Wire × buttons on the inline charge list.
       $$('[data-charge-remove]', card).forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -5990,6 +6108,9 @@
       if (unpayBtn) unpayBtn.addEventListener('click', function () { setCurrentMonthPaid(c, false); });
       var verifyBtn = $('[data-action="confirm-cycle-payment"]', card);
       if (verifyBtn) verifyBtn.addEventListener('click', function () { confirmCyclePayment(c, verifyBtn); });
+      // «סמן כתשלום לפי טיפול?» — one click flips THIS client only (optimistic, rolled back on failure).
+      var suggestBtn = $('[data-action="suggest-per-session"]', card);
+      if (suggestBtn) suggestBtn.addEventListener('click', function () { setBillingMode(c, 'per_session'); });
 
       var statusSel = document.createElement('select');
       ['פעיל', 'הפסקה זמנית'].forEach(function (opt) {
@@ -6389,6 +6510,7 @@
     if (form.notes) form.notes.value = client.notes || '';
     if (form.plannedExitDate) form.plannedExitDate.value = client.plannedExitDate || '';
     if (form.preferredHouse) form.preferredHouse.value = preferredHouseOrBlank(client.preferredHouse);
+    if (form.billingMode) form.billingMode.value = billingModeOf(client.billingMode);
     // Treatment plan: service types + sessions per week per treatment
     var ecGroup = $('[data-group="serviceType"]', form);
     var ecHost = $('[data-host="editClientSessions"]', form);
@@ -7571,7 +7693,8 @@
           paymentDate: payDate,
           nextBillingDate: nextBill,
           house_of_origin: (fd.get('house_of_origin') || '').trim(),
-          preferredHouse: preferredHouseOrBlank(fd.get('preferredHouse'))
+          preferredHouse: preferredHouseOrBlank(fd.get('preferredHouse')),
+          billingMode: billingModeStored(fd.get('billingMode'))
         };
         state.clients.push(client);
         // Mirror an already-paid/partial intake into a current-month payment ROW
@@ -7753,7 +7876,8 @@
         // משוייך ל: the assignee follows the person from lead to patient.
         assignedTo: lead.assignedTo || '',
         // בית מועדף (createLead handoff) follows the person too.
-        preferredHouse: preferredHouseOrBlank(lead.preferredHouse)
+        preferredHouse: preferredHouseOrBlank(lead.preferredHouse),
+        billingMode: billingModeStored(fd.get('billingMode'))
       };
       state.clients.push(client);
       var intakePaymentToPersist = null;
@@ -8003,7 +8127,8 @@
         nextBillingDate: client.nextBillingDate,
         house_of_origin: client.house_of_origin, notes: client.notes,
         preferredHouse: client.preferredHouse,
-        plannedExitDate: client.plannedExitDate
+        plannedExitDate: client.plannedExitDate,
+        billingMode: client.billingMode
       };
       var newName = (fd.get('name') || '').trim();
       if (newName) client.name = newName;
@@ -8037,6 +8162,12 @@
       if (fd.has('preferredHouse')) client.preferredHouse = preferredHouseOrBlank(fd.get('preferredHouse'));
       var preferredHouseChanged = preferredHouseOrBlank(client.preferredHouse) !== prevPreferredHouse;
       var preferredHouseFailed = false;
+      // אופן חיוב: a stable key from the select (an ops session has the field disabled → absent → unchanged).
+      // «חבילה / חודשי» on a legacy blank row is NOT an edit — the cell stays blank.
+      if (fd.has('billingMode')) {
+        var bm = billingModeOf(fd.get('billingMode'));
+        if (!(bm === 'package' && !billingModeStored(client.billingMode))) client.billingMode = bm;
+      }
       // Treatment plan: service types + sessions per week
       var ecGroup2 = $('[data-group="serviceType"]', e.target);
       var ecHost2 = $('[data-host="editClientSessions"]', e.target);

@@ -4,7 +4,7 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
-const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, resolveUserPins } = require('./lib/users');
+const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, OFFER_DELETE_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const moneyScope = require('./lib/money-scope');
 const backendCaps = require('./lib/backend-capabilities');
@@ -813,6 +813,14 @@ function requirePricingPrivilege(req, res, next) {
       return res.status(403).json({ ok: false, error: 'pricing_override_vered_only' });
     }
   }
+  // Soft delete / reset of an offer (2026-11-04): OFFER_DELETE_USERS (ורד) only — same rule, own list, own code.
+  if (catalogAdmin.OFFER_DELETE_OPS.indexOf(body.op) >= 0) {
+    const who = sessionUserFromRequest(req);
+    if (!who || OFFER_DELETE_USERS.indexOf(who) < 0 || RETIRED_SESSION_USERS.indexOf(who) >= 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(403).json({ ok: false, error: 'offer_delete_vered_only' });
+    }
+  }
   return next();
 }
 
@@ -859,7 +867,8 @@ app.get('/api/offers', requireSession, async (req, res) => {
     let data;
     try { data = JSON.parse(text); } catch (_) { throw new Error('upstream_unavailable'); }
     if (!data || data.ok === false) return res.status(502).json({ ok: false, error: (data && data.error) || 'upstream_unavailable' });
-    const offers = Array.isArray(data.offers) ? data.offers.map((o) => ({
+    // a soft-deleted offer is already filtered at the source; belt and braces here
+    const offers = Array.isArray(data.offers) ? data.offers.filter((o) => o && String(o.status || '') !== 'deleted').map((o) => ({
       id: String(o.id || ''), status: String(o.status || ''), crmStatus: String(o.crmStatus || ''), requesterKey: String(o.requesterKey || ''),
       patientName: String(o.patientName || ''), attachedType: String(o.attachedType || ''), attachedId: String(o.attachedId || ''),
       validUntil: String(o.validUntil || ''), followUpDate: String(o.followUpDate || ''), assignee: String(o.assignee || ''),

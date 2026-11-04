@@ -80,7 +80,10 @@
 //   (PR #163, bbe6df9); re-check the LIVE /sw.js before release.
 // v27 (2026-11-04, hotfix stale-save): app.js (conflict / stale reload bypasses the proxy cache) and
 //   conflicts.js (reason-aware banner) changed. Bumped from the LIVE value v26 (#165 merge 2f0d630).
-var CACHE = 'ezone-outpatient-v27';
+// v28 (2026-11-04, CRM follow-up 2): index.html, app.js, style.css, my-day.js, package-pricing.js changed
+//   (billing mode, card offer form, delete/reset, three-source picker, WhatsApp links). Bumped from the LIVE
+//   value v27 (hotfix #168 merge ba9a53a3).
+var CACHE = 'ezone-outpatient-v28';
 var SHELL = [
   './',
   './index.html',

@@ -203,25 +203,31 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     await card().locator('.pkg-log li', { hasText: 'תואם מ-' }).waitFor();
     await card().getByRole('button', { name: /אישור תמחור/ }).click();
     await card().locator('.pkg-st-ready_to_send').waitFor();
-    // WhatsApp: prepare, open (status unchanged), then mark sent
-    await card().getByRole('button', { name: /הכן הודעת WhatsApp/ }).click();
+    // WhatsApp (2026-11-04): two explicit synchronous links right under the status — «שליחה לאורן» (settings
+    // number) and «שליחה למטופל» (the lead's phone) — real anchors (target=_blank, rel=noopener), no window.open
+    const oren = card().locator('a.pkg-wa-oren'), patient = card().locator('a.pkg-wa-patient');
+    await oren.waitFor();
+    assert.equal(await oren.getAttribute('target'), '_blank'); assert.equal(await oren.getAttribute('rel'), 'noopener');
+    assert.match(await oren.getAttribute('href'), /^https:\/\/wa\.me\/972527654321\?text=/, 'Oren\'s number from the settings, international format');
+    assert.match(await patient.getAttribute('href'), /^https:\/\/wa\.me\/972501111111\?text=/, 'the lead\'s own phone');
+    const text = decodeURIComponent((await oren.getAttribute('href')).split('text=')[1]);
+    assert.match(text, /ליד להצעה/); assert.match(text, /30,000 ₪/); assert.ok(!/אבחנה|תרופות/.test(text));
+    // clicking the link opens a new tab (blocked by the fixture) and changes NOTHING
+    const popup = page.waitForEvent('popup', { timeout: 5000 }).catch(() => null);
+    await oren.click();
+    const p2 = await popup; if (p2) await p2.close().catch(() => {});
+    assert.equal(mine()[0].status, 'priced', 'opening WhatsApp did NOT mark the offer as sent');
+    assert.equal(await card().locator('.pkg-st-ready_to_send').count(), 1);
+    // «סמן כנשלחה» opens the in-card confirmation: who + follow-up → sent
+    await card().locator('.pkg-mark-sent-btn').click();
     await card().locator('.pkg-wa').waitFor();
     await card().locator('.pkg-wa select').selectOption('oren');
-    const text = await card().locator('.pkg-wa-text').inputValue();
-    assert.match(text, /ליד להצעה/); assert.match(text, /30,000 ₪/); assert.ok(!/אבחנה|תרופות/.test(text));
-    // capture what would open (the fixture blocks every non-origin navigation)
-    await page.evaluate(() => { window.__wa = []; window.open = function (u) { window.__wa.push(String(u)); return null; }; });
-    await card().getByRole('button', { name: /פתיחת WhatsApp/ }).click();
-    const opened = await page.evaluate(() => window.__wa);
-    assert.equal(opened.length, 1);
-    assert.match(opened[0], /^https:\/\/wa\.me\/972527654321\?text=/, 'Oren\'s number from the settings, international format');
-    assert.match(decodeURIComponent(opened[0].split('text=')[1]), /ליד להצעה/);
-    assert.equal(mine()[0].status, 'priced', 'opening WhatsApp did NOT mark the offer as sent');
     await card().locator('.pkg-wa input[aria-label="מועד מעקב אחרי השליחה"]').fill(todayPlus(0));
-    await card().locator('.pkg-wa').getByRole('button', { name: /סמן כנשלחה/ }).click();
+    await card().locator('.pkg-mark-sent-ok').click();
     await card().locator('.pkg-st-sent').waitFor();
     const row = mine()[0];
     assert.equal(row.status, 'sent'); assert.equal(row.sentTo, 'oren'); assert.ok(row.sentAtIso); assert.equal(row.followUpDate, todayPlus(0));
+    assert.match(await card().locator('.pkg-terms-line').textContent(), /נשלחה .* לאורן/);
     assert.equal(f.sb.rows('Charges').length, 0); assert.equal(f.sb.rows('Payments').length, 0);
     // filters
     await page.locator('.pkg-filters .pkg-chip', { hasText: /^נשלחה/ }).click();

@@ -1,3 +1,19 @@
+# Outpatient — CRM follow-up 2 (draft PR, 2026-11-04, base = production `2f0d630` / #165 + #166)
+
+Sandra's second production review after #163/#165 (`CHANGELOG-crm-followup-2.md`): (1) **billing mode per
+client** — `billingMode` ∈ {`package`, `per_session`}, APPENDED `Clients` column 39 (+ tombstone mirror; blank = package;
+no migration; money key), «אופן חיוב» toggle in עריכה / intake, a per-session client has no renewal cycle anywhere
+(banner, «תשלומים באיחור», KPIs, billing due list) and the card shows «משלם/ת לפי טיפול»; one-click suggestion chip for
+פרטני-only clients without a package; (2) **«💰 הצעת מחיר» on the client card** — the same offer form, target locked,
+inside the card (`PackagePricing.mountOfferForm`); (3) **delete / reset a quote** — ורד only at Node (403) and at the
+source (`adminDeletePackageRequest` soft delete, `adminResetPackageRequest` empty draft, both logged, in-app confirm);
+(4) **picker sources** — «מטופלים» · «מאושפזים» (Dashboard roster, new target type `roster`, stable ref) · «לידים
+פתוחים», linked quotes surface on the lead card / «מסלול המשך»; (5) **WhatsApp fix** — synchronous `wa.me` anchors
+«שליחה לאורן» / «שליחה למטופל» (no `window.open`), hint to הגדרות when Oren's number is missing, «סמן כנשלחה» stores the
+recipient kind + last four digits only. SW v26 → **v27**. Code.gs changed → Apps Script release phase after the approved
+merge. No `*_HEADERS` reorder; package billing math, payments, renewals, `TherapistRates` untouched. Manual step for
+Sandra after release: flip the real per-visit clients (e.g. ערן אטיאס) in עריכה → «אופן חיוב» (or via the card chip).
+
 # Outpatient — E-ZONE One CRM (draft PR, 2026-11-03, base = #162 merge 8d61cc32)
 
 One PR on top of the live #162 production: (1) **fix** — «תמחור חבילות» buttons died on concurrent

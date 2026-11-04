@@ -1433,3 +1433,24 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-fu { gap: 6px; }
 .pkg-wa { display: flex; flex-direction: column; gap: 8px; background: var(--bg-elev); }
 .pkg-wa-text { width: 100%; min-height: 140px; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); resize: vertical; }
+/* billing mode (אופן חיוב, 2026-11-04): per-session clients have no package cycle */
+.chip-per-session { background: #EEF3FF; color: var(--blue-deep); border: 1px solid #B8C8F0; font-weight: 600; }
+.chip-suggest-per-session { background: #fff3cd; color: #664d03; border: 1px dashed #e8cb75; cursor: pointer; font: inherit; font-size: 12px; }
+.chip-suggest-per-session:hover { background: #ffe9a8; }
+/* CRM follow-up 2 (2026-11-04): picker sections, card-embedded offer form, delete/reset confirm, WhatsApp links */
+.pkg-who-section { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 4px; border-top: 1px solid var(--border); }
+.pkg-who-section:first-child { border-top: 0; }
+.pkg-who-locked { border-style: solid; }
+.pkg-new-embedded { margin-top: 10px; }
+.cc-offer-host { padding: 0 12px 12px; }
+.cc-offer-host[hidden] { display: none; }
+.pkg-danger-zone { justify-content: flex-end; gap: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.pkg-confirm { display: flex; flex-direction: column; gap: 8px; background: #fff8f0; border: 1px solid #f0c9a0; }
+.pkg-reset-note { font-style: italic; }
+.pkg-wa-block { display: flex; flex-direction: column; gap: 4px; }
+.pkg-wa-links { align-items: center; gap: 8px; }
+.pkg-wa-links a.btn { text-decoration: none; }
+.pkg-wa-cap { font-weight: 600; }
+.pkg-wa-note { margin: 0; font-size: 12px; }
+.pkg-wa-missing { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pkg-root .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
