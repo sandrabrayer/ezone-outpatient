@@ -1454,3 +1454,37 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-wa-note { margin: 0; font-size: 12px; }
 .pkg-wa-missing { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pkg-root .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+
+/* Global patient search on «היום שלי» (CHANGELOG-global-patient-search.md).
+   Pinned above the KPI strip: full-width box, dropdown anchored under it.
+   The dropdown is absolutely positioned so it never pushes the KPI strip
+   down; `inset-inline: 0` keeps it inside the box in RTL and LTR alike, so
+   nothing can overflow sideways at 360px. */
+.gs-wrap { position: relative; width: 100%; margin: 0 0 12px; }
+.gs-wrap .gs-input { width: 100%; max-width: none; box-sizing: border-box; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.gs-results {
+  position: absolute; inset-inline: 0; top: calc(100% + 4px); z-index: 30;
+  max-height: 46vh; overflow-y: auto; overflow-x: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); padding: 4px;
+}
+.gs-results[hidden] { display: none; }
+.gs-opt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+  width: 100%; box-sizing: border-box; text-align: start;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.gs-opt:hover, .gs-opt.is-active, .gs-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.gs-name { font-weight: 600; font-size: 15px; }
+.gs-sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.gs-hint { margin-inline-start: auto; font-size: 0.72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+.gs-hint.st-active { background: #d4edda; color: #155724; }
+.gs-hint.st-inactive { background: #e2e3e5; color: #41464b; }
+.gs-hint.st-lead { background: #fff3cd; color: #856404; }
+.gs-none { padding: 10px 12px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .gs-results { max-height: 50vh; }
+  .gs-hint { margin-inline-start: 0; }
+}

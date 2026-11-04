@@ -193,6 +193,7 @@
     dataVersion: null, // Clients data version from getData, echoed back on saveAll (staleness signal); null = server didn't send one (fail-open: save never flagged stale)
     leadSearch: '',
     dashSearch: '',   // cross-tab patient locator on the dashboard (איתור מטופל)
+    globalSearch: '',  // «חיפוש מטופל» pinned at the top of «היום שלי» (name or phone)
     clientSearch: '',
     retentionSearch: '',
     inactiveSearch: '',
@@ -1675,6 +1676,135 @@
     } else if (kind === 'offer') {
       setView('packages');
     }
+  }
+
+  // ---- «חיפוש מטופל» — the box pinned above the KPI strip on «היום שלי» ----
+  // Jump-to-patient over the lists the app has ALREADY loaded (state.clients,
+  // state.leads): no new fetch, no new Apps Script action. The matching rule is
+  // pure and unit-tested in public/global-search.js; this layer is markup,
+  // keyboard and navigation only.
+  //
+  // MONEY: a row is name · phone · service/house + a status hint. Nothing
+  // financial is read or rendered, so an operational session (דנה) sees the
+  // same rows ורד does — and a patient hidden from a list is hidden here too,
+  // because the source IS that list.
+  var gsRows = [];      // the rows currently drawn (index === option index)
+  var gsActive = -1;    // keyboard highlight
+  var gsTimer = null;   // input debounce (~150ms)
+
+  function globalSearchEls() {
+    return { input: $('#globalSearch'), box: $('#globalSearchResults') };
+  }
+
+  function closeGlobalSearch() {
+    var el = globalSearchEls();
+    if (!el.box) return;
+    el.box.hidden = true;
+    el.box.innerHTML = '';
+    gsRows = [];
+    gsActive = -1;
+    if (el.input) el.input.setAttribute('aria-expanded', 'false');
+  }
+
+  function clearGlobalSearch() {
+    state.globalSearch = '';
+    var el = globalSearchEls();
+    if (el.input) el.input.value = '';
+    closeGlobalSearch();
+  }
+
+  function gsHighlight(next) {
+    var el = globalSearchEls();
+    if (!el.box || !gsRows.length) return;
+    var opts = $$('.gs-opt', el.box);
+    if (!opts.length) return;
+    gsActive = ((next % opts.length) + opts.length) % opts.length;
+    opts.forEach(function (o, i) {
+      o.classList.toggle('is-active', i === gsActive);
+      o.setAttribute('aria-selected', i === gsActive ? 'true' : 'false');
+    });
+    if (opts[gsActive].scrollIntoView) opts[gsActive].scrollIntoView({ block: 'nearest' });
+  }
+
+  function renderGlobalSearch() {
+    var el = globalSearchEls();
+    if (!el.box || !window.GlobalSearch) return;
+    var q = String(state.globalSearch || '').trim();
+    if (!q) { closeGlobalSearch(); return; }
+    gsRows = window.GlobalSearch.search(q, { clients: state.clients, leads: state.leads });
+    gsActive = -1;
+    if (!gsRows.length) {
+      el.box.innerHTML = '<div class="gs-none">לא נמצא מטופל או ליד מתאים</div>';
+    } else {
+      el.box.innerHTML = gsRows.map(function (r, i) {
+        return '<button type="button" class="gs-opt" role="option" aria-selected="false" data-gs-index="' + i + '">' +
+          '<span class="gs-name">' + escapeHtml(r.name || '—') + '</span>' +
+          (r.phone ? '<span class="gs-sub">' + escapeHtml(r.phone) + '</span>' : '') +
+          (r.sub ? '<span class="gs-sub">' + escapeHtml(r.sub) + '</span>' : '') +
+          '<span class="gs-hint st-' + escapeHtml(r.statusKind) + '">' + escapeHtml(r.statusLabel) + '</span>' +
+          '</button>';
+      }).join('');
+    }
+    el.box.hidden = false;
+    if (el.input) el.input.setAttribute('aria-expanded', 'true');
+  }
+
+  // Open the result on its own tab, exactly as finding it there by hand would:
+  // the tab's own search is prefilled (so the patient is isolated) and the card
+  // is scrolled into view. A lead opens its editing modal, as in the לידים tab.
+  function globalSearchOpen(row) {
+    if (!row) return;
+    clearGlobalSearch();
+    if (row.kind === 'lead') {
+      state.leadSearch = row.name || '';
+      var li = $('#leadsSearch'); if (li) li.value = state.leadSearch;
+      setView('leads');
+      var lead = state.leads.filter(function (x) { return String(x.id) === String(row.id); })[0];
+      if (lead) openLeadModal(lead);
+      return;
+    }
+    dashOpenInTab({ tab: row.tab, name: row.name });
+    var listSel = row.tab === 'inactive' ? '#inactiveList' : '#clientsList';
+    var cardSel = row.tab === 'inactive' ? '.arc-card' : '.client-card';
+    var list = $(listSel);
+    var card = list ? $(cardSel, list) : null;
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  function bindGlobalSearch() {
+    var el = globalSearchEls();
+    if (!el.input || !el.box) return;
+    el.input.addEventListener('input', function (e) {
+      state.globalSearch = e.target.value;
+      if (gsTimer) clearTimeout(gsTimer);
+      gsTimer = setTimeout(function () { gsTimer = null; renderGlobalSearch(); }, 150);
+    });
+    el.input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { clearGlobalSearch(); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (gsTimer) { clearTimeout(gsTimer); gsTimer = null; renderGlobalSearch(); }
+        if (!gsRows.length) return;
+        e.preventDefault();
+        gsHighlight(gsActive < 0 ? (e.key === 'ArrowDown' ? 0 : gsRows.length - 1) : gsActive + (e.key === 'ArrowDown' ? 1 : -1));
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (gsTimer) { clearTimeout(gsTimer); gsTimer = null; renderGlobalSearch(); }
+        if (!gsRows.length) return;
+        e.preventDefault();
+        globalSearchOpen(gsRows[gsActive >= 0 ? gsActive : 0]);
+      }
+    });
+    el.input.addEventListener('focus', function () { if (String(state.globalSearch || '').trim()) renderGlobalSearch(); });
+    el.box.addEventListener('mousedown', function (e) { e.preventDefault(); }); // keep focus off the blur path
+    el.box.addEventListener('click', function (e) {
+      var opt = e.target.closest('[data-gs-index]');
+      if (opt) globalSearchOpen(gsRows[Number(opt.getAttribute('data-gs-index'))]);
+    });
+    // clicking anywhere outside the box closes the dropdown
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.gs-wrap')) closeGlobalSearch();
+    });
   }
 
   // ---- Cross-tab patient locator (איתור מטופל, dashboard) ----
@@ -7431,6 +7561,7 @@
     if (dupReportBox) dupReportBox.addEventListener('click', handleDuplicateReportClick);
     var mergeConfirmBtn = $('#mergeClientsConfirm');
     if (mergeConfirmBtn) mergeConfirmBtn.addEventListener('click', performMergeClients);
+    bindGlobalSearch();
     on('#dashPatientSearch', 'input', function (e) { state.dashSearch = e.target.value; renderDashPatientSearch(); });
     on('#leadsSearch', 'input', function (e) { state.leadSearch = e.target.value; renderLeads(); });
     on('#addLeadBtn', 'click', function () { openLeadModal(null); });
