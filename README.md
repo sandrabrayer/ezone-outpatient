@@ -82,6 +82,12 @@ the existing UI reloads server data. Normal edits do not read the removal archiv
 See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
 release precautions and remaining limitations of full-sheet writes.
 
+The proxy's 60-second `getData` cache is write-safe: a read that a write
+overtook while in flight is re-read once (`X-Cache: MISS`) or answered uncached
+(`X-Cache: BYPASS`) and never stored, so no tab reloads into a picture that
+predates a save; the reload after a stale-save conflict asks for `?fresh=1`.
+See [CHANGELOG-hotfix-stale-save.md](CHANGELOG-hotfix-stale-save.md).
+
 `test/lead-save-browser.test.js` exercises the real UI, session/proxy/cache
 server and Apps Script handlers with dummy Sheets. The `lead-save-browser`
 CI job installs test-only browser tooling outside the application dependency

@@ -235,7 +235,15 @@ const STALE_FALLBACK_MS = 10 * 60 * 1000; // serve stale up to 10 min if upstrea
 const getDataCache = {
   data: null,
   status: null,
-  timestamp: 0
+  timestamp: 0,
+  // Write generation (hotfix 2026-11-04, CHANGELOG-hotfix-stale-save.md): bumped
+  // by every invalidation. A getData upstream read that STARTED before a write
+  // landed carries the pre-write sheet; storing it would serve every tab a
+  // picture without that write (and its who/when stamps) for up to CACHE_TTL_MS,
+  // so each of those tabs' next save was refused as a stale conflict against
+  // the write — "ורד עדכן/ה קודם" for ורד's own save. Such a read is never
+  // cached; the request re-reads once, then answers uncached.
+  generation: 0
 };
 function isCacheFresh() {
   return getDataCache.data && (Date.now() - getDataCache.timestamp) < CACHE_TTL_MS;
@@ -263,6 +271,7 @@ function invalidateCache() {
   getDataCache.data = null;
   getDataCache.status = null;
   getDataCache.timestamp = 0;
+  getDataCache.generation++;
 }
 // ---------------------------------------------------------------------------
 
@@ -432,11 +441,20 @@ app.get('/api/sheets', requireSession, async (req, res) => {
       // Built from `action` only, so a browser query string cannot smuggle it.
       + '&moneyScope=' + encodeURIComponent(requestMoneyScope(req))
       + (req.query.secret ? '&secret=' + encodeURIComponent(req.query.secret) : '');
-    const r = await fetch(url, { redirect: 'follow' });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error('upstream_unavailable'); }
+    // Read-after-write guard: remember the write generation BEFORE the upstream
+    // read. A write that lands while the read is in flight bumps it, which means
+    // the sheet this read returns predates that write. Re-read once (the common
+    // case: one save overlapped), and never cache a read that lost the race.
+    let r, data, generation;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      generation = getDataCache.generation;
+      r = await fetch(url, { redirect: 'follow' });
+      const text = await r.text();
+      try { data = JSON.parse(text); }
+      catch (_) { throw new Error('upstream_unavailable'); }
+      if (action !== 'getData' || generation === getDataCache.generation) break;
+    }
+    const current = action !== 'getData' || generation === getDataCache.generation;
 
     // Track load metrics + populate cache only on the bulk read.
     if (action === 'getData') {
@@ -446,15 +464,15 @@ app.get('/api/sheets', requireSession, async (req, res) => {
       lastLoad.clients = Array.isArray(data.clients) ? data.clients.length : 0;
       lastLoad.error = data.ok === false ? (data.error || 'unknown') : null;
 
-      // Only cache successful responses
-      if (r.status >= 200 && r.status < 300 && data.ok !== false) {
+      // Only cache successful responses that no write overtook
+      if (current && r.status >= 200 && r.status < 300 && data.ok !== false) {
         getDataCache.data = data;
         getDataCache.status = r.status;
         getDataCache.timestamp = Date.now();
       }
     }
 
-    res.set('X-Cache', 'MISS');
+    res.set('X-Cache', current ? 'MISS' : 'BYPASS');
     res.status(r.status).json(scoped(req, data));
   } catch (err) {
     lastLoad.at = new Date().toISOString();
