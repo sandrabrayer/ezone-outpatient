@@ -199,6 +199,8 @@
     var dueNow = function (r) { return r.state === 'late' || r.state === 'today'; };
     var count = function (rows, pred) { return rows.filter(pred || function () { return true; }).length; };
     var isCall = function (r) { return r.kind === 'task' && (r.taskKind === 'call' || r.taskKind === 'intro'); };
+    // an overdue PAYMENT row: an unpaid renewal cycle, or a collection task whose date passed
+    var isOverduePayment = function (r) { return r.kind === 'renewal_overdue' || (r.kind === 'task' && r.taskKind === 'collection' && r.state === 'late'); };
     var cards = [
       { id: 'tasks', label: 'משימות לביצוע', value: tasks ? count(rowsBy.tasks, dueNow) : null, hint: tasks ? count(rowsBy.tasks, function (r) { return r.state === 'late'; }) + ' באיחור · ' + rowsBy.tasks.length + ' פתוחות' : 'המידע אינו זמין' },
       { id: 'calls', label: 'שיחות להיום', value: tasks ? count(rowsBy.tasks, function (r) { return isCall(r) && dueNow(r); }) : null, hint: tasks ? count(rowsBy.tasks, function (r) { return isCall(r) && r.state === 'late'; }) + ' שיחות באיחור' : 'המידע אינו זמין', domain: 'tasks' },
@@ -206,7 +208,8 @@
       { id: 'intros', label: 'שיחות היכרות היום', value: leads ? count(rowsBy.leads, function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) : null, second: leads ? { label: 'מתוכננות', value: count(rowsBy.leads, function (r) { return r.kind === 'intro_scheduled' && r.state === 'wait'; }) } : null, domain: 'leads' },
       { id: 'plans', label: 'תוכניות להפעלה', value: leads ? rowsBy.plans.length : null, hint: leads ? count(rowsBy.plans, function (r) { return r.priority === 'exception'; }) + ' אחרי תאריך ההתחלה' : 'המידע אינו זמין' }
     ];
-    if (money) cards.push({ id: 'renewals', label: 'חידושים וגבייה', value: clients ? count(rowsBy.renewals, dueNow) : null, hint: clients ? count(rowsBy.renewals, function (r) { return r.state === 'late'; }) + ' לא שולמו · ' + rowsBy.renewals.length + ' בשבוע הקרוב' : 'המידע אינו זמין' });
+    var overduePayments = count(all, isOverduePayment); // the «תשלומים באיחור» section counts the same rows
+    if (money) cards.push({ id: 'renewals', label: 'חידושים וגבייה', value: clients ? count(rowsBy.renewals, dueNow) : null, hint: clients ? overduePayments + ' תשלומים באיחור · ' + rowsBy.renewals.length + ' בשבוע הקרוב' : 'המידע אינו זמין' });
     else cards.push({ id: 'continuity', label: 'המשך טיפול ועצירות', value: cont ? rowsBy.continuity.length : null, hint: cont ? 'פגישות המשך לעדכון' : 'המידע אינו זמין' });
     cards.push({ id: 'approvals', label: 'ממתין לאישור שלך', value: stopFlags && extras ? rowsBy.approvals.length : null, hint: stopFlags && extras ? count(rowsBy.approvals, function (r) { return r.kind === 'stop_flag'; }) + ' הפסקות · ' + count(rowsBy.approvals, function (r) { return r.kind === 'extra_request'; }) + ' טיפולים נוספים' : 'המידע אינו זמין' });
     var urgent = sortRows(all.filter(function (r) { return r.priority === 'binding' || r.priority === 'exception' || r.state === 'late'; }).slice());
@@ -214,8 +217,12 @@
     // the first section that claims it wins. Sections and cards read the same rows.
     var taken = {};
     function take(pred) { var out = []; all.forEach(function (r) { if (taken[r.id] || !pred(r)) return; taken[r.id] = true; out.push(r); }); return sortRows(out); }
+    // 2026-11-04 (Sandra's production review): the first section holds ONLY overdue payment /
+    // collection rows (unpaid cycle, collection task past its date); every other late or dated
+    // commitment (continuation offers, follow-ups, contacts, today's tasks) sits right below it.
     var sections = [
-      { id: 'critical', label: 'באיחור ומחויבויות עם מועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || (r.kind === 'task' && r.state === 'today'); }) },
+      { id: 'overdue_payments', label: 'תשלומים באיחור', rows: take(function (r) { return isOverduePayment(r); }) },
+      { id: 'dated', label: 'מעקבים ומשימות במועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || (r.kind === 'task' && r.state === 'today'); }) },
       { id: 'calls', label: 'שיחות להיום', rows: take(function (r) { return isCall(r) && r.state === 'today'; }) },
       { id: 'intros', label: 'שיחות היכרות היום', rows: take(function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) },
       { id: 'undecided', label: 'היכרויות שעברו ללא החלטה', rows: take(function (r) { return r.kind === 'intro_passed'; }) },
@@ -226,7 +233,7 @@
     if (money) sections.push({ id: 'money', label: 'חידושים וגבייה', rows: take(function (r) { return !!r.money || r.kind === 'renewal_overdue' || r.kind === 'renewal_due'; }) });
     sections.push({ id: 'later', label: 'בהמשך השבוע', rows: take(function () { return true; }) });
     sections = sections.filter(function (x) { return x.rows.length; });
-    return { today: today, money: money, cards: cards, rowsBy: rowsBy, urgent: urgent, sections: sections, domains: DOMAINS.filter(function (d) { return !d.money || money; }), total: all.length };
+    return { today: today, money: money, cards: cards, rowsBy: rowsBy, urgent: urgent, sections: sections, overduePayments: overduePayments, domains: DOMAINS.filter(function (d) { return !d.money || money; }), total: all.length };
   }
 
   var CONTACT_OUTCOME_HE = { spoke_follow_up: 'שיחה — נדרש המשך', no_answer: 'אין מענה', call_back_later: 'לחזור במועד', awaiting_decision: 'ממתינים להחלטה', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע', bad_contact_details: 'פרטי קשר שגויים', stop_contact: 'ביקש/ה הפסקת פניות' };

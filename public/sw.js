@@ -75,7 +75,10 @@
 // v24 (draft OP-BILL-01): payment-date coverage card and source policy; v23 is deployed.
 // v25 (2026-11-03, E-ZONE One CRM): index.html (menu order, settings WhatsApp field), app.js, style.css,
 //   my-day.js, continuation-logic.js, package-pricing.js changed. LIVE v24 (#162 merge 8d61cc32) verified before this bump.
-var CACHE = 'ezone-outpatient-v25';
+// v26 (2026-11-04, CRM follow-up 1): app.js, style.css, my-day.js, package-pricing.js changed («תשלומים באיחור»
+//   split, searchable offer picker, Vered-only custom lines / overrides). Bumped from the deploy-branch value v25
+//   (PR #163, bbe6df9); re-check the LIVE /sw.js before release.
+var CACHE = 'ezone-outpatient-v26';
 var SHELL = [
   './',
   './index.html',

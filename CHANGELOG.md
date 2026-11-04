@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CRM follow-up 1 — Sandra's production review (2026-11-04)
+- «היום שלי»: the first section is now **«תשלומים באיחור»** and holds ONLY overdue payment / collection rows (unpaid cycle, collection task past its date); every other late or dated item (continuation offers, offer follow-ups, contacts, today's tasks) moved to the new **«מעקבים ומשימות במועד»** right below it. The «חידושים וגבייה» card hint counts the same rows (`overduePayments`).
+- Offer form («הצעת מחיר חדשה»): the «למי ההצעה» picker is a full-width searchable field (name or phone → matches with name · phone · house/type); «שם לקוח לא רשום» + phone on their own row beneath. No horizontal scroll at 360px.
+- Pricing flexibility for ורד only (server-enforced): custom line item (free-text name + quantity + unit price) and per-line manual price override on catalog items with a required reason (catalog price struck through); totals computed server-side from the submitted lines, non-Vered → 403, override without reason → 400, every override / custom line appended to `adjustLog` (actor, catalog price, new price, reason, timestamp). No new sheet columns. See `CHANGELOG-crm-followup-1.md`.
+
 ### Offers CRM in «תמחור חבילות» + WhatsApp (2026-11-03)
 - «➕ הצעת מחיר חדשה» (lead/client, packages + single treatments + quantities, Solo tier, validity, follow-up, owner, notes; double click = one request); statuses draft · ready_to_send · sent · awaiting_decision · approved · rejected · expired (legacy mapped at read, expired computed at read); prices from the catalog server-side only; discount = existing adjust with reason; «אושרה» creates no charge/payment. Price-free `GET /api/offers` feeds the cards, «היום שלי» and «מסלול המשך»; דנה 403. Nine appended `PackageRequests` columns.
 - WhatsApp: prepared message to אורן (number in Settings) or another number, opened via `wa.me` for human sending; only «סמן כנשלחה» moves the offer to `sent` (date, recipient, follow-up). See `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`.

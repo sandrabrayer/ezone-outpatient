@@ -111,12 +111,30 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     await page.locator('.pkg-new-btn').waitFor();
     await page.locator('.pkg-new-btn').click();
     await page.waitForSelector('.pkg-new');
-    // who: the existing lead
-    await page.locator('.pkg-new select[aria-label="לקוח / ליד"]').selectOption({ label: 'ליד · ליד להצעה' });
+    // who: a full-width searchable picker — by phone, then by name; the unregistered row sits beneath it
+    const who = page.locator('.pkg-new .pkg-who-input');
+    const formW = (await page.locator('.pkg-new').boundingBox()).width;
+    const whoBox = await who.boundingBox();
+    assert.ok(whoBox.width >= formW - 48, 'picker spans the form (' + whoBox.width + ' of ' + formW + ')');
+    assert.ok(whoBox.height >= 40, 'picker is large (' + whoBox.height + 'px)');
+    const manualBox = await page.locator('.pkg-new .pkg-who-manual').boundingBox();
+    assert.ok(manualBox.y > whoBox.y + whoBox.height - 1, 'name/phone row is beneath the picker');
+    const nameBox = await page.locator('.pkg-new input[aria-label="שם הלקוח"]').boundingBox();
+    assert.ok(nameBox.y >= manualBox.y, 'the unregistered name input lives in that row');
+    await who.fill('0500000021');
+    await page.locator('.pkg-new .pkg-who-opt').first().waitFor();
+    assert.match(await page.locator('.pkg-new .pkg-who-opt').first().textContent(), /מטופל חבילה.*050-?000-?0021|מטופל חבילה.*0500000021/, 'phone search finds the client with name · phone');
+    assert.match(await page.locator('.pkg-new .pkg-who-opt').first().textContent(), /פרטני · רעננה הפרדס/, 'house/type shown');
+    await who.fill('ליד להצ');
+    await page.locator('.pkg-new .pkg-who-opt', { hasText: 'ליד להצעה' }).waitFor();
+    assert.equal(await page.locator('.pkg-new .pkg-who-opt').count(), 1);
+    await page.locator('.pkg-new .pkg-who-opt', { hasText: 'ליד להצעה' }).click();
+    await page.locator('.pkg-new .pkg-who-picked[data-target="lead:lead-1"]').waitFor();
+    assert.equal(await page.locator('.pkg-new input[aria-label="שם הלקוח"]').count(), 0, 'a picked target hides the unregistered row');
     // item 1: EMDR Core × 2
     await page.locator('.pkg-new .pkg-chip', { hasText: 'Core' }).first().click();
     await page.locator('.pkg-new .pkg-pick-quote', { hasText: 'מחיר ליחידה' }).waitFor();
-    await page.locator('.pkg-new .pkg-qty').fill('2');
+    await page.locator('.pkg-new .pkg-qty:not(.pkg-custom-qty)').fill('2');
     await page.locator('.pkg-new button', { hasText: 'הוספה להצעה' }).click();
     await page.locator('.pkg-item-row').first().waitFor();
     // item 2: Solo needs a tier before it can be added
@@ -128,6 +146,29 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     await page.locator('.pkg-new button', { hasText: 'הוספה להצעה' }).click();
     assert.equal(await page.locator('.pkg-item-row').count(), 2);
     assert.match(await page.locator('.pkg-new .pkg-total').textContent(), /המחיר הסופי מחושב בשרת/);
+    // pricing flexibility (ורד): manual override on the Core line — reason mandatory; catalog price struck through
+    const coreRow = page.locator('.pkg-item-row', { hasText: 'Core' });
+    await coreRow.locator('.pkg-override-btn').click();
+    await page.locator('.pkg-override').waitFor();
+    await page.locator('.pkg-override input[aria-label="מחיר ידני ליחידה"]').fill('3000');
+    await page.locator('.pkg-override-save').click();
+    assert.equal(await page.locator('.pkg-override').count(), 1, 'without a reason the override is not applied');
+    await page.locator('.pkg-override input[aria-label="סיבת המחיר הידני"]').fill('הנחת היכרות');
+    await page.locator('.pkg-override-save').click();
+    await page.locator('.pkg-item-row.pkg-item-overridden').waitFor();
+    const struck = page.locator('.pkg-item-row.pkg-item-overridden s.pkg-item-catalog');
+    assert.match(await struck.textContent(), /6,800 ₪/, 'catalog price (2 × 3,400) struck through');
+    assert.equal(await struck.evaluate((el) => getComputedStyle(el).textDecorationLine), 'line-through');
+    assert.match(await page.locator('.pkg-item-row.pkg-item-overridden .pkg-item-sum').textContent(), /6,000 ₪/, 'override 2 × 3,000');
+    assert.match(await page.locator('.pkg-item-row.pkg-item-overridden').textContent(), /הנחת היכרות/);
+    // custom line: a treatment that is not in the catalog
+    await page.locator('.pkg-new input[aria-label="שם טיפול מותאם"]').fill('טיפול זוגי');
+    await page.locator('.pkg-new input[aria-label="מחיר ליחידה (פריט מותאם)"]').fill('500');
+    await page.locator('.pkg-custom-add').click();
+    await page.locator('.pkg-item-row', { hasText: 'טיפול זוגי' }).waitFor();
+    assert.equal(await page.locator('.pkg-item-row').count(), 3);
+    assert.match(await page.locator('.pkg-item-row', { hasText: 'טיפול זוגי' }).textContent(), /מותאם/);
+    assert.match(await page.locator('.pkg-new .pkg-total-split').textContent(), /לפני מע״מ .* · מע״מ 18% .* · סה״כ 33,500 ₪/, 'browser estimate 6,000 + 27,000 + 500');
     await page.locator('.pkg-new input[aria-label="תוקף ההצעה"]').fill(todayPlus(30));
     await page.locator('.pkg-new input[aria-label="מועד מעקב"]').fill(todayPlus(0));
     await page.locator('.pkg-new input[aria-label="הערות"]').fill('הצעה לדוגמה');
@@ -139,15 +180,27 @@ for (const vp of [{ name: 'desktop 1280px', width: 1280, height: 900 }, { name: 
     assert.equal(mine().length, 1, 'a double click created one request (the two manager requests are fixture rows)');
     const card = () => page.locator('.pkg-card', { hasText: 'ליד להצעה' });
     assert.match(await card().textContent(), /טיוטה/);
-    assert.equal(await card().locator('.pkg-items-list li').count(), 2, 'both items listed');
+    assert.equal(await card().locator('.pkg-items-list li').count(), 3, 'all three lines listed');
     const stored = mine()[0];
-    assert.equal(JSON.parse(stored.quoteSnapshot).grossAgorot, 2 * 340000 + 3 * 900000, 'priced by the source');
+    assert.equal(JSON.parse(stored.quoteSnapshot).grossAgorot, 2 * 300000 + 3 * 900000 + 50000, 'priced by the source from the lines (override + Solo + custom)');
+    const snapItems = JSON.parse(stored.items);
+    assert.equal(snapItems[0].catalogUnitAgorot, 340000); assert.equal(snapItems[0].grossAgorot, 300000);
+    assert.equal(snapItems[2].custom, true); assert.equal(snapItems[2].title, 'טיפול זוגי');
+    const log = JSON.parse(stored.adjustLog);
+    assert.deepEqual(log.map((e) => [e.kind, e.by, e.from, e.to]), [['override', 'ורד', 340000, 300000], ['custom', 'ורד', null, 50000]]);
+    assert.equal(log[0].reason, 'הנחת היכרות'); assert.ok(log[0].at);
     assert.equal(stored.attachedType, 'lead');
+    // the card shows the struck-through catalog price, the custom chip and the trail
+    assert.equal(await card().locator('.pkg-items-list li').count(), 3);
+    assert.match(await card().locator('.pkg-items-list li.pkg-item-overridden s').textContent(), /6,800 ₪/);
+    assert.match(await card().locator('.pkg-items-list li.pkg-item-custom').textContent(), /טיפול זוגי.*500 ₪/);
+    assert.match(await card().locator('.pkg-log').textContent(), /מחיר ידני ל.*3,400 ₪ → 3,000 ₪.*הנחת היכרות \(ורד/);
+    assert.match(await card().locator('.pkg-log').textContent(), /פריט מותאם «טיפול זוגי» 500 ₪/);
     // discount (reason mandatory) + approve pricing → ready_to_send
     await card().getByLabel('סכום מתואם').fill('30000');
-    await card().getByLabel('סיבת התאמה').fill('הנחת היכרות');
+    await card().getByLabel('סיבת התאמה').fill('מחיר סגירה');
     await card().getByRole('button', { name: 'התאמת סכום' }).click();
-    await card().locator('.pkg-log li', { hasText: 'הנחת היכרות' }).waitFor();
+    await card().locator('.pkg-log li', { hasText: 'תואם מ-' }).waitFor();
     await card().getByRole('button', { name: /אישור תמחור/ }).click();
     await card().locator('.pkg-st-ready_to_send').waitFor();
     // WhatsApp: prepare, open (status unchanged), then mark sent

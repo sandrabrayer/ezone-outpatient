@@ -5529,6 +5529,10 @@ var PACKAGE_STATUS_TRANSITIONS = {
   awaiting_decision: { approved: true, rejected: true }
 };
 var PACKAGE_MAX_ITEMS = 12, PACKAGE_MAX_QTY = 20;
+/* Who may depart from the catalog inside an offer (custom line / manual unit-price override), 2026-11-04.
+ * `user` arrives from the Node proxy's signed session (never from a browser field) and Node already refuses
+ * anyone else with 403 — this is the source's own fail-closed twin (lib/users.js PRICE_OVERRIDE_USERS). */
+var PACKAGE_PRICE_OVERRIDE_USERS = ['ורד'];
 /* Stable requester keys (Hebrew labels are render-time only, in the UI). */
 var PACKAGE_REQUESTERS = { oren: true, shahar: true };
 var PACKAGE_UNITS = { per_session_pack: true, flat: true, per_month: true, per_month_range: true };
@@ -6226,12 +6230,42 @@ function _pkgIsoDate(v) { var t = String(v == null ? '' : v).trim(); return /^\d
 
 /* Price one item list against the ACTIVE catalog. Returns { ok, items:[snapshot…], gross, net, vat, vatRateBp }
  * or { ok:false, error }. Every amount is computed HERE from the catalog row — a browser amount is never read. */
-function _pkgPriceItems(cat, rawItems, now) {
+function _pkgItemNeedsOverridePrivilege(it) {
+  return !!it && typeof it === 'object' && (it.custom === true || it.custom === 'true' || it.title !== undefined || it.unitAgorot !== undefined ||
+    it.overrideUnitAgorot !== undefined || it.overrideReason !== undefined);
+}
+function _pkgPriceItems(cat, rawItems, now, user) {
   if (!Array.isArray(rawItems) || !rawItems.length) return { ok: false, error: 'items_required' };
   if (rawItems.length > PACKAGE_MAX_ITEMS) return { ok: false, error: 'too_many_items' };
-  var out = [], gross = 0, vatBp = null;
+  var out = [], gross = 0, vatBp = null, adjustLog = [];
+  var actor = String(user == null ? '' : user);
   for (var i = 0; i < rawItems.length; i++) {
     var it = rawItems[i] && typeof rawItems[i] === 'object' ? rawItems[i] : {};
+    // Vered-only pricing flexibility (2026-11-04): refused for any other actor BEFORE any amount is read
+    if (_pkgItemNeedsOverridePrivilege(it) && PACKAGE_PRICE_OVERRIDE_USERS.indexOf(actor) < 0) return { ok: false, error: 'vered_only' };
+    if (it.custom === true || it.custom === 'true') {
+      // CUSTOM line: a treatment that is not in the catalog — name + quantity + unit price typed by Vered.
+      var title = _pkgText(it.title, 120);
+      if (title.length < 2) return { ok: false, error: 'invalid_custom_item' };
+      if (it.overrideUnitAgorot !== undefined || it.overrideReason !== undefined) return { ok: false, error: 'invalid_custom_item' };
+      var cqty = it.qty === undefined || it.qty === null || it.qty === '' ? 1 : it.qty;
+      if (!_pkgIsIntInRange(cqty, 1, PACKAGE_MAX_QTY)) return { ok: false, error: 'invalid_quantity' };
+      if (!_pkgIsIntInRange(it.unitAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_amount' };
+      var cvat = vatBp === null ? PACKAGE_VAT_RATE_BP_DEFAULT : vatBp;
+      var csplit = _pkgSplitVat(it.unitAgorot, cvat);
+      var csnap = { rowId: '', key: 'custom', version: 0, epoch: 0, family: 'custom', tier: 'custom', unit: 'custom', sessions: 0, months: 0,
+        monthlyAgorot: null, commitmentMonths: null, grossAgorot: it.unitAgorot, netAgorot: csplit.netAgorot, vatAgorot: csplit.vatAgorot,
+        vatBasis: 'inclusive', vatRateBp: cvat, needsSelection: false, computedAtIso: now,
+        custom: true, title: title, packageKey: 'custom', qty: cqty, lineGrossAgorot: it.unitAgorot * cqty, selectedMonthlyAgorot: null,
+        catalogUnitAgorot: null, overrideReason: '', pricedBy: actor };
+      if (!_pkgIsIntInRange(csnap.lineGrossAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_amount' };
+      gross += csnap.lineGrossAgorot;
+      if (vatBp === null) vatBp = cvat;
+      adjustLog.push({ at: now, by: actor, kind: 'custom', item: title, qty: cqty, from: null, to: it.unitAgorot, reason: 'פריט מותאם — לא בקטלוג' });
+      out.push(csnap);
+      continue;
+    }
+    if (it.title !== undefined || it.unitAgorot !== undefined) return { ok: false, error: 'invalid_custom_item' };
     var key = String(it.packageKey == null ? '' : it.packageKey);
     if (!/^[a-z][a-z0-9_]{2,40}$/.test(key)) return { ok: false, error: 'invalid_package' };
     var row = _pkgActiveRowByKey(cat, key);
@@ -6248,13 +6282,25 @@ function _pkgPriceItems(cat, rawItems, now) {
     var snap = _pkgSnapshot(row, q, now);
     snap.qty = qty; snap.lineGrossAgorot = q.grossAgorot * qty; snap.packageKey = String(row.key);
     snap.selectedMonthlyAgorot = sel;
+    snap.catalogUnitAgorot = q.grossAgorot; // the catalog price of ONE unit, kept even when overridden
+    if (it.overrideUnitAgorot !== undefined) {
+      // manual unit-price OVERRIDE (discount / on-the-spot package price): reason mandatory, logged with the catalog price
+      if (!_pkgIsIntInRange(it.overrideUnitAgorot, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_amount' };
+      var reason = _pkgText(it.overrideReason, 200);
+      if (reason.length < 2) return { ok: false, error: 'reason_required' };
+      var osplit = _pkgSplitVat(it.overrideUnitAgorot, q.vatRateBp);
+      snap.grossAgorot = it.overrideUnitAgorot; snap.netAgorot = osplit.netAgorot; snap.vatAgorot = osplit.vatAgorot;
+      snap.lineGrossAgorot = it.overrideUnitAgorot * qty; snap.overrideReason = reason; snap.pricedBy = actor;
+      adjustLog.push({ at: now, by: actor, kind: 'override', item: String(row.key), qty: qty, from: q.grossAgorot, to: it.overrideUnitAgorot, reason: reason });
+    } else if (it.overrideReason !== undefined) return { ok: false, error: 'invalid_amount' };
     gross += snap.lineGrossAgorot;
     if (vatBp === null) vatBp = q.vatRateBp;
     out.push(snap);
   }
   if (!_pkgIsIntInRange(gross, 0, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_package' };
+  // totals are ALWAYS derived here from the priced lines — a browser total is never read
   var split = _pkgSplitVat(gross, vatBp);
-  return { ok: true, items: out, grossAgorot: gross, netAgorot: split.netAgorot, vatAgorot: split.vatAgorot, vatRateBp: vatBp };
+  return { ok: true, items: out, grossAgorot: gross, netAgorot: split.netAgorot, vatAgorot: split.vatAgorot, vatRateBp: vatBp, adjustLog: adjustLog };
 }
 
 /* adminCreatePackageRequest { requestId, items:[{packageKey, months?, selectedMonthlyAgorot?, qty?}], patientName?,
@@ -6298,9 +6344,10 @@ function _pkgAdminCreate(payload) {
       var cat = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
       var epoch = _pkgMaxEpoch(cat);
       var now = _pkgNow();
-      var priced = _pkgPriceItems(cat, p.items, now);
+      var priced = _pkgPriceItems(cat, p.items, now, user);
       if (!priced.ok) return priced;
-      var first = priced.items[0];
+      // the aggregate snapshot points at the first CATALOG line (a custom line has no catalog row)
+      var first = priced.items.filter(function (x) { return !x.custom; })[0] || priced.items[0];
       var aggregate = {
         multi: true, itemCount: priced.items.length, unit: first.unit, sessions: first.sessions, months: priced.items.length === 1 ? first.months : 0,
         monthlyAgorot: priced.items.length === 1 ? first.monthlyAgorot : null, commitmentMonths: priced.items.length === 1 ? first.commitmentMonths : null,
@@ -6309,13 +6356,14 @@ function _pkgAdminCreate(payload) {
         rowId: first.rowId, key: first.key, version: first.version, epoch: epoch, family: first.family, tier: first.tier
       };
       var rec = {
-        id: requestId, payloadHash: _pkgSha256Hex(_pkgCanonicalJson({ requestId: requestId, items: priced.items.map(function (x) { return { k: x.packageKey, m: x.months, q: x.qty, s: x.selectedMonthlyAgorot }; }) })),
+        id: requestId, payloadHash: _pkgSha256Hex(_pkgCanonicalJson({ requestId: requestId, items: priced.items.map(function (x) { return { k: x.packageKey, m: x.months, q: x.qty, s: x.selectedMonthlyAgorot, t: x.custom ? x.title : undefined, o: x.overrideReason !== undefined || x.custom ? x.grossAgorot : undefined }; }) })),
         status: 'pending', revision: 1,
         requesterKey: 'outpatient', patientName: name, patientPhone: phone,
         packageKey: first.packageKey, months: first.months, catalogRowId: String(first.rowId), catalogEpoch: epoch,
         selectedMonthlyAgorot: priced.items.length === 1 && first.selectedMonthlyAgorot !== null ? first.selectedMonthlyAgorot : '',
         quoteSnapshot: JSON.stringify(aggregate),
-        adjustedTotalAgorot: '', adjustReason: '', adjustLog: '[]',
+        // every custom line / override is on the record's adjust trail from birth (actor, catalog price, new price, reason, time)
+        adjustedTotalAgorot: '', adjustReason: '', adjustLog: JSON.stringify(priced.adjustLog || []),
         approvedTotalAgorot: '', approvedSnapshot: '', approvedAtIso: '', approvedBy: '',
         attachedType: type || '', attachedId: type ? tid : '', attachedAtIso: type ? now : '', attachedBy: type ? user : '',
         opLog: '[]', createdAtIso: now, updatedAt: now, updatedBy: user,
