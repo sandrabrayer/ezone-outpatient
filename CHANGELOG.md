@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CI: the protected-price browser test no longer waits for `networkidle` (2026-11-05)
+- `test/protected-price-browser.test.js` reloaded the page with `waitUntil: 'networkidle'` while a service worker controlled it — that state does not settle reliably and timed out on slow runners, turning a green change red (and a red CI blocks the Railway deploy). Both reloads now wait for `domcontentloaded` plus the explicit signals the assertions need (`#app` visible, the protected globals present); nothing about what the test proves changed.
+
 ### «תמחור חבילות» recovers after a server restart (2026-11-05)
 - **Report (production, 08:13, right after a Railway redeploy):** the pricing tab showed the admin tab bar over a bare «רשימת הבקשות לא נטענה.» — no error, no retry — «רענון» did nothing, and only a full page reload helped.
 - **Root cause (`public/package-pricing.js`)**: the catalog-admin privilege is a server-side in-memory record, so a restart forgets it under an open tab. `loadAll()` returned silently on `admin_required` / `unauthorized`, leaving `S.catalog` / `S.requests` `null` **with `S.loadError` empty** — so the red «הנתונים לא נטענו … נסי שוב» banner never rendered; the gate view had nothing to press; and «רענון» called a bare `loadAll()`, which never renews the privilege by itself.
