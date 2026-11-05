@@ -3096,7 +3096,7 @@ function _getTreatmentPlans() {
       monthRemaining: quota ? Math.max(0, quota - used) : null,
       // Make-up sessions the patient is owed (a therapist cancellation adds one; a session
       // beyond the quota draws one) — a COUNT of sessions, never an amount.
-      makeupSessionsOwed: _toCredits(cl.creditsOwed)
+      makeupSessions: _toCredits(cl.creditsOwed)
     });
   }
   return { ok: true, clients: out };

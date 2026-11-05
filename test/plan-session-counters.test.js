@@ -4,7 +4,7 @@
  * 2026-11-05 (CHANGELOG-plan-session-counters.md), against the REAL Code.gs:
  *   - getTreatmentPlans carries this month's session COUNTER per client (monthQuota /
  *     monthUsed / monthRemaining, from the plan + SessionLog «happened» rows) and the
- *     make-up sessions owed (makeupSessionsOwed = Clients.creditsOwed) — counts, never amounts;
+ *     make-up sessions owed (makeupSessions = Clients.creditsOwed) — counts, never amounts;
  *   - the monthly quota honours `_units` («1 / חודש» is 1 per month, not 4) in the plan
  *     projection AND in the credit engine of recordSessionOutcome;
  *   - אינטייק is a clinical session type (a psychiatrist's intake reaches SessionLog / pay).
@@ -46,14 +46,14 @@ test('monthQuota / monthUsed / monthRemaining from the plan and this month\'s ha
   const p = plans(s);
   assert.deepEqual([p.c1.monthQuota, p.c1.monthUsed, p.c1.monthRemaining], [4, 2, 2]);
   assert.deepEqual([p.c2.monthQuota, p.c2.monthUsed, p.c2.monthRemaining], [8, 1, 7]);
-  assert.equal(p.c1.makeupSessionsOwed, 0);
+  assert.equal(p.c1.makeupSessions, 0);
 });
 
 test('remaining never goes below 0; no countable plan → quota 0, remaining null; credits projected as a count', () => {
   const s = box([client({ creditsOwed: 2 }), client({ id: 'c3', phone: '0503333333', sessionsPerWeek: '' })],
     [log({ sessionId: '1' }), log({ sessionId: '2' }), log({ sessionId: '3' }), log({ sessionId: '4' }), log({ sessionId: '5' })]);
   const p = plans(s);
-  assert.deepEqual([p.c1.monthQuota, p.c1.monthUsed, p.c1.monthRemaining, p.c1.makeupSessionsOwed], [4, 5, 0, 2]);
+  assert.deepEqual([p.c1.monthQuota, p.c1.monthUsed, p.c1.monthRemaining, p.c1.makeupSessions], [4, 5, 0, 2]);
   assert.deepEqual([p.c3.monthQuota, p.c3.monthUsed, p.c3.monthRemaining], [0, 0, null]);
 });
 
@@ -79,7 +79,7 @@ test('credit engine: a monthly psychiatric plan is beyond quota on the 2nd sessi
   const row = s.rows('SessionLog').find((x) => x.sessionId === 'second');
   assert.equal(row.creditStatus, 'covered', 'beyond the 1/month quota → the credit covers it');
   assert.equal(Number(row.clientSessionValue), 0);
-  assert.equal(plans(s).c1.makeupSessionsOwed, 0, 'the credit was drawn');
+  assert.equal(plans(s).c1.makeupSessions, 0, 'the credit was drawn');
 });
 
 test('אינטייק is a clinical session type: mapped in Code.gs and the mirror, accepted by recordSessionOutcome, paid at the psychiatrist intake rate', () => {
@@ -103,5 +103,5 @@ test('the projection stays money-free: no key or value smells of amounts, and th
   for (const k of Object.keys(out.clients[0])) assert.doesNotMatch(k, /pay|amount|price|charge|billing|credit/i, k);
   assert.ok(!JSON.stringify(out).includes('9000') && !JSON.stringify(out).includes('500'), 'no amounts cross');
   assert.equal(typeof out.clients[0].monthQuota, 'number');
-  assert.equal(typeof out.clients[0].makeupSessionsOwed, 'number');
+  assert.equal(typeof out.clients[0].makeupSessions, 'number');
 });
