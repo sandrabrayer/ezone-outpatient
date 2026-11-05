@@ -58,7 +58,8 @@ function fixture(fields = {}) {
   vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
   // אופן חיוב helpers the intake / edit handlers call (real list + functions).
   vm.runInContext(source.match(/var BILLING_MODES = \[[^\]]*\];/)[0], ctx);
-  for (const name of ['preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
+  // the shared busy-spinner adapters the submit handlers call (public/busy.js is absent here → plain disabled)
+  for (const name of ['busyApi', 'busyRun', 'busyStart', 'busyEnd', 'busyIs', 'preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);

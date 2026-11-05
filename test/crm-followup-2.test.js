@@ -258,7 +258,10 @@ test('static guards: no window.confirm / window.open in the pricing UI; the card
   assert.match(UI, /function mountOfferForm\(hostEl, opts\)/);
   assert.match(UI, /function newRequestView\(F, done\)/, 'ONE form implementation');
   assert.equal((UI.match(/class: 'pkg-new card'/g) || []).length, 1);
-  assert.match(UI, /mutate\(del \? 'deleteRequest' : 'resetRequest', r, \{ reason: \(C\.reason \|\| ''\)\.trim\(\) \}/);
+  // (2026-11-05) wrapped in the shared action spinner: the reason is read into a
+  // local before the async action starts — the call itself is unchanged.
+  assert.match(UI, /var reason = \(C\.reason \|\| ''\)\.trim\(\);/);
+  assert.match(UI, /mutate\(del \? 'deleteRequest' : 'resetRequest', r, \{ reason: reason \}/);
   assert.match(APP, /offerBtn\.textContent = '💰 הצעת מחיר';/);
   assert.match(APP, /if \(state\.user === 'ורד' && !isOpsScope\(\) && window\.PackagePricing\) \{/, 'display rule only — the server decides');
   assert.match(APP, /window\.PackagePricing\.mountOfferForm\(host, Object\.assign\(pricingOpts\(\), \{\n\s*target: 'client:' \+ c\.id,/);

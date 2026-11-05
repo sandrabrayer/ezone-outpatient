@@ -99,6 +99,12 @@ credentials or live data are used, and this is not a real-Google staging run.
 
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).
 - Frontend: plain HTML/JS/CSS. No build step.
+- Action feedback: every control that writes or reloads is wrapped in
+  `Busy.withBusy(button, fn)` from `public/busy.js` — the pressed control is
+  disabled, gets `aria-busy="true"` and a pure-CSS inline spinner in place of
+  its label, a second click is dropped, and it is restored on success and on
+  failure (`CHANGELOG-action-busy-spinner.md`). New write/reload buttons should
+  use it rather than toggling `disabled` by hand.
 - Database: Google Sheets via Apps Script Web App (`doGet` / `doPost`).
 
 ## Google Sheet setup

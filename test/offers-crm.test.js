@@ -257,7 +257,10 @@ test('static guards: allowlist, dispatch, UI wiring, WhatsApp rules', () => {
   assert.ok(!/innerHTML|insertAdjacentHTML/.test(UI));
   assert.match(UI, /function waHref\(number, text\) \{ return 'https:\/\/wa\.me\/' \+ number \+ '\?text=' \+ encodeURIComponent\(text\); \}/);
   assert.match(UI, /פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה/);
-  assert.match(UI, /mutate\('setStatus', r, \{ status: 'sent', sentTo: to, followUpDate: fu\.value \}/, 'only «סמן כנשלחה» moves to sent');
+  // (2026-11-05) the call is wrapped in the shared action spinner, so the follow-up
+  // date is read into a local BEFORE the async action starts — same single path.
+  assert.match(UI, /mutate\('setStatus', r, \{ status: 'sent', sentTo: to, followUpDate: followUp \}/, 'only «סמן כנשלחה» moves to sent');
+  assert.match(UI, /var followUp = fu\.value;/);
   assert.ok(!/window\.open\(/.test(UI), 'WhatsApp opens through a synchronous <a target=_blank>, never window.open');
   assert.ok(!/0\d{2}-?\d{7}|9725\d{8}/.test(UI), 'no phone number in the code: Oren\'s number is a setting');
   assert.match(APP, /orenWhatsapp: \(fd\.get\('orenWhatsapp'\)/);

@@ -1489,3 +1489,61 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
   .gs-results { max-height: 50vh; }
   .gs-hint { margin-inline-start: 0; }
 }
+
+/* ===== Busy ("working…") indicator — see public/busy.js =====================
+   Any control that triggers a write or a reload is wrapped in
+   Busy.withBusy(el, fn): it is disabled, gets aria-busy="true" and the
+   .is-busy class, and a button's label is swapped for the pure-CSS spinner
+   below. The element's measured width/height are pinned inline by busy.js, so
+   nothing in the row moves. Direction-agnostic: a circle spins the same in
+   RTL. */
+.busy-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  opacity: 0.85;
+  animation: busy-spin 0.7s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Non-button controls (a <select>, an <input>) keep their content — they get a
+   soft moving sheen plus the progress cursor instead of a spinner. */
+.is-busy { cursor: progress !important; }
+select.is-busy,
+input.is-busy {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--green) 18%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: busy-sheen 1.1s linear infinite;
+}
+@keyframes busy-sheen {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Respect a reduced-motion preference: no spin, no sweep — a calm pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border-radius: 50%;
+    border-inline-end-color: currentColor;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  select.is-busy,
+  input.is-busy {
+    background-image: none;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes busy-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.9; }
+  }
+}

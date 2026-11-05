@@ -104,6 +104,18 @@
     return el;
   }
 
+  /* Action spinner — public/busy.js. Every control that calls the server (or
+   * reloads the list afterwards) runs through busy(): pressed → disabled +
+   * inline spinner until the whole action settles, and a second click while it
+   * is in flight is dropped. The screen redraws itself when the action ends, so
+   * the spinning node is simply replaced. */
+  function busy(el, fn) {
+    var B = (typeof window !== 'undefined' && window.Busy) || null;
+    if (B) return B.withBusy(el, fn);
+    return Promise.resolve().then(fn);
+  }
+  function spinnerEl() { return h('span', { class: 'busy-spinner', 'aria-hidden': 'true' }); }
+
   // ---- state -----------------------------------------------------------------
   var S = { onUnauthorized: function () {}, root: null, phase: 'loading', tab: 'requests', configured: true, catalog: null, requests: null, error: '',
     targets: function () { return []; }, notify: function () {}, onPending: function () {}, settings: function () { return {}; }, signedInName: '',
@@ -245,7 +257,11 @@
     var bar = h('div', { class: 'pkg-tabs' }, tabs.map(function (t) {
       return h('button', { type: 'button', class: 'btn' + (S.tab === t[0] ? ' btn-primary' : ''), text: t[1], onclick: function () { S.tab = t[0]; draw(); } });
     }).concat([
-      h('button', { type: 'button', class: 'btn', text: 'רענון', onclick: refresh }),
+      // רענון redraws the whole screen as it starts, so the busy state is
+      // rendered from S.loading (the pressed node would be replaced).
+      S.loading
+        ? h('button', { type: 'button', class: 'btn pkg-refresh-btn is-busy', 'aria-busy': 'true', 'aria-label': 'רענון', disabled: 'disabled' }, [spinnerEl(), ' רענון'])
+        : h('button', { type: 'button', class: 'btn pkg-refresh-btn', text: 'רענון', onclick: refresh }),
       h('button', { type: 'button', class: 'btn', text: 'יציאה מתמחור', onclick: lock })
     ]));
     var body = S.loading ? h('p', { class: 'muted', text: 'טוען…' }) : S.tab === 'requests' ? requestsView() : S.tab === 'calc' ? calcView() : catalogView();
@@ -394,7 +410,9 @@
       var notes = h('input', { type: 'text', maxlength: '500', placeholder: 'הערות (ללא פרטים רפואיים)', 'aria-label': 'הערות', value: F.notes, oninput: function () { F.notes = notes.value; } });
       box.appendChild(h('div', { class: 'pkg-row pkg-terms' }, [h('label', { class: 'pkg-lbl' }, ['תוקף עד ', vu]), h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]), h('label', { class: 'pkg-lbl' }, ['אחראי/ת ', asg]), notes]));
       box.appendChild(h('div', { class: 'pkg-row' }, [
-        h('button', { type: 'button', class: 'btn btn-primary pkg-create-btn', text: F.busy ? 'יוצרת…' : 'יצירת הצעה (טיוטה)', disabled: F.busy ? 'disabled' : false, onclick: create }),
+        F.busy
+          ? h('button', { type: 'button', class: 'btn btn-primary pkg-create-btn is-busy', 'aria-busy': 'true', disabled: 'disabled' }, [spinnerEl(), ' יוצרת…'])
+          : h('button', { type: 'button', class: 'btn btn-primary pkg-create-btn', text: 'יצירת הצעה (טיוטה)', onclick: function (e) { busy(e.currentTarget, create); } }),
         h('button', { type: 'button', class: 'btn btn-ghost', text: 'ביטול', onclick: function () { F.closed = true; done(null); } }),
         h('span', { class: 'muted', text: 'ההצעה נוצרת כטיוטה; אישור התמחור הופך אותה ל«מוכנה לשליחה». אין חיוב ואין תשלום.' })
       ]));
@@ -634,9 +652,12 @@
       h('p', { class: 'muted', text: del ? 'ההצעה תוסתר מכל הרשימות, הכרטיסים ו«היום שלי». הרשומה נשמרת בגיליון עם תיעוד מי / מתי / למה. אין חיוב, תשלום או חידוש שמושפעים.'
         : 'ההצעה תחזור לטיוטה ריקה: הפריטים, התמחור, האישור והשליחה יימחקו (מתועד). הלקוח, התוקף והמעקב נשארים.' }),
       h('div', { class: 'pkg-row' }, [why,
-        h('button', { type: 'button', class: 'btn ' + (del ? 'btn-danger' : 'btn-primary') + ' pkg-confirm-ok', text: del ? 'אישור מחיקה' : 'אישור איפוס', onclick: function () {
+        h('button', { type: 'button', class: 'btn ' + (del ? 'btn-danger' : 'btn-primary') + ' pkg-confirm-ok', text: del ? 'אישור מחיקה' : 'אישור איפוס', onclick: function (e) {
           delete S.confirm[r.id];
-          mutate(del ? 'deleteRequest' : 'resetRequest', r, { reason: (C.reason || '').trim() }, del ? 'ההצעה נמחקה' : 'ההצעה אופסה לטיוטה');
+          var reason = (C.reason || '').trim();
+          busy(e.currentTarget, function () {
+            return mutate(del ? 'deleteRequest' : 'resetRequest', r, { reason: reason }, del ? 'ההצעה נמחקה' : 'ההצעה אופסה לטיוטה');
+          });
         } }),
         h('button', { type: 'button', class: 'btn btn-ghost pkg-confirm-cancel', text: 'ביטול', onclick: function () { delete S.confirm[r.id]; draw(); } })])
     ]);
@@ -646,21 +667,21 @@
   function crmControls(r, crm) {
     var box = [];
     var fu = h('input', { type: 'date', value: r.followUpDate || '', 'aria-label': 'מועד מעקב' });
-    var saveFu = h('button', { type: 'button', class: 'btn btn-sm', text: 'עדכון מעקב', onclick: function () { mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); } });
+    var saveFu = h('button', { type: 'button', class: 'btn btn-sm', text: 'עדכון מעקב', onclick: function (e) { busy(e.currentTarget, function () { return mutate('setStatus', r, { followUpDate: fu.value }, 'מועד המעקב עודכן'); }); } });
     var waBlock = null;
     if (crm === 'ready_to_send' || crm === 'sent' || crm === 'awaiting_decision') waBlock = whatsappLinks(r, crm);
     if (crm === 'ready_to_send') box.push(h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-btn', text: '✔ סמן כנשלחה', 'aria-expanded': S.wa[r.id] && S.wa[r.id].panel ? 'true' : 'false', onclick: function () { var W = waState(r); W.panel = !W.panel; draw(); } }));
-    if (crm === 'sent') box.push(h('button', { type: 'button', class: 'btn', text: '⏳ ממתינה להחלטה', onclick: function () { mutate('setStatus', r, { status: 'awaiting_decision' }, 'סומן: ממתינה להחלטה'); } }));
+    if (crm === 'sent') box.push(h('button', { type: 'button', class: 'btn', text: '⏳ ממתינה להחלטה', onclick: function (e) { busy(e.currentTarget, function () { return mutate('setStatus', r, { status: 'awaiting_decision' }, 'סומן: ממתינה להחלטה'); }); } }));
     if (crm === 'sent' || crm === 'awaiting_decision') {
-      box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✅ הלקוח אישר', title: 'אישור ההצעה בלבד — ללא חיוב, תשלום או חידוש', onclick: function () { if (confirm('לסמן שהלקוח אישר את ההצעה? (אין חיוב ואין תשלום — הגבייה נעשית בכרטיס המטופל)')) mutate('setStatus', r, { status: 'approved' }, 'ההצעה אושרה — ללא חיוב'); } }));
+      box.push(h('button', { type: 'button', class: 'btn btn-primary', text: '✅ הלקוח אישר', title: 'אישור ההצעה בלבד — ללא חיוב, תשלום או חידוש', onclick: function (e) { if (!confirm('לסמן שהלקוח אישר את ההצעה? (אין חיוב ואין תשלום — הגבייה נעשית בכרטיס המטופל)')) return; busy(e.currentTarget, function () { return mutate('setStatus', r, { status: 'approved' }, 'ההצעה אושרה — ללא חיוב'); }); } }));
     }
     if (['ready_to_send', 'sent', 'awaiting_decision'].indexOf(crm) >= 0) {
-      box.push(h('button', { type: 'button', class: 'btn btn-danger', text: '✕ נדחתה', onclick: function () { if (confirm('לסמן את ההצעה כנדחתה?')) mutate('setStatus', r, { status: 'rejected' }, 'ההצעה סומנה כנדחתה'); } }));
+      box.push(h('button', { type: 'button', class: 'btn btn-danger', text: '✕ נדחתה', onclick: function (e) { if (!confirm('לסמן את ההצעה כנדחתה?')) return; busy(e.currentTarget, function () { return mutate('setStatus', r, { status: 'rejected' }, 'ההצעה סומנה כנדחתה'); }); } }));
       box.push(h('span', { class: 'pkg-row pkg-fu' }, [fu, saveFu]));
     }
     if (crm === 'expired') {
       var vu = h('input', { type: 'date', value: isoPlus(14), 'aria-label': 'תוקף חדש' });
-      box.push(h('span', { class: 'pkg-row pkg-fu' }, [h('span', { class: 'muted', text: 'הארכת תוקף עד' }), vu, h('button', { type: 'button', class: 'btn btn-sm', text: 'הארכה', onclick: function () { mutate('setStatus', r, { validUntil: vu.value }, 'התוקף הוארך'); } })]));
+      box.push(h('span', { class: 'pkg-row pkg-fu' }, [h('span', { class: 'muted', text: 'הארכת תוקף עד' }), vu, h('button', { type: 'button', class: 'btn btn-sm', text: 'הארכה', onclick: function (e) { busy(e.currentTarget, function () { return mutate('setStatus', r, { validUntil: vu.value }, 'התוקף הוארך'); }); } })]));
     }
     if (!box.length && !waBlock) return null;
     return h('div', { class: 'pkg-controls pkg-crm-actions' }, [waBlock, box.length ? h('div', { class: 'pkg-row' }, box) : null]);
@@ -728,11 +749,14 @@
       h('div', { class: 'pkg-fam-title', text: 'סימון ההצעה כנשלחה — אישור אנושי' }),
       h('p', { class: 'muted', text: 'ההודעה נשלחת מחשבון ה-WhatsApp המחובר במכשיר זה (לא ניתן לבחור מספר שולח). כאן רק מתועד למי ומתי נשלחה; נשמרות ארבע הספרות האחרונות בלבד.' }),
       h('div', { class: 'pkg-row' }, [toSel, W.to === 'custom' ? custom : null, h('label', { class: 'pkg-lbl' }, ['מעקב ב-', fu]),
-        h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-ok', text: '✔ סמן כנשלחה', onclick: function () {
+        h('button', { type: 'button', class: 'btn btn-primary pkg-mark-sent-ok', text: '✔ סמן כנשלחה', onclick: function (e) {
           var to = recipient(); if (!to || to === '0') { say(errorText('invalid_recipient'), true); return; }
           if (!fu.value) { say('יש לקבוע מועד מעקב', true); return; }
+          var followUp = fu.value;
           delete S.wa[r.id];
-          mutate('setStatus', r, { status: 'sent', sentTo: to, followUpDate: fu.value }, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(fu.value));
+          busy(e.currentTarget, function () {
+            return mutate('setStatus', r, { status: 'sent', sentTo: to, followUpDate: followUp }, 'ההצעה סומנה כנשלחה — המעקב נקבע ל-' + fmtDay(followUp));
+          });
         } }),
         h('button', { type: 'button', class: 'btn btn-ghost', text: 'סגירה', onclick: function () { W.panel = false; draw(); } })
       ])
@@ -769,22 +793,23 @@
     if (r.needsSelection) {
       var item = S.catalog && S.catalog.items.filter(function (i) { return i.key === r.packageKey && i.active; })[0];
       var sel = tierSelect(item, 'מדרגת מחיר חודשי');
-      box.push(h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'בחירת מחיר חודשי', onclick: function () {
+      box.push(h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'בחירת מחיר חודשי', onclick: function (e) {
         var a = parseInt(sel.value, 10); if (!(a > 0)) { say('יש לבחור מדרגת מחיר', true); return; }
-        mutate('adjust', r, { selectedMonthlyAgorot: a }, 'המחיר נבחר');
+        busy(e.currentTarget, function () { return mutate('adjust', r, { selectedMonthlyAgorot: a }, 'המחיר נבחר'); });
       } })]));
     } else {
       var amt = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'סכום מתואם ב-₪', 'aria-label': 'סכום מתואם' });
       var why = h('input', { type: 'text', maxlength: '200', placeholder: 'סיבה (חובה)', 'aria-label': 'סיבת התאמה' });
-      box.push(h('div', { class: 'pkg-row' }, [amt, why, h('button', { type: 'button', class: 'btn', text: 'התאמת סכום', onclick: function () {
+      box.push(h('div', { class: 'pkg-row' }, [amt, why, h('button', { type: 'button', class: 'btn', text: 'התאמת סכום', onclick: function (e) {
         var a = parseShekels(amt.value); if (a === null) { say('סכום לא תקין', true); return; }
         if (why.value.trim().length < 2) { say('חובה לרשום סיבה', true); return; }
-        mutate('adjust', r, { adjustedTotalAgorot: a, reason: why.value.trim() }, 'הסכום הותאם');
+        var reason = why.value.trim();
+        busy(e.currentTarget, function () { return mutate('adjust', r, { adjustedTotalAgorot: a, reason: reason }, 'הסכום הותאם'); });
       } })]));
     }
     var canApprove = !(r.needsSelection && r.selectedMonthlyAgorot === null);
     box.push(h('button', { type: 'button', class: 'btn btn-primary', disabled: canApprove ? false : 'disabled', text: 'אישור תמחור → מוכנה לשליחה',
-      onclick: function () { mutate('approve', r, {}, 'התמחור אושר — ההצעה מוכנה לשליחה'); } }));
+      onclick: function (e) { busy(e.currentTarget, function () { return mutate('approve', r, {}, 'התמחור אושר — ההצעה מוכנה לשליחה'); }); } }));
     return h('div', { class: 'pkg-controls' }, box);
   }
 
@@ -794,9 +819,9 @@
     var sel = h('select', { 'aria-label': 'שיוך למטופל' }, [h('option', { value: '', text: 'שיוך למטופל/ליד…' })].concat(targets.map(function (t) {
       return h('option', { value: t.type + ':' + t.id, text: label(TARGET_HE, t.type) + ' · ' + t.name });
     })));
-    return h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'שיוך (ללא חיוב)', onclick: function () {
+    return h('div', { class: 'pkg-row' }, [sel, h('button', { type: 'button', class: 'btn', text: 'שיוך (ללא חיוב)', onclick: function (e) {
       var v = sel.value.split(':'); if (v.length < 2) { say('בחרי מטופל או ליד', true); return; }
-      mutate('attach', r, { targetType: v[0], targetId: v.slice(1).join(':') }, 'שויך — לא נוצר חיוב או תשלום');
+      busy(e.currentTarget, function () { return mutate('attach', r, { targetType: v[0], targetId: v.slice(1).join(':') }, 'שויך — לא נוצר חיוב או תשלום'); });
     } })]);
   }
 
@@ -875,10 +900,12 @@
   function catalogView() {
     var cat = S.catalog;
     if (!cat) return h('p', { class: 'muted', text: 'לא ניתן לטעון את הקטלוג.' });
-    if (!cat.items.length) return h('div', { class: 'card' }, [h('p', { text: 'הקטלוג ריק.' }), h('button', { type: 'button', class: 'btn btn-primary', text: 'ייבוא ראשוני מקטלוג השירותים (PDF)', onclick: async function () {
-      var res = await rpc('seed').catch(function (e) { return { ok: false, error: e.message }; });
-      if (res.ok) { say('הקטלוג יובא'); await loadAll(); } else { S.error = errorText(res.error); }
-      draw();
+    if (!cat.items.length) return h('div', { class: 'card' }, [h('p', { text: 'הקטלוג ריק.' }), h('button', { type: 'button', class: 'btn btn-primary', text: 'ייבוא ראשוני מקטלוג השירותים (PDF)', onclick: function (e) {
+      return busy(e.currentTarget, async function () {
+        var res = await rpc('seed').catch(function (err) { return { ok: false, error: err.message }; });
+        if (res.ok) { say('הקטלוג יובא'); await loadAll(); } else { S.error = errorText(res.error); }
+        draw();
+      });
     } })]);
     var active = cat.items.filter(function (i) { return i.active; });
     return h('div', { class: 'pkg-list' }, active.map(catalogRow));
@@ -898,7 +925,7 @@
     function field(name, ph) { inputs[name] = h('input', { type: 'text', inputmode: 'decimal', placeholder: ph, 'aria-label': ph }); return inputs[name]; }
     if (i.unit === 'per_month_range') edit.append(field('priceMinAgorot', 'מינימום ₪'), field('priceMaxAgorot', 'מקסימום ₪'));
     else edit.append(field(PRICE_FIELD[i.unit], i.unit === 'per_session_pack' ? 'מחיר לטיפול ₪' : 'מחיר ₪'));
-    edit.appendChild(h('button', { type: 'button', class: 'btn btn-primary', text: 'שמירה כגרסה חדשה', onclick: async function () {
+    edit.appendChild(h('button', { type: 'button', class: 'btn btn-primary', text: 'שמירה כגרסה חדשה', onclick: function (ev) { return busy(ev.currentTarget, async function () {
       var fields = { family: i.family, tier: i.tier, unit: i.unit, sessions: i.sessions, sessionMinutes: i.sessionMinutes,
         allowedMonths: i.allowedMonths, vatRateBp: i.vatRateBp, sourceRef: i.sourceRef, sortOrder: i.sortOrder,
         pricePerSessionAgorot: i.pricePerSessionAgorot, priceTotalAgorot: i.priceTotalAgorot, monthlyPriceAgorot: i.monthlyPriceAgorot,
@@ -908,7 +935,7 @@
       if (res.ok) { say('נשמרה גרסה ' + res.version + ' — בקשות קיימות לא משתנות'); await loadAll(); S.error = ''; }
       else { S.error = errorText(res.error); if (res.error === 'version_conflict') await loadAll(); }
       draw();
-    } }));
+    }); } }));
     return h('div', { class: 'pkg-card card' }, [
       h('div', { class: 'pkg-head' }, [h('strong', { text: label(FAMILY, i.family) + ' — ' + label(TIER, i.tier) }), h('span', { class: 'chip', text: label(UNIT, i.unit) }), h('span', { class: 'muted', text: 'גרסה ' + i.version })]),
       h('div', { text: priceText(i) }),
