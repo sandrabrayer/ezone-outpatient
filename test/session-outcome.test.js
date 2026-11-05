@@ -398,13 +398,18 @@ test('unknown outcome is rejected and writes nothing', () => {
   assert.equal(rows.length, 0);
 });
 
-test('unknown clinical type is rejected and writes nothing', () => {
+test('unknown clinical type is rejected and writes nothing; אינטייק is accepted (2026-11-05)', () => {
   const { res, rows } = recordSessionOutcome(
-    { sessionId: 'x2', therapist: 'מעיין דלומי', clinicalTreatmentType: 'אינטייק', outcome: 'happened' }, []
+    { sessionId: 'x2', therapist: 'מעיין דלומי', clinicalTreatmentType: 'סוג שלא קיים', outcome: 'happened' }, []
   );
-  // אינטייק is billing-only — not a clinical session type, so it rejects
   assert.deepEqual(res, { ok: false, reason: 'unknown_type' });
   assert.equal(rows.length, 0);
+  const ok = recordSessionOutcome(
+    { sessionId: 'x3', therapist: 'ד״ר שפרינץ', clinicalTreatmentType: 'אינטייק', outcome: 'happened' }, []
+  );
+  assert.equal(ok.res.ok, true, JSON.stringify(ok.res));
+  assert.equal(ok.rows.length, 1);
+  assert.equal(ok.rows[0].therapistPay, 900, 'the psychiatrist intake rate reaches the payout');
 });
 
 test('missing sessionId is rejected', () => {

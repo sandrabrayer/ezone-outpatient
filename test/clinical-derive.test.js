@@ -84,7 +84,7 @@ function deriveServiceType(client) {
 // --- mirror is in sync with the canonical module ----------------------------
 test('Code.gs CLINICAL_TO_BILLING mirror equals public/treatment-map.js', () => {
   assert.deepEqual(CLINICAL_MAP, TreatmentMap.CLINICAL_TO_BILLING);
-  assert.equal(Object.keys(CLINICAL_MAP).length, 12);
+  assert.equal(Object.keys(CLINICAL_MAP).length, 13);   // + אינטייק (2026-11-05)
 });
 
 // --- derive: every clinical value -> correct serviceType --------------------
