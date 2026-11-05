@@ -91,7 +91,12 @@
 //   itself after the Node process restarts (CHANGELOG-pricing-session-recovery.md). Bumped from the
 //   deploy-branch value v29 (8aff368f, Apps Script v106); the LIVE /sw.js was NOT reachable from this
 //   sandbox (egress blocked) — re-check it serves v29 before release.
-var CACHE = 'ezone-outpatient-v30';
+// v31 (2026-11-05, action busy spinner): the new public/busy.js, its script tag in index.html,
+//   app.js, package-pricing.js, my-day.js and style.css changed — every write/reload button shows an
+//   inline spinner while it works (CHANGELOG-action-busy-spinner.md). Bumped from the deploy-branch
+//   value v30 (2ea3314, Apps Script v106); the LIVE /sw.js was NOT reachable from this sandbox
+//   (proxy 403 on egress) — re-check it serves v30 before release.
+var CACHE = 'ezone-outpatient-v31';
 var SHELL = [
   './',
   './index.html',
