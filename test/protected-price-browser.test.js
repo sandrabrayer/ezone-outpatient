@@ -87,7 +87,10 @@ test('browser: constants are absent before sign-in, present after, dropped on lo
 
   // service worker active + reload: still not in any cache
   await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
-  await page.reload({ waitUntil: 'networkidle' });
+  // domcontentloaded + the explicit waits below: 'networkidle' never settles reliably once a service worker
+  // controls the page, and timed out on slow CI runners.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#app:not([hidden])');
   await page.waitForFunction(() => typeof window.TherapistPay === 'object');
   const cached = await page.evaluate(async () => {
     const out = [];
@@ -127,7 +130,8 @@ test('browser: encoded aliases never enter Cache Storage; seeded aliases are pur
   await page.waitForSelector('#app:not([hidden])');
   await page.waitForFunction(() => typeof window.TherapistPay === 'object');
   await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
-  await page.reload({ waitUntil: 'networkidle' });               // now controlled by the worker
+  await page.reload({ waitUntil: 'domcontentloaded' });          // now controlled by the worker ('networkidle'
+  await page.waitForSelector('#app:not([hidden])');             // does not settle reliably under one)
   await page.waitForFunction(() => typeof window.TherapistPay === 'object');
 
   // 1. authenticated fetches of the canonical file and of every alias go through the worker

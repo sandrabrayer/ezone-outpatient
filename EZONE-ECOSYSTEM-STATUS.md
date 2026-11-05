@@ -1,3 +1,19 @@
+# Outpatient — «תמחור חבילות» session recovery (draft PR, 2026-11-05, base = deploy branch `8aff368f` / #169)
+
+Production report (08:13, right after a Railway redeploy restarted the Node process): the pricing tab kept the admin
+tab bar over a bare «רשימת הבקשות לא נטענה.» with no error and no retry, «רענון» did nothing, only a full page reload
+recovered. The catalog-admin privilege is a **server-side in-memory record** (`lib/catalog-admin.js`), so a restart
+forgets it under an open tab; `loadAll()` in `public/package-pricing.js` returned silently on
+`admin_required` / `unauthorized` (null catalog + null requests + **empty `S.loadError`**, so the existing red banner
+never rendered), the gate view had no control to press, and «רענון» called a bare `loadAll()` which never renews the
+privilege by itself. Fix (browser only): `loadAll(renewed)` renews ONCE and repeats the load transparently, falls back
+to the gate (now with a «נסי שוב» button) when the privilege cannot be re-obtained, and sets `S.loadError` for anything
+else; «רענון» / «נסי שוב» route through `refresh()` → `boot()`; a successful load undoes a gate set by a sibling call;
+`unauthorized` still goes to sign-in; `adminFlight` / `bootFlight` single-flight and `mountOfferForm` unchanged in
+behaviour (it inherits the recovery). SW v29 → **v30**. **No `Code.gs` change — no Apps Script phase.** Tests:
+`test/pricing-session-recovery-browser.test.js` (7; Playwright 1280 + 360 with the restart emulated as the server
+experiences it; two fail on the pre-fix code). See `CHANGELOG-pricing-session-recovery.md`.
+
 # Outpatient — CRM follow-up 2 (draft PR, 2026-11-04, base = production `2f0d630` / #165 + #166)
 
 Sandra's second production review after #163/#165 (`CHANGELOG-crm-followup-2.md`): (1) **billing mode per

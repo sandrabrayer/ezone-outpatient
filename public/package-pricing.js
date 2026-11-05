@@ -175,19 +175,47 @@
     return bootFlight;
   }
   /* Loads catalog + requests. A failure is REPORTED (S.loadError, drawn with a retry button) — never shown as an
-   * empty catalog / "no requests", which looked like dead buttons. */
-  async function loadAll() {
+   * empty catalog / "no requests", which looked like dead buttons.
+   *
+   * NEVER a silent dead state (2026-11-05: after a Railway redeploy restarted the Node process the tab kept the
+   * admin bar with a bare «רשימת הבקשות לא נטענה.» and no error, no retry). The catalog privilege is a SERVER-SIDE
+   * in-memory record, so a restart forgets it while this tab stays open: `admin_required` is renewed ONCE per
+   * load attempt and the load repeats transparently; if the privilege cannot be re-obtained the gate comes back;
+   * anything else sets S.loadError so the red banner + «נסי שוב» render. `renewed` bounds it to one renew —
+   * never a retry loop. */
+  async function loadAll(renewed) {
     S.loadError = '';
     try {
       var res = await Promise.all([rpc('catalog'), rpc('list')]);
       S.catalog = res[0] && res[0].ok ? res[0] : null;
       S.requests = res[1] && res[1].ok ? res[1] : null;
       if (!S.catalog || !S.requests) S.loadError = errorText(((S.catalog ? res[1] : res[0]) || {}).error || 'upstream_unavailable');
+      // A sibling call that failed first may have dropped the screen to the gate while this load was still
+      // running; the data proves the privilege is live, so the admin screen is what belongs on screen.
+      if (S.catalog && S.requests && S.phase === 'gate') S.phase = 'admin';
       S.onPending(S.requests ? S.requests.counts.pending : 0);
     } catch (e) {
-      if (e.message === 'unauthorized' || e.message === 'admin_required') return;
+      // The base session is gone: S.onUnauthorized() already ran (sign-in). The message is kept only so a host
+      // that stays put still shows something instead of an empty screen.
+      if (e.message === 'unauthorized') { S.loadError = errorText('unauthorized'); return; }
+      if (e.message === 'admin_required') {
+        var ok = false;
+        if (!renewed) {
+          try { ok = await ensureAdmin(); } catch (e2) { if (e2.message === 'unauthorized') { S.loadError = errorText('unauthorized'); return; } ok = false; }
+        }
+        if (ok) { S.phase = 'admin'; return loadAll(true); }   // renewed: load again, the user sees the list
+        S.phase = 'gate'; S.catalog = null; S.requests = null; // cannot be re-obtained: the gate explains why
+        return;
+      }
       S.catalog = null; S.requests = null; S.loadError = errorText(e.message);
     }
+  }
+  /* The one recovery path for «רענון» and «נסי שוב»: the SAME sequence as boot (privilege first, then the
+   * data), so the button the user naturally presses after a server restart actually brings the tab back.
+   * boot() is single-flight, so a double click is one round of requests. */
+  async function refresh() {
+    S.loading = true; draw();
+    try { await boot(); } finally { S.loading = false; draw(); }
   }
 
   // ---- views -----------------------------------------------------------------
@@ -204,7 +232,10 @@
       : (S.eligible ? 'לא ניתן לפתוח את התמחור כרגע. נסי לרענן או להיכנס מחדש.' : 'האזור הזה מיועד לורד בלבד.');
     return h('div', { class: 'pkg-gate card' }, [
       h('h2', { text: 'תמחור חבילות' }),
-      h('p', { class: 'muted', text: text })
+      h('p', { class: 'muted', text: text }),
+      // The privilege can lapse under an open tab (it is a server-side session: a restart forgets it). Asking
+      // again is the whole recovery — without this the only way back was reloading the page.
+      S.configured && S.eligible ? h('button', { type: 'button', class: 'btn pkg-gate-retry', text: 'נסי שוב', onclick: refresh }) : null
     ]);
   }
 
@@ -214,13 +245,13 @@
     var bar = h('div', { class: 'pkg-tabs' }, tabs.map(function (t) {
       return h('button', { type: 'button', class: 'btn' + (S.tab === t[0] ? ' btn-primary' : ''), text: t[1], onclick: function () { S.tab = t[0]; draw(); } });
     }).concat([
-      h('button', { type: 'button', class: 'btn', text: 'רענון', onclick: async function () { S.loading = true; draw(); await loadAll(); S.loading = false; draw(); } }),
+      h('button', { type: 'button', class: 'btn', text: 'רענון', onclick: refresh }),
       h('button', { type: 'button', class: 'btn', text: 'יציאה מתמחור', onclick: lock })
     ]));
     var body = S.loading ? h('p', { class: 'muted', text: 'טוען…' }) : S.tab === 'requests' ? requestsView() : S.tab === 'calc' ? calcView() : catalogView();
     var loadErr = S.loadError ? h('div', { class: 'pkg-msg pkg-load-error', role: 'alert' }, [
       'הנתונים לא נטענו: ' + S.loadError + ' ',
-      h('button', { type: 'button', class: 'btn', text: 'נסי שוב', onclick: async function () { S.loading = true; draw(); await loadAll(); S.loading = false; draw(); } })
+      h('button', { type: 'button', class: 'btn', text: 'נסי שוב', onclick: refresh })
     ]) : null;
     return h('div', { class: 'pkg-admin' }, [bar, loadErr, S.error ? h('p', { class: 'pkg-msg', role: 'alert', text: S.error }) : null, body]);
   }
