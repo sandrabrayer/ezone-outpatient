@@ -109,7 +109,7 @@ test('B: every existing field is unchanged — plannedExitDate is purely additiv
     startDate: '2026-09-01', exitDate: '', renewalDate: '2026-11-01',
     plannedExitDate: '2026-12-31',
     // + the session counters (2026-11-05, test/plan-session-counters.test.js): counts only
-    monthQuota: 4, monthUsed: 0, monthRemaining: 4, makeupSessionsOwed: 0
+    monthQuota: 4, monthUsed: 0, monthRemaining: 4, makeupSessions: 0
   });
 });
 

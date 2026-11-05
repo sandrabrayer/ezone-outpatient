@@ -8,7 +8,7 @@ Sandra, 05/11 (therapists-app audit): «כשטיפול מתקיים וזה חל�
    - `monthQuota` — the plan's sessions per calendar month (`_planMonthlyQuota`: weekly × 4, monthly × 1).
    - `monthUsed` — «happened» rows in `SessionLog` for this client this month.
    - `monthRemaining` — `max(0, quota − used)`, or `null` when the plan has no countable frequency.
-   - `makeupSessionsOwed` — `Clients.creditsOwed` as a number (a therapist cancellation adds one; a
+   - `makeupSessions` — `Clients.creditsOwed` as a number (a therapist cancellation adds one; a
      session beyond the quota draws one). A COUNT of sessions, never an amount — the money-free
      projection contract holds (`test/treatment-plans-phone.test.js` E pins the key set and
      `/pay|amount|price|charge|billing|credit/i` on keys).

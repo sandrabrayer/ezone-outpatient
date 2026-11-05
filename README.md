@@ -328,7 +328,7 @@ checkout ever drifts back.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
   status, startDate, exitDate, renewalDate, plannedExitDate,
-  monthQuota, monthUsed, monthRemaining, makeupSessionsOwed }] }`
+  monthQuota, monthUsed, monthRemaining, makeupSessions }] }`
   (the last four — 2026-11-05 — are session COUNTS for this calendar month: the plan's
   monthly quota with `_units` honoured, «happened» rows in `SessionLog`, remaining ≥ 0 or
   `null` when the plan has no countable frequency, and `Clients.creditsOwed` as a count;
