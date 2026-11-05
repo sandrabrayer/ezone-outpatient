@@ -69,7 +69,7 @@
   // Monthly price by weekly frequency. The ONLY frequency-dependent price.
   var DAY_CENTER_MONTHLY_BY_FREQ = { 3: 15000, 5: 18000 };
 
-  // --- Clinical → billing (one-to-one, 12 clinical keys) ---------------------
+  // --- Clinical → billing (one-to-one, 13 clinical keys; אינטייק added 2026-11-05) ---------------------
   var CLINICAL_TO_BILLING = {
     'פרטני כללי':                'פרטני',                  // RENAME (generic individual)
     'פרטני CBT':                 'פרטני CBT',
@@ -82,7 +82,8 @@
     'פסיכותרפי ממוקד טראומה':    'פסיכותרפי ממוקד טראומה', // newly billable
     'עיסוי טיפולי':              'עיסוי טיפולי',           // newly billable
     'טיפול ממוקד התמכרויות':     'טיפול ממוקד התמכרויות',  // newly billable
-    'טיפול אינטגרטיבי':          'טיפול אינטגרטיבי'        // newly billable
+    'טיפול אינטגרטיבי':          'טיפול אינטגרטיבי',       // newly billable
+    'אינטייק':                   'אינטייק'                 // 2026-11-05: a psychiatrist's intake is a paid session
   };
 
   // Sentinel: this billing type has no clinic-wide price; bill per client
