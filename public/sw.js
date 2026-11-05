@@ -87,7 +87,11 @@
 //   global-search.js script tag), app.js, style.css and package-pricing.js changed. Bumped from the
 //   deploy-branch value v28 (a367fb74, Apps Script v106); the LIVE /sw.js was not reachable from this
 //   sandbox (egress blocked) — re-check it serves v28 before release.
-var CACHE = 'ezone-outpatient-v29';
+// v30 (2026-11-05, pricing session recovery): package-pricing.js only — «תמחור חבילות» recovers by
+//   itself after the Node process restarts (CHANGELOG-pricing-session-recovery.md). Bumped from the
+//   deploy-branch value v29 (8aff368f, Apps Script v106); the LIVE /sw.js was NOT reachable from this
+//   sandbox (egress blocked) — re-check it serves v29 before release.
+var CACHE = 'ezone-outpatient-v30';
 var SHELL = [
   './',
   './index.html',
