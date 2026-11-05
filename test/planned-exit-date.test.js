@@ -107,7 +107,9 @@ test('B: every existing field is unchanged — plannedExitDate is purely additiv
     sourceApp: 'ezone-outpatient', clientId: 'a', name: 'אורי', phone: '0501234567',
     phoneIssue: '', serviceType: 'פרטני', sessions: '{"פרטני":1}', status: ACTIVE,
     startDate: '2026-09-01', exitDate: '', renewalDate: '2026-11-01',
-    plannedExitDate: '2026-12-31'
+    plannedExitDate: '2026-12-31',
+    // + the session counters (2026-11-05, test/plan-session-counters.test.js): counts only
+    monthQuota: 4, monthUsed: 0, monthRemaining: 4, makeupSessionsOwed: 0
   });
 });
 

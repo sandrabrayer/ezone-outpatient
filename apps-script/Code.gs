@@ -854,7 +854,7 @@ function _getData() {
  * the debt/phone rules are. test/clinical-derive.test.js parses this literal and
  * asserts it deep-equals the module — any drift fails the suite. Keep in sync.
  *
- * One-to-one over 12 clinical keys; two renames are pinned (פרטני כללי→פרטני and
+ * One-to-one over 13 clinical keys (אינטייק added 2026-11-05); two renames are pinned (פרטני כללי→פרטני and
  * מרכז יום→ליווי יומי בקהילה, here keyed under the NEW name); the five
  * newly-billable types map to their own names.
  */
@@ -870,7 +870,10 @@ var CLINICAL_TO_BILLING = {
   'פסיכותרפי ממוקד טראומה': 'פסיכותרפי ממוקד טראומה',
   'עיסוי טיפולי':           'עיסוי טיפולי',
   'טיפול ממוקד התמכרויות':  'טיפול ממוקד התמכרויות',
-  'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי'
+  'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי',
+  // 2026-11-05: a psychiatrist's intake IS a session (PSYCHIATRIST_RATES pays ₪900 for it) —
+  // it was rejected as unknown_type, so intakes never reached SessionLog / the payout.
+  'אינטייק':                'אינטייק'
 };
 
 function _clinicalToBilling(clinicalType) {
@@ -1362,6 +1365,36 @@ function _planWeeklyFrequency(client) {
     if (!isNaN(n) && n > 0) total = n;
   }
   return total;
+}
+
+/* The plan's MONTHLY session quota (2026-11-05): each service's count × 4 for a weekly
+ * unit, × 1 for a monthly one (`_units` — e.g. «מעקב פסיכיאטרי: 1 / חודש» used to count as
+ * 4 per month). Bare numbers and services without a unit are weekly (the legacy rule). */
+function _planMonthlyQuota(client) {
+  if (!client) return 0;
+  var s = String(client.sessionsPerWeek == null ? '' : client.sessionsPerWeek).trim();
+  if (!s) return 0;
+  if (s.charAt(0) !== '{') { var n0 = parseInt(s, 10); return (!isNaN(n0) && n0 > 0) ? n0 * 4 : 0; }
+  var o; try { o = JSON.parse(s); } catch (_) { return 0; }
+  var units = (o && typeof o._units === 'object' && o._units) || {};
+  var total = 0;
+  Object.keys(o).forEach(function (k) {
+    if (k === '_units') return;
+    var n = parseInt(o[k], 10); if (isNaN(n) || n <= 0) return;
+    total += (String(units[k] || '').trim() === 'חודש') ? n : n * 4;
+  });
+  return total;
+}
+
+/* Sessions delivered («happened») for a client in a calendar month, from SessionLog rows. */
+function _happenedInMonth(logRows, clientId, month, excludeSessionId) {
+  var n = 0;
+  for (var i = 0; i < logRows.length; i++) {
+    var r = logRows[i];
+    if (excludeSessionId && String(r.sessionId) === String(excludeSessionId)) continue;
+    if (String(r.clientId) === String(clientId) && r.outcome === 'happened' && _monthKey(r.date) === month) n++;
+  }
+  return n;
 }
 
 /* Calendar-month key (YYYY-MM) of a yyyy-MM-dd date string, or '' if absent /
@@ -3007,6 +3040,12 @@ function _isActiveClientStatus(status) {
 function _getTreatmentPlans() {
   var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
   var clients   = _readAll(clientsSh, CLIENTS_HEADERS);
+  // Session COUNTS for the therapists app (2026-11-05): this month's quota / used / remaining
+  // from SessionLog (happened rows), and the per-session credit balance. Counts only — no
+  // amounts, no rates (the minimal-projection contract holds).
+  var logRows = [];
+  try { logRows = _readAll(_ensureSheet('SessionLog', SESSION_LOG_HEADERS), SESSION_LOG_HEADERS); } catch (_) { logRows = []; }
+  var thisMonth = _monthKey(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
   var out = [];
   for (var c = 0; c < clients.length; c++) {
     var cl = clients[c];
@@ -3021,6 +3060,8 @@ function _getTreatmentPlans() {
     // emits. When neither is canonical, phone is '' and phoneIssue says why
     // ('missing' / 'invalid'); never a guessed number.
     var ph = _crossAppPhone(cl);
+    var quota = _planMonthlyQuota(cl);
+    var used = _happenedInMonth(logRows, id, thisMonth, '');
     out.push({
       sourceApp:   'ezone-outpatient',
       clientId:    id,
@@ -3046,7 +3087,16 @@ function _getTreatmentPlans() {
       // append-only plannedExitDate column; '' when none, when the stored
       // value is not a valid date, or when the client is not active
       // (discharged clients carry their actual exitDate instead).
-      plannedExitDate: _isActiveClientStatus(cl.status) ? _isoDateOrBlank(cl.plannedExitDate) : ''
+      plannedExitDate: _isActiveClientStatus(cl.status) ? _isoDateOrBlank(cl.plannedExitDate) : '',
+      // This month's session counter (2026-11-05): quota from the plan (monthly units honoured),
+      // used = «happened» rows in SessionLog this month, remaining never below 0. quota 0 →
+      // the plan has no countable frequency (remaining = null, not a number).
+      monthQuota:     quota,
+      monthUsed:      used,
+      monthRemaining: quota ? Math.max(0, quota - used) : null,
+      // Make-up sessions the patient is owed (a therapist cancellation adds one; a session
+      // beyond the quota draws one) — a COUNT of sessions, never an amount.
+      makeupSessionsOwed: _toCredits(cl.creditsOwed)
     });
   }
   return { ok: true, clients: out };
@@ -3479,24 +3529,16 @@ function _recordSessionOutcome(payload) {
         balance += 1;
         rowObj.creditStatus = 'credit_added';
       } else if (outcome === 'happened') {
-        var quotaFreq = _planWeeklyFrequency(matchedClient);
-        if (!quotaFreq && freq != null && freq !== '') {           // fall back to the event frequency
+        var quota = _planMonthlyQuota(matchedClient);             // honours monthly units (2026-11-05)
+        if (!quota && freq != null && freq !== '') {               // fall back to the event frequency
           var ef = parseInt(freq, 10);
-          if (!isNaN(ef) && ef > 0) quotaFreq = ef;
+          if (!isNaN(ef) && ef > 0) quota = ef * 4;
         }
         var month = _monthKey(rowObj.date);
-        if (!quotaFreq || !month) {
+        if (!quota || !month) {
           rowObj.creditStatus = 'quota_unknown';                   // can't bucket -> never draw
         } else {
-          var quota = quotaFreq * 4;
-          var priorHappened = 0;                                   // delivered this month, excluding self
-          for (var hh = 0; hh < logRows.length; hh++) {
-            var lrow = logRows[hh];
-            if (String(lrow.sessionId) === sessionId) continue;
-            if (String(lrow.clientId) === clientId &&
-                lrow.outcome === 'happened' &&
-                _monthKey(lrow.date) === month) priorHappened++;
-          }
+          var priorHappened = _happenedInMonth(logRows, clientId, month, sessionId);   // delivered this month, excluding self
           var beyondQuota = priorHappened >= quota;
           if (!beyondQuota) {
             rowObj.creditStatus = 'within_quota';

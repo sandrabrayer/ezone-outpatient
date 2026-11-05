@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Session counters for the therapists app, monthly units, אינטייק (2026-11-05)
+- `getTreatmentPlans` adds **`monthQuota` / `monthUsed` / `monthRemaining` / `makeupSessionsOwed`** per client — counts only (this month's plan quota, «happened» rows in `SessionLog`, remaining ≥ 0 or `null`, `creditsOwed` as a session count). No amount crosses; the key set is pinned by tests.
+- **Monthly units honoured**: `_planMonthlyQuota` reads `sessionsPerWeek._units` — «1 / חודש» is 1 per month (the credit engine in `recordSessionOutcome` counted it as 4). Weekly / bare numbers unchanged (× 4).
+- **`אינטייק` is a clinical session type** in `CLINICAL_TO_BILLING` (Code.gs + `public/treatment-map.js`, 13 keys): a psychiatrist's intake (₪900 pay, ₪2,300 session value) was rejected as `unknown_type` and never reached SessionLog / «תשלומי מטפלים». `test-support/google-operational-drill-candidate.gs` regenerated (helpers changed).
+- Tests: `test/plan-session-counters.test.js` (6, real Code.gs) + updated pins. See `CHANGELOG-plan-session-counters.md`.
+
 ### CI: the protected-price browser test no longer waits for `networkidle` (2026-11-05)
 - `test/protected-price-browser.test.js` reloaded the page with `waitUntil: 'networkidle'` while a service worker controlled it — that state does not settle reliably and timed out on slow runners, turning a green change red (and a red CI blocks the Railway deploy). Both reloads now wait for `domcontentloaded` plus the explicit signals the assertions need (`#app` visible, the protected globals present); nothing about what the test proves changed.
 
