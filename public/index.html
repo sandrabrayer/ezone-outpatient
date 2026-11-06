@@ -82,6 +82,18 @@
       <section id="view-dashboard" class="view active">
         <!-- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md): the work screen — summary cards,
              the urgent band and the lists by domain come from public/my-day.js. -->
+        <!-- Global patient search (CHANGELOG-global-patient-search.md): pinned at the
+             very top of «היום שלי», above the KPI strip, so Vered jumps to a patient or
+             an open lead without going to the מטופלים tab. Name OR phone (digits-only
+             comparison). A result row carries NO financial field, so an operational
+             session (דנה) uses it exactly as ורד does. -->
+        <div class="gs-wrap" role="search">
+          <input id="globalSearch" class="search gs-input" type="search" autocomplete="off"
+                 role="combobox" aria-expanded="false" aria-controls="globalSearchResults"
+                 aria-autocomplete="list" aria-label="חיפוש מטופל"
+                 placeholder="חיפוש מטופל — שם או טלפון…" />
+          <div id="globalSearchResults" class="gs-results" role="listbox" aria-label="תוצאות חיפוש מטופל" hidden></div>
+        </div>
         <!-- The three headline numbers Sandra wants on landing (restored 2026-10-31, OP-CRM-G):
              above the work screen, always visible. הכנסה חודשית is a money figure — hidden for an
              operational session (body.ops-scope) and never computed from stripped data. -->
@@ -439,6 +451,12 @@
           </label>
           <div class="wide sessions-host" data-host="activateSessions"></div>
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
 
           <!-- Payment fields -->
@@ -506,6 +524,12 @@
           <div class="wide sessions-host" data-host="directSessions"></div>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <!-- Payment fields -->
           <div class="wide form-section-title">פרטי תשלום חבילה</div>
@@ -591,6 +615,12 @@
           </label>
           <label>תאריך תשלום אחרון<input name="paymentDate" type="date" /></label>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <div class="wide form-section-title">פרטים נוספים</div>
           <label>בית מוצא
@@ -1083,7 +1113,9 @@
     </div>
   </div>
 
+  <script src="busy.js?v=__BUILD__" defer></script>
   <script src="name-search.js?v=__BUILD__" defer></script>
+  <script src="global-search.js?v=__BUILD__" defer></script>
   <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
   <script src="crm-activity.js?v=__BUILD__" defer></script>

@@ -33,7 +33,7 @@ async function fixture(t, options = {}) {
   const client = { id: 'fixture-client', name: 'מטופל בדיקה', phone: '0500000003',
     serviceType: 'פרטני', sessionsPerWeek: '{"פרטני":1}', location: 'רעננה הפרדס',
     status: 'פעיל', pricePerSession: 500, startDate: '2026-09-01', billingDay: 1,
-    nextBillingDate: '2026-10-01', paymentDate: '2026-09-01',
+    nextBillingDate: options.futureCycle ? '2026-11-01' : '2026-10-01', paymentDate: options.futureCycle ? '2026-10-16' : '2026-09-01',
     updatedAt: '2026-10-01T00:00:00.000Z' };
   const sb = sandbox([{ ...A, stage: 'תוכנית טיפול' }], [client]);
   sb.ctx._todayISODate = () => '2026-10-31';
@@ -97,7 +97,7 @@ async function fixture(t, options = {}) {
     delete require.cache[modulePath];
   });
   async function login(user) {
-    const context = await browser.newContext({ serviceWorkers: 'block' });
+    const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: options.width || 1280, height: 900 } });
     await context.route('**/*', (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
@@ -526,3 +526,50 @@ test('browser: midnight before first extra reservation refreshes the displayed d
   assert.equal(fx.sb.rows('Payments')[0].paymentDate,'2026-11-01');assert.match(fx.sb.rows('Payments')[0].id,/::2026-11$/);
   assert.deepEqual(fx.errors,[]);
 });
+
+for (const width of [1280, 360]) {
+  test(`audit acceptance ${width}px: same-date future renewal requires a distinct payment; cancel never writes`, skipOpt, async t => {
+    const fx = await fixture(t, { futureCycle: true, width }); if (!fx) return;
+    const page = await fx.login('ורד');
+    await openRenew(page);
+    await page.fill('#renewForm [name="renewAmount"]', '500');
+    await page.fill('#renewForm [name="renewDate"]', '2026-10-16');
+    const before = JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments'), fx.sb.rows('FinancialOps')]);
+    const messages = [];
+    page.once('dialog', async d => { messages.push(d.message()); await d.dismiss(); });
+    await page.click('#renewSubmit');
+    await page.getByText('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', { exact: true }).waitFor();
+    assert.equal(messages.length, 1);
+    assert.match(messages[0], /תשלום נוסף ונפרד/);
+    assert.equal(fx.captured.filter(x => x.payload.action === 'reserveRenewal').length, 0);
+    assert.equal(JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments'), fx.sb.rows('FinancialOps')]), before);
+    assert.equal(await page.isDisabled('#renewSubmit'), false);
+    page.once('dialog', async d => { messages.push(d.message()); await d.accept(); });
+    await page.click('#renewSubmit');
+    await page.locator('#renewResume').getByText('אישור וסגירה', { exact: true }).waitFor();
+    assert.equal(messages.length, 2);
+    const reserve = fx.captured.filter(x => x.payload.action === 'reserveRenewal');
+    assert.equal(reserve.length, 1);
+    assert.equal(reserve[0].payload.advanceConfirmed, true);
+    assert.equal(JSON.parse(fx.sb.rows('FinancialOps')[0].intent).advanceConfirmed, true);
+    assert.equal(fx.sb.rows('Payments').length, 1);
+    assert.equal(fx.sb.rows('Payments')[0].coverageStart, '2026-11-01');
+    if (process.env.EZONE_AUDIT_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.EZONE_AUDIT_SCREENSHOT_DIR, 'outpatient-renewal-' + width + '.png'), fullPage: true });
+    await page.click('#renewResume');
+    await page.waitForSelector('#renewModal', { state: 'hidden' });
+    assert.equal(fx.sb.rows('FinancialOps')[0].state, 'acknowledged');
+    // Reopening after acknowledgement is precisely the original gap: this is
+    // now December with a NEW operation ID, so op-ID idempotency alone is insufficient.
+    await openRenew(page);
+    await page.fill('#renewForm [name="renewDate"]', '2026-10-16');
+    page.once('dialog', async d => { messages.push(d.message()); await d.dismiss(); });
+    await page.click('#renewSubmit');
+    await page.getByText('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', { exact: true }).waitFor();
+    assert.equal(messages.length, 3);
+    assert.notEqual(messages[2], messages[0], 'the next cycle must be identified explicitly');
+    assert.equal(fx.captured.filter(x => x.payload.action === 'reserveRenewal').length, 1);
+    assert.equal(fx.sb.rows('Payments').length, 1);
+    assert.equal(fx.sb.rows('Clients')[0].nextBillingDate, '2026-12-01');
+    assert.deepEqual(fx.errors, []);
+  });
+}

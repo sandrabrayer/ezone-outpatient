@@ -161,7 +161,8 @@ test('flow: draft → (discount with reason, Vered) → approve = ready_to_send 
   assert.equal((await lastReq()).crmStatus, 'ready_to_send', 'a refused send changed nothing');
   const sent = await rpc('setStatus', { requestId: r.id, opId: opId(), expectedRevision: r.revision, status: 'sent', sentTo: '050-333-3333', followUpDate: '2026-11-12' });
   assert.equal(sent.json.ok, true); r = sent.json.request;
-  assert.equal(r.crmStatus, 'sent'); assert.equal(r.sentTo, '0503333333'); assert.equal(r.followUpDate, '2026-11-12'); assert.ok(r.sentAt);
+  // 2026-11-04: only the recipient KIND + the last four digits are stored — never a full number on the row
+  assert.equal(r.crmStatus, 'sent'); assert.equal(r.sentTo, 'other:3333'); assert.equal(r.followUpDate, '2026-11-12'); assert.ok(r.sentAt);
   // the same op id again = replay, no second event
   const replay = await rpc('setStatus', { requestId: r.id, opId: upstream.at(-1).opId, expectedRevision: r.revision - 1, status: 'sent', sentTo: '0503333333' });
   assert.equal(replay.json.replay, true);
@@ -245,18 +246,22 @@ test('static guards: allowlist, dispatch, UI wiring, WhatsApp rules', () => {
   const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const UI = fs.readFileSync(path.join(__dirname, '..', 'public', 'package-pricing.js'), 'utf8');
   const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  assert.deepEqual(Object.keys(catalogAdmin.ADMIN_OPS).sort(), ['adjust', 'approve', 'attach', 'catalog', 'createRequest', 'list', 'quote', 'saveRow', 'seed', 'setStatus']);
-  assert.deepEqual(catalogAdmin.ITEM_FIELDS, ['packageKey', 'months', 'selectedMonthlyAgorot', 'qty']);
-  assert.match(GS, /var PACKAGE_CRM_STATUSES = \['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired'\]/);
+  assert.deepEqual(Object.keys(catalogAdmin.ADMIN_OPS).sort(), ['adjust', 'approve', 'attach', 'catalog', 'createRequest', 'deleteRequest', 'list', 'quote', 'resetRequest', 'saveRow', 'seed', 'setStatus']);
+  assert.deepEqual(catalogAdmin.ITEM_FIELDS, ['packageKey', 'months', 'selectedMonthlyAgorot', 'qty', 'custom', 'title', 'unitAgorot', 'overrideUnitAgorot', 'overrideReason'], 'append-only');
+  assert.match(GS, /var PACKAGE_CRM_STATUSES = \['draft', 'ready_to_send', 'sent', 'awaiting_decision', 'approved', 'rejected', 'expired', 'deleted'\]/);
   assert.match(GS, /adminCreatePackageRequest: true, adminSetPackageRequestStatus: true/);
   assert.match(GS, /if \(action === 'adminCreatePackageRequest'\) return _json\(_pkgAdminCreate\(payload\)\);/);
   assert.match(GS, /if \(action === 'getPackageOfferSummaries'\) return _json\(_pkgOfferSummaries\(\)\);/);
   // the Hebrew labels live in the UI only; the UI never writes HTML strings and never computes a price it sends
   assert.match(UI, /var CRM_STATUS = \{ draft: 'טיוטה'/);
   assert.ok(!/innerHTML|insertAdjacentHTML/.test(UI));
-  assert.match(UI, /https:\/\/wa\.me\/' \+ n \+ '\?text=' \+ encodeURIComponent/);
+  assert.match(UI, /function waHref\(number, text\) \{ return 'https:\/\/wa\.me\/' \+ number \+ '\?text=' \+ encodeURIComponent\(text\); \}/);
   assert.match(UI, /פתיחת WhatsApp אינה מסמנת את ההצעה כנשלחה/);
-  assert.match(UI, /status: 'sent', sentTo: W\.to === 'oren' \? 'oren' : /, 'only «סמן כנשלחה» moves to sent');
+  // (2026-11-05) the call is wrapped in the shared action spinner, so the follow-up
+  // date is read into a local BEFORE the async action starts — same single path.
+  assert.match(UI, /mutate\('setStatus', r, \{ status: 'sent', sentTo: to, followUpDate: followUp \}/, 'only «סמן כנשלחה» moves to sent');
+  assert.match(UI, /var followUp = fu\.value;/);
+  assert.ok(!/window\.open\(/.test(UI), 'WhatsApp opens through a synchronous <a target=_blank>, never window.open');
   assert.ok(!/0\d{2}-?\d{7}|9725\d{8}/.test(UI), 'no phone number in the code: Oren\'s number is a setting');
   assert.match(APP, /orenWhatsapp: \(fd\.get\('orenWhatsapp'\)/);
   assert.match(APP, /function offersFor\(subj\)/);
@@ -268,4 +273,125 @@ test('static guards: allowlist, dispatch, UI wiring, WhatsApp rules', () => {
   const msg = PP.offerMessage({ patientName: 'דנה', items: [{ packageKey: 'emdr_core', qty: 2 }], effectiveTotalAgorot: 680000, validUntil: '2026-11-30' });
   assert.match(msg, /6,800 ₪/); assert.match(msg, /30\/11\/2026/);
   assert.ok(!/אבחנה|תרופ|פסיכיאט/.test(msg), 'no medical detail in the prepared message');
+});
+
+test('pricing flexibility (ורד): custom line + per-line override are priced server-side from the lines, logged in adjustLog; browser totals ignored', async () => {
+  const id = uuid(40);
+  const body = { requestId: id, patientName: 'גמישות מחיר', items: [
+    { packageKey: 'emdr_core', qty: 2, overrideUnitAgorot: 300000, overrideReason: 'הנחת היכרות', grossAgorot: 1, lineGrossAgorot: 1 },
+    { custom: true, title: 'טיפול זוגי', qty: 3, unitAgorot: 50000 },
+    { packageKey: 'emdr_core' }
+  ], grossAgorot: 1, netAgorot: 1, vatAgorot: 1, totalAgorot: 1, validUntil: '2099-01-31' };
+  const r = await rpc('createRequest', body);
+  assert.equal(r.status, 200, JSON.stringify(r.json)); assert.equal(r.json.ok, true);
+  const q = r.json.request;
+  const gross = 2 * 300000 + 3 * 50000 + 340000;
+  assert.equal(q.quote.grossAgorot, gross, 'total = sum of the priced lines (override + custom + catalog)');
+  const net = Math.floor((gross * 10000 + 5900) / 11800);
+  assert.equal(q.quote.netAgorot, net); assert.equal(q.quote.vatAgorot, gross - net); assert.equal(q.quote.vatRateBp, 1800, '18% VAT split computed by the source');
+  assert.equal(q.effectiveTotalAgorot, gross);
+  // lines: catalog price kept next to the override; custom line carries its title; browser amounts never read
+  assert.equal(q.items[0].catalogUnitAgorot, 340000); assert.equal(q.items[0].grossAgorot, 300000); assert.equal(q.items[0].lineGrossAgorot, 600000); assert.equal(q.items[0].overrideReason, 'הנחת היכרות');
+  assert.equal(q.items[1].custom, true); assert.equal(q.items[1].title, 'טיפול זוגי'); assert.equal(q.items[1].lineGrossAgorot, 150000); assert.equal(q.items[1].catalogUnitAgorot, null); assert.equal(q.items[1].vatRateBp, 1800);
+  assert.equal(q.items[2].catalogUnitAgorot, 340000); assert.equal(q.items[2].grossAgorot, 340000); assert.equal(q.items[2].overrideReason, undefined);
+  // adjustLog: one entry per override / custom line with actor, catalog price, new price, reason, timestamp
+  assert.equal(q.adjustLog.length, 2);
+  const ov = q.adjustLog.find((e) => e.kind === 'override'), cu = q.adjustLog.find((e) => e.kind === 'custom');
+  assert.deepEqual([ov.by, ov.item, ov.from, ov.to, ov.reason, ov.qty], ['ורד', 'emdr_core', 340000, 300000, 'הנחת היכרות', 2]);
+  assert.match(ov.at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual([cu.by, cu.item, cu.from, cu.to, cu.qty], ['ורד', 'טיפול זוגי', null, 50000, 3]); assert.ok(cu.reason); assert.ok(cu.at);
+  assert.equal(JSON.parse(sb.rows('PackageRequests').find((x) => x.id === id).adjustLog).length, 2, 'persisted on the row');
+  // what travelled upstream: allowlisted item keys only; no total of any kind
+  const sent = upstream.filter((u) => u.action === 'adminCreatePackageRequest').at(-1);
+  assert.deepEqual(Object.keys(sent.items[0]).sort(), ['overrideReason', 'overrideUnitAgorot', 'packageKey', 'qty']);
+  assert.deepEqual(Object.keys(sent.items[1]).sort(), ['custom', 'qty', 'title', 'unitAgorot']);
+  for (const k of ['grossAgorot', 'netAgorot', 'vatAgorot', 'totalAgorot']) assert.equal(sent[k], undefined, k + ' never travels');
+  // the existing approve flow still works on such an offer (no billing side effect)
+  const ap = await rpc('approve', { requestId: id, opId: opId(), expectedRevision: q.revision });
+  assert.equal(ap.json.ok, true); assert.equal(ap.json.request.approvedTotalAgorot, gross);
+  assert.equal(sb.rows('Charges').length, 0); assert.equal(sb.rows('Payments').length, 0);
+});
+
+test('pricing flexibility: override without reason → 400; bad amounts → 400; non-Vered session → 403 (Node) and vered_only (source); nothing written', async () => {
+  const before = sb.rows('PackageRequests').length;
+  let n = 50;
+  const mk = (items) => ({ requestId: uuid(++n), patientName: 'בדיקה', items });
+  const noReason = await rpc('createRequest', mk([{ packageKey: 'emdr_core', overrideUnitAgorot: 300000 }]));
+  assert.equal(noReason.status, 400); assert.equal(noReason.json.error, 'reason_required');
+  const shortReason = await rpc('createRequest', mk([{ packageKey: 'emdr_core', overrideUnitAgorot: 300000, overrideReason: ' א ' }]));
+  assert.equal(shortReason.status, 400); assert.equal(shortReason.json.error, 'reason_required');
+  for (const [items, err] of [
+    [[{ packageKey: 'emdr_core', overrideUnitAgorot: 1234.5, overrideReason: 'הנחה' }], 'invalid_amount'],
+    [[{ packageKey: 'emdr_core', overrideUnitAgorot: '300000', overrideReason: 'הנחה' }], 'invalid_amount'],
+    [[{ packageKey: 'emdr_core', overrideUnitAgorot: -1, overrideReason: 'הנחה' }], 'invalid_amount'],
+    [[{ packageKey: 'emdr_core', overrideReason: 'הנחה' }], 'invalid_amount'],
+    [[{ custom: true, title: 'x', unitAgorot: 50000 }], 'invalid_custom_item'],
+    [[{ custom: true, title: 'טיפול', unitAgorot: 0 }], 'invalid_amount'],
+    [[{ custom: true, title: 'טיפול', unitAgorot: 500.5 }], 'invalid_amount'],
+    [[{ custom: true, title: 'טיפול', unitAgorot: 50000, overrideUnitAgorot: 1, overrideReason: 'xx' }], 'invalid_custom_item'],
+    [[{ packageKey: 'emdr_core', title: 'מוסווה', unitAgorot: 1 }], 'invalid_custom_item']
+  ]) {
+    const r = await rpc('createRequest', mk(items));
+    assert.equal(r.status, 400, JSON.stringify(items)); assert.equal(r.json.error, err, JSON.stringify(items));
+  }
+  // the source's own validation agrees (defense in depth: a signed call that skipped Node's 400)
+  const direct = (action, b) => sb.post(Object.assign({ action }, b, { proxySecret: PROXY, adminAssertion: catalogAdmin.signAssertion(action, b, ASSERT) }));
+  const srcNoReason = direct('adminCreatePackageRequest', { user: 'ורד', requestId: uuid(++n), patientName: 'בדיקה', items: [{ packageKey: 'emdr_core', overrideUnitAgorot: 300000 }] });
+  assert.equal(srcNoReason.ok, false); assert.equal(srcNoReason.error, 'reason_required');
+  const srcCustomOren = direct('adminCreatePackageRequest', { user: 'אורן', requestId: uuid(++n), patientName: 'בדיקה', items: [{ custom: true, title: 'טיפול', unitAgorot: 50000 }] });
+  assert.equal(srcCustomOren.error, 'vered_only');
+  const srcOverrideShahar = direct('adminCreatePackageRequest', { user: 'שחר', requestId: uuid(++n), patientName: 'בדיקה', items: [{ packageKey: 'emdr_core', overrideUnitAgorot: 1, overrideReason: 'הנחה' }] });
+  assert.equal(srcOverrideShahar.error, 'vered_only');
+  const srcNoUser = direct('adminCreatePackageRequest', { user: '', requestId: uuid(++n), patientName: 'בדיקה', items: [{ packageKey: 'emdr_core', overrideUnitAgorot: 1, overrideReason: 'הנחה' }] });
+  assert.equal(srcNoUser.error, 'vered_only');
+  // Node: any non-Vered session is told 403 before the admin privilege is even considered
+  for (const who of ['אורן', 'דנה']) {
+    for (const items of [[{ packageKey: 'emdr_core', overrideUnitAgorot: 300000, overrideReason: 'הנחה' }], [{ custom: true, title: 'טיפול', unitAgorot: 50000 }]]) {
+      const r = await rpc('createRequest', mk(items), sess(who));
+      assert.equal(r.status, 403, who); assert.equal(r.json.error, 'pricing_override_vered_only', who);
+    }
+    // a plain catalog offer from the same session keeps its usual answer (no admin privilege → 401)
+    assert.equal((await rpc('createRequest', mk([{ packageKey: 'emdr_core' }]), sess(who))).status, 401);
+  }
+  assert.equal((await request('POST', '/api/catalog-admin/rpc', { op: 'createRequest', ...mk([{ custom: true, title: 'טיפול', unitAgorot: 50000 }]) })).status, 401, 'no session');
+  assert.equal(sb.rows('PackageRequests').length, before, 'nothing written');
+  // the manager path (therapists app) has no such fields: a custom / override item there is a plain invalid request
+  const epoch = (await rpc('catalog')).json.items.reduce((m, i) => Math.max(m, i.epoch), 0);
+  const mgr = sb.post({ action: 'createPackageRequest', secret: 'package-request-secret-0123456789abcdef-B', requestId: uuid(++n), requesterKey: 'oren', patientName: 'x', packageKey: 'emdr_core', catalogEpoch: epoch, overrideUnitAgorot: 1, overrideReason: 'הנחה', items: [{ custom: true, title: 'x', unitAgorot: 1 }] });
+  if (mgr.ok) { const row = sb.rows('PackageRequests').find((x) => x.id === uuid(n)); assert.equal(JSON.parse(row.quoteSnapshot).grossAgorot, 340000, 'catalog price, the manager body amounts were ignored'); assert.equal(row.adjustLog, '[]'); }
+  // static guards
+  const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
+  const SRV = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(GS, /var PACKAGE_PRICE_OVERRIDE_USERS = \['ורד'\];/);
+  assert.match(SRV, /requireSession, requirePricingPrivilege, requireCatalogAdmin/);
+  assert.deepEqual(require('../lib/users').PRICE_OVERRIDE_USERS, ['ורד']);
+  assert.equal(GS.indexOf("'items', 'validUntil', 'assignee', 'notes', 'followUpDate', 'sentAtIso', 'sentTo', 'decisionAtIso', 'createdFrom'\n];") > 0, true, 'PACKAGE_REQUEST_HEADERS unchanged (lines + log live in the existing items / adjustLog columns)');
+  // browser estimate helper mirrors the split (display only)
+  const PP = require('../public/package-pricing.js');
+  const est = PP.estimateTotals([{ unitGross: 340000, qty: 2, overrideUnitAgorot: 300000 }, { custom: true, unitAgorot: 50000, qty: 3 }]);
+  assert.deepEqual(est, { gross: 750000, net: Math.floor((750000 * 10000 + 5900) / 11800), vat: 750000 - Math.floor((750000 * 10000 + 5900) / 11800) });
+});
+
+test('«למי ההצעה» picker: matches by name or phone, clients first, capped; the UI feeds it name · phone · house/type', () => {
+  const PP = require('../public/package-pricing.js');
+  const T = [
+    { type: 'lead', id: 'l1', name: 'דנה כהן', phone: '052-111-2233', sub: 'פרטני' },
+    { type: 'client', id: 'c1', name: 'אבי כהן', phone: '0501112233', sub: 'קבוצתי · רעננה הפרדס' },
+    { type: 'client', id: 'c2', name: 'רות לוי', phone: '', sub: '' },
+    null
+  ];
+  assert.deepEqual(PP.matchTargets(T, 'כהן').map((t) => t.id), ['c1', 'l1'], 'name substring, clients before leads');
+  assert.deepEqual(PP.matchTargets(T, ' 1112233 ').map((t) => t.id), ['c1', 'l1'], 'digits match a formatted phone too');
+  assert.deepEqual(PP.matchTargets(T, '052').map((t) => t.id), ['l1']);
+  assert.deepEqual(PP.matchTargets(T, 'לוי', 8).map((t) => t.id), ['c2']);
+  assert.deepEqual(PP.matchTargets(T, ''), []);
+  assert.deepEqual(PP.matchTargets(T, 'xx'), []);
+  assert.equal(PP.matchTargets([{ name: 'א' }, { name: 'א' }, { name: 'א' }], 'א', 2).length, 2, 'capped');
+  const UI = fs.readFileSync(path.join(__dirname, '..', 'public', 'package-pricing.js'), 'utf8');
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(!/aria-label': 'לקוח \/ ליד'/.test(UI), 'the cramped <select> is gone');
+  assert.match(UI, /class: 'pkg-who-input'/); assert.match(UI, /placeholder: 'שם לקוח לא רשום'/);
+  assert.match(APP, /phone: c\.phone \|\| '', sub: sub\(c\)/);
+  assert.match(APP, /type: 'lead', id: l\.id, name: l\.name \|\| '', phone: l\.phone \|\| '', sub: leadSourceLabel\(l\)/, 'open leads carry their source');
+  assert.match(APP, /type: 'roster', id: ref, name: String\(p\.name \|\| ''\)\.trim\(\), phone: CLm\.normalizePhone\(p\.phone\)/, 'roster patients carry name, phone, house');
 });

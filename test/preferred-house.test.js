@@ -47,13 +47,13 @@ const base = (over) => Object.assign({
 
 /* ================================ A. schema ================================ */
 
-test('A: preferredHouse is the ONE new column, appended LAST on Clients (position 38)', () => {
+test('A: preferredHouse is appended at position 38 on Clients (billingMode was appended after it, 2026-11-04)', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
-  assert.equal(H.length, 38);
+  assert.equal(H.length, 39);
   assert.equal(H[37], 'preferredHouse');
   assert.equal(H.indexOf('preferredHouse'), H.lastIndexOf('preferredHouse'), 'exactly once');
-  assert.deepEqual(H.slice(-2), ['plannedExitDate', 'preferredHouse']);
+  assert.deepEqual(H.slice(-3), ['plannedExitDate', 'preferredHouse', 'billingMode']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
 
@@ -61,7 +61,8 @@ test('A: mirrored at the END of the tombstone, Leads and removed-leads literals'
   const { ctx } = sandbox();
   for (const name of ['CLIENTS_REMOVED_HEADERS', 'LEADS_HEADERS', 'REMOVED_LEADS_HEADERS']) {
     const H = plain(ctx[name]);
-    assert.equal(H[H.length - 1], 'preferredHouse', name);
+    // the Clients tombstone later appended billingMode after it (same mirror rule)
+    assert.equal(H[H.length - (name === 'CLIENTS_REMOVED_HEADERS' ? 2 : 1)], 'preferredHouse', name);
     assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
   assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);

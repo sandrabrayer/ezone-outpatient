@@ -326,7 +326,8 @@
       // Base monthly: a client is due on X iff their גבייה הבאה is X — the
       // stored nextBillingDate (the billing-cycle anchor), NOT a billing-day
       // calendar match. Mirrors clientsDueOn in public/app.js — keep in sync.
-      if (String(c.nextBillingDate || '').slice(0, 10) === dateISO) {
+      // billingMode 'per_session' (תשלום לפי טיפול): no monthly package row is ever due.
+      if (String(c.billingMode || '').trim() !== 'per_session' && String(c.nextBillingDate || '').slice(0, 10) === dateISO) {
         out.push({
           clientId: c.id, kind: 'base', dueDate: dateISO,
           amount: Number(c.pricePerSession) || 0

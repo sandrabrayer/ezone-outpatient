@@ -82,6 +82,12 @@ the existing UI reloads server data. Normal edits do not read the removal archiv
 See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
 release precautions and remaining limitations of full-sheet writes.
 
+The proxy's 60-second `getData` cache is write-safe: a read that a write
+overtook while in flight is re-read once (`X-Cache: MISS`) or answered uncached
+(`X-Cache: BYPASS`) and never stored, so no tab reloads into a picture that
+predates a save; the reload after a stale-save conflict asks for `?fresh=1`.
+See [CHANGELOG-hotfix-stale-save.md](CHANGELOG-hotfix-stale-save.md).
+
 `test/lead-save-browser.test.js` exercises the real UI, session/proxy/cache
 server and Apps Script handlers with dummy Sheets. The `lead-save-browser`
 CI job installs test-only browser tooling outside the application dependency
@@ -93,6 +99,12 @@ credentials or live data are used, and this is not a real-Google staging run.
 
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).
 - Frontend: plain HTML/JS/CSS. No build step.
+- Action feedback: every control that writes or reloads is wrapped in
+  `Busy.withBusy(button, fn)` from `public/busy.js` — the pressed control is
+  disabled, gets `aria-busy="true"` and a pure-CSS inline spinner in place of
+  its label, a second click is dropped, and it is restored on success and on
+  failure (`CHANGELOG-action-busy-spinner.md`). New write/reload buttons should
+  use it rather than toggling `disabled` by hand.
 - Database: Google Sheets via Apps Script Web App (`doGet` / `doPost`).
 
 ## Google Sheet setup
@@ -281,7 +293,11 @@ checkout ever drifts back.
 - `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
   (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
   «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`
-  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`).
+  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`). 2026-11-04: `deleteRequest` /
+  `resetRequest` ops (ורד only — 403 `offer_delete_vered_only` for anyone else, re-checked at the source), a
+  third target type `roster` (Dashboard admitted patient, stable ref), and soft-deleted offers filtered from the
+  feed; clients carry an append-only `billingMode` (`package` | `per_session`, a money key) —
+  `CHANGELOG-crm-followup-2.md`.
 - CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
   `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
   the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
@@ -317,7 +333,12 @@ checkout ever drifts back.
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
-  status, startDate, exitDate, renewalDate, plannedExitDate }] }`
+  status, startDate, exitDate, renewalDate, plannedExitDate,
+  monthQuota, monthUsed, monthRemaining, makeupSessions }] }`
+  (the last four — 2026-11-05 — are session COUNTS for this calendar month: the plan's
+  monthly quota with `_units` honoured, «happened» rows in `SessionLog`, remaining ≥ 0 or
+  `null` when the plan has no countable frequency, and `Clients.creditsOwed` as a count;
+  never an amount — see `CHANGELOG-plan-session-counters.md`)
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the
   canonical patient phone and the cross-app join key: the first value of the
   `phone` column, then `treatmentContactPhone`, that normalizes (separators

@@ -38,7 +38,7 @@ const CLINICAL_KEYS = [
 // --- map completeness -------------------------------------------------------
 test('map completeness: exactly the 12 clinical keys are present', () => {
   const keys = Object.keys(TM.CLINICAL_TO_BILLING);
-  assert.equal(keys.length, 12);
+  assert.equal(keys.length, 13);   // + אינטייק (2026-11-05)
   CLINICAL_KEYS.forEach((k) => {
     assert.ok(
       Object.prototype.hasOwnProperty.call(TM.CLINICAL_TO_BILLING, k),

@@ -1240,6 +1240,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .md-card .l2 { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .acc-leads { --acc: #579BFC; } .acc-intros { --acc: #A25DDC; } .acc-plans { --acc: #00C875; } .acc-renewals { --acc: #FDAB3D; } .acc-approvals { --acc: #E2445C; } .acc-continuity { --acc: #0073EA; }
 .md-urgent { border: 1px solid #a33; background: rgba(226, 68, 92, 0.12); border-radius: 10px; padding: 4px 12px 10px; margin-bottom: 12px; }
+.md-sec-dated.md-urgent { border-color: #C98A1A; background: rgba(226, 160, 40, 0.10); } /* dated follow-ups/tasks: amber, under «תשלומים באיחור» */
 .md-domain { margin-bottom: 14px; }
 .md-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 15px; }
 .md-domain .md-title strong { border-inline-start: 4px solid var(--acc, var(--green)); padding-inline-start: 8px; }
@@ -1383,12 +1384,43 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-chip-on { background: var(--panel-2); border-color: var(--green-deep); color: var(--green-2); font-weight: 600; }
 .pkg-new { display: flex; flex-direction: column; gap: 10px; }
 .pkg-new h3 { margin: 0; font-size: 16px; color: var(--green-2); }
+/* «למי ההצעה» (2026-11-04): a large full-width searchable picker, the unregistered-client row beneath */
+.pkg-who-box { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-input { width: 100%; flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.pkg-who-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 4px; }
+.pkg-who-list[hidden] { display: none; }
+.pkg-who-opt, .pkg-who-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; text-align: start; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.pkg-who-opt:hover, .pkg-who-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.pkg-who-picked { cursor: default; border-color: var(--green-deep); background: var(--panel-2); }
+.pkg-who-picked .btn { margin-inline-start: auto; }
+.pkg-who-name { font-weight: 600; font-size: 15px; }
+.pkg-who-none { padding: 8px 12px; }
+.pkg-who-more { padding: 6px 12px; font-size: 12px; font-style: italic; }
+.pkg-who-manual { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-manual input { flex: 1 1 200px; min-height: 42px; }
+.pkg-who-or { flex: 0 0 100%; font-size: 13px; }
 .pkg-pick { display: flex; flex-direction: column; gap: 6px; }
 .pkg-qty { max-width: 80px; flex: 0 0 80px; }
 .pkg-items { display: flex; flex-direction: column; gap: 4px; }
 .pkg-item-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .pkg-item-row > span:first-child { flex: 1; }
-.pkg-item-sum { font-weight: 600; white-space: nowrap; }
+.pkg-item-sum { font-weight: 600; white-space: nowrap; display: inline-flex; gap: 6px; align-items: baseline; }
+/* pricing flexibility (2026-11-04, ורד): custom lines + manual overrides — catalog price struck through */
+.pkg-item-label { flex: 1; display: inline-flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.pkg-item-catalog { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+.pkg-item-overridden .pkg-item-sum > span:last-child { color: var(--amber); }
+.pkg-chip-custom { font-size: 11px; padding: 1px 8px; background: #EEF3FF; color: var(--blue-deep); border-color: #B8C8F0; }
+.pkg-item-wrap { display: flex; flex-direction: column; gap: 6px; }
+.pkg-override { padding: 6px 8px 8px; background: var(--bg-elev); border-radius: 8px; }
+.pkg-root .pkg-override input, .pkg-root .pkg-custom input[type="text"] { flex: 1 1 180px; }
+.pkg-total-split { font-weight: 400; font-size: 13px; }
+.pkg-item-why { font-size: 13px; }
+.pkg-override-btn { white-space: nowrap; }
+@media (max-width: 480px) {
+  .pkg-item-row { flex-wrap: wrap; }
+  .pkg-item-row > span.pkg-item-label:first-child { flex: 1 1 100%; }
+  .pkg-item-row .pkg-item-sum { margin-inline-end: auto; }
+}
 .pkg-lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .pkg-items-list { margin: 0; padding-inline-start: 18px; }
 .pkg-terms-line { font-size: 13px; }
@@ -1402,3 +1434,116 @@ body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
 .pkg-fu { gap: 6px; }
 .pkg-wa { display: flex; flex-direction: column; gap: 8px; background: var(--bg-elev); }
 .pkg-wa-text { width: 100%; min-height: 140px; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); resize: vertical; }
+/* billing mode (אופן חיוב, 2026-11-04): per-session clients have no package cycle */
+.chip-per-session { background: #EEF3FF; color: var(--blue-deep); border: 1px solid #B8C8F0; font-weight: 600; }
+.chip-suggest-per-session { background: #fff3cd; color: #664d03; border: 1px dashed #e8cb75; cursor: pointer; font: inherit; font-size: 12px; }
+.chip-suggest-per-session:hover { background: #ffe9a8; }
+/* CRM follow-up 2 (2026-11-04): picker sections, card-embedded offer form, delete/reset confirm, WhatsApp links */
+.pkg-who-section { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 4px; border-top: 1px solid var(--border); }
+.pkg-who-section:first-child { border-top: 0; }
+.pkg-who-locked { border-style: solid; }
+.pkg-new-embedded { margin-top: 10px; }
+.cc-offer-host { padding: 0 12px 12px; }
+.cc-offer-host[hidden] { display: none; }
+.pkg-danger-zone { justify-content: flex-end; gap: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.pkg-confirm { display: flex; flex-direction: column; gap: 8px; background: #fff8f0; border: 1px solid #f0c9a0; }
+.pkg-reset-note { font-style: italic; }
+.pkg-wa-block { display: flex; flex-direction: column; gap: 4px; }
+.pkg-wa-links { align-items: center; gap: 8px; }
+.pkg-wa-links a.btn { text-decoration: none; }
+.pkg-wa-cap { font-weight: 600; }
+.pkg-wa-note { margin: 0; font-size: 12px; }
+.pkg-wa-missing { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pkg-root .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+
+/* Global patient search on «היום שלי» (CHANGELOG-global-patient-search.md).
+   Pinned above the KPI strip: full-width box, dropdown anchored under it.
+   The dropdown is absolutely positioned so it never pushes the KPI strip
+   down; `inset-inline: 0` keeps it inside the box in RTL and LTR alike, so
+   nothing can overflow sideways at 360px. */
+.gs-wrap { position: relative; width: 100%; margin: 0 0 12px; }
+.gs-wrap .gs-input { width: 100%; max-width: none; box-sizing: border-box; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.gs-results {
+  position: absolute; inset-inline: 0; top: calc(100% + 4px); z-index: 30;
+  max-height: 46vh; overflow-y: auto; overflow-x: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); padding: 4px;
+}
+.gs-results[hidden] { display: none; }
+.gs-opt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+  width: 100%; box-sizing: border-box; text-align: start;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.gs-opt:hover, .gs-opt.is-active, .gs-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.gs-name { font-weight: 600; font-size: 15px; }
+.gs-sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.gs-hint { margin-inline-start: auto; font-size: 0.72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+.gs-hint.st-active { background: #d4edda; color: #155724; }
+.gs-hint.st-inactive { background: #e2e3e5; color: #41464b; }
+.gs-hint.st-lead { background: #fff3cd; color: #856404; }
+.gs-none { padding: 10px 12px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .gs-results { max-height: 50vh; }
+  .gs-hint { margin-inline-start: 0; }
+}
+
+/* ===== Busy ("working…") indicator — see public/busy.js =====================
+   Any control that triggers a write or a reload is wrapped in
+   Busy.withBusy(el, fn): it is disabled, gets aria-busy="true" and the
+   .is-busy class, and a button's label is swapped for the pure-CSS spinner
+   below. The element's measured width/height are pinned inline by busy.js, so
+   nothing in the row moves. Direction-agnostic: a circle spins the same in
+   RTL. */
+.busy-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  opacity: 0.85;
+  animation: busy-spin 0.7s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Non-button controls (a <select>, an <input>) keep their content — they get a
+   soft moving sheen plus the progress cursor instead of a spinner. */
+.is-busy { cursor: progress !important; }
+select.is-busy,
+input.is-busy {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--green) 18%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: busy-sheen 1.1s linear infinite;
+}
+@keyframes busy-sheen {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Respect a reduced-motion preference: no spin, no sweep — a calm pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border-radius: 50%;
+    border-inline-end-color: currentColor;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  select.is-busy,
+  input.is-busy {
+    background-image: none;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes busy-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.9; }
+  }
+}

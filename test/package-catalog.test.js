@@ -509,3 +509,35 @@ test('actor: the admin user in the audit trail comes from the signed body (Node 
   run(sb, 'adminApprovePackageRequest', r.requestId, 1);
   assert.equal(sb.rows('PackageRequests')[0].approvedBy, 'ורד');
 });
+
+
+/* 04-Nov production sync: Outpatient #163 records CRM offer states that the
+ * requesting coordinator must not see as 'ממתין לתמחור' after Vered acts. */
+test('manager package status projects actual offer progress, including terminal states, with no money or identity fields', () => {
+  const sb = seeded();
+  const first = submit(sb);
+  assert.equal(first.ok, true);
+  const row = sb.rows('PackageRequests')[0];
+  for (const [stored,visible] of [
+    ['pending','pending'], ['draft','pending'], ['priced','priced'],
+    ['ready_to_send','priced'], ['sent','sent'],
+    ['awaiting_decision','awaiting_decision'], ['approved','approved'],
+    ['rejected','rejected'], ['expired','expired']
+  ]) {
+    sb.seed('PackageRequests', sb.ctx.PACKAGE_REQUEST_HEADERS, [{ ...row, status: stored, validUntil: '' }]);
+    const r = status(sb, { requesterKey: 'oren' });
+    assert.equal(r.ok, true);
+    assert.equal(r.items.length, 1);
+    assert.equal(r.items[0].status, visible, stored);
+    const repeated = submit(sb, { requestId: first.requestId });
+    assert.equal(repeated.ok, true, stored);
+    assert.equal(repeated.duplicate, true, stored);
+    assert.equal(repeated.status, visible, 'a lost-reply retry returns actual persisted status');
+    for (const response of [r, repeated]) {
+      const raw = JSON.stringify(response);
+      assert.doesNotMatch(raw, /0501234567|"(?:amount|amountDue|grossAgorot|price|quote|patientName|patientPhone|secret)"[ ]*:/i,
+        'no money/PII fields even if the safe status label is priced');
+    }
+  }
+  assert.equal(sb.rows('PackageRequests').length, 1, 'status reads/retries never create new rows');
+});

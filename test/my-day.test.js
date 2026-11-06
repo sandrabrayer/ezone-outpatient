@@ -246,14 +246,20 @@ test('14. a derived row is suppressed when an open task already covers the subje
 test('15. sections follow the priority order, each row appears once, cards count the same rows', () => {
   const out = MyDay.build(tasked());
   const order = out.sections.map((x) => x.id);
-  const want = ['critical', 'intros', 'undecided', 'first', 'starts', 'approvals', 'money', 'later'];
+  const want = ['overdue_payments', 'dated', 'intros', 'undecided', 'first', 'starts', 'approvals', 'money', 'later'];
   assert.deepEqual(order.filter((id) => want.includes(id)), want.filter((id) => order.includes(id)));
-  assert.equal(order.indexOf('critical'), 0);
+  // C1's unpaid cycle is covered by a collection task due TODAY → nothing is an overdue payment here
+  assert.equal(order.includes('overdue_payments'), false, 'an empty «תשלומים באיחור» is not shown');
+  assert.equal(order.indexOf('dated'), 0);
   const seen = {}; out.sections.forEach((x) => x.rows.forEach((r) => { assert.ok(!seen[r.id], 'row ' + r.id + ' twice'); seen[r.id] = 1; }));
   assert.equal(Object.keys(seen).length, out.total, 'every row is in exactly one section');
-  const critical = out.sections[0].rows.map((r) => r.id);
-  assert.ok(critical.includes('task:t-late')); assert.ok(critical.includes('task:t-today')); assert.ok(critical.includes('task:t-money'));
-  assert.ok(critical.includes('lead:intro-passed:L3'), 'an undecided intro is late/exception and goes to critical');
+  const dated = out.sections[0];
+  assert.equal(dated.label, 'מעקבים ומשימות במועד');
+  const datedIds = dated.rows.map((r) => r.id);
+  assert.ok(datedIds.includes('task:t-late')); assert.ok(datedIds.includes('task:t-today')); assert.ok(datedIds.includes('task:t-money'), 'a collection task due today is a dated task, not an overdue payment');
+  assert.ok(datedIds.includes('lead:intro-passed:L3'), 'an undecided intro is late/exception and goes to the dated section');
+  assert.equal(out.overduePayments, 0);
+  assert.match(out.cards.find((c) => c.id === 'renewals').hint, /^0 תשלומים באיחור/);
   const byId = Object.fromEntries(out.cards.map((c) => [c.id, c]));
   assert.equal(byId.tasks.value, out.rowsBy.tasks.filter((r) => r.state === 'late' || r.state === 'today').length);
   assert.equal(byId.calls.value, 2, 'late + today call tasks');
@@ -266,4 +272,37 @@ test('16. דנה: money tasks never reach her rows/sections even if a payload ca
   assert.equal(out.rowsBy.tasks.some((r) => r.money), false);
   assert.equal(out.sections.some((x) => x.id === 'money'), false);
   assert.equal(out.rowsBy.tasks.length, 4);
+});
+
+test('17. «תשלומים באיחור» holds ONLY overdue payment/collection rows; every other late or dated item is in «מעקבים ומשימות במועד» right below', () => {
+  const f = fixture();
+  f.tasks = [
+    { id: 't-coll-late', kind: 'collection', clientId: 'C5', title: 'גבייה — חוב', dueDate: '2026-10-20', status: 'open', assignee: 'ורד' },
+    { id: 't-coll-today', kind: 'collection', clientId: 'C2', title: 'גבייה היום', dueDate: TODAY, status: 'open', assignee: 'ורד' },
+    { id: 't-cont-late', kind: 'continuity', clientId: 'cont:phone:0501234567', title: 'הצעת המשך טיפול — לפני חודש 1 בבית', dueDate: '2026-10-25', status: 'open', assignee: 'ורד' },
+    { id: 't-call-late', kind: 'call', leadId: 'L1', title: 'לחזור לפנייה', dueDate: '2026-10-27', status: 'open', assignee: 'דנה' }
+  ];
+  f.continuationNames = { 'cont:phone:0501234567': 'נועה לוי' };
+  f.offers = [{ id: 'o1', status: 'sent', attachedType: 'lead', attachedId: 'L5', followUpDate: '2026-10-26', sentAt: '2026-10-20' }];
+  const out = MyDay.build(f);
+  assert.equal(out.sections[0].id, 'overdue_payments'); assert.equal(out.sections[0].label, 'תשלומים באיחור');
+  assert.equal(out.sections[1].id, 'dated'); assert.equal(out.sections[1].label, 'מעקבים ומשימות במועד');
+  const pay = out.sections[0].rows.map((r) => r.id).sort();
+  assert.deepEqual(pay, ['renew:overdue:C1', 'task:t-coll-late'], 'unpaid cycle + late collection task only');
+  const dated = out.sections[1].rows.map((r) => r.id);
+  for (const id of ['task:t-cont-late', 'task:t-call-late', 'offer:o1', 'lead:intro-passed:L3', 'lead:plan:L6', 'stopflag:S1', 'task:t-coll-today']) assert.ok(dated.includes(id), id + ' belongs to the dated section');
+  for (const id of pay) assert.ok(!dated.includes(id), id + ' is not repeated');
+  assert.equal(out.overduePayments, 2);
+  const card = out.cards.find((c) => c.id === 'renewals');
+  assert.match(card.hint, /^2 תשלומים באיחור/, 'KPI strip counts the same rows as the first section');
+  // דנה (no money): the payments section never exists; her late rows still open the dated section first
+  f.user = 'דנה';
+  const ops = MyDay.build(f);
+  assert.equal(ops.sections.some((x) => x.id === 'overdue_payments'), false);
+  assert.equal(ops.sections[0].id, 'dated');
+  assert.equal(ops.overduePayments, 0);
+  // the renderer names both sections and highlights them
+  assert.match(appRaw, /sec\.id === 'overdue_payments' \|\| sec\.id === 'dated' \? ' md-urgent'/);
+  assert.match(cssRaw, /\.md-sec-dated\.md-urgent/);
+  assert.ok(!/באיחור ומחויבויות עם מועד/.test(fs.readFileSync(path.join(PUB, 'my-day.js'), 'utf8')), 'the old title is gone');
 });

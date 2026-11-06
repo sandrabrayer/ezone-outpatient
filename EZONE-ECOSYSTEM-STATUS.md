@@ -1,3 +1,48 @@
+# Outpatient — acceptance audit candidate (local, not deployed), 2026-11-06
+
+Existing draft #164's same-paid-date future-renewal guard adapted onto current
+base `213ffa4609c3453d8ddf5a6eb8a890eacedac3dd`, preserving the subsequent
+pricing, session-counter and busy-spinner changes. SW v32; Apps Script guard
+also required for enforcement, but neither component has been deployed.
+Eight focused synthetic tests pass, including the real submit handler against
+the in-memory source. Browser acceptance now also passes at 1280px and 360px;
+the complete suite is **2,235 pass, 0 fail, 0 skipped** (75 browser cases).
+Native Google drill regenerated disabled and never executed.
+No new issue/PR, production write or Claude activation. See
+`CHANGELOG-op-bill01-advance-confirmation.md` for release limits and validation.
+
+# Outpatient — «תמחור חבילות» session recovery (draft PR, 2026-11-05, base = deploy branch `8aff368f` / #169)
+
+Production report (08:13, right after a Railway redeploy restarted the Node process): the pricing tab kept the admin
+tab bar over a bare «רשימת הבקשות לא נטענה.» with no error and no retry, «רענון» did nothing, only a full page reload
+recovered. The catalog-admin privilege is a **server-side in-memory record** (`lib/catalog-admin.js`), so a restart
+forgets it under an open tab; `loadAll()` in `public/package-pricing.js` returned silently on
+`admin_required` / `unauthorized` (null catalog + null requests + **empty `S.loadError`**, so the existing red banner
+never rendered), the gate view had no control to press, and «רענון» called a bare `loadAll()` which never renews the
+privilege by itself. Fix (browser only): `loadAll(renewed)` renews ONCE and repeats the load transparently, falls back
+to the gate (now with a «נסי שוב» button) when the privilege cannot be re-obtained, and sets `S.loadError` for anything
+else; «רענון» / «נסי שוב» route through `refresh()` → `boot()`; a successful load undoes a gate set by a sibling call;
+`unauthorized` still goes to sign-in; `adminFlight` / `bootFlight` single-flight and `mountOfferForm` unchanged in
+behaviour (it inherits the recovery). SW v29 → **v30**. **No `Code.gs` change — no Apps Script phase.** Tests:
+`test/pricing-session-recovery-browser.test.js` (7; Playwright 1280 + 360 with the restart emulated as the server
+experiences it; two fail on the pre-fix code). See `CHANGELOG-pricing-session-recovery.md`.
+
+# Outpatient — CRM follow-up 2 (draft PR, 2026-11-04, base = production `2f0d630` / #165 + #166)
+
+Sandra's second production review after #163/#165 (`CHANGELOG-crm-followup-2.md`): (1) **billing mode per
+client** — `billingMode` ∈ {`package`, `per_session`}, APPENDED `Clients` column 39 (+ tombstone mirror; blank = package;
+no migration; money key), «אופן חיוב» toggle in עריכה / intake, a per-session client has no renewal cycle anywhere
+(banner, «תשלומים באיחור», KPIs, billing due list) and the card shows «משלם/ת לפי טיפול»; one-click suggestion chip for
+פרטני-only clients without a package; (2) **«💰 הצעת מחיר» on the client card** — the same offer form, target locked,
+inside the card (`PackagePricing.mountOfferForm`); (3) **delete / reset a quote** — ורד only at Node (403) and at the
+source (`adminDeletePackageRequest` soft delete, `adminResetPackageRequest` empty draft, both logged, in-app confirm);
+(4) **picker sources** — «מטופלים» · «מאושפזים» (Dashboard roster, new target type `roster`, stable ref) · «לידים
+פתוחים», linked quotes surface on the lead card / «מסלול המשך»; (5) **WhatsApp fix** — synchronous `wa.me` anchors
+«שליחה לאורן» / «שליחה למטופל» (no `window.open`), hint to הגדרות when Oren's number is missing, «סמן כנשלחה» stores the
+recipient kind + last four digits only. SW v26 → **v27**. Code.gs changed → Apps Script release phase after the approved
+merge. No `*_HEADERS` reorder; package billing math, payments, renewals, `TherapistRates` untouched. Manual step for
+Sandra after release: flip the real per-visit clients (e.g. ערן אטיאס) in עריכה → «אופן חיוב» (or via the card chip).
+
 # Outpatient — E-ZONE One CRM (draft PR, 2026-11-03, base = #162 merge 8d61cc32)
 
 One PR on top of the live #162 production: (1) **fix** — «תמחור חבילות» buttons died on concurrent
