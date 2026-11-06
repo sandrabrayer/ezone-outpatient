@@ -5244,6 +5244,13 @@ function _finIntent(payload) {
   var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
   var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
     snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  // A follow-on future-cycle receipt on the SAME paid date needs an explicit
+  // separate-advance decision. Otherwise a lost reply followed by a fresh
+  // renewal can silently settle the next month with the original receipt.
+  if (_hasOwn(payload, 'advanceConfirmed')) {
+    if (payload.advanceConfirmed !== true) throw new Error('invalid_renewal_advance_confirmation');
+    intent.advanceConfirmed = true;
+  }
   // OP-BILL-01 B2: settling an EXISTING unpaid/partial row of the same cycle.
   // The browser states what it saw (id / status / amountPaid); the source
   // verifies that against the sheet at reserve, pins the full observed row into
@@ -5301,6 +5308,13 @@ function _finIntentError(intent, c, stored) {
   var p = intent.payment, patch = intent.patch;
   if (!intent.cycleDate || _coverageDateISO(intent.cycleDate) !== intent.cycleDate ||
       (!stored && intent.cycleDate !== _finDue(c))) return 'renewal_period_changed';
+  // An already-acknowledged operation is no longer active, so the next
+  // renewal could point to a FUTURE cycle even when the operator reuses the
+  // exact previous payment date. Fail closed unless this is a consciously
+  // confirmed second advance; existing stored journals replay unchanged.
+  if (!stored && c.paymentDate && _asISODate(c.paymentDate) === p.paymentDate &&
+      intent.cycleDate > _todayISODate() && p.paymentDate < intent.cycleDate &&
+      intent.advanceConfirmed !== true) return 'renewal_advance_confirmation_required';
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.

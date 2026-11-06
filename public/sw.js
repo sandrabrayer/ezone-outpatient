@@ -96,7 +96,8 @@
 //   inline spinner while it works (CHANGELOG-action-busy-spinner.md). Bumped from the deploy-branch
 //   value v30 (2ea3314, Apps Script v106); the LIVE /sw.js was NOT reachable from this sandbox
 //   (proxy 403 on egress) — re-check it serves v30 before release.
-var CACHE = 'ezone-outpatient-v31';
+// v31 → v32: explicit second-payment confirmation for a same-date future renewal (#164).
+var CACHE = 'ezone-outpatient-v32';
 var SHELL = [
   './',
   './index.html',

@@ -7023,6 +7023,7 @@
     var message = String(err && err.message || '');
     if (message.indexOf('extra_charge_pending') >= 0) return 'יש חיוב נוסף פתוח למטופל. יש לחזור אל הוסף טיפול ולהשלים את הבדיקה לפני חידוש.';
     if (message.indexOf('renewal_payment_exists') >= 0) return 'כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.';
+    if (message.indexOf('renewal_advance_confirmation_required') >= 0) return 'כבר דווח תשלום באותו תאריך. כדי לרשום מקדמה נוספת לחודש הבא יש לפתוח מחדש ולאשר במפורש שזה תשלום נפרד.';
     if (message.indexOf('renewal_snapshot_changed') >= 0 || message.indexOf('renewal_period_changed') >= 0) return 'פרטי המטופל השתנו. יש לפתוח את החידוש מחדש ולבדוק את החודש והסכום.';
     return 'לא ניתן לאמת את מצב החידוש. יש לפתוח שוב את החלון כדי לבדוק מה נשמר; אין ליצור חידוש נוסף בינתיים.';
   }
@@ -7133,10 +7134,24 @@
     var priorRow = findPaymentById(renewRow.id);
     if (priorRow && priorRow.status === 'paid') { toast('כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.', true); return; }
     if (priorRow) { renewRow.notes = notes || priorRow.notes || ''; renewRow.method = priorRow.method || ''; }
+    // A new future-cycle payment reusing the last recorded paid date can be a
+    // genuine two-month advance OR an accidental retry after a lost response.
+    // Require a deliberate second-payment confirmation; the source checks the
+    // same condition under lock and refuses old clients without confirmation.
+    var sameDateFutureAdvance = !!fmtDate(c.paymentDate) && fmtDate(c.paymentDate) === paidDate &&
+      renewSourceState.cycleDate > today() && paidDate < renewSourceState.cycleDate;
+    var advanceConfirmed = false;
+    if (sameDateFutureAdvance) {
+      advanceConfirmed = confirm('בכרטיס כבר מופיע תשלום בתאריך ' + fmtDate(c.paymentDate) +
+        '. כעת נפתח חיוב נוסף עבור ' + monthLabel(renewSourceState.cycleDate) +
+        '. האם התקבל בפועל תשלום נוסף ונפרד עבור חודש זה? אם מדובר בניסיון חוזר אחרי שמירה שלא אושרה — בחרו ביטול ובדקו את הגבייה.');
+      if (!advanceConfirmed) { toast('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', true); return; }
+    }
     var request = { opId: 'renew-' + uid(), clientId: cid, snapshot: renewSourceState.snapshot,
       cycleDate: renewSourceState.cycleDate, patch: patch,
       payment: paymentForSheet(renewRow) };
     if (priorRow) request.priorPayment = { id: priorRow.id, status: priorRow.status, amountPaid: priorRow.amountPaid };
+    if (advanceConfirmed) request.advanceConfirmed = true;
     busyStart(submit);
     $('#renewMarkPaid').disabled = true;
     form.querySelectorAll('input, textarea, select').forEach(function (el) { el.disabled = true; });

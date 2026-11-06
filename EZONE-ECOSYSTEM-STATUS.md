@@ -1,3 +1,16 @@
+# Outpatient — acceptance audit candidate (local, not deployed), 2026-11-06
+
+Existing draft #164's same-paid-date future-renewal guard adapted onto current
+base `213ffa4609c3453d8ddf5a6eb8a890eacedac3dd`, preserving the subsequent
+pricing, session-counter and busy-spinner changes. SW v32; Apps Script guard
+also required for enforcement, but neither component has been deployed.
+Eight focused synthetic tests pass, including the real submit handler against
+the in-memory source. Browser acceptance now also passes at 1280px and 360px;
+the complete suite is **2,235 pass, 0 fail, 0 skipped** (75 browser cases).
+Native Google drill regenerated disabled and never executed.
+No new issue/PR, production write or Claude activation. See
+`CHANGELOG-op-bill01-advance-confirmation.md` for release limits and validation.
+
 # Outpatient — «תמחור חבילות» session recovery (draft PR, 2026-11-05, base = deploy branch `8aff368f` / #169)
 
 Production report (08:13, right after a Railway redeploy restarted the Node process): the pricing tab kept the admin

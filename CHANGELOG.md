@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Same-date future renewal confirmation — current-base candidate (2026-11-06)
+- Adapt existing draft #164 to production base `213ffa4609c3453d8ddf5a6eb8a890eacedac3dd`; preserve the newer busy spinner, pricing recovery and session counters.
+- Ask for explicit confirmation of a distinct additional payment before reserving a future renewal with the last recorded payment date. The source repeats the guard under the existing lock and persists strict boolean confirmation in the existing journal intent.
+- No new sheet, migration or historical financial adjustment. SW v31 → v32. Prepared locally only; not merged or deployed. See `CHANGELOG-op-bill01-advance-confirmation.md`.
+
 ### A busy spinner on every action button (2026-11-05)
 - **Request (Sandra, production):** «כשלוחצים על כפתורים שמירה איפוס או כל שינוי תוסיף ספינר» — several actions gave no feedback between the click and the result, so users clicked twice (a double «יצירת הצעה» or «אישור מחיקה» is a duplicate-write risk).
 - **One shared helper, `public/busy.js` (`window.Busy`)**, wrapped around every control that starts a write or a reload: `Busy.withBusy(button, fn)` disables the pressed control, sets `aria-busy="true"`, replaces a button's label with a **pure-CSS inline spinner** after pinning its measured width/height (no layout jump), **drops a second click** (the wrapped action is never called twice), and restores the control **on success and on failure**. A `<select>` / `<input>` keeps its content and gets a soft sheen instead. RTL-safe (`border-inline-end`), and under `prefers-reduced-motion` it fades instead of spinning. For actions that reload a list the spinner is held until the refresh finishes, not just until the POST returns.
