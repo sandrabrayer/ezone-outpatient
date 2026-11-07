@@ -1,7 +1,7 @@
 'use strict';
 // «מסלול המשך» as a CRM flow (2026-11-03) in a real browser: server.js + Code.gs sandbox + a fake Dashboard
 // roster. Signed in as ורד at 1280px and 360px:
-//   - the roster answer triggers ONE server-side milestone sync; the tab shows month 1/2/3 from the ENTRY date
+//   - opening the tab writes nothing; «עדכון משימות המשך» triggers ONE server-side milestone sync; the tab shows month 1/2/3 from the ENTRY date
 //     with their contact dates, «חסר תאריך כניסה» for a patient without one, the link chip by phone only;
 //   - status / owner save → reload → read back; «📞 פנייה» on the month-1 task files the contact under the
 //     stable subject and closes that task only; a terminal status closes the open tasks;
@@ -99,8 +99,15 @@ test('מסלול המשך CRM: one server sync, milestones from the entry date, 
   const { page, errors } = await f.open({ width: 1280, height: 900 });
   await page.click('.tab[data-view="continuation"]');
   await page.locator('.cont-card').first().waitFor();
+  // R6 (2026-11-07): opening the tab writes nothing; the person presses «עדכון משימות המשך»
+  assert.equal(f.calls.sync, 0, 'opening the tab did not sync');
+  assert.equal(f.sb.rows('Tasks').length, 0, 'opening the tab created no task');
+  await page.waitForFunction(() => /6 שינויים ממתינים/.test(document.querySelector('#continuationSyncStatus').textContent));
+  const syncedNow = page.waitForResponse((r) => r.url().endsWith('/api/continuation-sync') && r.request().method() === 'POST');
+  await page.click('#continuationSyncBtn');
+  assert.equal((await (await syncedNow).json()).created, 6);
   await page.waitForSelector('.cont-ms-item');
-  assert.equal(f.calls.sync, 1, 'the server synced once while answering the roster');
+  assert.equal(f.calls.sync, 1, 'the explicit action synced once');
   const ids = f.sb.rows('Tasks').map((x) => x.id).sort();
   assert.deepEqual(ids, ['m1', 'm2', 'm3'].map((m) => 'cont::phone:0501234567::' + ROSTER.patients[0].entryDate + '::' + m).concat(['m1', 'm2', 'm3'].map((m) => 'cont::phone:0509999999::' + ROSTER.patients[2].entryDate + '::' + m)).sort(), 'three milestone tasks per dated patient, none for the undated one');
 

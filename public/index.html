@@ -74,6 +74,11 @@
         <span id="conflictBannerText"></span>
         <button type="button" id="conflictBannerClose" class="link-btn" aria-label="סגור">✕</button>
       </div>
+      <!-- R10: a source the load could not read — «מידע לא זמין», never an empty list read as «nothing». -->
+      <div id="dataUnavailableBanner" class="conflict-banner" role="alert" hidden>
+        <span id="dataUnavailableText"></span>
+        <button type="button" id="dataUnavailableClose" class="link-btn" aria-label="סגור הודעת מידע לא זמין">✕</button>
+      </div>
       <div id="financialSaveWarning" class="conflict-banner" role="alert" hidden>
         <span id="financialSaveWarningText"></span>
         <button type="button" id="financialSaveWarningClose" class="link-btn" aria-label="סגור הודעת תשלום">✕</button>
@@ -101,6 +106,12 @@
           <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
           <div class="kpi money-only"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
           <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
+        <!-- R6 follow-up: pending continuation milestone changes (read-only dry run) + the one explicit action,
+             so a new admission is never silently missing from the daily queue. Opening this screen writes nothing. -->
+        <div id="myDayContSync" class="conflict-banner my-day-cont-sync" role="status" hidden>
+          <span id="myDayContSyncText"></span>
+          <button type="button" id="myDayContSyncBtn" class="btn edit-only">🔄 עדכון משימות המשך</button>
         </div>
         <div id="myDay" class="my-day"></div>
 
@@ -345,6 +356,11 @@
         <div class="toolbar">
           <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
           <h2 class="view-title">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
+        </div>
+        <!-- R6: opening / refreshing this tab never writes; the milestone tasks change only on this button. -->
+        <div class="toolbar continuation-sync-bar">
+          <button type="button" id="continuationSyncBtn" class="btn edit-only">🔄 עדכון משימות המשך</button>
+          <span id="continuationSyncStatus" class="muted-hint" aria-live="polite"></span>
         </div>
         <div id="continuationList" class="continuation-list"></div>
       </section>

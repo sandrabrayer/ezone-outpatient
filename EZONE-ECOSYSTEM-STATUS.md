@@ -1,3 +1,19 @@
+# Outpatient — read-only boot (R6/R10 of #149) draft PR, 2026-11-07, base = production `68b78a5` (#164)
+
+Opening, navigating and refreshing Outpatient now performs **no source write**: the boot no longer
+`persist()`s converted-lead cleanup (display filter; `_saveAll` already drops them on a deliberate save),
+and `GET /api/continuation-roster` is a pure read. Continuation milestone tasks change only via the
+explicit, session-gated, idempotent `POST /api/continuation-sync` («🔄 עדכון משימות המשך»), with a
+read-only dry-run preview (`previewContinuationMilestones`, new Code.gs action). Failed reads show
+«מידע לא זמין». Synthetic Chromium acceptance (real server + real Code.gs) proves 0 writes on
+open / refresh / two windows / roster cache miss. SW v33. Not merged/deployed; after approval: Node, then
+Apps Script dispatch. Work's signed-in read-only UI pass is unblocked only once this is live.
+Review follow-up: pending milestone work surfaces in «היום שלי» with the one explicit action; a lost
+sync answer is read back, never reported as «nothing changed»; payments/charges unreadable → every
+money write refused in the browser before sending (#164 guard untouched). Manual (click) milestone
+application is a business change awaiting Sandra's acceptance.
+See `CHANGELOG-read-only-boot.md`.
+
 # Outpatient — acceptance audit candidate (local, not deployed), 2026-11-06
 
 Existing draft #164's same-paid-date future-renewal guard adapted onto current

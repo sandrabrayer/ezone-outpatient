@@ -4510,23 +4510,27 @@ function _contFmt(iso) { var a = _contParseISO(iso); return a ? _contPad2(a.d) +
  * terminal has the open milestone tasks cancelled. Milestones already in the past are not
  * opened (offering "before month 1" after month 1 is moot). The actor of derived rows is
  * 'system' — never the requesting user. */
-function _syncContinuationMilestones(payload) {
+function _syncContinuationMilestones(payload, opts) {
   var p = payload || {};
+  // dryRun (previewContinuationMilestones, 2026-11-07): the SAME computation, no lock and NO write —
+  // the counters say what an explicit sync would do. Nothing below the computation runs.
+  var dryRun = !!(opts && opts.dryRun === true);
   var patients = Array.isArray(p.patients) ? p.patients : null;
   if (!patients) return { ok: false, error: 'missing_patients' };
   if (patients.length > 2000) return { ok: false, error: 'too_many_patients' };
   var rosterComplete = p.rosterComplete === true;
   var today = _crmToday(), nowIso = _crmNow(), actor = 'system';
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  var lock = dryRun ? null : LockService.getScriptLock();
+  if (lock && !lock.tryLock(10000)) return { ok: false, error: 'busy' };
   try {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return { ok: false, error: 'recovery_pending' };
     var contSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONTINUATION_SHEET);
     var contRows = contSh ? _readAll(contSh, CONTINUATION_HEADERS) : [];
     var statusByRef = {};
     contRows.forEach(function (r) { var ref = String(r.patientRef || '').trim(); if (ref) statusByRef[ref] = String(r.crmStatus || '').trim(); });
-    var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
-    var rows = _tasksRead(sh), changed = false, created = 0, updated = 0, cancelled = 0, skipped = 0;
+    // a dry run never creates the Tasks sheet either: a missing sheet reads as no tasks
+    var sh = dryRun ? SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TASKS_SHEET) : _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+    var rows = sh ? _tasksRead(sh) : [], changed = false, created = 0, updated = 0, cancelled = 0, skipped = 0;
     var byId = {}, openByRefN = {};
     rows.forEach(function (t, i) {
       var parsed = _contParseTaskId(t.id);
@@ -4581,13 +4585,14 @@ function _syncContinuationMilestones(payload) {
       t.status = 'cancelled'; t.outcome = why; t.updatedAt = nowIso; t.updatedBy = actor; changed = true; cancelled++;
       events.push(_activityEvent('task_cancelled', { clientId: 'cont:' + parsed.ref }, actor, 'משימת המשך נסגרה: ' + (gone ? 'המטופל/ת כבר לא ברשימת המאושפזים' : 'סטטוס ' + why), { id: t.id, reason: why }, 'task_cancelled:' + t.id, { source: 'derived' }));
     });
+    if (dryRun) return { ok: true, dryRun: true, created: created, updated: updated, cancelled: cancelled, skipped: skipped, today: today };
     if (changed) {
       _writeAll(sh, TASKS_HEADERS, rows);
       var ash = _ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS);
       events.forEach(function (ev) { _activityAppend(ash, ev); });
     }
     return { ok: true, created: created, updated: updated, cancelled: cancelled, skipped: skipped, today: today };
-  } finally { try { lock.releaseLock(); } catch (_) {} }
+  } finally { if (lock) { try { lock.releaseLock(); } catch (_) {} } }
 }
 
 
@@ -6867,6 +6872,7 @@ var SOURCE_POST_AUTH = {
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   saveContinuation: 'OUTPATIENT_PROXY_SECRET',
   syncContinuationMilestones: 'OUTPATIENT_PROXY_SECRET',
+  previewContinuationMilestones: 'OUTPATIENT_PROXY_SECRET',
   getTasks: 'OUTPATIENT_PROXY_SECRET',
   getActivity: 'OUTPATIENT_PROXY_SECRET',
   createTask: 'OUTPATIENT_PROXY_SECRET',
@@ -7213,6 +7219,7 @@ function doPost(e) {
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
     if (action === 'syncContinuationMilestones') return _json(_syncContinuationMilestones(payload));
+    if (action === 'previewContinuationMilestones') return _json(_syncContinuationMilestones(payload, { dryRun: true }));
     if (action === 'getTasks') return _json(_getTasks(payload, payload));
     if (action === 'getActivity') return _json(_getActivity(payload, payload));
     if (action === 'createTask') return _json(_createTask(payload));

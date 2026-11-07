@@ -214,11 +214,16 @@ test('a contact logged on a milestone task closes it, is filed under the stable 
 
 test('server: the sync action is server-only (403 from /api/sheets); routes exist; my-day routes continuation tasks to the tab', () => {
   const SRV = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(SRV, /body\.action === 'syncContinuationMilestones'\) \{\s*return res\.status\(403\)/);
+  assert.match(SRV, /body\.action === 'syncContinuationMilestones' \|\| body\.action === 'previewContinuationMilestones'\) \{\s*return res\.status\(403\)/);
   assert.match(SRV, /app\.post\('\/api\/continuation-sync', requireSession/);
   assert.match(SRV, /action: 'syncContinuationMilestones', proxySecret: OUTPATIENT_PROXY_SECRET/);
   assert.match(SRV, /rosterComplete: true/);
-  assert.match(SRV, /await runContinuationSync\(got\.data, sessionUserFromRequest\(req\)\)/, 'a fresh roster syncs before answering');
+  // R6 (2026-11-07): the roster READ never syncs; only the explicit POST route writes the milestone tasks
+  const get = SRV.match(/app\.get\('\/api\/continuation-roster',[\s\S]*?\n\}\);/)[0];
+  assert.doesNotMatch(get, /runContinuationSync|syncContinuationMilestones|method: 'POST'/, 'GET /api/continuation-roster writes nothing');
+  const post = SRV.match(/app\.post\('\/api\/continuation-sync',[\s\S]*?\n\}\);/)[0];
+  assert.match(post, /await runContinuationSync\(got\.data, sessionUserFromRequest\(req\)\)/, 'the explicit route is the one that syncs');
+  assert.match(post, /req\.is\('application\/json'\)/, 'the explicit route requires a JSON request');
   const MyDay = require('../public/my-day.js');
   const m = MyDay.build({
     leads: [], clients: [], stopFlags: [], extraRequests: [], continuation: [], tasks: [
@@ -234,4 +239,39 @@ test('server: the sync action is server-only (403 from /api/sheets); routes exis
   const later = m.sections.find((x) => x.id === 'later').rows;
   assert.equal(later.length, 1, 'the December milestone waits in «בהמשך»');
   assert.equal(later[0].state, 'wait');
+});
+
+/* R6 (2026-11-07): previewContinuationMilestones is the SAME computation as a dry run — exact counters,
+ * no Tasks / Activity row, no sheet created, no lock taken; the real sync then does exactly that. */
+test('preview (dry run) predicts the sync exactly and writes nothing — not even the Tasks sheet', () => {
+  const sb = sandbox();
+  const patients = [{ name: 'נועה', phone: '0501234567', house: 'ramot', entryDate: new Date().toISOString().slice(0, 10) }];
+  const snap = () => JSON.stringify(Object.keys(sb.sheets).sort().map((n) => [n, sb.sheets[n].grid]));
+  const before = snap();
+  const pv = sb.post({ action: 'previewContinuationMilestones', user: 'ורד', patients, rosterComplete: true });
+  assert.equal(pv.ok, true); assert.equal(pv.dryRun, true);
+  assert.equal(pv.created, 3);
+  assert.equal(snap(), before, 'the dry run changed no sheet');
+  assert.equal(sb.sheets.Tasks, undefined, 'the dry run did not even create the Tasks sheet');
+  assert.equal(sb.isLocked(), false);
+  const real = syncWith(sb, patients);
+  assert.deepEqual([real.created, real.updated, real.cancelled], [pv.created, pv.updated, pv.cancelled], 'the sync did what the preview said');
+  const after = snap();
+  // after the sync the preview says «nothing to do», and replaying the sync changes nothing (lost-answer retry)
+  const pv2 = sb.post({ action: 'previewContinuationMilestones', user: 'ורד', patients, rosterComplete: true });
+  assert.deepEqual([pv2.created, pv2.updated, pv2.cancelled], [0, 0, 0]);
+  const again = syncWith(sb, patients);
+  assert.deepEqual([again.created, again.updated, again.cancelled], [0, 0, 0]);
+  assert.equal(snap(), after, 'the replay wrote nothing');
+  // a departed patient: preview counts the closures, writes none
+  const pv3 = sb.post({ action: 'previewContinuationMilestones', user: 'ורד', patients: [], rosterComplete: true });
+  assert.equal(pv3.cancelled, 3);
+  assert.equal(snap(), after);
+  assert.ok(sb.rows('Tasks').every((t) => t.status === 'open'), 'nothing closed by the preview');
+});
+
+test('preview is proxy-only: without the proxy secret the source refuses it', () => {
+  const sb = sandbox();
+  const r = JSON.parse(sb.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify({ action: 'previewContinuationMilestones', patients: [], rosterComplete: true }) } }).getContent());
+  assert.equal(r.ok, false);
 });
