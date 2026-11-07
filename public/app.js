@@ -600,6 +600,7 @@
     return data;
   }
   async function apiSave(payload) {
+    if (financeUnavailable() && saveChangesMoney(payload)) throw financeRefusal();
     var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -652,6 +653,45 @@
   var MONEY_FORM_FIELDS = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'paymentLink', 'billingMode'];
   var MONEY_SECTION_TITLES = ['פרטי תשלום חבילה', 'פרטי חשבון בנק לגבייה', 'פרטי תשלום אחרון', 'הצעות מחיר — WhatsApp'];
   function isOpsScope() { return state.moneyScope !== 'full'; }
+
+  /* R10 finance fail-closed (2026-11-07): when the last load could NOT read payments or charges, the
+   * empty lists in state are PLACEHOLDERS, not «no payments». No money write may then be decided from
+   * them: every money action is refused in the browser before it is sent, and a saveAll that changes a
+   * client's money fields is refused too. Non-money work (leads, tasks, notes, continuation) goes on.
+   * The list mirrors the WRITE actions of lib/money-scope.js MONEY_POST_ACTIONS (pinned by a test). */
+  var FINANCE_SOURCE_LABELS = ['תשלומים', 'חיובים'];
+  var FINANCE_WRITE_ACTIONS = [
+    'savePayment', 'updatePayment', 'removePayment', 'removePaymentsForClient',
+    'saveCharge', 'updateCharge', 'removeCharge', 'removeChargesForClient',
+    'saveCredit', 'savePaymentAmountOverride', 'markForwarded', 'correctSessionOutcome',
+    'saveSettings', 'repairStaleNextBilling', 'mergeClients',
+    'reserveRenewal', 'applyRenewal', 'cancelRenewal', 'acknowledgeRenewal', 'resolveRenewalReview',
+    'reserveExtraCharge', 'applyExtraCharge', 'acknowledgeExtraCharge', 'cancelExtraCharge', 'resolveExtraChargeReview'
+  ];
+  var CLIENT_MONEY_COMPARE = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'bundlePaid', 'paymentLink', 'billingMode', 'nextBillingDate'];
+  var FINANCE_UNAVAILABLE_MSG = 'פעולה כספית חסומה: נתוני התשלומים / החיובים לא נטענו. רעננו את המסך ונסו שוב.';
+  function financeUnavailable() {
+    var gaps = Array.isArray(state.loadGaps) ? state.loadGaps : [];
+    return FINANCE_SOURCE_LABELS.some(function (l) { return gaps.indexOf(l) >= 0; });
+  }
+  function financeRefusal() { var e = new Error(FINANCE_UNAVAILABLE_MSG); e.code = 'finance_unavailable'; return e; }
+  function clientMoneyPrint(c) {
+    return JSON.stringify(CLIENT_MONEY_COMPARE.map(function (k) { var v = c ? c[k] : ''; return v == null ? '' : String(v); }));
+  }
+  function snapshotLoadedMoney() {
+    var m = {};
+    state.clients.forEach(function (c) { if (c && c.id != null) m[String(c.id)] = clientMoneyPrint(c); });
+    state.loadedClientMoney = m;
+  }
+  // a saveAll payload that would change a loaded client's money fields while finance is unreadable
+  function saveChangesMoney(payload) {
+    var loaded = state.loadedClientMoney || {};
+    return (payload && Array.isArray(payload.clients) ? payload.clients : []).some(function (c) {
+      var id = c && c.id != null ? String(c.id) : '';
+      var cur = id && state.clients.find(function (x) { return String(x.id) === id; });
+      return !!(id && Object.prototype.hasOwnProperty.call(loaded, id) && cur && clientMoneyPrint(cur) !== loaded[id]);
+    });
+  }
   /* Operational session: hide the money tabs / settings, and take the money
    * inputs out of every form (disabled inputs are not serialized, so the save
    * carries no money and the server keeps the stored values). Idempotent. */
@@ -705,6 +745,8 @@
     } catch (_) { return {}; }
   }
   async function apiSaveSettings(settings) {
+    // settings that failed to load are blanks in state: saving them would erase the stored bank details
+    if ((state.loadGaps || []).indexOf('הגדרות') >= 0) throw new Error('ההגדרות לא נטענו — לא ניתן לשמור. רעננו את המסך ונסו שוב.');
     var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1121,6 +1163,7 @@
   // credit is treated as a failure too — otherwise a refused write would look
   // like a save.
   async function apiSaveCredit(credit) {
+    if (financeUnavailable()) throw financeRefusal();
     var r = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1144,6 +1187,7 @@
     return data;
   }
   async function apiPostAction(action, extra) {
+    if (financeUnavailable() && FINANCE_WRITE_ACTIONS.indexOf(action) >= 0) throw financeRefusal();
     var body = Object.assign({ action: action }, extra || {});
     var r = await apiFetch('/api/sheets', {
       method: 'POST',
@@ -4956,28 +5000,55 @@
       state.continuationRoster = res[0].patients;
       state.continuationRows = res[1].rows;
       state.continuationLoading = false;
+      if (state.continuationError) { state.continuationSyncPreview = { ok: false }; renderContinuationSyncStatus(); }
+      else loadContinuationSyncPreview();
       if (state.view === 'continuation') renderContinuation();
     });
   }
 
   /* R6 (2026-11-07): the milestone tasks are opened / moved / closed ONLY by this explicit action.
    * The preview is a read (source dry run) so the tab can say how many changes are waiting. */
+  var continuationPreviewFlight = null;
   function loadContinuationSyncPreview() {
-    if (state.continuationSyncPreview === 'loading') return;
+    if (continuationPreviewFlight) return continuationPreviewFlight;
     state.continuationSyncPreview = 'loading';
-    apiFetch('/api/continuation-sync/preview', { cache: 'no-store' })
+    continuationPreviewFlight = apiFetch('/api/continuation-sync/preview', { cache: 'no-store' })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return r.ok && d.ok === true ? d : { ok: false }; }); })
       .catch(function () { return { ok: false }; })
-      .then(function (d) { state.continuationSyncPreview = d; renderContinuationSyncStatus(); });
+      .then(function (d) {
+        continuationPreviewFlight = null;
+        state.continuationSyncPreview = d;
+        renderContinuationSyncStatus();
+        return d;
+      });
+    return continuationPreviewFlight;
   }
+  function pendingContinuationChanges(p) {
+    if (!p || p === 'loading' || p.ok !== true) return null; // unknown — never «0»
+    return (p.created || 0) + (p.updated || 0) + (p.cancelled || 0);
+  }
+  /* Two places say the same thing: the bar in «מסלול המשך» and, so a pending milestone is never silently
+   * missing from the daily queue, a row at the top of «היום שלי» with the same one direct action. */
   function renderContinuationSyncStatus() {
-    var el = $('#continuationSyncStatus');
-    if (!el) return;
     var p = state.continuationSyncPreview;
-    if (!p || p === 'loading') { el.textContent = ''; return; }
-    if (p.ok !== true) { el.textContent = 'מצב הסנכרון לא זמין כרגע'; return; }
-    var n = (p.created || 0) + (p.updated || 0) + (p.cancelled || 0);
-    el.textContent = n ? (n + ' שינויים ממתינים במשימות ההמשך') : 'משימות ההמשך מעודכנות';
+    var n = pendingContinuationChanges(p);
+    var el = $('#continuationSyncStatus');
+    if (el) {
+      if (!p || p === 'loading') el.textContent = '';
+      else if (n === null) el.textContent = 'מצב הסנכרון לא זמין כרגע';
+      else el.textContent = n ? (n + ' שינויים ממתינים במשימות ההמשך') : 'משימות ההמשך מעודכנות';
+    }
+    var box = $('#myDayContSync'), txt = $('#myDayContSyncText'), btn = $('#myDayContSyncBtn');
+    if (!box || !txt) return;
+    if (!p || p === 'loading' || n === 0) { box.hidden = true; return; }
+    if (n === null) {
+      txt.textContent = '⚠️ מצב משימות מסלול המשך לא זמין כרגע — ייתכן שיש פניות שטרם נפתחו. רעננו בעוד רגע.';
+      if (btn) btn.hidden = true;
+    } else {
+      txt.textContent = '🔔 מסלול המשך: ' + n + ' שינויים ממתינים במשימות הפנייה (פתיחה / הזזה / סגירה · אחראית: ורד)';
+      if (btn) btn.hidden = state.role !== 'editor';
+    }
+    box.hidden = false;
   }
   function runContinuationSyncNow(btn) {
     if (btn && btn.disabled) return;
@@ -4985,13 +5056,19 @@
     return continuationSync()
       .then(function (d) {
         toast('משימות ההמשך עודכנו: ' + (d.created || 0) + ' נפתחו, ' + (d.updated || 0) + ' הוזזו, ' + (d.cancelled || 0) + ' נסגרו');
-        return crmReload().catch(function () {});
+        return crmReload().catch(function () {}).then(loadContinuationSyncPreview);
       })
       .catch(function () {
-        // safe to retry: the sync is idempotent, nothing is created or closed twice
-        toast('עדכון משימות ההמשך נכשל — לא בוצע שינוי חלקי שאינו ניתן לחזרה. אפשר לנסות שוב.', true);
+        // AMBIGUOUS: the source may have committed before the answer was lost. Read back (dry run +
+        // tasks) instead of guessing; the sync is idempotent, so a retry never creates / closes twice.
+        return Promise.all([loadContinuationSyncPreview(), crmReload().catch(function () {})]).then(function (res) {
+          var n = pendingContinuationChanges(res[0]);
+          if (n === 0) toast('לא התקבלה תשובה מהשרת, אך בבדיקה חוזרת משימות ההמשך מעודכנות — העדכון נשמר.');
+          else if (n) toast('לא ניתן לאמת שהעדכון נשמר: ' + n + ' שינויים עדיין ממתינים. אפשר לנסות שוב בבטחה — שום משימה לא תיפתח או תיסגר פעמיים.', true);
+          else toast('לא ניתן לאמת אם העדכון נשמר. אפשר לרענן את המצב ולנסות שוב בבטחה.', true);
+        });
       })
-      .then(function () { busyEnd(btn); state.continuationSyncPreview = null; loadContinuationSyncPreview(); if (state.view === 'continuation') renderContinuation(); });
+      .then(function () { busyEnd(btn); if (state.view === 'continuation') renderContinuation(); });
   }
 
   function upsertContinuationLocal(row) {
@@ -6778,6 +6855,7 @@
   var extraLoadToken = 0;
   function extraErrorMessage(err) {
     var message = String(err && err.message);
+    if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG; // nothing was sent
     if (message.indexOf('renewal_pending') >= 0) return 'יש חידוש פתוח למטופל. יש לחזור אל חידוש ותשלום ולהשלים את הבדיקה לפני הוספת טיפול.';
     if (message.indexOf('extra_recording_day_changed') >= 0) return 'מועד הרישום התחלף מאז פתיחת החלון. יש לבדוק את התאריך המעודכן לפני שמירה חוזרת.';
     if (message.indexOf('review_observation_too_large') >= 0) return 'נמצאו רשומות רבות מדי לסגירת הבדיקה בחלון זה. יש לפנות לאחראית לבירור הרשומות; הבקשה נשארת פתוחה.';
@@ -7073,6 +7151,7 @@
   var renewLoadToken = 0;
   function renewalErrorMessage(err) {
     var message = String(err && err.message || '');
+    if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG; // nothing was sent
     if (message.indexOf('extra_charge_pending') >= 0) return 'יש חיוב נוסף פתוח למטופל. יש לחזור אל הוסף טיפול ולהשלים את הבדיקה לפני חידוש.';
     if (message.indexOf('renewal_payment_exists') >= 0) return 'כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.';
     if (message.indexOf('renewal_advance_confirmation_required') >= 0) return 'כבר דווח תשלום באותו תאריך. כדי לרשום מקדמה נוספת לחודש הבא יש לפתוח מחדש ולאשר במפורש שזה תשלום נפרד.';
@@ -7544,7 +7623,8 @@
     if (!box || !txt) return;
     if (!gaps.length) { box.hidden = true; txt.textContent = ''; return; }
     txt.textContent = '⚠️ מידע לא זמין כרגע: ' + gaps.join(', ') +
-      '. המסך אינו מציג אותו — אין להסיק שאין תשלומים, חובות או משימות. רעננו בעוד רגע.';
+      '. המסך אינו מציג אותו — אין להסיק שאין תשלומים, חובות או משימות. רעננו בעוד רגע.' +
+      (financeUnavailable() ? ' פעולות כספיות חסומות עד שהנתונים ייטענו.' : '');
     box.hidden = false;
   }
 
@@ -7613,6 +7693,7 @@
       state.payments = (results[1].payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
       // Derive nextBillingDate for legacy clients now that payments are loaded.
       deriveNextBillingDates();
+      snapshotLoadedMoney();
       state.charges = (results[2].charges || []).map(normalizeChargeFromSheet).filter(function (c) { return !!c.id; });
       // Display-time safety net: never surface charges whose patient was deleted
       // (orphans). Root-cause cleanup runs server-side via removeChargesForClient.
@@ -7636,7 +7717,10 @@
       renderLoadGaps();
       // Continuation CRM (2026-11-03): fetch the admitted roster right after boot (cached ≤60s server-side) so
       // «היום שלי» can name the milestone tasks. A READ only (R6): the tasks change only via «עדכון משימות המשך».
+      // read-only dry run: pending milestone changes surface in «היום שלי» without visiting the tab
+      // (run once the roster read is known; a failed roster → «לא זמין», never silence)
       if (state.continuationRoster === null) ensureContinuationLoaded();
+      else if (!state.continuationError) loadContinuationSyncPreview();
     } catch (e) {
       // A 401 already flipped to the PIN screen (apiFetch) — no error toast
       // on top of it; every other failure is surfaced as before.
@@ -7746,6 +7830,7 @@
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
     on('#continuationSyncBtn', 'click', function (e) { runContinuationSyncNow(e.currentTarget); });
+    on('#myDayContSyncBtn', 'click', function (e) { runContinuationSyncNow(e.currentTarget); });
     on('#dataUnavailableClose', 'click', function () { var b = $('#dataUnavailableBanner'); if (b) b.hidden = true; });
     var continuationListEl = $('#continuationList');
     if (continuationListEl) continuationListEl.addEventListener('click', handleContinuationListClick);

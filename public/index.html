@@ -107,6 +107,12 @@
           <div class="kpi money-only"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
           <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
         </div>
+        <!-- R6 follow-up: pending continuation milestone changes (read-only dry run) + the one explicit action,
+             so a new admission is never silently missing from the daily queue. Opening this screen writes nothing. -->
+        <div id="myDayContSync" class="conflict-banner my-day-cont-sync" role="status" hidden>
+          <span id="myDayContSyncText"></span>
+          <button type="button" id="myDayContSyncBtn" class="btn edit-only">🔄 עדכון משימות המשך</button>
+        </div>
         <div id="myDay" class="my-day"></div>
 
         <!-- Cross-tab patient locator: searches Clients (any status), the

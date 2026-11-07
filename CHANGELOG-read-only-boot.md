@@ -46,6 +46,30 @@ Milestone tasks no longer appear just because someone opened the app. In «מס�
 moved / closed). Saving a terminal status (סירב/ה, נסגר, עבר/ה לטיפול המשך) still closes that
 patient's open tasks immediately.
 
+## Review follow-up (PR #174 comment, 2026-11-07)
+
+1. **Nothing silently missing from «היום שלי».** The boot runs the read-only dry run
+   (`GET /api/continuation-sync/preview`) and, when changes are pending, shows at the top of
+   «היום שלי»: «🔔 מסלול המשך: N שינויים ממתינים … · אחראית: ורד» with the same
+   «🔄 עדכון משימות המשך» button. Preview unavailable → «מצב … לא זמין — ייתכן שיש פניות שטרם
+   נפתחו», never silence. Still no write on open; no scheduler, no second ledger.
+   **Business change for Sandra to accept:** milestone tasks are now applied by a person's click
+   (from «היום שלי» or «מסלול המשך»), not automatically on page load.
+2. **Ambiguous answer is reported honestly.** After a failed / lost `POST /api/continuation-sync`
+   the app reads back (dry run + tasks): 0 pending → «לא התקבלה תשובה… העדכון נשמר»; N pending →
+   «לא ניתן לאמת שהעדכון נשמר: N עדיין ממתינים. אפשר לנסות שוב בבטחה»; unknown → «לא ניתן לאמת אם
+   העדכון נשמר. אפשר לרענן את המצב ולנסות שוב בבטחה». Tested with the source committing and the
+   response dropped.
+3. **Finance fail-closed (R10).** If payments or charges did not load, the empty lists are
+   placeholders. `apiPostAction` refuses every money WRITE action (list pinned equal to
+   `lib/money-scope.js` MONEY_POST_ACTIONS minus reads), `apiSaveCredit` refuses, and `apiSave`
+   refuses a saveAll that changes any loaded client's money fields (price, billing, payment status /
+   date, next billing date …) — all **before** a request is sent, so a «no payment this month»
+   decision can never be made from a placeholder. Settings that failed to load cannot be saved over
+   the stored bank details. Leads, tasks, contacts and continuation work continue. Renewal / extra
+   charge dialogs show «פעולה כספית חסומה…». The #164 same-paid-date guard (client and source) is
+   unchanged and its tests pass.
+
 ## Release order
 
 1. Node (Railway) first: the roster GET stops writing immediately. Until step 2 the preview answers

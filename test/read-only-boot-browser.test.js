@@ -31,7 +31,7 @@ function iso(d) { return d.toISOString().slice(0, 10); }
 function daysAgo(n) { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return iso(d); }
 
 // Source POST actions that only read. Anything else reaching the source during a "read" is a write.
-const READ_POST_ACTIONS = new Set(['getTasks', 'getActivity', 'previewContinuationMilestones', 'getBackendCapabilities']);
+const READ_POST_ACTIONS = new Set(['getTasks', 'getActivity', 'previewContinuationMilestones', 'getBackendCapabilities', 'getRenewalState', 'getExtraChargeState']);
 
 const OPEN_LEAD = { id: 'lead-open-1', name: 'ליד פתוח', phone: '0503333333', stage: 'new', serviceType: 'פרטני', created: '2026-11-01', updatedAt: '2026-11-01T08:00:00.000Z' };
 // a lead that was already converted (a client points at it): the old boot path persisted a trimmed list
@@ -220,7 +220,9 @@ test('R6 acceptance 5–6: explicit sync applies once; a retry after a LOST answ
     return route.continue();
   });
   await page.click('#continuationSyncBtn');
-  await page.waitForFunction(() => /נכשל/.test(document.querySelector('#toast') ? document.querySelector('#toast').textContent : ''));
+  // the source committed, the answer was lost: the app reads back instead of claiming «nothing changed»
+  await page.waitForFunction(() => /בבדיקה חוזרת משימות ההמשך מעודכנות — העדכון נשמר/.test(document.querySelector('#toast') ? document.querySelector('#toast').textContent : ''));
+  assert.doesNotMatch(await page.textContent('#toast'), /לא בוצע שינוי/, 'never claims that nothing was written');
   assert.deepEqual(f.writes(), ['syncContinuationMilestones'], 'the lost attempt reached the source exactly once');
   const afterFirst = f.snapshot();
   const tasks = f.sb.rows('Tasks');
@@ -266,7 +268,7 @@ test('R6/R10 acceptance 7: source / roster outage → «מידע לא זמין»
   await page.waitForFunction(() => /לא זמין/.test(document.querySelector('#continuationSyncStatus').textContent));
   // the explicit sync with no roster is refused and closes nothing
   await page.click('#continuationSyncBtn');
-  await page.waitForFunction(() => /נכשל/.test(document.querySelector('#toast').textContent));
+  await page.waitForFunction(() => /לא ניתן לאמת אם העדכון נשמר. אפשר לרענן את המצב ולנסות שוב בבטחה/.test(document.querySelector('#toast').textContent));
   assert.deepEqual(f.writes(), [], 'no write reached the source during the outage');
   assert.deepEqual(f.changedSince(before), [], 'no task was closed because the roster was unreachable');
   assert.deepEqual(f.sb.rows('Tasks').filter((x) => x.clientId === 'cont:phone:0504444444').map((x) => x.status), ['open', 'open', 'open']);
@@ -308,4 +310,87 @@ test('R6 acceptance 8: an unauthorized caller cannot write (no / forged / legacy
   assert.deepEqual(r, { sync: 403, preview: 403, form: 415 });
   assert.deepEqual(f.writes(), []);
   assert.deepEqual(f.changedSince(before), []);
+});
+
+test('R6 follow-up: a «היום שלי»-only user sees pending milestone work for a NEW admission and can apply it once from there', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const ctx = await f.context();
+  const { page, errors } = await f.open(ctx);
+  const before = f.snapshot();
+  // never visits «מסלול המשך»: the landing screen alone shows the pending work and the one action
+  await page.waitForSelector('#myDayContSync:not([hidden])');
+  assert.match(await page.textContent('#myDayContSyncText'), /9 שינויים ממתינים/);
+  assert.equal(await page.locator('#myDayContSyncBtn').isVisible(), true);
+  assert.deepEqual(f.changedSince(before), [], 'showing the pending work wrote nothing');
+  assert.deepEqual(f.writes(), []);
+  const done = page.waitForResponse((r) => r.url().endsWith('/api/continuation-sync') && r.request().method() === 'POST');
+  await page.click('#myDayContSyncBtn');
+  assert.equal((await (await done).json()).created, 6);
+  await page.waitForSelector('#myDayContSync', { state: 'hidden' });
+  assert.deepEqual(f.writes(), ['syncContinuationMilestones'], 'one explicit sync');
+  // the month-1 contact of the existing patient is overdue → a row in «היום שלי» now
+  await page.locator('#myDay .md-row', { hasText: 'הצעת המשך טיפול' }).first().waitFor();
+
+  // a NEW admission arrives in the Dashboard roster; a refresh of the landing screen surfaces it (read only)
+  const NEW = { sourceApp: 'dashboard', name: 'קבלה חדשה', phone: '0505555555', house: 'ramot', entryDate: daysAgo(1) };
+  ROSTER.patients.push(NEW);
+  t.after(() => { ROSTER.patients.splice(ROSTER.patients.indexOf(NEW), 1); });
+  const settled = f.snapshot();
+  await page.evaluate(() => fetch('/api/continuation-roster?fresh=1')); // the 60 s roster cache expires
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#myDayContSync:not([hidden])');
+  assert.match(await page.textContent('#myDayContSyncText'), /3 שינויים ממתינים/);
+  assert.deepEqual(f.changedSince(settled), [], 'the new admission was surfaced without any write');
+  await page.click('#myDayContSyncBtn');
+  await page.waitForSelector('#myDayContSync', { state: 'hidden' });
+  const ids = f.sb.rows('Tasks').filter((x) => x.clientId === 'cont:phone:0505555555').map((x) => x.id);
+  assert.equal(ids.length, 3); assert.equal(new Set(ids).size, 3, 'one task per milestone, no duplicate');
+  assert.deepEqual(f.writes(), ['syncContinuationMilestones', 'syncContinuationMilestones']);
+  assert.deepEqual(errors, []);
+});
+
+test('R10 finance fail-closed: payments / charges unreadable → no money write leaves the browser; non-money work continues', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  f.net.failGet.add('getPayments');
+  const ctx = await f.context();
+  const { page, errors } = await f.open(ctx);
+  await page.waitForSelector('#dataUnavailableBanner:not([hidden])');
+  assert.match(await page.textContent('#dataUnavailableText'), /פעולות כספיות חסומות/);
+  const before = f.snapshot();
+  // every money write path is refused BEFORE a request is sent (placeholders are never authoritative)
+  const sent = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/sheets')) sent.push(r.postDataJSON().action || 'saveAll'); });
+  await page.click('.tab[data-view="clients"]');
+  const card = page.locator('#clientsList .client-card').filter({ has: page.locator('.client-name', { hasText: 'מטופל קיים' }) });
+  await card.getByRole('button', { name: 'חידוש ותשלום', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#renewSubmit').disabled || !document.querySelector('#renewRecovery').hidden);
+  await page.click('#renewSubmit');
+  await page.waitForFunction(() => /פעולה כספית חסומה/.test(document.body.textContent));
+  assert.deepEqual(sent.filter((a) => a !== 'getRenewalState'), [], 'no money write was sent');
+  assert.deepEqual(f.changedSince(before), [], 'no payment / renewal / client money row changed');
+  assert.ok(f.sb.rows('Payments').length === 0 && f.sb.rows('ClientCharges').length === 0);
+  assert.deepEqual(f.writes(), []);
+  // fail-closed for money ONLY: a non-money source write still goes through (a lead note save)
+  const r = await page.evaluate(async () => {
+    const res = await fetch('/api/sheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'createTask', submissionId: 'sub-r10-nonmoney-1', task: { leadId: 'lead-open-1', kind: 'call', title: 'שיחת מעקב', dueDate: '2026-11-20', assignee: 'ורד' } }) });
+    return res.json();
+  });
+  assert.equal(r.ok, true, 'a non-money task write is not blocked');
+  assert.deepEqual(errors, []);
+});
+
+test('R10: the browser finance write list mirrors every money WRITE action of lib/money-scope.js', () => {
+  const fs = require('node:fs');
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const m = APP.match(/var FINANCE_WRITE_ACTIONS = \[([\s\S]*?)\];/);
+  assert.ok(m, 'FINANCE_WRITE_ACTIONS present');
+  const browser = m[1].match(/'([A-Za-z]+)'/g).map((x) => x.slice(1, -1)).sort();
+  const server = require('../lib/money-scope').MONEY_POST_ACTIONS.filter((a) => !/^get/.test(a)).sort();
+  assert.deepEqual(browser, server);
+  // the three browser write paths are gated
+  assert.match(APP, /async function apiPostAction\(action, extra\) \{\s*if \(financeUnavailable\(\) && FINANCE_WRITE_ACTIONS\.indexOf\(action\) >= 0\) throw financeRefusal\(\);/);
+  assert.match(APP, /async function apiSave\(payload\) \{\s*if \(financeUnavailable\(\) && saveChangesMoney\(payload\)\) throw financeRefusal\(\);/);
+  assert.match(APP, /async function apiSaveCredit\(credit\) \{\s*if \(financeUnavailable\(\)\) throw financeRefusal\(\);/);
+  assert.match(APP, /async function apiSaveSettings\(settings\) \{\s*\/\/[^\n]*\n\s*if \(\(state\.loadGaps \|\| \[\]\)\.indexOf\('הגדרות'\) >= 0\) throw/);
 });

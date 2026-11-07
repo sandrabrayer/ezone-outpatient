@@ -8,6 +8,10 @@ read-only dry-run preview (`previewContinuationMilestones`, new Code.gs action).
 «מידע לא זמין». Synthetic Chromium acceptance (real server + real Code.gs) proves 0 writes on
 open / refresh / two windows / roster cache miss. SW v33. Not merged/deployed; after approval: Node, then
 Apps Script dispatch. Work's signed-in read-only UI pass is unblocked only once this is live.
+Review follow-up: pending milestone work surfaces in «היום שלי» with the one explicit action; a lost
+sync answer is read back, never reported as «nothing changed»; payments/charges unreadable → every
+money write refused in the browser before sending (#164 guard untouched). Manual (click) milestone
+application is a business change awaiting Sandra's acceptance.
 See `CHANGELOG-read-only-boot.md`.
 
 # Outpatient — acceptance audit candidate (local, not deployed), 2026-11-06
