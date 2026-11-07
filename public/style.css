@@ -1547,3 +1547,7 @@ input.is-busy {
     50% { opacity: 0.9; }
   }
 }
+
+/* R6 (2026-11-07): explicit «עדכון משימות המשך» bar — the only control that writes milestone tasks. */
+.continuation-sync-bar { flex-wrap: wrap; gap: 8px; align-items: center; }
+.panel.data-unavailable { padding: 12px 16px; color: #b45309; }

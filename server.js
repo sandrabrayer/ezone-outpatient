@@ -511,7 +511,7 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     }
     // Server-only write: the milestone sync takes the roster Node fetched itself (see
     // runContinuationSync), never a patient list typed by a browser.
-    if (body.action === 'syncContinuationMilestones') {
+    if (body.action === 'syncContinuationMilestones' || body.action === 'previewContinuationMilestones') {
       return res.status(403).json({ ok: false, error: 'forbidden_action' });
     }
     for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin', 'moneyScope']) {
@@ -569,22 +569,30 @@ app.post('/api/sheets', requireSession, async (req, res) => {
 // GET /api/continuation-roster — proxy the dashboard's getAdmittedRoster behind
 // the server-held secret. The continuation WORKFLOW rows themselves go through
 // the existing /api/sheets path (getContinuation / saveContinuation), NOT here.
-/* Continuation milestones (CRM, 2026-11-03): after the roster is (re)fetched, the
- * SERVER asks Apps Script to open / move / close the milestone contact tasks
- * (syncContinuationMilestones) from the roster it fetched itself — a browser can
- * neither supply the patient list nor call that action (refused on /api/sheets).
- * Single-flight, best effort: a sync failure never fails the roster response, and
- * the browser refreshes its tasks afterwards. `rosterComplete` is true only for a
- * roster the Dashboard answered ok, so an upstream hiccup never cancels tasks. */
+/* Continuation milestones (CRM, 2026-11-03; read/write split 2026-11-07, CHANGELOG-read-only-boot.md).
+ * READS NEVER WRITE: GET /api/continuation-roster only fetches (and caches) the roster. The milestone
+ * contact tasks are opened / moved / closed ONLY by the explicit, session-gated
+ * POST /api/continuation-sync (a person pressed «עדכון משימות המשך», or saved a terminal CRM status).
+ * The SERVER sends Apps Script (syncContinuationMilestones) the roster it fetched itself — a browser can
+ * neither supply the patient list nor call that action (refused on /api/sheets). The source action is
+ * idempotent by stable task ids (cont::<ref>::<entryDate>::m<n>), so a retry after a lost response
+ * creates / closes nothing twice. `rosterComplete` is true only for a roster the Dashboard answered ok,
+ * so an upstream hiccup never cancels tasks. GET /api/continuation-sync/preview runs the SAME source
+ * computation as a dry run (previewContinuationMilestones: no lock, no write) so the tab can say how
+ * many changes are waiting without making them. */
 let continuationSyncFlight = null;
 const continuationSyncState = { lastAt: 0, lastResult: null };
-function runContinuationSync(roster, user) {
-  if (continuationSyncFlight) return continuationSyncFlight;
-  if (!SHEETS_URL || !roster || roster.ok === false || !Array.isArray(roster.patients)) return Promise.resolve(null);
-  const patients = roster.patients.map((p) => ({
+function rosterPatientsForSource(roster) {
+  if (!roster || roster.ok === false || !Array.isArray(roster.patients)) return null;
+  return roster.patients.map((p) => ({
     name: String((p && p.name) || ''), house: String((p && p.house) || ''), entryDate: String((p && p.entryDate) || ''),
     phone: String((p && p.phone) || ''), id: String((p && (p.id || p.patientId)) || '')
   }));
+}
+function runContinuationSync(roster, user) {
+  if (continuationSyncFlight) return continuationSyncFlight;
+  const patients = rosterPatientsForSource(roster);
+  if (!SHEETS_URL || !patients) return Promise.resolve(null);
   continuationSyncFlight = (async () => {
     try {
       const r = await fetch(SHEETS_URL, {
@@ -630,12 +638,9 @@ app.get('/api/continuation-roster', requireSession, async (req, res) => {
 
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
   try {
+    // READ ONLY (R6, 2026-11-07): a roster read — cache hit, miss or forced fresh — never
+    // writes. The milestone tasks change only through POST /api/continuation-sync.
     const got = await fetchRoster(forceFresh);
-    if (!got.hit && got.good) {
-      // keep the milestone tasks in step with the roster BEFORE answering, so the
-      // browser's next getTasks already shows them (bounded by the upstream timeout)
-      await runContinuationSync(got.data, sessionUserFromRequest(req));
-    }
     res.set('X-Cache', got.hit ? 'HIT' : 'MISS');
     res.status(got.status).json(got.data);
   } catch (err) {
@@ -643,12 +648,18 @@ app.get('/api/continuation-roster', requireSession, async (req, res) => {
   }
 });
 
-/* POST /api/continuation-sync — re-run the milestone sync on demand (after a CRM
- * status change, or when the cached roster served the tab). Session-gated; the
- * body is ignored. Answers the sync counters, never the roster. */
+/* POST /api/continuation-sync — THE ONLY route that opens / moves / closes the continuation
+ * milestone tasks. Explicit and authorized: a signed-in, allow-listed session (requireSession —
+ * the same people who may already edit the continuation track; unsigned, unnamed and retired
+ * sessions get 401) AND a JSON request (415 otherwise — a cross-site form cannot send one, on top
+ * of the SameSite=Lax cookie). The body is ignored: the patient list is the roster Node fetched
+ * itself. Safe to retry: the source sync is idempotent by stable task ids, so a replay after a
+ * lost answer creates / closes nothing twice; a roster that could not be read is 502 and closes
+ * nothing. Answers the sync counters, never the roster. */
 app.post('/api/continuation-sync', requireSession, async (req, res) => {
   if (!requireContinuationConfig(res)) return;
   if (!requireSheetsUrl(res)) return;
+  if (!req.is('application/json')) return res.status(415).json({ ok: false, error: 'json_required' });
   try {
     const got = await fetchRoster(false);
     if (!(got.hit || got.good)) return res.status(502).json({ ok: false, error: 'roster_unavailable' });
@@ -656,6 +667,30 @@ app.post('/api/continuation-sync', requireSession, async (req, res) => {
     if (!out || out.ok === false) return res.status(502).json({ ok: false, error: (out && out.error) || 'sync_failed' });
     res.set('Cache-Control', 'no-store');
     res.status(200).json({ ok: true, created: out.created || 0, updated: out.updated || 0, cancelled: out.cancelled || 0 });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
+});
+
+/* GET /api/continuation-sync/preview — READ ONLY: how many milestone tasks the explicit sync WOULD
+ * open / move / close right now (source dry run previewContinuationMilestones: no lock, no write).
+ * Lets the tab show «N שינויים ממתינים» without writing. A source that does not know the action yet
+ * (Apps Script not redeployed) or an unreadable roster answers ok:false — shown as «לא זמין», never 0. */
+app.get('/api/continuation-sync/preview', requireSession, async (req, res) => {
+  if (!requireContinuationConfig(res)) return;
+  if (!requireSheetsUrl(res)) return;
+  res.set('Cache-Control', 'no-store');
+  try {
+    const got = await fetchRoster(false);
+    const patients = (got.hit || got.good) ? rosterPatientsForSource(got.data) : null;
+    if (!patients) return res.status(502).json({ ok: false, error: 'roster_unavailable' });
+    const r = await fetch(SHEETS_URL, {
+      method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'previewContinuationMilestones', proxySecret: OUTPATIENT_PROXY_SECRET, user: sessionUserFromRequest(req), moneyScope: moneyScope.SCOPE_OPS, patients, rosterComplete: true })
+    });
+    let data; try { data = JSON.parse(await r.text()); } catch (_) { data = null; }
+    if (!data || data.ok !== true || data.dryRun !== true) return res.status(502).json({ ok: false, error: (data && data.error) || 'preview_unavailable' });
+    res.status(200).json({ ok: true, created: data.created || 0, updated: data.updated || 0, cancelled: data.cancelled || 0 });
   } catch (err) {
     res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }

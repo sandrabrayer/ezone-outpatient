@@ -285,11 +285,15 @@ checkout ever drifts back.
   the sheet row is kept and listed in the additive response field
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
-- `GET /api/continuation-roster` — session-gated. Since the continuation CRM (2026-11-03,
-  `CHANGELOG-continuation-milestones.md`) a FRESH roster answer also makes the server run the Apps Script action
-  `syncContinuationMilestones` with the roster it fetched itself (milestone contact tasks
-  `cont::<ref>::<entryDate>::m1|m2|m3`, +1/+2/+3 calendar months from the entry date, 14 days ahead); a browser
-  cannot call that action (`/api/sheets` refuses it). `POST /api/continuation-sync` re-runs it on demand.
+- `GET /api/continuation-roster` — session-gated, **read only** (R6, 2026-11-07, `CHANGELOG-read-only-boot.md`):
+  never writes, on a cache hit, miss or `?fresh=1`. The milestone contact tasks
+  (`cont::<ref>::<entryDate>::m1|m2|m3`, +1/+2/+3 calendar months from the entry date, 14 days ahead —
+  `CHANGELOG-continuation-milestones.md`) are opened / moved / closed ONLY by `POST /api/continuation-sync`
+  (explicit «🔄 עדכון משימות המשך» or a terminal status save; signed-in session + JSON; idempotent, safe to retry),
+  which sends the Apps Script action `syncContinuationMilestones` the roster Node fetched itself; a browser cannot
+  call that action (`/api/sheets` refuses it). `GET /api/continuation-sync/preview` is the read-only dry run
+  (`previewContinuationMilestones`) behind «N שינויים ממתינים». Opening, navigating and refreshing the app performs
+  no source write; a failed read shows «מידע לא זמין», never an empty list.
 - `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
   (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
   «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`

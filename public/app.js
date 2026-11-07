@@ -219,6 +219,9 @@
     activity: null,           // CRM activity events, newest first (getActivity); null = unavailable
     continuationLoading: false,
     continuationError: '',
+    continuationRowsError: '',     // getContinuation failed: statuses unknown, never «טרם נוצר קשר» (R10)
+    continuationSyncPreview: null, // R6: dry-run counters {ok,created,updated,cancelled}; null = not asked; 'loading'
+    loadGaps: [],                  // R10: sources the last load could not read (shown as «מידע לא זמין»)
     continuationSearch: '',
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
@@ -4944,15 +4947,51 @@
         .catch(function (e) { state.continuationError = e.message || String(e); return { patients: [] }; }),
       apiGetContinuation()
         .then(function (d) { return { rows: Array.isArray(d.rows) ? d.rows : [] }; })
-        .catch(function () { return { rows: [] }; })
+        .catch(function (e) {
+          // never «טרם נוצר קשר» for everyone because the status sheet did not answer
+          state.continuationRowsError = e.message || String(e);
+          return { rows: [] };
+        })
     ]).then(function (res) {
       state.continuationRoster = res[0].patients;
       state.continuationRows = res[1].rows;
       state.continuationLoading = false;
       if (state.view === 'continuation') renderContinuation();
-      // the server synced the milestone tasks while answering the roster: pick them up
-      return crmReload().catch(function () {});
     });
+  }
+
+  /* R6 (2026-11-07): the milestone tasks are opened / moved / closed ONLY by this explicit action.
+   * The preview is a read (source dry run) so the tab can say how many changes are waiting. */
+  function loadContinuationSyncPreview() {
+    if (state.continuationSyncPreview === 'loading') return;
+    state.continuationSyncPreview = 'loading';
+    apiFetch('/api/continuation-sync/preview', { cache: 'no-store' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return r.ok && d.ok === true ? d : { ok: false }; }); })
+      .catch(function () { return { ok: false }; })
+      .then(function (d) { state.continuationSyncPreview = d; renderContinuationSyncStatus(); });
+  }
+  function renderContinuationSyncStatus() {
+    var el = $('#continuationSyncStatus');
+    if (!el) return;
+    var p = state.continuationSyncPreview;
+    if (!p || p === 'loading') { el.textContent = ''; return; }
+    if (p.ok !== true) { el.textContent = 'מצב הסנכרון לא זמין כרגע'; return; }
+    var n = (p.created || 0) + (p.updated || 0) + (p.cancelled || 0);
+    el.textContent = n ? (n + ' שינויים ממתינים במשימות ההמשך') : 'משימות ההמשך מעודכנות';
+  }
+  function runContinuationSyncNow(btn) {
+    if (btn && btn.disabled) return;
+    busyStart(btn);
+    return continuationSync()
+      .then(function (d) {
+        toast('משימות ההמשך עודכנו: ' + (d.created || 0) + ' נפתחו, ' + (d.updated || 0) + ' הוזזו, ' + (d.cancelled || 0) + ' נסגרו');
+        return crmReload().catch(function () {});
+      })
+      .catch(function () {
+        // safe to retry: the sync is idempotent, nothing is created or closed twice
+        toast('עדכון משימות ההמשך נכשל — לא בוצע שינוי חלקי שאינו ניתן לחזרה. אפשר לנסות שוב.', true);
+      })
+      .then(function () { busyEnd(btn); state.continuationSyncPreview = null; loadContinuationSyncPreview(); if (state.view === 'continuation') renderContinuation(); });
   }
 
   function upsertContinuationLocal(row) {
@@ -5135,6 +5174,7 @@
       listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">טוען רוסטר…</p></div>';
       return;
     }
+    if (state.continuationSyncPreview === null) loadContinuationSyncPreview(); else renderContinuationSyncStatus();
     if (state.continuationError && !state.continuationRoster.length) {
       listEl.innerHTML = '<div class="panel"><p style="color:#e88;padding:20px">שגיאה בטעינת הרוסטר: ' +
         escapeHtml(state.continuationError) + '</p></div>';
@@ -5207,6 +5247,13 @@
     });
 
     listEl.innerHTML = '';
+    if (state.continuationRowsError) {
+      var warn = document.createElement('div');
+      warn.className = 'panel data-unavailable';
+      warn.setAttribute('role', 'alert');
+      warn.textContent = '⚠️ סטטוסי מסלול ההמשך לא זמינים כרגע — הסטטוס המוצג אינו מעיד שלא נוצר קשר. רעננו בעוד רגע.';
+      listEl.appendChild(warn);
+    }
     houseOrder.forEach(function (house) {
       listEl.appendChild(continuationSection(house, groups[house], editor));
     });
@@ -5310,7 +5357,12 @@
   // POST /api/continuation-sync: open / move / close the milestone tasks from the roster the server holds.
   function continuationSync() {
     return apiFetch('/api/continuation-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then(function (r) { return r.json().catch(function () { return {}; }); });
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (d) {
+          if (!r.ok || d.ok !== true) throw new Error(d.error || ('HTTP ' + r.status));
+          return d;
+        });
+      });
   }
   function handleContinuationListClick(e) {
     var act = e.target.closest ? e.target.closest('[data-caction]') : null;
@@ -7480,7 +7532,24 @@
     });
   }
 
+  // R10 (2026-11-07): the sources a load could NOT read. A failed read is shown as
+  // «מידע לא זמין», never as «no payments / no debts / no tasks».
+  function noteLoadGap(gaps, label, err) {
+    if (gaps.indexOf(label) < 0) gaps.push(label);
+    console.warn('[ezone] read failed (' + label + '):', err && err.message);
+  }
+  function renderLoadGaps() {
+    var box = $('#dataUnavailableBanner'), txt = $('#dataUnavailableText');
+    var gaps = Array.isArray(state.loadGaps) ? state.loadGaps : [];
+    if (!box || !txt) return;
+    if (!gaps.length) { box.hidden = true; txt.textContent = ''; return; }
+    txt.textContent = '⚠️ מידע לא זמין כרגע: ' + gaps.join(', ') +
+      '. המסך אינו מציג אותו — אין להסיק שאין תשלומים, חובות או משימות. רעננו בעוד רגע.';
+    box.hidden = false;
+  }
+
   async function loadAll(opts) {
+    var gaps = [];
     try {
       // All six reads are independent Apps Script round-trips (~1-3s each).
       // Fired in PARALLEL: total load = slowest call, not the sum (was serial,
@@ -7492,32 +7561,33 @@
       var results = await Promise.all([
         apiLoad(!!(opts && opts.fresh)),
         ops ? Promise.resolve({ payments: [] }) : apiGetPayments().catch(function (pe) {
-          console.warn('[ezone] getPayments failed, assuming empty:', pe.message);
+          noteLoadGap(gaps, 'תשלומים', pe);
           return { payments: [] };
         }),
         ops ? Promise.resolve({ charges: [] }) : apiGetCharges().catch(function (ce) {
-          console.warn('[ezone] getCharges failed, assuming empty:', ce.message);
+          noteLoadGap(gaps, 'חיובים', ce);
           return { charges: [] };
         }),
         apiGetStopFlags().catch(function (sfe) {
-          console.warn('[ezone] getStopFlags failed, assuming empty:', sfe.message);
+          noteLoadGap(gaps, 'סימוני עצירת טיפול', sfe);
           return { stopFlags: [] };
         }),
         apiGetExtraRequests().catch(function (ere) {
-          console.warn('[ezone] getExtraSessionRequests failed, assuming empty:', ere.message);
+          noteLoadGap(gaps, 'בקשות לטיפול נוסף', ere);
           return { requests: [] };
         }),
-        ops ? Promise.resolve({}) : apiLoadSettings().catch(function () { return {}; }),
+        ops ? Promise.resolve({}) : apiLoadSettings().catch(function (se) { noteLoadGap(gaps, 'הגדרות', se); return {}; }),
         apiGetMyStopAlerts().catch(function (mse) {
-          console.warn('[ezone] getMyStopAlerts failed, assuming empty:', mse.message);
+          noteLoadGap(gaps, 'התראות עצירה', mse);
           return { myStopAlerts: [] };
         }),
         // CRM (OP-CRM-3B): soft — a failed read shows «המידע אינו זמין», never 0.
-        apiGetTasks().catch(function (te) { console.warn('[ezone] getTasks failed:', te.message); return null; }),
-        apiGetActivity().catch(function (ae) { console.warn('[ezone] getActivity failed:', ae.message); return null; }),
+        apiGetTasks().catch(function (te) { noteLoadGap(gaps, 'משימות', te); return null; }),
+        apiGetActivity().catch(function (ae) { noteLoadGap(gaps, 'היסטוריית פעילות', ae); return null; }),
         // Offers CRM (2026-11-03): price-free summaries for «היום שלי» / cards; an ops session never asks
-        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { console.warn('[ezone] offers failed:', oe.message); return null; })
+        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { noteLoadGap(gaps, 'הצעות חבילה', oe); return null; })
       ]);
+      state.loadGaps = gaps;
       state.tasks = results[7];
       state.activity = results[8];
       state.offers = results[9];
@@ -7530,18 +7600,14 @@
       state.dataVersion = (data.dataVersion == null || data.dataVersion === '') ? null : Number(data.dataVersion);
       state.leads = (data.leads || []).map(normalizeLeadFromSheet);
       state.clients = (data.clients || []).map(normalizeClientFromSheet);
-      // One-time cleanup: a converted lead has no further meaning. Remove any lead
-      // that already has a matching client (linked by fromLead). If we removed any,
-      // persist the trimmed leads list back so the duplication is fixed permanently.
-      (function cleanupConvertedLeads() {
+      // A converted lead has no further meaning: hide any lead that already has a
+      // matching client (linked by fromLead). DISPLAY ONLY (R6, 2026-11-07) — loading
+      // the screen never writes. The sheet row is dropped by the source itself on the
+      // next deliberate save (_saveAll drops every lead a client's fromLead points to).
+      (function hideConvertedLeads() {
         var clientLeadIds = {};
         state.clients.forEach(function (c) { if (c.fromLead) clientLeadIds[c.fromLead] = true; });
-        var before = state.leads.length;
         state.leads = state.leads.filter(function (l) { return !clientLeadIds[l.id]; });
-        if (state.leads.length !== before) {
-          console.log('[ezone] removed', before - state.leads.length, 'converted leads');
-          persist().catch(function (e) { console.warn('[ezone] cleanup persist failed:', e.message); });
-        }
       })();
       backfillClientPhones();
       state.payments = (results[1].payments || []).map(normalizePaymentFromSheet).filter(function (p) { return !!p.id; });
@@ -7567,8 +7633,9 @@
       state.myStopAlerts = (results[6].myStopAlerts || []).filter(function (a) { return a && a.clientId; });
       state.loaded = true;
       render();
-      // Continuation CRM (2026-11-03): fetch the admitted roster right after boot (cached ≤60s server-side) so the
-      // server opens / moves / closes the milestone tasks and «היום שלי» can name them — not only when the tab is opened.
+      renderLoadGaps();
+      // Continuation CRM (2026-11-03): fetch the admitted roster right after boot (cached ≤60s server-side) so
+      // «היום שלי» can name the milestone tasks. A READ only (R6): the tasks change only via «עדכון משימות המשך».
       if (state.continuationRoster === null) ensureContinuationLoaded();
     } catch (e) {
       // A 401 already flipped to the PIN screen (apiFetch) — no error toast
@@ -7678,6 +7745,8 @@
     on('#inactiveSearch', 'input', function (e) { state.inactiveSearch = e.target.value; renderInactive(); });
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
     on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
+    on('#continuationSyncBtn', 'click', function (e) { runContinuationSyncNow(e.currentTarget); });
+    on('#dataUnavailableClose', 'click', function () { var b = $('#dataUnavailableBanner'); if (b) b.hidden = true; });
     var continuationListEl = $('#continuationList');
     if (continuationListEl) continuationListEl.addEventListener('click', handleContinuationListClick);
     on('#continuationToOutpatientConfirm', 'click', function (e) {

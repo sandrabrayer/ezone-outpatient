@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Read-only boot — opening / navigating / refreshing never writes (R6 + R10, #149, 2026-11-07)
+- **R6 fix (Work acceptance audit, issue #149):** `loadAll` no longer calls `persist()` to drop converted leads — they are hidden on screen only; the source's `_saveAll` already drops every lead a client's `fromLead` points to on the next deliberate save. `GET /api/continuation-roster` no longer runs the milestone sync: it is a pure read (cache hit, miss or `?fresh=1`).
+- **The milestone sync keeps working, explicitly:** «🔄 עדכון משימות המשך» in «מסלול המשך» → `POST /api/continuation-sync` (signed-in allow-listed session, JSON only → 401 / 415 otherwise; roster fetched by Node, never typed by a browser). Idempotent by stable task ids: a retry after a lost answer creates / closes nothing twice. A terminal CRM status save still triggers it (that is a deliberate write).
+- **Read-only preview:** `GET /api/continuation-sync/preview` → new source action `previewContinuationMilestones` (the same computation as a dry run: no lock, no write, not even sheet creation) so the tab shows «N שינויים ממתינים» / «מעודכנות» / «לא זמין». Old source without the action → «לא זמין», never a write.
+- **R10:** a failed payments / charges / stop flags / extra requests / settings / alerts / tasks / activity / offers read shows a «מידע לא זמין» banner (no more silent empty list read as «no debt»); a failed continuation-status read warns instead of showing everyone as «טרם נוצר קשר».
+- Tests: `test/read-only-boot-browser.test.js` (Chromium + real server.js + real Code.gs: open, every tab, 4 refreshes, 2 windows, forced roster miss → 0 writes; explicit sync once; lost-answer retry → nothing new; outage → «מידע לא זמין», nothing closed; unauthorized → 401/403/415) — fails on the deployed code, passes here. `test/continuation-milestones.test.js` +2 (dry run predicts the sync exactly, writes nothing; proxy-only). Existing continuation browser test now presses the button. SW **v32 → v33**. **Code.gs changed → Apps Script phase required** after Node. See `CHANGELOG-read-only-boot.md`.
+
 ### Same-date future renewal confirmation — current-base candidate (2026-11-06)
 - Adapt existing draft #164 to production base `213ffa4609c3453d8ddf5a6eb8a890eacedac3dd`; preserve the newer busy spinner, pricing recovery and session counters.
 - Ask for explicit confirmation of a distinct additional payment before reserving a future renewal with the last recorded payment date. The source repeats the guard under the existing lock and persists strict boolean confirmation in the existing journal intent.
