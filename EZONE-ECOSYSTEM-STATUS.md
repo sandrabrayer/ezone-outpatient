@@ -1,4 +1,15 @@
-# Outpatient — read-only boot (R6/R10 of #149) draft PR, 2026-11-07, base = production `68b78a5` (#164)
+# Outpatient — read-only acceptance continuation, 2026-11-08
+
+PR #174 is merged and released at `5f6225f5c85cc3ed17db2a31e3339fa868a74cab`;
+its final release record verifies Apps Script v109. Live signed-in read-only
+inspection now covers Today, Leads, Clients, Continuation and Billing.
+The isolated frontend candidate fixes delayed continuation task names, direct
+navigation by the existing subject/key, and misleading missing-date labels.
+No live data was changed; this new candidate is not released. See
+`docs/crm/OUTPATIENT-READONLY-ACCEPTANCE-20261108.md` for observations, limits and
+the precise next work. Referral deduplication #137 remains a separate draft.
+
+# Historical PR #174 preparation — read-only boot (R6/R10 of #149), 2026-11-07, base = production `68b78a5` (#164)
 
 Opening, navigating and refreshing Outpatient now performs **no source write**: the boot no longer
 `persist()`s converted-lead cleanup (display filter; `_saveAll` already drops them on a deliberate save),

@@ -223,6 +223,7 @@
     continuationSyncPreview: null, // R6: dry-run counters {ok,created,updated,cancelled}; null = not asked; 'loading'
     loadGaps: [],                  // R10: sources the last load could not read (shown as «מידע לא זמין»)
     continuationSearch: '',
+    continuationSubjectId: '', // read-only navigation from a task; never match a patient by display name
     settings: { bankName: '', bankBranch: '', bankAccount: '', bankHolder: '' },
     loaded: false
   };
@@ -1763,7 +1764,8 @@
     } else if (kind === 'extra') {
       var e = $('#panel-extras'); if (e) e.scrollIntoView({ block: 'start', behavior: 'smooth' });
     } else if (kind === 'continuation') {
-      state.continuationSearch = name; var ci = $('#continuationSearch'); if (ci) ci.value = name;
+      state.continuationSubjectId = String(id || '').trim();
+      state.continuationSearch = ''; var ci = $('#continuationSearch'); if (ci) ci.value = '';
       setView('continuation');
     } else if (kind === 'offer') {
       setView('packages');
@@ -5003,6 +5005,7 @@
       if (state.continuationError) { state.continuationSyncPreview = { ok: false }; renderContinuationSyncStatus(); }
       else loadContinuationSyncPreview();
       if (state.view === 'continuation') renderContinuation();
+      else if (state.view === 'dashboard') renderMyDay(); // roster names arrive after the first task render
     });
   }
 
@@ -5092,6 +5095,7 @@
    * «חסר תאריך כניסה» and no task (business rule, CHANGELOG-continuation-milestones.md). */
   function continuationMilestonesHtml(p, editor) {
     var CL = window.ContinuationLogic, CA = window.CrmActivity;
+    if (!p.ref && CL && CL.milestones(p.entryDate)) return '<div class="cont-ms cont-ms-missing">⚠ חסר טלפון/מזהה — לא נפתחות משימות המשך עד שיושלמו בדשבורד</div>';
     if (!p.milestones) return '<div class="cont-ms cont-ms-missing">⚠ חסר תאריך כניסה — לא נפתחות משימות המשך עד שיוזן בדשבורד</div>';
     var todayISO = today();
     return '<div class="cont-ms">' + p.milestones.map(function (m) {
@@ -5306,10 +5310,17 @@
       return vm;
     });
 
-    if (q) patients = patients.filter(function (p) { return p.name.toLowerCase().indexOf(q) !== -1; });
+    var target = state.continuationSubjectId;
+    // Tasks use cont:<ref>; legacy meeting rows already carry the workflow key.
+    // No fallback by name: two people may share a name, and a departed patient's task may remain open.
+    if (target) patients = patients.filter(function (p) { return p.subjectId === target || p.key === target; });
+    else if (q) patients = patients.filter(function (p) { return p.name.toLowerCase().indexOf(q) !== -1; });
+    var focusHtml = target ? '<div class="panel continuation-focus"><span>' +
+      (patients.length ? 'מציג את המטופל/ת של המשימה' : 'המטופל/ת של המשימה לא נמצא/ת ברשימת המאושפזים הנוכחית — יש לבדוק לפני טיפול במשימה') +
+      '</span> <button type="button" class="link-btn" data-caction="clear-focus">לכל המאושפזים</button></div>' : '';
 
     if (!patients.length) {
-      listEl.innerHTML = '<div class="panel"><p style="color:#888;padding:20px">אין מטופלים מאושפזים להצגה</p></div>';
+      listEl.innerHTML = focusHtml || '<div class="panel"><p style="color:#888;padding:20px">אין מטופלים מאושפזים להצגה</p></div>';
       return;
     }
 
@@ -5323,7 +5334,7 @@
       return continuationHouseLabel(a).localeCompare(continuationHouseLabel(b), 'he');
     });
 
-    listEl.innerHTML = '';
+    listEl.innerHTML = focusHtml;
     if (state.continuationRowsError) {
       var warn = document.createElement('div');
       warn.className = 'panel data-unavailable';
@@ -5444,6 +5455,11 @@
   function handleContinuationListClick(e) {
     var act = e.target.closest ? e.target.closest('[data-caction]') : null;
     if (!act) return;
+    if (act.getAttribute('data-caction') === 'clear-focus') {
+      state.continuationSubjectId = '';
+      renderContinuation();
+      return;
+    }
     var rowEl = e.target.closest('.continuation-row');
     if (!rowEl) return;
     var key = rowEl.getAttribute('data-key');
@@ -7828,7 +7844,7 @@
     on('#retentionSearch', 'input', function (e) { state.retentionSearch = e.target.value; renderRetention(); });
     on('#inactiveSearch', 'input', function (e) { state.inactiveSearch = e.target.value; renderInactive(); });
     on('#billingSearch', 'input', function (e) { state.billingSearch = e.target.value; renderBilling(); });
-    on('#continuationSearch', 'input', function (e) { state.continuationSearch = e.target.value; renderContinuation(); });
+    on('#continuationSearch', 'input', function (e) { state.continuationSubjectId = ''; state.continuationSearch = e.target.value; renderContinuation(); });
     on('#continuationSyncBtn', 'click', function (e) { runContinuationSyncNow(e.currentTarget); });
     on('#myDayContSyncBtn', 'click', function (e) { runContinuationSyncNow(e.currentTarget); });
     on('#dataUnavailableClose', 'click', function () { var b = $('#dataUnavailableBanner'); if (b) b.hidden = true; });

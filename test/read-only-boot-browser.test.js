@@ -41,7 +41,7 @@ const NOA = { sourceApp: 'dashboard', name: 'נועה לוי', phone: '050-123-4
 const DEPARTED = { sourceApp: 'dashboard', name: 'עזב את הבית', phone: '0504444444', house: 'ramot', entryDate: daysAgo(10) };
 const ROSTER = { ok: true, patients: [NOA, { sourceApp: 'dashboard', name: 'מטופל קיים', phone: '0509999999', house: 'asher', entryDate: daysAgo(5) }] };
 
-async function fixture(t) {
+async function fixture(t, fixtureOptions = {}) {
   let browser;
   try { browser = await chromium.launch(); } catch (e) {
     if (process.env.EZONE_REQUIRE_BROWSER_TESTS === '1') throw e;
@@ -67,7 +67,7 @@ async function fixture(t) {
   const seeded = sb.post({ action: 'syncContinuationMilestones', user: 'ורד', patients: [DEPARTED], rosterComplete: false });
   assert.equal(seeded.ok, true); assert.equal(seeded.created, 3);
 
-  const net = { roster: 0, posts: [], rosterDown: false, failGet: new Set() };
+  const net = { roster: 0, posts: [], rosterDown: false, rosterGate: null, failGet: new Set() };
   const keys = ['APP_PIN', 'USER_PIN_OREN', 'USER_PIN_DANA', 'SESSION_SECRET', 'SHEETS_URL', 'DASHBOARD_SHEETS_URL', 'OCCUPANCY_SECRET'];
   const oldEnv = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   Object.assign(process.env, { APP_PIN: '424242', USER_PIN_OREN: '515151', USER_PIN_DANA: '626262', SESSION_SECRET: 'fixture-session-secret-not-a-real-credential', SHEETS_URL: 'https://sheets.invalid/fixture', DASHBOARD_SHEETS_URL: 'https://dashboard.invalid/exec', OCCUPANCY_SECRET: 'occupancy-fixture-secret' });
@@ -76,8 +76,9 @@ async function fixture(t) {
     const url = new URL(String(input));
     if (url.host === 'dashboard.invalid') {
       net.roster++;
+      if (net.rosterGate) await net.rosterGate;
       if (net.rosterDown) throw new Error('ECONNRESET (synthetic)');
-      return { status: 200, text: async () => JSON.stringify(ROSTER) };
+      return { status: 200, text: async () => JSON.stringify(fixtureOptions.roster || ROSTER) };
     }
     assert.equal(url.origin + url.pathname, 'https://sheets.invalid/fixture', 'no other upstream allowed');
     let result;
@@ -127,7 +128,7 @@ async function fixture(t) {
     await ctx.route('**/*', (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     return ctx;
   }
-  async function open(ctx, name, pin) {
+  async function open(ctx, name, pin, waitForIdle = true) {
     const page = await ctx.newPage();
     page.setDefaultTimeout(15000);
     const errors = [];
@@ -137,7 +138,7 @@ async function fixture(t) {
     await page.fill('#pinInput', pin || '424242');
     await page.click('#pinSubmit');
     await page.waitForSelector('#app:not([hidden])');
-    await page.waitForLoadState('networkidle');
+    if (waitForIdle) await page.waitForLoadState('networkidle');
     return { page, errors };
   }
   async function visitEveryTab(page) {
@@ -150,6 +151,91 @@ async function fixture(t) {
   }
   return { sb, net, origin, snapshot, changedSince, writes, context, open, visitEveryTab };
 }
+
+test('UAT continuation: delayed roster names appear in Today without navigation or source writes', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  f.sb.post({ action: 'syncContinuationMilestones', user: 'ורד', patients: [NOA], rosterComplete: false });
+  const before = f.snapshot();
+  let release;
+  f.net.rosterGate = new Promise((resolve) => { release = resolve; });
+  const ctx = await f.context();
+  const { page, errors } = await f.open(ctx, undefined, undefined, false);
+  const row = page.locator('#myDay .md-row[data-md-id="cont:phone:0501234567"]').first();
+  try {
+    await row.waitFor();
+    assert.equal(await row.locator('.name').textContent(), '—', 'task read precedes the held roster');
+  } finally { release(); }
+  await page.waitForFunction(() => document.querySelector('#myDay [data-md-id="cont:phone:0501234567"] .name')?.textContent === 'נועה לוי');
+  assert.equal(await page.locator('#view-dashboard').evaluate((el) => el.classList.contains('active')), true);
+  assert.deepEqual(f.writes(), []);
+  assert.deepEqual(f.changedSince(before), []);
+  assert.deepEqual(errors, []);
+});
+
+test('UAT continuation: an early task click resolves its exact patient, not a same-name neighbour', skipOpt, async (t) => {
+  const neighbour = { ...NOA, phone: '0508888888', house: 'asher' };
+  const f = await fixture(t, { roster: { ok: true, patients: [NOA, neighbour] } }); if (!f) return;
+  f.sb.post({ action: 'syncContinuationMilestones', user: 'ורד', patients: [NOA], rosterComplete: false });
+  const before = f.snapshot();
+  let release;
+  f.net.rosterGate = new Promise((resolve) => { release = resolve; });
+  const { page, errors } = await f.open(await f.context(), undefined, undefined, false);
+  try {
+    const row = page.locator('#myDay .md-row[data-md-id="cont:phone:0501234567"]').first();
+    await row.waitFor();
+    await row.locator('[data-md-go]').click();
+  } finally { release(); }
+  await page.locator('#continuationList .cont-card').first().waitFor();
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 1, 'exact subject, not a name filter');
+  assert.equal(await page.locator('#continuationList .cont-card').getAttribute('data-crm-client'), 'cont:phone:0501234567');
+  assert.equal(await page.inputValue('#continuationSearch'), '', 'the placeholder is never used as a search term');
+  await page.getByRole('button', { name: 'לכל המאושפזים', exact: true }).click();
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 2, 'return to the complete roster');
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.click('.tab[data-view="dashboard"]');
+  await page.locator('#myDay .md-row[data-md-id="cont:phone:0501234567"]').first().locator('[data-md-go]').click();
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 1, 'the focused action also works on mobile');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'no horizontal overflow');
+  await page.fill('#continuationSearch', 'נועה');
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 2, 'typing explicitly returns to ordinary name search');
+  assert.deepEqual(f.writes(), []);
+  assert.deepEqual(f.changedSince(before), []);
+  assert.deepEqual(errors, []);
+});
+
+test('UAT continuation: a task for an absent patient shows a clear warning, never another patient', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const before = f.snapshot();
+  const { page, errors } = await f.open(await f.context());
+  await page.locator('#myDay .md-row[data-md-id="cont:phone:0504444444"]').first().locator('[data-md-go]').click();
+  assert.match(await page.textContent('#continuationList'), /לא נמצא\/ת ברשימת המאושפזים הנוכחית/);
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 0);
+  await page.getByRole('button', { name: 'לכל המאושפזים', exact: true }).click();
+  assert.equal(await page.locator('#continuationList .cont-card').count(), 2);
+  assert.deepEqual(f.writes(), []);
+  assert.deepEqual(f.changedSince(before), []);
+  assert.deepEqual(errors, []);
+});
+
+test('UAT continuation: a missing identifier is not reported as a missing admission date', skipOpt, async (t) => {
+  const datedNoRef = { name: 'ללא מזהה', house: 'ramot', entryDate: daysAgo(5) };
+  const undated = { name: 'ללא תאריך', house: 'ramot', phone: '0507777777', entryDate: '' };
+  const idOnly = { name: 'מזהה ללא טלפון', id: 'fixture-stay-1', house: 'ramot', entryDate: daysAgo(5) };
+  const f = await fixture(t, { roster: { ok: true, patients: [datedNoRef, undated, idOnly] } }); if (!f) return;
+  const before = f.snapshot();
+  const { page, errors } = await f.open(await f.context());
+  await page.click('.tab[data-view="continuation"]');
+  const dated = page.locator('.cont-card', { hasText: 'ללא מזהה' });
+  await dated.waitFor();
+  assert.match(await dated.textContent(), /חסר טלפון\/מזהה/);
+  assert.doesNotMatch(await dated.textContent(), /חסר תאריך כניסה/);
+  assert.equal(await dated.locator('.cont-ms-item').count(), 0);
+  assert.match(await page.locator('.cont-card', { hasText: 'ללא תאריך' }).textContent(), /חסר תאריך כניסה/);
+  assert.equal(await page.locator('.cont-card', { hasText: 'מזהה ללא טלפון' }).locator('.cont-ms-item').count(), 3);
+  assert.deepEqual(f.writes(), []);
+  assert.deepEqual(f.changedSince(before), []);
+  assert.deepEqual(errors, []);
+});
 
 test('R6 acceptance 1–4: open, refresh, every tab, two windows, roster cache miss → ZERO source writes', skipOpt, async (t) => {
   const f = await fixture(t); if (!f) return;
