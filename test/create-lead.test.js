@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity schema');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the createLead inbound write endpoint (apps-script/Code.gs).
@@ -254,5 +262,5 @@ test('source: mirror lead keys equal LEADS_HEADERS in Code.gs (row shape in sync
   const m = SRC.match(/var LEADS_HEADERS = \[([\s\S]*?)\];/);
   assert.ok(m, 'LEADS_HEADERS not found');
   const cols = m[1].match(/'[^']+'/g).map(s => s.slice(1, -1));
-  assert.deepEqual(cols, LEADS_HEADERS, 'test mirror must track LEADS_HEADERS');
+  assert.deepEqual(withoutCareIdentityTail(cols), LEADS_HEADERS, 'physical Leads prefix unchanged');
 });

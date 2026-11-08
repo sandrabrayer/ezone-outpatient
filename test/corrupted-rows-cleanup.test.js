@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity schema');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the corrupted-rows cleanup pipeline (apps-script/Code.gs):
@@ -753,8 +761,8 @@ test('CORRUPTION_LOCATIONS mirrors public/app.js LOCATIONS exactly', () => {
 });
 
 test('CLIENTS_HEADERS: 39 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, preferredHouse, then billingMode', () => {
-  assert.equal(CLIENTS_HEADERS.length, 39);
-  assert.deepEqual(CLIENTS_HEADERS.slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.equal(withoutCareIdentityTail(CLIENTS_HEADERS).length, 39);
+  assert.deepEqual(withoutCareIdentityTail(CLIENTS_HEADERS).slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
 });
 
 test('scan targets: every configured column exists in its sheet\'s header array', () => {
