@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Read-only acceptance: continuation task names, navigation and missing-data labels (2026-11-08)
+- Refresh Today when the asynchronous admitted roster finishes loading, so existing continuation tasks show their patient names without leaving the screen.
+- Open a continuation task by its existing subject/workflow key, including a click before the roster arrives. Same-name patients are not substituted; an absent subject gets an explicit warning and a return-to-roster action.
+- A valid entry date with no usable identifier is labelled as missing phone/identifier, rather than missing entry date.
+- Four synthetic browser regressions verify these paths and unchanged source sheets/properties. The existing continuation/read-only browser suites are now explicitly included in browser CI. SW v33 → v34; no Apps Script change. See `CHANGELOG-continuation-readonly-acceptance.md` and `docs/crm/OUTPATIENT-READONLY-ACCEPTANCE-20261108.md`.
+
 ### Read-only boot — opening / navigating / refreshing never writes (R6 + R10, #149, 2026-11-07)
 - **R6 fix (Work acceptance audit, issue #149):** `loadAll` no longer calls `persist()` to drop converted leads — they are hidden on screen only; the source's `_saveAll` already drops every lead a client's `fromLead` points to on the next deliberate save. `GET /api/continuation-roster` no longer runs the milestone sync: it is a pure read (cache hit, miss or `?fresh=1`).
 - **The milestone sync keeps working, explicitly:** «🔄 עדכון משימות המשך» in «מסלול המשך» → `POST /api/continuation-sync` (signed-in allow-listed session, JSON only → 401 / 415 otherwise; roster fetched by Node, never typed by a browser). Idempotent by stable task ids: a retry after a lost answer creates / closes nothing twice. A terminal CRM status save still triggers it (that is a deliberate write).

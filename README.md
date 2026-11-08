@@ -1,5 +1,7 @@
 # E-ZONE Outpatient Dashboard
 
+> Latest read-only acceptance and return point: [2026-11-08](docs/crm/OUTPATIENT-READONLY-ACCEPTANCE-20261108.md).
+
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
 > Uninstalled, default-disabled removed-leads header helper: [runbook](docs/removed-leads-header-correction.md).
 > The older eight-table evidence below proves only that subset, not full recovery.
