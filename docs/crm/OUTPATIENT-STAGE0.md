@@ -66,7 +66,7 @@ Dashboard owner, mapped to a `SESSION_USERS` name or blank), `_createLead`
 accepts it **only if** it is in `SESSION_USERS` (else blank, never rejected —
 the lead must still be created).
 
-### G2 — no status feedback
+### G2 — no status feedback (Outpatient side DONE in Phase D draft: `getHandoffStatus`; Dashboard consumer D-FB-1 pending)
 The Dashboard marks the patient «נשלח לאמבולטורי» at send time and never learns
 «נוצר קשר / נקבעה היכרות / התחיל טיפול / לא רלוונטי». Fix (OP-CRM-2): a
 read-only, shared-secret endpoint on this app (`getLeadStatus` by lead id or
@@ -74,7 +74,7 @@ phone, same auth pattern as the existing cross-app reads, `no-store`) that the
 Dashboard polls when it renders the ambulatory card. No write from the
 Dashboard into Outpatient beyond `createLead`.
 
-### G3 — money separation is client-side only
+### G3 — money separation is client-side only (CLOSED in OP-CRM-3A, draft — see `CHANGELOG-crm-money-scope.md`)
 Same decision as the Dashboard: operational people (דנה) must not receive money
 fields from the server. Fix (OP-CRM-3 or its own PR): `OPS_USER_IDS`-style
 list in `lib/users.js`; the session-gated read routes strip
@@ -96,13 +96,3 @@ money for דנה but the clients tab does not.
 1. After OP-CRM-1 is live: as דנה, open the app — «היום שלי» shows no «חידושים וגבייה» card; as ורד it does.
 2. Discharge a **test** patient from the Dashboard to outpatient only if a sandbox sheet is configured; otherwise skip — the handoff path is covered by `test/create-lead.test.js`.
 3. `curl -s https://ezone-outpatient.up.railway.app/sw.js | grep -o 'ezone-outpatient-v[0-9]*'` → `v21`.
-## 7. Care-continuum identity checkpoint (2026-10-30)
-
-Sandra approved: continuity starts before discharge. The identity contract reuses Dashboard identity rather than inventing a new id:
-
-- stay/admission = `dashboardPatientId = Patients.id`
-- cross-stay person key = `dashboardPersonId || dashboardPatientId`
-- Dashboard lead id = `dashboardLeadId` when known
-
-OP-ID-1 adds the storage/link-or-create foundation in Outpatient. Exact stable ids may link one open Lead / active Client; phone+name is duplicate-warning only and never auto-links. OP-ID-2 will add the continuation-row linkage and activation copy. Dashboard feedback follows after identity is stable. See `CHANGELOG-care-continuum-identity.md`.
-

@@ -234,9 +234,9 @@ test('B: /api/me round-trips the cookie user; legacy cookie -> ""; no cookie -> 
   assert.equal((await request('GET', '/api/me')).status, 401);
   const named = await request('GET', '/api/me', null, { Cookie: cookieOf(await login('אורן')) });
   assert.equal(named.status, 200);
-  assert.deepEqual(named.json, { ok: true, user: 'אורן' });
+  assert.deepEqual(named.json, { ok: true, user: 'אורן', moneyScope: 'full' });
   const legacy = await request('GET', '/api/me', null, { Cookie: cookieOf(await login()) });
-  assert.deepEqual(legacy.json, { ok: true, user: '' });
+  assert.deepEqual(legacy.json, { ok: true, user: '', moneyScope: 'ops' });
 });
 
 test('B: /api/sheets GET + POST, /api/continuation-roster and /api/debug/* are 401 without a cookie (and with a bad one); 200 with', async () => {
@@ -407,27 +407,24 @@ function baseLeads(ctx) {
 
 /* ================= C. schema ================= */
 
-test('C: who/when positions remain frozen; OP-ID-1 appends server-owned identity after existing tails', () => {
+test('C: CLIENTS_HEADERS, LEADS_HEADERS and both tombstone mirrors END with updatedAt, updatedBy (append-only)', () => {
   const { ctx } = makeSandbox();
-  const care = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
-  const CH = headersOf(ctx, 'CLIENTS_HEADERS');
-  const LH = headersOf(ctx, 'LEADS_HEADERS');
-  const CR = headersOf(ctx, 'CLIENTS_REMOVED_HEADERS');
-  const LR = headersOf(ctx, 'REMOVED_LEADS_HEADERS');
-  assert.deepEqual(CH.slice(34, 36), ['updatedAt', 'updatedBy']);
-  assert.deepEqual(CH.slice(36, 38), ['plannedExitDate', 'preferredHouse']);
-  assert.deepEqual(CH.slice(-5), care);
-  assert.deepEqual(LH.slice(16, 19), ['updatedAt', 'updatedBy', 'preferredHouse']);
-  assert.deepEqual(LH.slice(-5), care);
-  assert.deepEqual(CR.slice(-9, -7), ['updatedAt', 'updatedBy']);
-  assert.deepEqual(CR.slice(-7, -5), ['plannedExitDate', 'preferredHouse']);
-  assert.deepEqual(CR.slice(-5), care);
-  assert.deepEqual(LR.slice(-3, -1), ['updatedAt', 'updatedBy']);
-  assert.equal(LR[LR.length - 1], 'preferredHouse');
-  assert.equal(CH.length, 43);
-  assert.equal(CH[33], 'paymentAmountOverrides');
-  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides'].concat(care));
-  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy'].concat(care));
+  for (const name of ['CLIENTS_HEADERS', 'LEADS_HEADERS', 'CLIENTS_REMOVED_HEADERS', 'REMOVED_LEADS_HEADERS']) {
+    // Clients + its tombstone later appended plannedExitDate after the stamps;
+    // all four then appended preferredHouse (בית מועדף) last.
+    const H = headersOf(ctx, name);
+    // (Clients + its tombstone also appended billingMode after preferredHouse, 2026-11-04)
+    const tail = /^CLIENTS/.test(name) ? H.slice(-5, -3) : H.slice(-3, -1);
+    assert.deepEqual(tail, ['updatedAt', 'updatedBy'], name);
+  }
+  assert.equal(ctx.CLIENTS_HEADERS.length, 39);
+  assert.equal(ctx.CLIENTS_HEADERS[36], 'plannedExitDate');
+  assert.equal(ctx.CLIENTS_HEADERS[37], 'preferredHouse');
+  assert.equal(ctx.CLIENTS_HEADERS[38], 'billingMode');
+  assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides', 'everything before the stamps unchanged');
+  assert.equal(ctx.LEADS_HEADERS[ctx.LEADS_HEADERS.length - 4], 'assignedTo');
+  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides']);
+  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy']);
 });
 
 test('C: _ensureSheet adds the headers to a legacy sheet and text-forces the two stamp columns; _writeAll text-forces them too', () => {
@@ -718,7 +715,7 @@ test('E: source-scan — every Clients write path stamps (no writer left behind)
   assert.match(stampAt, /CLIENTS_HEADERS\.indexOf\('updatedBy'\) \+ 1/);
   assert.doesNotMatch(stampAt, /getRange\([^,]+,\s*\d+\)/, 'never a hardcoded column');
   // doPost feeds the proxy-injected user into every internal writer
-  assert.match(GS, /user: _requestUser\(payload\)\n\s*\}\)\);/, 'saveAll receives user');
+  assert.match(GS, /user: _requestUser\(payload\),\n(?:\s*\/\/[^\n]*\n)*\s*moneyScope: payload\.moneyScope\n\s*\}\)\);/, 'saveAll receives user (+ the proxy-decided moneyScope, OP-CRM-3A)');
   assert.match(GS, /_removeLead\(payload\.lead, _requestUser\(payload\)\)/);
 });
 

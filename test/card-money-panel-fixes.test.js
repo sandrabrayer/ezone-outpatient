@@ -81,7 +81,9 @@ test('#1 the חידוש ותשלום (renewForm) modal has no clinical-type fiel
 // #2 — money content (incl. charges) lives in the right כספים panel
 // ─────────────────────────────────────────────────────────────────────────────
 test('#2 the extra-charge rows render in the money panel, not the plan panel', () => {
-  const money = APP.match(/var moneyPanel =([\s\S]*?)'<\/div>';/);
+  // 2026-11-04 (billing mode): the panel is built in two branches (per-session / package) — both live under
+  // `var moneyPanel;` and both end with chargesHtml; the match spans up to the plan panel.
+  const money = APP.match(/var moneyPanel;([\s\S]*?)\n    \/\/ תוכנית טיפול/);
   const plan = APP.match(/var planPanel =([\s\S]*?)'<\/div>';/);
   assert.ok(money && plan, 'money/plan panel blocks not found');
   assert.match(money[1], /cc-money/);
@@ -96,8 +98,8 @@ test('#2 the two-column split makes the money (right) panel wider than the plan 
 });
 
 test('#2 the green/blue tint scheme + @supports color-mix fallback are preserved', () => {
-  assert.match(CSS, /\.client-card \.cc-money \{ background: #124733;/);
-  assert.match(CSS, /\.client-card \.cc-plan  \{ background: #0d3845;/);
+  assert.match(CSS, /\.client-card \.cc-money \{ background: #E6F4EC;/); // light theme (OP-CRM-4)
+  assert.match(CSS, /\.client-card \.cc-plan  \{ background: #E7F0FA;/);
   assert.match(CSS, /@supports \(background: color-mix\(in srgb, red, blue\)\)/);
 });
 

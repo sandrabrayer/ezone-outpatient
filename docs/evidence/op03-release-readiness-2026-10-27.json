@@ -1,0 +1,945 @@
+{
+  "schema": "op03-readonly-release-readiness-v1",
+  "readsCompletedByUTC": "2026-10-27 17:24:47 UTC",
+  "codeHead": "41678db096f9c72622fd7da80919cb94861af0c5",
+  "noProductionWrites": true,
+  "coordinatedCapture": false,
+  "deployedScriptVersionVerified": false,
+  "source": {
+    "id": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+    "url": "https://docs.google.com/spreadsheets/d/17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc/edit",
+    "title": "EZONE OUTPATIENT",
+    "timeZone": "Asia/Jerusalem",
+    "sheets": [
+      {
+        "title": "Sheet1",
+        "sheetId": 0,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "FinancialOps",
+        "sheetId": 944728949,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "PackageCatalog",
+        "sheetId": 1501463318,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "PackageRequests",
+        "sheetId": 1842916727,
+        "allocatedRows": 1000,
+        "allocatedColumns": 28
+      },
+      {
+        "title": "AuditLog",
+        "sheetId": 793691873,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Credits",
+        "sheetId": 169202412,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Clients-removed",
+        "sheetId": 1281588581,
+        "allocatedRows": 1000,
+        "allocatedColumns": 41
+      },
+      {
+        "title": "התראות עצירת טיפול",
+        "sheetId": 1470013209,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "מסלול המשך",
+        "sheetId": 124869027,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "TherapistRates",
+        "sheetId": 1839640136,
+        "allocatedRows": 997,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "ExtraSessionRequests",
+        "sheetId": 654665363,
+        "allocatedRows": 997,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "SessionLog",
+        "sheetId": 1942953182,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "StopFlags",
+        "sheetId": 306416922,
+        "allocatedRows": 993,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "ClientCharges",
+        "sheetId": 332968333,
+        "allocatedRows": 988,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "RepairPlan",
+        "sheetId": 1538281084,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "לידים שהוסרו",
+        "sheetId": 1894136505,
+        "allocatedRows": 999,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Settings",
+        "sheetId": 1841579048,
+        "allocatedRows": 1000,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Payments",
+        "sheetId": 423612964,
+        "allocatedRows": 972,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Leads",
+        "sheetId": 459722543,
+        "allocatedRows": 969,
+        "allocatedColumns": 26
+      },
+      {
+        "title": "Clients",
+        "sheetId": 1512548670,
+        "allocatedRows": 993,
+        "allocatedColumns": 38
+      },
+      {
+        "title": "Copy of Clients",
+        "sheetId": 1081599834,
+        "allocatedRows": 993,
+        "allocatedColumns": 33
+      }
+    ]
+  },
+  "backup": {
+    "id": "1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM",
+    "url": "https://docs.google.com/spreadsheets/d/1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM/edit",
+    "title": "EZONE-Backups",
+    "timeZone": "Asia/Jerusalem",
+    "totalTabs": 205,
+    "todayTabs": [
+      {
+        "title": "dashboard-patients-2026-10-27",
+        "sheetId": 1877503041
+      },
+      {
+        "title": "dashboard-leads-2026-10-27",
+        "sheetId": 1345160195
+      },
+      {
+        "title": "outpatient-2026-10-27",
+        "sheetId": 2113543580
+      },
+      {
+        "title": "outpatient-leads-2026-10-27",
+        "sheetId": 2118070164
+      },
+      {
+        "title": "outpatient-leads-removed-2026-10-27",
+        "sheetId": 1838168520
+      },
+      {
+        "title": "outpatient-clients-removed-2026-10-27",
+        "sheetId": 147755898
+      },
+      {
+        "title": "outpatient-payments-2026-10-27",
+        "sheetId": 1071127108
+      },
+      {
+        "title": "outpatient-charges-2026-10-27",
+        "sheetId": 844440612
+      },
+      {
+        "title": "outpatient-credits-2026-10-27",
+        "sheetId": 1229414143
+      },
+      {
+        "title": "outpatient-financial-ops-2026-10-27",
+        "sheetId": 485162555
+      },
+      {
+        "title": "outpatient-package-catalog-2026-10-27",
+        "sheetId": 1202608571
+      },
+      {
+        "title": "outpatient-package-requests-2026-10-27",
+        "sheetId": 2030415526
+      },
+      {
+        "title": "outpatient-manifest-2026-10-27",
+        "sheetId": 1454966264
+      }
+    ]
+  },
+  "manifestObservation": {
+    "range": "'outpatient-manifest-2026-10-27'!A1:J15",
+    "majorDimension": "ROWS",
+    "values": [
+      [
+        "id",
+        "source",
+        "snapshot",
+        "absent",
+        "sha256"
+      ],
+      [
+        "Clients",
+        "Clients",
+        "outpatient-2026-10-27",
+        "0",
+        "5d2631ef9d83caefdf4d5963398698602416ad458d7350dab6414d6d2f747508"
+      ],
+      [
+        "Leads",
+        "Leads",
+        "outpatient-leads-2026-10-27",
+        "0",
+        "5fabed4966dc7448a19b677dbd03b747171067ab784a4c521646732f0d5d3648"
+      ],
+      [
+        "לידים שהוסרו",
+        "לידים שהוסרו",
+        "outpatient-leads-removed-2026-10-27",
+        "0",
+        "8330a109d59f3f7a2be4ff3d3a7edf8985691a1fa4d243c40144ec6d1313e5a4"
+      ],
+      [
+        "Clients-removed",
+        "Clients-removed",
+        "outpatient-clients-removed-2026-10-27",
+        "0",
+        "8e8b119c67775fdd359dfda5b0b860ec1901cd01b2df07632fed0aa49fa7f86c"
+      ],
+      [
+        "Payments",
+        "Payments",
+        "outpatient-payments-2026-10-27",
+        "0",
+        "d2a7fc05aa2e732e362d02d8e5d09caa96193b81abdcc8b5dc0d455a6a5041bb"
+      ],
+      [
+        "ClientCharges",
+        "ClientCharges",
+        "outpatient-charges-2026-10-27",
+        "0",
+        "29ce52adc42b9799557df79d83d7c38e684d2655e902413bdc8adf2d62cee0e0"
+      ],
+      [
+        "Credits",
+        "Credits",
+        "outpatient-credits-2026-10-27",
+        "0",
+        "e885af7dd2b4eb911e58401d29e3c32abb63c61c0f4ab649165c97921855b931"
+      ],
+      [
+        "FinancialOps",
+        "FinancialOps",
+        "outpatient-financial-ops-2026-10-27",
+        "0",
+        "c541c12231c0cb5c047026ae9b54f9198bf0ddba065879a54b7e455f9fa4d67e"
+      ],
+      [
+        "PackageCatalog",
+        "PackageCatalog",
+        "outpatient-package-catalog-2026-10-27",
+        "0",
+        "a877d419272ae289b62c279be2d9afdd1cff279d86c6996223934ce8de8ee695"
+      ],
+      [
+        "PackageRequests",
+        "PackageRequests",
+        "outpatient-package-requests-2026-10-27",
+        "0",
+        "d95bc114ca38ab2ee1cefc515c4ce4e595ca4cab726bdaa4024be9ddfcdbfa07"
+      ]
+    ],
+    "digestsRecomputed": false
+  },
+  "expectedHeaders": {
+    "CLIENTS_HEADERS": [
+      "id",
+      "name",
+      "serviceType",
+      "location",
+      "sessionsPerWeek",
+      "pricePerSession",
+      "startDate",
+      "status",
+      "exitDate",
+      "fromLead",
+      "source",
+      "notes",
+      "billingType",
+      "billingDay",
+      "bundleSize",
+      "bundlePrice",
+      "sessionsUsed",
+      "bundlePaid",
+      "house_of_origin",
+      "responsiblePerson",
+      "serviceScope",
+      "treatmentContactPhone",
+      "payerName",
+      "payerPhone",
+      "paymentLink",
+      "phone",
+      "paymentStatus",
+      "paymentDate",
+      "nextBillingDate",
+      "creditsOwed",
+      "clinicalTreatmentType",
+      "packageChangeDate",
+      "assignedTo",
+      "paymentAmountOverrides",
+      "updatedAt",
+      "updatedBy",
+      "plannedExitDate",
+      "preferredHouse"
+    ],
+    "LEADS_HEADERS": [
+      "id",
+      "name",
+      "phone",
+      "serviceType",
+      "location",
+      "note",
+      "stage",
+      "sessionsPerWeek",
+      "pricePerSession",
+      "startDate",
+      "created",
+      "introDateTime",
+      "house_of_origin",
+      "not_relevant_reason",
+      "not_relevant_note",
+      "assignedTo",
+      "updatedAt",
+      "updatedBy",
+      "preferredHouse"
+    ],
+    "CLIENTS_REMOVED_HEADERS": [
+      "id",
+      "name",
+      "serviceType",
+      "location",
+      "sessionsPerWeek",
+      "pricePerSession",
+      "startDate",
+      "status",
+      "exitDate",
+      "fromLead",
+      "source",
+      "notes",
+      "billingType",
+      "billingDay",
+      "bundleSize",
+      "bundlePrice",
+      "sessionsUsed",
+      "bundlePaid",
+      "house_of_origin",
+      "responsiblePerson",
+      "serviceScope",
+      "treatmentContactPhone",
+      "payerName",
+      "payerPhone",
+      "paymentLink",
+      "phone",
+      "paymentStatus",
+      "paymentDate",
+      "nextBillingDate",
+      "creditsOwed",
+      "clinicalTreatmentType",
+      "packageChangeDate",
+      "assignedTo",
+      "paymentAmountOverrides",
+      "removedAt",
+      "removedVia",
+      "restoredAt",
+      "updatedAt",
+      "updatedBy",
+      "plannedExitDate",
+      "preferredHouse"
+    ],
+    "REMOVED_LEADS_HEADERS": [
+      "id",
+      "name",
+      "phone",
+      "serviceType",
+      "location",
+      "note",
+      "stage",
+      "sessionsPerWeek",
+      "pricePerSession",
+      "startDate",
+      "created",
+      "introDateTime",
+      "house_of_origin",
+      "not_relevant_reason",
+      "not_relevant_note",
+      "removedAt",
+      "originSheet",
+      "assignedTo",
+      "updatedAt",
+      "updatedBy",
+      "preferredHouse"
+    ]
+  },
+  "headerReads": [
+    {
+      "role": "source",
+      "spreadsheetId": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+      "sheet": "Clients",
+      "requestedRange": "A1:AL1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "Clients!A1:AL1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "serviceType",
+            "location",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "status",
+            "exitDate",
+            "fromLead",
+            "source",
+            "notes",
+            "billingType",
+            "billingDay",
+            "bundleSize",
+            "bundlePrice",
+            "sessionsUsed",
+            "bundlePaid",
+            "house_of_origin",
+            "responsiblePerson",
+            "serviceScope",
+            "treatmentContactPhone",
+            "payerName",
+            "payerPhone",
+            "paymentLink",
+            "phone",
+            "paymentStatus",
+            "paymentDate",
+            "nextBillingDate",
+            "creditsOwed",
+            "clinicalTreatmentType",
+            "packageChangeDate",
+            "assignedTo",
+            "paymentAmountOverrides",
+            "updatedAt",
+            "updatedBy",
+            "plannedExitDate",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "snapshot",
+      "spreadsheetId": "1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM",
+      "sheet": "outpatient-2026-10-27",
+      "requestedRange": "A1:AL1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'outpatient-2026-10-27'!A1:AL1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "serviceType",
+            "location",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "status",
+            "exitDate",
+            "fromLead",
+            "source",
+            "notes",
+            "billingType",
+            "billingDay",
+            "bundleSize",
+            "bundlePrice",
+            "sessionsUsed",
+            "bundlePaid",
+            "house_of_origin",
+            "responsiblePerson",
+            "serviceScope",
+            "treatmentContactPhone",
+            "payerName",
+            "payerPhone",
+            "paymentLink",
+            "phone",
+            "paymentStatus",
+            "paymentDate",
+            "nextBillingDate",
+            "creditsOwed",
+            "clinicalTreatmentType",
+            "packageChangeDate",
+            "assignedTo",
+            "paymentAmountOverrides",
+            "updatedAt",
+            "updatedBy",
+            "plannedExitDate",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "source",
+      "spreadsheetId": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+      "sheet": "Leads",
+      "requestedRange": "A1:Z1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "Leads!A1:Z1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "phone",
+            "serviceType",
+            "location",
+            "note",
+            "stage",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "created",
+            "introDateTime",
+            "house_of_origin",
+            "not_relevant_reason",
+            "not_relevant_note",
+            "assignedTo",
+            "updatedAt",
+            "updatedBy",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "snapshot",
+      "spreadsheetId": "1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM",
+      "sheet": "outpatient-leads-2026-10-27",
+      "requestedRange": "A1:Z1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'outpatient-leads-2026-10-27'!A1:Z1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "phone",
+            "serviceType",
+            "location",
+            "note",
+            "stage",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "created",
+            "introDateTime",
+            "house_of_origin",
+            "not_relevant_reason",
+            "not_relevant_note",
+            "assignedTo",
+            "updatedAt",
+            "updatedBy",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "source",
+      "spreadsheetId": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+      "sheet": "Clients-removed",
+      "requestedRange": "A1:AO1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'Clients-removed'!A1:AO1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "serviceType",
+            "location",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "status",
+            "exitDate",
+            "fromLead",
+            "source",
+            "notes",
+            "billingType",
+            "billingDay",
+            "bundleSize",
+            "bundlePrice",
+            "sessionsUsed",
+            "bundlePaid",
+            "house_of_origin",
+            "responsiblePerson",
+            "serviceScope",
+            "treatmentContactPhone",
+            "payerName",
+            "payerPhone",
+            "paymentLink",
+            "phone",
+            "paymentStatus",
+            "paymentDate",
+            "nextBillingDate",
+            "creditsOwed",
+            "clinicalTreatmentType",
+            "packageChangeDate",
+            "assignedTo",
+            "paymentAmountOverrides",
+            "removedAt",
+            "removedVia",
+            "restoredAt",
+            "updatedAt",
+            "updatedBy",
+            "plannedExitDate",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "snapshot",
+      "spreadsheetId": "1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM",
+      "sheet": "outpatient-clients-removed-2026-10-27",
+      "requestedRange": "A1:AO1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'outpatient-clients-removed-2026-10-27'!A1:AO1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "serviceType",
+            "location",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "status",
+            "exitDate",
+            "fromLead",
+            "source",
+            "notes",
+            "billingType",
+            "billingDay",
+            "bundleSize",
+            "bundlePrice",
+            "sessionsUsed",
+            "bundlePaid",
+            "house_of_origin",
+            "responsiblePerson",
+            "serviceScope",
+            "treatmentContactPhone",
+            "payerName",
+            "payerPhone",
+            "paymentLink",
+            "phone",
+            "paymentStatus",
+            "paymentDate",
+            "nextBillingDate",
+            "creditsOwed",
+            "clinicalTreatmentType",
+            "packageChangeDate",
+            "assignedTo",
+            "paymentAmountOverrides",
+            "removedAt",
+            "removedVia",
+            "restoredAt",
+            "updatedAt",
+            "updatedBy",
+            "plannedExitDate",
+            "preferredHouse"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "source",
+      "spreadsheetId": "17dVBbOuf09c7dug1Tpq9Fr8_3fxfg0M87F9ChkGMCyc",
+      "sheet": "לידים שהוסרו",
+      "requestedRange": "A1:Z1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'לידים שהוסרו'!A1:Z1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "phone",
+            "serviceType",
+            "location",
+            "note",
+            "stage",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "created",
+            "introDateTime",
+            "house_of_origin",
+            "not_relevant_reason",
+            "not_relevant_note",
+            "removedAt",
+            "originSheet",
+            "assignedTo"
+          ]
+        ]
+      }
+    },
+    {
+      "role": "snapshot",
+      "spreadsheetId": "1GTiMksHak6p6a8VxaAuJAjtTxlZ6ikF4cBLPDErFdOM",
+      "sheet": "outpatient-leads-removed-2026-10-27",
+      "requestedRange": "A1:Z1",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'outpatient-leads-removed-2026-10-27'!A1:Z1",
+        "majorDimension": "ROWS",
+        "values": [
+          [
+            "id",
+            "name",
+            "phone",
+            "serviceType",
+            "location",
+            "note",
+            "stage",
+            "sessionsPerWeek",
+            "pricePerSession",
+            "startDate",
+            "created",
+            "introDateTime",
+            "house_of_origin",
+            "not_relevant_reason",
+            "not_relevant_note",
+            "removedAt",
+            "originSheet",
+            "assignedTo"
+          ]
+        ]
+      }
+    }
+  ],
+  "headerComparisons": [
+    {
+      "role": "source",
+      "sheet": "Clients",
+      "expectedColumns": 38,
+      "returnedColumns": 38,
+      "preferredHouseColumn": 38,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "snapshot",
+      "sheet": "outpatient-2026-10-27",
+      "expectedColumns": 38,
+      "returnedColumns": 38,
+      "preferredHouseColumn": 38,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "source",
+      "sheet": "Leads",
+      "expectedColumns": 19,
+      "returnedColumns": 19,
+      "preferredHouseColumn": 19,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "snapshot",
+      "sheet": "outpatient-leads-2026-10-27",
+      "expectedColumns": 19,
+      "returnedColumns": 19,
+      "preferredHouseColumn": 19,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "source",
+      "sheet": "Clients-removed",
+      "expectedColumns": 41,
+      "returnedColumns": 41,
+      "preferredHouseColumn": 41,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "snapshot",
+      "sheet": "outpatient-clients-removed-2026-10-27",
+      "expectedColumns": 41,
+      "returnedColumns": 41,
+      "preferredHouseColumn": 41,
+      "fullPrefixMatches": true,
+      "extraNonemptyColumns": [],
+      "diffs": []
+    },
+    {
+      "role": "source",
+      "sheet": "לידים שהוסרו",
+      "expectedColumns": 21,
+      "returnedColumns": 18,
+      "preferredHouseColumn": 0,
+      "fullPrefixMatches": false,
+      "extraNonemptyColumns": [],
+      "diffs": [
+        {
+          "column": 19,
+          "expected": "updatedAt",
+          "observed": null
+        },
+        {
+          "column": 20,
+          "expected": "updatedBy",
+          "observed": null
+        },
+        {
+          "column": 21,
+          "expected": "preferredHouse",
+          "observed": null
+        }
+      ]
+    },
+    {
+      "role": "snapshot",
+      "sheet": "outpatient-leads-removed-2026-10-27",
+      "expectedColumns": 21,
+      "returnedColumns": 18,
+      "preferredHouseColumn": 0,
+      "fullPrefixMatches": false,
+      "extraNonemptyColumns": [],
+      "diffs": [
+        {
+          "column": 19,
+          "expected": "updatedAt",
+          "observed": null
+        },
+        {
+          "column": 20,
+          "expected": "updatedBy",
+          "observed": null
+        },
+        {
+          "column": 21,
+          "expected": "preferredHouse",
+          "observed": null
+        }
+      ]
+    }
+  ],
+  "removedLeadsTailObservations": [
+    {
+      "range": "S2:U999",
+      "renderOption": "UNFORMATTED_VALUE",
+      "response": {
+        "range": "'לידים שהוסרו'!S2:U999",
+        "majorDimension": "ROWS",
+        "values": []
+      }
+    },
+    {
+      "range": "S1:U999",
+      "renderOption": "FORMULA",
+      "response": {
+        "range": "'לידים שהוסרו'!S1:U999",
+        "majorDimension": "ROWS",
+        "values": []
+      }
+    }
+  ],
+  "coverage": {
+    "legacyManifestSourceCount": 10,
+    "knownRegistrySourceCount": 19,
+    "missingKnownSources": [
+      "SessionLog",
+      "TherapistRates",
+      "Settings",
+      "StopFlags",
+      "ExtraSessionRequests",
+      "מסלול המשך",
+      "התראות עצירת טיפול",
+      "AuditLog",
+      "RepairPlan"
+    ],
+    "unclassifiedSources": [
+      "Sheet1",
+      "Copy of Clients"
+    ],
+    "v2RecoveryMetadataPresent": false
+  },
+  "proposedHeaderCorrection": {
+    "authorized": false,
+    "applied": false,
+    "sheet": "לידים שהוסרו",
+    "range": "S1:U1",
+    "values": [
+      [
+        "updatedAt",
+        "updatedBy",
+        "preferredHouse"
+      ]
+    ],
+    "historicalRowBackfill": false,
+    "requiresFreshIdentityHeaderBlankTailAndWritePauseChecks": true
+  },
+  "limits": [
+    "Metadata and bounded header/tail reads only, not a coordinated complete capture.",
+    "No source payload rows read except the three expected-empty tail columns; no patient payload retained.",
+    "Manifest digests were observed, not recomputed; snapshot data correctness not certified.",
+    "No Apps Script run, deployment, migration, backup job, alert email or production value change."
+  ]
+}

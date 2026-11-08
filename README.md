@@ -1,10 +1,23 @@
 # E-ZONE Outpatient Dashboard
 
+> Latest read-only acceptance and return point: [2026-11-08](docs/crm/OUTPATIENT-READONLY-ACCEPTANCE-20261108.md).
+
+> OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
+> Uninstalled, default-disabled removed-leads header helper: [runbook](docs/removed-leads-header-correction.md).
+> The older eight-table evidence below proves only that subset, not full recovery.
+> The candidate is not deployed; Google round-trip/manual-tab review remain required.
+> A phased [isolated Google drill](docs/google-operational-drill.md) is prepared;
+> its checked-in runner refuses execution until a separate test project is pinned.
+
 Hebrew/RTL dark-theme dashboard for managing outpatient therapy clients in Israel.
 Node.js + Express backend, vanilla HTML/JS frontend, Google Sheets as the database
 through an Apps Script Web App.
 
 ## Screens
+
+Light theme since OP-CRM-4 (`CHANGELOG-crm-theme.md`): the Dashboard CRM's format (right-side menu on desktop, white
+surfaces, red = exception / amber = waiting / green = done — always with a word) on this app's own sage/forest palette.
+Tokens live in `public/style.css` `:root`; mobile keeps the top tab strip.
 
 1. **«היום שלי»** (tab id `dashboard`) – the CRM opening screen: summary
    cards, an urgent band and work lists by domain (leads/intros, plans to
@@ -47,6 +60,11 @@ secret-looking is added to it.
   served only to a valid session (`no-store`), loaded by `app.js` after sign-in, dropped on logout and
   never cached by the service worker. They are still visible to anyone who signs in with the shared PIN.
   See `CHANGELOG-protect-price-constants.md`.
+- **Money scope (OP-CRM-3A).** The server decides per session, from the signed cookie name only and
+  fail-closed, whether money may flow: ורד / אורן `full`; דנה (and any unknown / retired name) `ops` — money
+  `/api/sheets` actions answer 403, every other answer is deep-stripped of money keys (fresh, cached and stale),
+  `therapist-pay.js` is refused, and `saveAll` carries `moneyScope` so Apps Script keeps the stored money fields
+  on her saves. `GET /api/me` reports `moneyScope` for the UI. See `lib/money-scope.js`, `CHANGELOG-crm-money-scope.md`.
 - The former "המשך כצופה בלבד" button was removed (2026-10-20): the PIN screen has only the PIN entry. A stale
   remembered viewer flag is ignored and cleared. The credential is the cookie, never a browser flag.
 - Who/when: every Clients / Leads write stamps `updatedAt` (server time) and
@@ -66,6 +84,12 @@ the existing UI reloads server data. Normal edits do not read the removal archiv
 See [the lead-save change notes](CHANGELOG-concurrent-leads.md) for validation,
 release precautions and remaining limitations of full-sheet writes.
 
+The proxy's 60-second `getData` cache is write-safe: a read that a write
+overtook while in flight is re-read once (`X-Cache: MISS`) or answered uncached
+(`X-Cache: BYPASS`) and never stored, so no tab reloads into a picture that
+predates a save; the reload after a stale-save conflict asks for `?fresh=1`.
+See [CHANGELOG-hotfix-stale-save.md](CHANGELOG-hotfix-stale-save.md).
+
 `test/lead-save-browser.test.js` exercises the real UI, session/proxy/cache
 server and Apps Script handlers with dummy Sheets. The `lead-save-browser`
 CI job installs test-only browser tooling outside the application dependency
@@ -77,6 +101,12 @@ credentials or live data are used, and this is not a real-Google staging run.
 
 - Backend: Node.js + Express (serves static frontend and proxies to Apps Script).
 - Frontend: plain HTML/JS/CSS. No build step.
+- Action feedback: every control that writes or reloads is wrapped in
+  `Busy.withBusy(button, fn)` from `public/busy.js` — the pressed control is
+  disabled, gets `aria-busy="true"` and a pure-CSS inline spinner in place of
+  its label, a second click is dropped, and it is restored on success and on
+  failure (`CHANGELOG-action-busy-spinner.md`). New write/reload buttons should
+  use it rather than toggling `disabled` by hand.
 - Database: Google Sheets via Apps Script Web App (`doGet` / `doPost`).
 
 ## Google Sheet setup
@@ -257,7 +287,27 @@ checkout ever drifts back.
   the sheet row is kept and listed in the additive response field
   `conflicts: [{ id, name, sheetUpdatedAt, sheetUpdatedBy, changed }]`
   (absent when none). The client shows a banner and reloads; it never retries.
-- `GET /api/continuation-roster` — session-gated.
+- `GET /api/continuation-roster` — session-gated, **read only** (R6, 2026-11-07, `CHANGELOG-read-only-boot.md`):
+  never writes, on a cache hit, miss or `?fresh=1`. The milestone contact tasks
+  (`cont::<ref>::<entryDate>::m1|m2|m3`, +1/+2/+3 calendar months from the entry date, 14 days ahead —
+  `CHANGELOG-continuation-milestones.md`) are opened / moved / closed ONLY by `POST /api/continuation-sync`
+  (explicit «🔄 עדכון משימות המשך» or a terminal status save; signed-in session + JSON; idempotent, safe to retry),
+  which sends the Apps Script action `syncContinuationMilestones` the roster Node fetched itself; a browser cannot
+  call that action (`/api/sheets` refuses it). `GET /api/continuation-sync/preview` is the read-only dry run
+  (`previewContinuationMilestones`) behind «N שינויים ממתינים». Opening, navigating and refreshing the app performs
+  no source write; a failed read shows «מידע לא זמין», never an empty list.
+- `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
+  (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
+  «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`
+  ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`). 2026-11-04: `deleteRequest` /
+  `resetRequest` ops (ורד only — 403 `offer_delete_vered_only` for anyone else, re-checked at the source), a
+  third target type `roster` (Dashboard admitted patient, stable ref), and soft-deleted offers filtered from the
+  feed; clients carry an append-only `billingMode` (`package` | `per_session`, a money key) —
+  `CHANGELOG-crm-followup-2.md`.
+- CRM (OP-CRM-3B) adds **no route**: `getTasks` / `getActivity` (reads) and `createTask` / `completeTask` /
+  `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
+  the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
+  tasks from an operational session. Writes are idempotent by a browser `submissionId`. See `CHANGELOG-crm-tasks-activity.md`.
 - The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
   (write) are Apps Script actions the client reaches through the two
   session-gated `/api/sheets` calls above. On `saveCredit` the proxy's
@@ -267,6 +317,11 @@ checkout ever drifts back.
   `session_not_configured` when `SESSION_SECRET` is unset).
 
 ### Cross-app read endpoints (shared-secret, read-only)
+
+- `getHandoffStatus` (`HANDOFF_STATUS_SECRET`, OP-CRM-2 / G2): `?outpatientIds=a,b` and/or
+  `?dashboardPatientIds=…` → `{ results:[{ outpatientId, entity, dashboardPatientId, state, stateDate,
+  assignedTo, nextAction, nextActionDate, lastActionDate, updatedAt }] }`. Exact ids only, no money /
+  clinical / phone. See `CHANGELOG-crm-handoff-status.md`.
 
 - `GET /api/sheets?action=getWinbackSource&secret=<WINBACK_SECRET>` → lost
   leads + discharged clients for the win-back call list. No billing data.
@@ -284,7 +339,12 @@ checkout ever drifts back.
   `CHANGELOG-debt-status-endpoint.md`.
 - `GET /api/sheets?action=getTreatmentPlans&secret=<TREATMENT_PLANS_SECRET>` →
   `{ ok, clients:[{ clientId, name, phone, phoneIssue, serviceType, sessions,
-  status, startDate, exitDate, renewalDate, plannedExitDate }] }`
+  status, startDate, exitDate, renewalDate, plannedExitDate,
+  monthQuota, monthUsed, monthRemaining, makeupSessions }] }`
+  (the last four — 2026-11-05 — are session COUNTS for this calendar month: the plan's
+  monthly quota with `_units` honoured, «happened» rows in `SessionLog`, remaining ≥ 0 or
+  `null` when the plan has no countable frequency, and `Clients.creditsOwed` as a count;
+  never an amount — see `CHANGELOG-plan-session-counters.md`)
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the
   canonical patient phone and the cross-app join key: the first value of the
   `phone` column, then `treatmentContactPhone`, that normalizes (separators

@@ -67,17 +67,15 @@ test('retry with the same dashboardPatientId links the open lead and does not cr
   assert.equal(sb.rows('Leads').length, 1);
 });
 
-test('returning stay links by dashboard person key (personId || patientId), never by PII', () => {
+test('different residential stay must not silently merge on shared person root', () => {
   const sb = sandbox();
   const first = createLead(sb, { name: 'דנה כהן', dashboardPatientId: 'id-root' });
-  const second = createLead(sb, {
-    name: 'דנה כהן', dashboardPatientId: 'id-stay-2', dashboardPersonId: 'id-root'
-  });
+  const second = createLead(sb, { name: 'דנה כהן', dashboardPatientId: 'id-stay-2', dashboardPersonId: 'id-root' });
+  assert.equal(first.ok, true);
   assert.equal(second.ok, true);
-  assert.equal(second.matched, true);
-  assert.equal(second.id, first.id);
-  assert.equal(second.matchedBy, 'personKey');
-  assert.equal(sb.rows('Leads').length, 1);
+  assert.equal(second.matched, false);
+  assert.notEqual(second.id, first.id);
+  assert.equal(sb.rows('Leads').length, 2);
 });
 
 test('a closed historical lead is history: same person key creates a new episode', () => {
@@ -92,14 +90,10 @@ test('a closed historical lead is history: same person key creates a new episode
   assert.equal(sb.rows('Leads').length, 2);
 });
 
-test('an active client with the exact person key wins: createLead returns it and creates no lead', () => {
-  const sb = sandbox([], [client({
-    id: 'C1', dashboardPatientId: 'id-root', dashboardPersonId: ''
-  })]);
-  const res = createLead(sb, {
-    name: 'דנה כהן', dashboardPatientId: 'id-stay-2', dashboardPersonId: 'id-root'
-  });
-  assert.deepEqual(res, { ok: true, id: 'C1', matched: true, entity: 'client', matchedBy: 'personKey' });
+test('a client matching the same STAY id wins and creates no lead', () => {
+  const sb = sandbox([], [client({ id: 'C1', dashboardPatientId: 'id-stay-1', dashboardPersonId: 'id-root' })]);
+  const res = createLead(sb, { name: 'דנה כהן', dashboardPatientId: 'id-stay-1', dashboardPersonId: 'id-root' });
+  assert.deepEqual(res, { ok: true, id: 'C1', matched: true, entity: 'client', matchedBy: 'dashboardPatientId' });
   assert.equal(sb.rows('Leads').length, 0);
 });
 
@@ -189,4 +183,38 @@ test('present malformed stable ids are refused; unknown owner/source are blanked
   const [row] = sb.rows('Leads');
   assert.equal(row.assignedTo, '');
   assert.equal(row.handoffSource, '');
+});
+
+
+test('same source stay retried after converted lead→client returns ONE client, not another lead', () => {
+  const sb = sandbox();
+  const created = createLead(sb, { name: 'דנה כהן', phone: '0501234567', dashboardPatientId: 'id-stay-77', dashboardLeadId: 'id-dash-lead-1' });
+  assert.equal(created.ok, true);
+  const from = sb.rows('Leads')[0];
+  const savedClient = client({ id: 'C-new', fromLead: created.id, dashboardPatientId: 'evil-actor' });
+  assert.equal(sb.save([from], [savedClient]).ok, true);
+  const cl = sb.rows('Clients').find(x => x.id === 'C-new');
+  assert.equal(cl.dashboardPatientId, 'id-stay-77', 'identity copied from source lead, not caller');
+  const retry = createLead(sb, { name: 'דנה כהן', phone: '0501234567', dashboardPatientId: 'id-stay-77', dashboardLeadId: 'id-dash-lead-1' });
+  assert.equal(retry.ok, true);
+  assert.equal(retry.id, 'C-new');
+  assert.equal(retry.entity, 'client');
+  assert.equal(sb.rows('Leads').length, 0);
+  assert.equal(sb.rows('Clients').length, 1);
+});
+
+test('one closed historical lead with exact same stay refuses resend rather than reminting an identity', () => {
+  const sb = sandbox([lead({ id: 'L-old', stage: 'לא רלוונטי', dashboardPatientId: 'id-stay-closed' })], []);
+  const retry = createLead(sb, { name: 'דנה כהן', dashboardPatientId: 'id-stay-closed' });
+  assert.equal(retry.ok, false);
+  assert.equal(retry.error, 'identity_closed');
+  assert.equal(sb.rows('Leads').length, 1);
+});
+
+test('same dashboard lead id with a different recorded stay refuses unsafe cross-episode merging', () => {
+  const sb = sandbox([lead({ id: 'L1', dashboardPatientId: 'id-stay-first', dashboardLeadId: 'id-dash-1' })], []);
+  const next = createLead(sb, { name: 'דנה כהן', dashboardPatientId: 'id-stay-second', dashboardLeadId: 'id-dash-1' });
+  assert.equal(next.ok, false);
+  assert.equal(next.error, 'identity_conflict');
+  assert.equal(sb.rows('Leads').length, 1);
 });

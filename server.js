@@ -4,8 +4,10 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
-const { CATALOG_ADMIN_USERS, resolveUserPins } = require('./lib/users');
+const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, OFFER_DELETE_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
+const moneyScope = require('./lib/money-scope');
+const backendCaps = require('./lib/backend-capabilities');
 const { sourceAuthConfigured } = require('./lib/source-auth');
 
 const app = express();
@@ -233,7 +235,15 @@ const STALE_FALLBACK_MS = 10 * 60 * 1000; // serve stale up to 10 min if upstrea
 const getDataCache = {
   data: null,
   status: null,
-  timestamp: 0
+  timestamp: 0,
+  // Write generation (hotfix 2026-11-04, CHANGELOG-hotfix-stale-save.md): bumped
+  // by every invalidation. A getData upstream read that STARTED before a write
+  // landed carries the pre-write sheet; storing it would serve every tab a
+  // picture without that write (and its who/when stamps) for up to CACHE_TTL_MS,
+  // so each of those tabs' next save was refused as a stale conflict against
+  // the write — "ורד עדכן/ה קודם" for ורד's own save. Such a read is never
+  // cached; the request re-reads once, then answers uncached.
+  generation: 0
 };
 function isCacheFresh() {
   return getDataCache.data && (Date.now() - getDataCache.timestamp) < CACHE_TTL_MS;
@@ -241,10 +251,27 @@ function isCacheFresh() {
 function isCacheStaleButUsable() {
   return getDataCache.data && (Date.now() - getDataCache.timestamp) < STALE_FALLBACK_MS;
 }
+/* OP-CRM-3A: the money scope of THIS request's session — decided from the signed
+ * cookie name only, fails closed (blank / unknown / retired -> ops). Every
+ * /api/sheets answer to an ops session is projected through stripMoney, cached,
+ * stale and fresh alike (the cache is shared across users, so the projection
+ * happens at response time, never at cache time). */
+function requestMoneyScope(req) { return moneyScope.scopeOf(sessionUserFromRequest(req)); }
+function scoped(req, data) { return requestMoneyScope(req) === moneyScope.SCOPE_OPS ? moneyScope.stripMoney(data) : data; }
+/* Deploy-window guard (lib/backend-capabilities.js): an ops session's
+ * full-row write is forwarded ONLY once the live Code.gs has confirmed it
+ * understands payload.moneyScope; otherwise the OLD source would overwrite
+ * every client's stored money with the stripped (0 / blank) fields. */
+const capabilityGate = backendCaps.createGate({
+  sheetsUrl: SHEETS_URL, proxySecret: OUTPATIENT_PROXY_SECRET,
+  fetch: (...a) => fetch(...a)
+});
+
 function invalidateCache() {
   getDataCache.data = null;
   getDataCache.status = null;
   getDataCache.timestamp = 0;
+  getDataCache.generation++;
 }
 // ---------------------------------------------------------------------------
 
@@ -329,6 +356,8 @@ app.use((req, res, next) => {
   return requireSession(req, res, () => {
     res.set('Cache-Control', 'no-store');
     if (name === 'blocked') return res.status(404).end();
+    // OP-CRM-3A: the pay-rate constants never reach an operational session.
+    if (moneyScope.MONEY_STATIC.indexOf(name) >= 0 && requestMoneyScope(req) === moneyScope.SCOPE_OPS) return res.status(403).end();
     res.type('js');
     return res.sendFile(path.join(__dirname, 'public', name), { dotfiles: 'deny' });
   });
@@ -389,13 +418,17 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   // Package catalog / pricing actions have their own Vered-only route and the
   // manager feeds never go through the browser: refuse them here.
   if (catalogAdmin.isPackageAction(action)) return res.status(403).json({ ok: false, error: 'forbidden_action' });
+  // OP-CRM-3A: money reads are refused for an operational session before any upstream call.
+  if (requestMoneyScope(req) === moneyScope.SCOPE_OPS && moneyScope.isMoneyAction('GET', action)) {
+    return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+  }
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
 
   // Serve from cache when possible: only for the bulk read, and only when
   // the caller hasn't explicitly asked for a fresh fetch.
   if (action === 'getData' && !forceFresh && isCacheFresh()) {
     res.set('X-Cache', 'HIT');
-    return res.status(getDataCache.status || 200).json(getDataCache.data);
+    return res.status(getDataCache.status || 200).json(scoped(req, getDataCache.data));
   }
 
   try {
@@ -403,12 +436,25 @@ app.get('/api/sheets', requireSession, async (req, res) => {
       + (SHEETS_URL.includes('?') ? '&' : '?')
       + 'action=' + encodeURIComponent(action)
       + '&proxySecret=' + encodeURIComponent(OUTPATIENT_PROXY_SECRET)
+      // OP-CRM-3A/3B: the SERVER-decided money scope rides on reads too (money
+      // tasks / money activity are filtered at the source for an ops session).
+      // Built from `action` only, so a browser query string cannot smuggle it.
+      + '&moneyScope=' + encodeURIComponent(requestMoneyScope(req))
       + (req.query.secret ? '&secret=' + encodeURIComponent(req.query.secret) : '');
-    const r = await fetch(url, { redirect: 'follow' });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error('upstream_unavailable'); }
+    // Read-after-write guard: remember the write generation BEFORE the upstream
+    // read. A write that lands while the read is in flight bumps it, which means
+    // the sheet this read returns predates that write. Re-read once (the common
+    // case: one save overlapped), and never cache a read that lost the race.
+    let r, data, generation;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      generation = getDataCache.generation;
+      r = await fetch(url, { redirect: 'follow' });
+      const text = await r.text();
+      try { data = JSON.parse(text); }
+      catch (_) { throw new Error('upstream_unavailable'); }
+      if (action !== 'getData' || generation === getDataCache.generation) break;
+    }
+    const current = action !== 'getData' || generation === getDataCache.generation;
 
     // Track load metrics + populate cache only on the bulk read.
     if (action === 'getData') {
@@ -418,16 +464,16 @@ app.get('/api/sheets', requireSession, async (req, res) => {
       lastLoad.clients = Array.isArray(data.clients) ? data.clients.length : 0;
       lastLoad.error = data.ok === false ? (data.error || 'unknown') : null;
 
-      // Only cache successful responses
-      if (r.status >= 200 && r.status < 300 && data.ok !== false) {
+      // Only cache successful responses that no write overtook
+      if (current && r.status >= 200 && r.status < 300 && data.ok !== false) {
         getDataCache.data = data;
         getDataCache.status = r.status;
         getDataCache.timestamp = Date.now();
       }
     }
 
-    res.set('X-Cache', 'MISS');
-    res.status(r.status).json(data);
+    res.set('X-Cache', current ? 'MISS' : 'BYPASS');
+    res.status(r.status).json(scoped(req, data));
   } catch (err) {
     lastLoad.at = new Date().toISOString();
     lastLoad.status = 'error';
@@ -440,7 +486,7 @@ app.get('/api/sheets', requireSession, async (req, res) => {
     if (action === 'getData' && isCacheStaleButUsable()) {
       res.set('X-Cache', 'STALE');
       res.set('X-Cache-Error', 'upstream_unavailable');
-      return res.status(getDataCache.status || 200).json(getDataCache.data);
+      return res.status(getDataCache.status || 200).json(scoped(req, getDataCache.data));
     }
 
     res.status(502).json({ ok: false, error: 'upstream_unavailable' });
@@ -463,10 +509,27 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     if (catalogAdmin.isPackageAction(body.action)) {
       return res.status(403).json({ ok: false, error: 'forbidden_action' });
     }
-    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin']) {
+    // Server-only write: the milestone sync takes the roster Node fetched itself (see
+    // runContinuationSync), never a patient list typed by a browser.
+    if (body.action === 'syncContinuationMilestones' || body.action === 'previewContinuationMilestones') {
+      return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
+    for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin', 'moneyScope']) {
       if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {
         return res.status(400).json({ ok: false, error: 'forbidden_field' });
       }
+    }
+    // OP-CRM-3A: money writes are refused for an operational session; every other
+    // write carries the SERVER-decided scope so Apps Script saveAll can keep the
+    // stored money fields of rows an operational user re-saves.
+    const scope = requestMoneyScope(req);
+    if (scope === moneyScope.SCOPE_OPS && moneyScope.isMoneyAction('POST', body.action)) {
+      return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+    }
+    body.moneyScope = scope;
+    if (scope === moneyScope.SCOPE_OPS && backendCaps.isFullRowWrite(body.action)) {
+      const ready = await capabilityGate.isReady();
+      if (!ready) return res.status(503).json({ ok: false, error: 'backend_upgrade_pending' });
     }
     if (body.action === 'saveAll') {
       body.leads   = Array.isArray(req.body?.leads)   ? req.body.leads   : [];
@@ -497,7 +560,7 @@ app.post('/api/sheets', requireSession, async (req, res) => {
       invalidateCache();
     }
 
-    res.status(r.status).json(data);
+    res.status(r.status).json(scoped(req, data));
   } catch (err) {
     res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
@@ -506,36 +569,130 @@ app.post('/api/sheets', requireSession, async (req, res) => {
 // GET /api/continuation-roster — proxy the dashboard's getAdmittedRoster behind
 // the server-held secret. The continuation WORKFLOW rows themselves go through
 // the existing /api/sheets path (getContinuation / saveContinuation), NOT here.
+/* Continuation milestones (CRM, 2026-11-03; read/write split 2026-11-07, CHANGELOG-read-only-boot.md).
+ * READS NEVER WRITE: GET /api/continuation-roster only fetches (and caches) the roster. The milestone
+ * contact tasks are opened / moved / closed ONLY by the explicit, session-gated
+ * POST /api/continuation-sync (a person pressed «עדכון משימות המשך», or saved a terminal CRM status).
+ * The SERVER sends Apps Script (syncContinuationMilestones) the roster it fetched itself — a browser can
+ * neither supply the patient list nor call that action (refused on /api/sheets). The source action is
+ * idempotent by stable task ids (cont::<ref>::<entryDate>::m<n>), so a retry after a lost response
+ * creates / closes nothing twice. `rosterComplete` is true only for a roster the Dashboard answered ok,
+ * so an upstream hiccup never cancels tasks. GET /api/continuation-sync/preview runs the SAME source
+ * computation as a dry run (previewContinuationMilestones: no lock, no write) so the tab can say how
+ * many changes are waiting without making them. */
+let continuationSyncFlight = null;
+const continuationSyncState = { lastAt: 0, lastResult: null };
+function rosterPatientsForSource(roster) {
+  if (!roster || roster.ok === false || !Array.isArray(roster.patients)) return null;
+  return roster.patients.map((p) => ({
+    name: String((p && p.name) || ''), house: String((p && p.house) || ''), entryDate: String((p && p.entryDate) || ''),
+    phone: String((p && p.phone) || ''), id: String((p && (p.id || p.patientId)) || '')
+  }));
+}
+function runContinuationSync(roster, user) {
+  if (continuationSyncFlight) return continuationSyncFlight;
+  const patients = rosterPatientsForSource(roster);
+  if (!SHEETS_URL || !patients) return Promise.resolve(null);
+  continuationSyncFlight = (async () => {
+    try {
+      const r = await fetch(SHEETS_URL, {
+        method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'syncContinuationMilestones', proxySecret: OUTPATIENT_PROXY_SECRET, user: typeof user === 'string' ? user : '', moneyScope: moneyScope.SCOPE_OPS, patients, rosterComplete: true })
+      });
+      const text = await r.text();
+      let data; try { data = JSON.parse(text); } catch (_) { data = { ok: false, error: 'upstream_unavailable' }; }
+      continuationSyncState.lastAt = Date.now(); continuationSyncState.lastResult = data && data.ok ? { ok: true, created: data.created, updated: data.updated, cancelled: data.cancelled } : { ok: false, error: (data && data.error) || 'sync_failed' };
+      return data;
+    } catch (_) {
+      continuationSyncState.lastAt = Date.now(); continuationSyncState.lastResult = { ok: false, error: 'upstream_unavailable' };
+      return null;
+    } finally { continuationSyncFlight = null; }
+  })();
+  return continuationSyncFlight;
+}
+
+async function fetchRoster(forceFresh) {
+  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
+    return { hit: true, status: rosterCache.status || 200, data: rosterCache.data };
+  }
+  const url = DASHBOARD_SHEETS_URL
+    + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
+    + 'action=getAdmittedRoster'
+    + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
+  const r = await fetch(url, { redirect: 'follow' });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
+  const good = r.status >= 200 && r.status < 300 && data.ok !== false;
+  if (good) {
+    rosterCache.data = data;
+    rosterCache.status = r.status;
+    rosterCache.timestamp = Date.now();
+  }
+  return { hit: false, status: r.status, data, good };
+}
+
 app.get('/api/continuation-roster', requireSession, async (req, res) => {
   if (!requireContinuationConfig(res)) return;
 
   const forceFresh = req.query && (req.query.fresh === '1' || req.query.fresh === 'true');
-  if (!forceFresh && rosterCache.data && (Date.now() - rosterCache.timestamp) < ROSTER_CACHE_TTL_MS) {
-    res.set('X-Cache', 'HIT');
-    return res.status(rosterCache.status || 200).json(rosterCache.data);
-  }
-
   try {
-    const url = DASHBOARD_SHEETS_URL
-      + (DASHBOARD_SHEETS_URL.includes('?') ? '&' : '?')
-      + 'action=getAdmittedRoster'
-      + '&secret=' + encodeURIComponent(OCCUPANCY_SECRET);
-    const r = await fetch(url, { redirect: 'follow' });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error('Non-JSON from dashboard roster: ' + text.slice(0, 200)); }
-
-    if (r.status >= 200 && r.status < 300 && data.ok !== false) {
-      rosterCache.data = data;
-      rosterCache.status = r.status;
-      rosterCache.timestamp = Date.now();
-    }
-
-    res.set('X-Cache', 'MISS');
-    res.status(r.status).json(data);
+    // READ ONLY (R6, 2026-11-07): a roster read — cache hit, miss or forced fresh — never
+    // writes. The milestone tasks change only through POST /api/continuation-sync.
+    const got = await fetchRoster(forceFresh);
+    res.set('X-Cache', got.hit ? 'HIT' : 'MISS');
+    res.status(got.status).json(got.data);
   } catch (err) {
     res.status(502).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+/* POST /api/continuation-sync — THE ONLY route that opens / moves / closes the continuation
+ * milestone tasks. Explicit and authorized: a signed-in, allow-listed session (requireSession —
+ * the same people who may already edit the continuation track; unsigned, unnamed and retired
+ * sessions get 401) AND a JSON request (415 otherwise — a cross-site form cannot send one, on top
+ * of the SameSite=Lax cookie). The body is ignored: the patient list is the roster Node fetched
+ * itself. Safe to retry: the source sync is idempotent by stable task ids, so a replay after a
+ * lost answer creates / closes nothing twice; a roster that could not be read is 502 and closes
+ * nothing. Answers the sync counters, never the roster. */
+app.post('/api/continuation-sync', requireSession, async (req, res) => {
+  if (!requireContinuationConfig(res)) return;
+  if (!requireSheetsUrl(res)) return;
+  if (!req.is('application/json')) return res.status(415).json({ ok: false, error: 'json_required' });
+  try {
+    const got = await fetchRoster(false);
+    if (!(got.hit || got.good)) return res.status(502).json({ ok: false, error: 'roster_unavailable' });
+    const out = await runContinuationSync(got.data, sessionUserFromRequest(req));
+    if (!out || out.ok === false) return res.status(502).json({ ok: false, error: (out && out.error) || 'sync_failed' });
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json({ ok: true, created: out.created || 0, updated: out.updated || 0, cancelled: out.cancelled || 0 });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
+});
+
+/* GET /api/continuation-sync/preview — READ ONLY: how many milestone tasks the explicit sync WOULD
+ * open / move / close right now (source dry run previewContinuationMilestones: no lock, no write).
+ * Lets the tab show «N שינויים ממתינים» without writing. A source that does not know the action yet
+ * (Apps Script not redeployed) or an unreadable roster answers ok:false — shown as «לא זמין», never 0. */
+app.get('/api/continuation-sync/preview', requireSession, async (req, res) => {
+  if (!requireContinuationConfig(res)) return;
+  if (!requireSheetsUrl(res)) return;
+  res.set('Cache-Control', 'no-store');
+  try {
+    const got = await fetchRoster(false);
+    const patients = (got.hit || got.good) ? rosterPatientsForSource(got.data) : null;
+    if (!patients) return res.status(502).json({ ok: false, error: 'roster_unavailable' });
+    const r = await fetch(SHEETS_URL, {
+      method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'previewContinuationMilestones', proxySecret: OUTPATIENT_PROXY_SECRET, user: sessionUserFromRequest(req), moneyScope: moneyScope.SCOPE_OPS, patients, rosterComplete: true })
+    });
+    let data; try { data = JSON.parse(await r.text()); } catch (_) { data = null; }
+    if (!data || data.ok !== true || data.dryRun !== true) return res.status(502).json({ ok: false, error: (data && data.error) || 'preview_unavailable' });
+    res.status(200).json({ ok: true, created: data.created || 0, updated: data.updated || 0, cancelled: data.cancelled || 0 });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
   }
 });
 
@@ -679,11 +836,38 @@ app.post('/api/catalog-admin/logout', (req, res) => {
  * from a per-op allowlist (never the raw browser body), the actor comes from
  * the signed session, and Apps Script gets a short-lived HMAC assertion bound
  * to this exact body. */
-app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (req, res) => {
+/* Pricing flexibility (2026-11-04): a custom line or a manual unit-price override inside a new offer is
+ * allowed for PRICE_OVERRIDE_USERS (ורד) only — decided from the SIGNED session name, never from the body,
+ * and checked before the admin privilege so any other session is told 403 regardless of its cookies. */
+function requirePricingPrivilege(req, res, next) {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  if (body.op === 'createRequest' && catalogAdmin.itemsNeedPricingPrivilege(body.items)) {
+    const user = sessionUserFromRequest(req);
+    if (!user || PRICE_OVERRIDE_USERS.indexOf(user) < 0 || RETIRED_SESSION_USERS.indexOf(user) >= 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(403).json({ ok: false, error: 'pricing_override_vered_only' });
+    }
+  }
+  // Soft delete / reset of an offer (2026-11-04): OFFER_DELETE_USERS (ורד) only — same rule, own list, own code.
+  if (catalogAdmin.OFFER_DELETE_OPS.indexOf(body.op) >= 0) {
+    const who = sessionUserFromRequest(req);
+    if (!who || OFFER_DELETE_USERS.indexOf(who) < 0 || RETIRED_SESSION_USERS.indexOf(who) >= 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(403).json({ ok: false, error: 'offer_delete_vered_only' });
+    }
+  }
+  return next();
+}
+
+app.post('/api/catalog-admin/rpc', requireSession, requirePricingPrivilege, requireCatalogAdmin, async (req, res) => {
   if (!requireSheetsUrl(res)) return;
   const op = req.body && req.body.op;
   const built = catalogAdmin.buildAdminUpstream(op, req.body, sessionUserFromRequest(req));
   if (built.error) return res.status(400).json({ ok: false, error: built.error });
+  if (op === 'createRequest') {
+    const bad = catalogAdmin.validatePricingItems(built.body.items);
+    if (bad) return res.status(400).json({ ok: false, error: bad }); // e.g. an override without a reason
+  }
   try {
     const upstream = Object.assign({ action: built.action }, built.body, {
       proxySecret: OUTPATIENT_PROXY_SECRET,
@@ -703,13 +887,44 @@ app.post('/api/catalog-admin/rpc', requireSession, requireCatalogAdmin, async (r
   }
 });
 
+/* GET /api/offers — PRICE-FREE package-offer summaries (id, CRM status, patient, attached lead /
+ * client, follow-up, validity, owner) for «היום שלי», the cards and «מסלול המשך». No amount, VAT,
+ * discount or price constant is in the answer. Still refused for an operational session (דנה
+ * sees no pricing object at all); the full offers with prices stay behind /api/catalog-admin/rpc. */
+app.get('/api/offers', requireSession, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireSheetsUrl(res)) return;
+  if (requestMoneyScope(req) === moneyScope.SCOPE_OPS) return res.status(403).json({ ok: false, error: 'forbidden_money_action' });
+  try {
+    const url = SHEETS_URL + (SHEETS_URL.includes('?') ? '&' : '?') + 'action=getPackageOfferSummaries&proxySecret=' + encodeURIComponent(OUTPATIENT_PROXY_SECRET);
+    const r = await fetch(url, { redirect: 'follow' });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('upstream_unavailable'); }
+    if (!data || data.ok === false) return res.status(502).json({ ok: false, error: (data && data.error) || 'upstream_unavailable' });
+    // a soft-deleted offer is already filtered at the source; belt and braces here
+    const offers = Array.isArray(data.offers) ? data.offers.filter((o) => o && String(o.status || '') !== 'deleted').map((o) => ({
+      id: String(o.id || ''), status: String(o.status || ''), crmStatus: String(o.crmStatus || ''), requesterKey: String(o.requesterKey || ''),
+      patientName: String(o.patientName || ''), attachedType: String(o.attachedType || ''), attachedId: String(o.attachedId || ''),
+      validUntil: String(o.validUntil || ''), followUpDate: String(o.followUpDate || ''), assignee: String(o.assignee || ''),
+      sentAt: String(o.sentAt || ''), createdAt: String(o.createdAt || ''), createdFrom: String(o.createdFrom || ''), itemCount: Number(o.itemCount) || 0
+    })) : [];
+    res.status(200).json({ ok: true, offers });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'upstream_unavailable' });
+  }
+});
+
 /* GET /api/me — the display name embedded in this session's signed cookie
  * (who/when stamping). Session-gated like every data route; a legacy
  * user-less cookie answers { user: '' } and everything keeps working. The
  * frontend reads it after the PIN (empty -> name picker) and at load (header
  * "מחובר/ת כ: <name>"). */
 app.get('/api/me', requireLoginStage, (req, res) => {
-  res.status(200).json({ ok: true, user: sessionUserFromRequest(req) });
+  const user = sessionUserFromRequest(req);
+  // moneyScope is informational for the UI (hide money tabs/fields); the server
+  // enforces it on every route regardless of what the browser does with it.
+  res.status(200).json({ ok: true, user, moneyScope: user ? moneyScope.scopeOf(user) : moneyScope.SCOPE_OPS });
 });
 
 /* GET /api/users — the fixed list of names the login name picker offers
@@ -832,3 +1047,4 @@ module.exports.requestIsHttps = requestIsHttps;
 module.exports.buildSessionCookie = buildSessionCookie;
 module.exports.buildClearedSessionCookie = buildClearedSessionCookie;
 module.exports.SESSION_COOKIE = SESSION_COOKIE;
+module.exports.capabilityGate = capabilityGate;

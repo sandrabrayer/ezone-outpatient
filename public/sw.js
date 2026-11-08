@@ -72,7 +72,32 @@
  *   option in app.js). Bumped from the deploy-branch value v19 (HEAD 336c8ef); re-check the LIVE /sw.js before release.
  */
 // v21 (2026-10-29): «היום שלי» CRM opening tab — index.html shell changed (CHANGELOG-my-day.md).
-var CACHE = 'ezone-outpatient-v21';
+// v24 (draft OP-BILL-01): payment-date coverage card and source policy; v23 is deployed.
+// v25 (2026-11-03, E-ZONE One CRM): index.html (menu order, settings WhatsApp field), app.js, style.css,
+//   my-day.js, continuation-logic.js, package-pricing.js changed. LIVE v24 (#162 merge 8d61cc32) verified before this bump.
+// v26 (2026-11-04, CRM follow-up 1): app.js, style.css, my-day.js, package-pricing.js changed («תשלומים באיחור»
+//   split, searchable offer picker, Vered-only custom lines / overrides). Bumped from the deploy-branch value v25
+//   (PR #163, bbe6df9); re-check the LIVE /sw.js before release.
+// v27 (2026-11-04, hotfix stale-save): app.js (conflict / stale reload bypasses the proxy cache) and
+//   conflicts.js (reason-aware banner) changed. Bumped from the LIVE value v26 (#165 merge 2f0d630).
+// v28 (2026-11-04, CRM follow-up 2): index.html, app.js, style.css, my-day.js, package-pricing.js changed
+//   (billing mode, card offer form, delete/reset, three-source picker, WhatsApp links). Bumped from the LIVE
+//   value v27 (hotfix #168 merge ba9a53a3).
+// v29 (2026-11-04, patient search + offer-picker browse): index.html (the «חיפוש מטופל» box and the new
+//   global-search.js script tag), app.js, style.css and package-pricing.js changed. Bumped from the
+//   deploy-branch value v28 (a367fb74, Apps Script v106); the LIVE /sw.js was not reachable from this
+//   sandbox (egress blocked) — re-check it serves v28 before release.
+// v30 (2026-11-05, pricing session recovery): package-pricing.js only — «תמחור חבילות» recovers by
+//   itself after the Node process restarts (CHANGELOG-pricing-session-recovery.md). Bumped from the
+//   deploy-branch value v29 (8aff368f, Apps Script v106); the LIVE /sw.js was NOT reachable from this
+//   sandbox (egress blocked) — re-check it serves v29 before release.
+// v31 (2026-11-05, action busy spinner): the new public/busy.js, its script tag in index.html,
+//   app.js, package-pricing.js, my-day.js and style.css changed — every write/reload button shows an
+//   inline spinner while it works (CHANGELOG-action-busy-spinner.md). Bumped from the deploy-branch
+//   value v30 (2ea3314, Apps Script v106); the LIVE /sw.js was NOT reachable from this sandbox
+//   (proxy 403 on egress) — re-check it serves v30 before release.
+// v31 → v32: explicit second-payment confirmation for a same-date future renewal (#164).
+var CACHE = 'ezone-outpatient-v34';
 var SHELL = [
   './',
   './index.html',

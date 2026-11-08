@@ -899,7 +899,12 @@ test('a credit save failure never rolls the discharge back', () => {
   // so nothing in it can undo the discharge that already persisted.
   const idx = APP.indexOf("toast('סיום נשמר')");
   assert.ok(idx > 0, 'discharge success branch not found');
-  const branch = APP.slice(idx, idx + 800);
+  // Success branch only (up to the .catch). Since discharge-persist the catch
+  // reverts the status ONLY when the Clients save itself was not stored.
+  const branch = APP.slice(idx, APP.indexOf('.catch(', idx));
   assert.ok(/openCreditsForClient/.test(branch));
   assert.ok(!/client\.status = /.test(branch), 'the discharge must not be reverted here');
+  const after = APP.slice(APP.indexOf('.catch(', idx), APP.indexOf('.catch(', idx) + 600);
+  assert.ok(/if \(!dischargeSaved\) \{[\s\S]*client\.status = prevExit\.status/.test(after),
+    'a revert must be guarded by dischargeSaved (a stored discharge is never undone)');
 });

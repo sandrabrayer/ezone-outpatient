@@ -30,6 +30,7 @@ function fixture(fields = {}) {
   const out = { notices: [], writes: [], closed: [], renders: 0, reloads: 0 };
   let serial = 0;
   const ctx = {
+    CL: require('../public/credits-ledger'),
     state: { clients: [client], leads: [lead], payments: [], charges: [] },
     renewClientId: client.id, addChargeClientId: client.id, editClientId: client.id, activateLeadId: lead.id,
     $: (selector) => selector === '#financialSaveWarning' ? warning : selector === '#financialSaveWarningText' ? warningText : selector.startsWith('[data-') ? null : button,
@@ -55,9 +56,12 @@ function fixture(fields = {}) {
   vm.createContext(ctx);
   // בית מועדף helper the submit handlers call (real list + function).
   vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
-  for (const name of ['preferredHouseOrBlank', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
+  // אופן חיוב helpers the intake / edit handlers call (real list + functions).
+  vm.runInContext(source.match(/var BILLING_MODES = \[[^\]]*\];/)[0], ctx);
+  // the shared busy-spinner adapters the submit handlers call (public/busy.js is absent here → plain disabled)
+  for (const name of ['busyApi', 'busyRun', 'busyStart', 'busyEnd', 'busyIs', 'preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
-    'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'persist',
+    'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);
   return { ctx, client, lead, out, button, warning, warningText,
     submit: (name) => vm.runInContext(handler(name), ctx)({ preventDefault() {}, target: {} }) };

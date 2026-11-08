@@ -1,0 +1,61 @@
+{
+  "range": "'_PolicyDrillReport'!A1:I7",
+  "majorDimension": "ROWS",
+  "values": [
+    [
+      "at",
+      "phase",
+      "result",
+      "detail",
+      "sourceSHA256",
+      "helperSHA256",
+      "setupSHA256",
+      "verifierSHA256",
+      "durationMs"
+    ],
+    [
+      "2026-10-27T15:50:51.879Z",
+      "prepare",
+      "PASS",
+      "New backup and initially empty target retained; owner-only metadata check required before capture",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "15cb194da60d42f9036faf4ecb61f74970b390abe4ef8430f84393d28b36c565",
+      "5ecdd49e1146e1e811bde90e07f14e27b4319a38742eff2ee2e151504373cb8f",
+      "",
+      "7346"
+    ],
+    [
+      "2026-10-27T15:55:21.674Z",
+      "capture",
+      "PASS",
+      "Fresh 22-entry capture, native copy and matching source inventories retained; verify native-copy sharing before restore",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "15cb194da60d42f9036faf4ecb61f74970b390abe4ef8430f84393d28b36c565",
+      "5ecdd49e1146e1e811bde90e07f14e27b4319a38742eff2ee2e151504373cb8f",
+      "",
+      "121397"
+    ],
+    [
+      "2026-10-27T15:58:48.872Z",
+      "restore",
+      "PASS",
+      "Known snapshots and native manual sheets restored in source order; hold retained for separately pinned verifier",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "15cb194da60d42f9036faf4ecb61f74970b390abe4ef8430f84393d28b36c565",
+      "5ecdd49e1146e1e811bde90e07f14e27b4319a38742eff2ee2e151504373cb8f",
+      "",
+      "103046"
+    ],
+    [
+      "2026-10-27T16:12:44.702Z",
+      "verify",
+      "PASS",
+      "Fixed synthetic policy refused tampering and passed both native finish proofs; hold cleared last; not production certification",
+      "bd597c3991c0daf7dbd83ccebf634dc01c905bed62639a0d7af704fb559e6014",
+      "15cb194da60d42f9036faf4ecb61f74970b390abe4ef8430f84393d28b36c565",
+      "5ecdd49e1146e1e811bde90e07f14e27b4319a38742eff2ee2e151504373cb8f",
+      "05bba7412842f176dcfcc512a87c2408c054bfa8359d6a599de3c27cdc5472d9",
+      "102323"
+    ]
+  ]
+}

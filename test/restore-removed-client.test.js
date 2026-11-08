@@ -132,7 +132,7 @@ test('Code.gs: routes — getRemovedClients on doGet + doPost, restoreRemovedCli
 });
 
 test('app.js: the inactive tab renders the מטופלים שנמחקו section with an editor-only restore', () => {
-  const idx = APP.indexOf("rh.textContent = 'מטופלים שנמחקו'");
+  const idx = APP.indexOf("arcHeading('מטופלים שנמחקו')");
   assert.ok(idx !== -1, 'removed-patients section not found');
   const renderInactiveIdx = APP.indexOf('function renderInactive(');
   assert.ok(renderInactiveIdx !== -1 && renderInactiveIdx < idx, 'section must live inside renderInactive');

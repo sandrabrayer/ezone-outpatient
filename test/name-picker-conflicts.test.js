@@ -118,7 +118,7 @@ test('A: two-step login — {pin} mints a short name-less PIN-stage session; {pi
   assert.equal(maxAgeOf(first), 600, 'PIN-stage session lives 10 minutes, not 7 days');
   assert.equal(tokenOf(first).split('.').length, 4, 'unique-login token (placeholder user)');
   const me0 = await request('GET', '/api/me', null, { Cookie: cookieOf(first) });
-  assert.deepEqual(me0.json, { ok: true, user: '' });
+  assert.deepEqual(me0.json, { ok: true, user: '', moneyScope: 'ops' });
   const data0 = await request('GET', '/api/sheets?action=getSettings', null, { Cookie: cookieOf(first) });
   assert.equal(data0.status, 401);
   assert.equal(data0.json.error, 'name_required', 'ordinary routes refuse the name-less session');
@@ -140,7 +140,7 @@ test('A: two-step login — {pin} mints a short name-less PIN-stage session; {pi
   assert.match(sessionCookie, /HttpOnly/);
   assert.match(sessionCookie, /SameSite=Lax/);
   const me = await request('GET', '/api/me', null, { Cookie: 'ezone_session=' + token });
-  assert.deepEqual(me.json, { ok: true, user: 'ורד' });
+  assert.deepEqual(me.json, { ok: true, user: 'ורד', moneyScope: 'full' });
 });
 
 test('A: the user is accepted ONLY from SESSION_USERS — listed names round-trip; unknown / retired / free-text names are REFUSED (403, no cookie); a wrong PIN with a user mints nothing', async () => {
@@ -150,7 +150,7 @@ test('A: the user is accepted ONLY from SESSION_USERS — listed names round-tri
     assert.equal(res.status, 200);
     const ck = setCookies(res).find((c) => c.startsWith('ezone_session=')).split(';')[0];
     const me = await request('GET', '/api/me', null, { Cookie: ck });
-    assert.deepEqual(me.json, { ok: true, user: name });
+    assert.deepEqual(me.json, { ok: true, user: name, moneyScope: name === 'דנה' ? 'ops' : 'full' });
   }
   for (const bad of ['HACKER', 'ורד<script>', 'ורדx', 'ירדן']) {
     const res = await request('POST', '/api/verify-pin', { pin: DUMMY_PIN, user: bad });
@@ -536,6 +536,21 @@ test('C: conflictsMessage — blank updatedBy -> מישהו/י; several names jo
   ] }), 'השינוי ל־דנה כהן, יוסי לוי, ליד א לא נשמר — ורד / דנה עדכן/ה קודם. הנתונים רועננו.');
 });
 
+test('C: conflictsMessage — a row refused by the financial-journal reservation names the open operation, not an editor (hotfix 2026-11-04)', () => {
+  const pending = { id: 'c1', name: 'מטופל א', sheetUpdatedAt: OLD_AT, sheetUpdatedBy: 'ורד', changed: ['sessionsPerWeek'], reason: 'financial_operation_pending' };
+  const msg = conflictsMessage({ ok: true, conflicts: [pending] });
+  assert.equal(msg, 'השינוי ל־מטופל א לא נשמר — יש פעולה כספית פתוחה (חידוש ותשלום / הוסף טיפול) על הכרטיס. יש לפתוח אותה מהכרטיס, לאשר את ההשלמה ואז לשמור שוב.');
+  assert.doesNotMatch(msg, /עדכן\/ה קודם/, 'never blames an editor for a reservation');
+  // mixed: the stale rows keep the who-saved-first wording, the reserved rows get theirs; names never cross over
+  const mixed = conflictsMessage({ conflicts: [pending, { id: 'c2', name: 'מטופל ב', sheetUpdatedBy: 'אורן', changed: ['notes'] }] });
+  assert.equal(mixed, 'השינוי ל־מטופל ב לא נשמר — אורן עדכן/ה קודם. הנתונים רועננו. ' +
+    'השינוי ל־מטופל א לא נשמר — יש פעולה כספית פתוחה (חידוש ותשלום / הוסף טיפול) על הכרטיס. יש לפתוח אותה מהכרטיס, לאשר את ההשלמה ואז לשמור שוב.');
+  assert.equal(require('../public/conflicts').PENDING_REASON, 'financial_operation_pending');
+  // the server really sets that reason (apps-script/Code.gs _saveAll)
+  const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
+  assert.match(GS, /pendingConflict\.reason = 'financial_operation_pending';/);
+});
+
 test('C: conflictsMessage — a nameless row falls back to its id; no/invalid conflicts -> "" (the caller\'s "show a banner?" test)', () => {
   assert.equal(conflictsMessage({ conflicts: [{ id: 'c7', name: '', sheetUpdatedBy: 'אורן' }] }),
     'השינוי ל־c7 לא נשמר — אורן עדכן/ה קודם. הנתונים רועננו.');
@@ -615,7 +630,7 @@ test('D: a save with conflicts shows the banner (conflictsMessage) and reloads �
   const branch = src.match(/var conflictMsg = conflictsMessage\(data\);\s*if \(conflictMsg\) \{([\s\S]*?)return;\s*\}/);
   assert.ok(branch, 'conflict branch in persist()');
   assert.match(branch[1], /showConflictBanner\(conflictMsg\);/);
-  assert.match(branch[1], /loadAll\(\)/);
+  assert.match(branch[1], /loadAll\(\{ fresh: true \}\)/, 'the reload after a conflict bypasses the proxy cache (hotfix 2026-11-04)');
   assert.doesNotMatch(branch[1], /apiSave|persist\(/, 'no automatic retry');
   assert.ok(src.indexOf('if (conflictMsg)') < src.indexOf('if (data && data.staleSave)'), 'conflicts take precedence over the staleSave toast (one reload)');
   assert.match(src, /hideConflictBanner\(\);\s*if \(data && data\.staleSave\)/);
@@ -703,7 +718,7 @@ function startStub() {
       if (p === '/api/users') return json({ ok: true, users: SESSION_USERS }); // public, like the real server
       const cu = cookieUser(req);
       if (p.indexOf('/api/') === 0 && cu === null) { res.statusCode = 401; return json({ ok: false, error: 'unauthorized' }); }
-      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu) });
+      if (p === '/api/me') return json({ ok: true, user: decodeURIComponent(cu), moneyScope: 'full' }); // OP-CRM-3A: the real server reports the scope
       if (p === '/api/users') return json({ ok: true, users: SESSION_USERS });
       if (p === '/api/sheets') {
         if (req.method === 'GET') {

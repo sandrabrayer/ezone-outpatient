@@ -35,10 +35,11 @@ test('CONTINUATION_SHEET is named מסלול המשך', () => {
   assert.match(GS, /var CONTINUATION_SHEET = 'מסלול המשך';/);
 });
 
-test('CONTINUATION_HEADERS has the exact order', () => {
+test('CONTINUATION_HEADERS has the exact order (append-only: the five CRM columns of 2026-11-03 come last)', () => {
   assert.deepEqual(headers('CONTINUATION_HEADERS'), [
     'key', 'name', 'house', 'entryDate',
-    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt'
+    'meetingDate', 'outcome', 'outcomeDate', 'note', 'updatedAt',
+    'crmStatus', 'assignee', 'offerRequestId', 'patientRef', 'phone'
   ]);
 });
 
@@ -73,8 +74,7 @@ test('CLIENTS_HEADERS is untouched: append-only tail intact, phone join key pres
   const CLIENTS_H = headers('CLIENTS_HEADERS');
   // Physical order: the volta-only columns, followed by the appended
   // paymentAmountOverrides, are the exact tail.
-  assert.deepEqual(CLIENTS_H.slice(30, 38), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse']);
-  assert.deepEqual(CLIENTS_H.slice(-5), ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
+  assert.deepEqual(CLIENTS_H.slice(-9), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
   // The continuation sheet is separate — CLIENTS_HEADERS must never mention it.
   assert.ok(CLIENTS_H.indexOf('meetingDate') === -1, 'continuation column leaked into CLIENTS_HEADERS');
   assert.ok(CLIENTS_H.indexOf('outcome') === -1, 'continuation column leaked into CLIENTS_HEADERS');

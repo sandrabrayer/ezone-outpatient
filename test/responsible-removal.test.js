@@ -95,9 +95,10 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
     'updatedAt', 'updatedBy',
     // planned discharge date — appended after the stamps
     'plannedExitDate',
-    // preferred house remains at its physical append position; OP-ID-1 follows it
+    // preferred house (בית מועדף) — appended
     'preferredHouse',
-    'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
+    // billing mode (אופן חיוב) — appended last
+    'billingMode'
   ]);
 });
 

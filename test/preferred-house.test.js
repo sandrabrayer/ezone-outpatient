@@ -47,26 +47,25 @@ const base = (over) => Object.assign({
 
 /* ================================ A. schema ================================ */
 
-test('A: preferredHouse keeps physical position 38; OP-ID-1 appends identity fields after it', () => {
+test('A: preferredHouse is appended at position 38 on Clients (billingMode was appended after it, 2026-11-04)', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS);
-  assert.equal(H.length, 43);
+  assert.equal(H.length, 39);
   assert.equal(H[37], 'preferredHouse');
   assert.equal(H.indexOf('preferredHouse'), H.lastIndexOf('preferredHouse'), 'exactly once');
-  assert.deepEqual(H.slice(-6), ['preferredHouse', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey']);
+  assert.deepEqual(H.slice(-3), ['plannedExitDate', 'preferredHouse', 'billingMode']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
 
-test('A: OP-ID-1 identity mirrors Clients tombstones + active Leads; removed-leads archive stays untouched', () => {
+test('A: mirrored at the END of the tombstone, Leads and removed-leads literals', () => {
   const { ctx } = sandbox();
-  const tail = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
-  assert.deepEqual(plain(ctx.CLIENTS_REMOVED_HEADERS).slice(-5), tail);
-  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-5), tail);
-  assert.deepEqual(plain(ctx.REMOVED_LEADS_HEADERS).slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
   for (const name of ['CLIENTS_REMOVED_HEADERS', 'LEADS_HEADERS', 'REMOVED_LEADS_HEADERS']) {
     const H = plain(ctx[name]);
+    // the Clients tombstone later appended billingMode after it (same mirror rule)
+    assert.equal(H[H.length - (name === 'CLIENTS_REMOVED_HEADERS' ? 2 : 1)], 'preferredHouse', name);
     assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
+  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
 });
 
 test('A: allowed list is identical in Code.gs, app.js and index.html', () => {

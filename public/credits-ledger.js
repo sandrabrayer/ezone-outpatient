@@ -312,16 +312,151 @@
    * would be a lie — and stamping its single day would change what the
    * credits ledger reads for that row today. Blank keeps BOTH readers exactly
    * where they are. */
-  function withDefaultCoverage(payment) {
+  /* The policy for NEW, ordinary monthly receipts. This does not reinterpret
+   * historical rows; callers must opt in explicitly at the new-write boundary.
+   * A coverage period is inclusive; the next collection is the following day.
+   *
+   * OP-BILL-01 B1: coverage starts on max(paymentDate, cycleDate). A payment
+   * made BEFORE its due cycle is an advance from the due date (due 1 Nov, paid
+   * 28 Oct -> 1 Nov–30 Nov, next 1 Dec); a payment on/after the due date covers
+   * one month from the actual payment (due 1 Nov, paid 10 Nov -> 10 Nov–9 Dec,
+   * next 10 Dec). Without this, an early payment's next collection lands in the
+   * SAME month key as the cycle it settled, and the following renewal is
+   * refused forever (pay::<id>::base::<YYYY-MM> already exists). `cycleDate`
+   * is optional: an invalid or blank cycle falls back to the payment date.
+   * EXACT MIRROR of _finPaidDateCoverage() in apps-script/Code.gs. */
+  function paymentDateCoverage(value, cycleDate) {
+    var iso = coverageDateISO(value);
+    // Canonical date only. A timestamp must not silently change calendar day
+    // between browser and Apps Script source verification.
+    if (typeof value !== 'string' || value !== iso) return null;
+    var d = iso && localDateFromISO(iso);
+    if (!d) return null;
+    var cycle = typeof cycleDate === 'string' && cycleDate === coverageDateISO(cycleDate) ? cycleDate : '';
+    var startIso = cycle && cycle > iso ? cycle : iso;
+    var next = addMonthsClamped(localDateFromISO(startIso), 1);
+    return { start: startIso, end: isoFromLocalDate(addDays(next, -1)),
+      next: isoFromLocalDate(next) };
+  }
+
+  function withDefaultCoverage(payment, options) {
     if (!payment) return payment;
     if (isOneTimePayment(payment)) return payment;
     if (recordedCoverage(payment)) return payment;
+    // Only a confirmed NEW base monthly receipt may opt into the paid-date
+    // policy. A partial/unpaid row or extra charge never advances coverage.
+    var newPaid = options && options.newPaidMonthly === true &&
+      str(payment.status) === 'paid' && str(payment.billingType) === 'monthly' &&
+      Number(payment.amountDue) > 0 &&
+      Number(payment.amountPaid) >= Number(payment.amountDue);
+    // The row's own dueDate is its cycle: an early payment advances from it.
+    var win = newPaid && paymentDateCoverage(payment.paymentDate, coverageDateISO(payment.dueDate) || '');
+    if (win) return assign({}, payment, {
+      coverageStart: win.start, coverageEnd: win.end
+    });
     var inf = inferredCoverage(payment);
     if (!inf) return payment;
     return assign({}, payment, {
       coverageStart: isoFromLocalDate(inf.start),
       coverageEnd: isoFromLocalDate(inf.end)
     });
+  }
+
+
+  /* OP-BILL-01: READ-ONLY reconciliation of what the card may safely claim.
+   * A source row explicitly matching the old inferred due-date window may have
+   * been AUTO-STAMPED by withDefaultCoverage. Therefore it is NOT evidence that
+   * a person chose to cover that period when paymentDate is different.
+   * Source calculations/writes are deliberately unchanged in this draft. */
+  function paidThroughReview(client, payments, todayISO) {
+    var registeredNext = isoDate(client && client.nextBillingDate);
+    var now = isoDate(todayISO);
+    var cid = str(client && client.id);
+    if (!cid || !now || !Array.isArray(payments)) return { state: 'unavailable' };
+    function asWindow(start, end) {
+      return start && end ? { start: isoFromLocalDate(start), end: isoFromLocalDate(end) } : null;
+    }
+    // The ordinary-month window a receipt would get under the write policy:
+    // max(paymentDate, dueDate) + 1 calendar month - 1 day (B1 rule).
+    function fromPaidDate(v, due) {
+      var w = paymentDateCoverage(coverageDateISO(v) || '', coverageDateISO(due) || '');
+      return w ? { start: w.start, end: w.end } : null;
+    }
+    function nextDay(iso) {
+      var d = localDateFromISO(iso);
+      return d ? isoFromLocalDate(addDays(d, 1)) : '';
+    }
+    function isBase(p) {
+      var id = str(p && p.id);
+      // Match the current canonical id plus earlier base-id formats; NEVER
+      // match an additional charge (::chg-), a one-off or a foreign client.
+      return p && str(p.clientId) === cid &&
+        str(p.status) === 'paid' && str(p.billingType) !== 'one_time' &&
+        id.indexOf('::chg-') < 0 && (id.indexOf('pay::') === 0 || id.indexOf('payment::') === 0);
+    }
+    var items = payments.filter(isBase).map(function (p) {
+      var proposed = fromPaidDate(p.paymentDate, p.dueDate);
+      var rec = recordedCoverage(p), inf = inferredCoverage(p);
+      var chosen = rec || inf;
+      var win = chosen ? asWindow(chosen.start, chosen.end) : null;
+      var explicit = !!rec && coverageDiffersFromDefault(p);
+      var matchesPaid = !!proposed && !!win && proposed.start === win.start && proposed.end === win.end;
+      var amount = Number(p.amountPaid), due = Number(p.amountDue);
+      // A status label alone cannot certify cash when the actual date or billed
+      // amount is missing/invalid. Do not treat a zero/blank due as fully paid.
+      var actualPaidDate = coverageDateISO(p.paymentDate);
+      var amountOk = !!actualPaidDate && actualPaidDate <= now && isFinite(amount) && amount > 0 &&
+        isFinite(due) && due > 0 && amount >= due;
+      return { id: str(p.id), paidDate: isoDate(p.paymentDate), proposed: proposed,
+        win: win, trusted: amountOk && (explicit || matchesPaid), explicit: explicit };
+    });
+    if (!items.length) return registeredNext && registeredNext >= now
+      ? { state: 'review', reason: 'future_anchor_without_receipt', registeredNext: registeredNext }
+      : { state: 'none', registeredNext: registeredNext };
+
+    // Only rows that could cover today matter for a current paid-through claim.
+    var relevant = items.filter(function (p) {
+      return (p.win && p.win.end >= now) || (p.proposed && p.proposed.end >= now);
+    }).sort(function (a, b) { return (b.paidDate || '').localeCompare(a.paidDate || '') || b.id.localeCompare(a.id); });
+    if (!relevant.length) return { state: registeredNext >= now ? 'review' : 'expired',
+      reason: 'no_current_paid_receipt', registeredNext: registeredNext };
+    var uncertain = relevant.filter(function (x) { return !x.trusted; });
+    if (uncertain.length) {
+      var recent = uncertain[0];
+      return { state: 'review', reason: 'old_cycle_or_unverified_amount',
+        registeredNext: registeredNext, paidDate: recent.paidDate,
+        candidateEnd: recent.proposed ? recent.proposed.end : '',
+        candidateNext: recent.proposed ? nextDay(recent.proposed.end) : '' };
+    }
+
+    // Contiguous verified coverages, not a guessed gap-bridging month count.
+    var windows = relevant.filter(function (x) { return x.win; })
+      .sort(function (a, b) { return a.win.start.localeCompare(b.win.start) || a.win.end.localeCompare(b.win.end); });
+    for (var i = 1; i < windows.length; i++) {
+      if (windows[i].win.start === windows[i - 1].win.start &&
+          windows[i].win.end === windows[i - 1].win.end) {
+        return { state: 'review', reason: 'duplicate_coverage', registeredNext: registeredNext };
+      }
+    }
+    var active = windows.filter(function (x) { return x.win.start <= now && x.win.end >= now; });
+    if (!active.length) return { state: 'review', reason: 'coverage_gap_or_future_advance',
+      registeredNext: registeredNext };
+    var latest = active.sort(function (a, b) { return b.win.end.localeCompare(a.win.end); })[0];
+    var end = latest.win.end, paidDate = latest.paidDate;
+    var changed = true;
+    while (changed) {
+      changed = false;
+      windows.forEach(function (w) {
+        if (w.win.start <= nextDay(end) && w.win.end > end) {
+          end = w.win.end; paidDate = w.paidDate; changed = true;
+        }
+      });
+    }
+    var next = nextDay(end);
+    if (!next || registeredNext !== next) return { state: 'review', reason: 'next_date_conflict',
+      confirmedEnd: end, nextCollection: next, registeredNext: registeredNext, paidDate: paidDate };
+    return { state: 'confirmed', confirmedEnd: end, nextCollection: next,
+      registeredNext: registeredNext, paidDate: paidDate };
   }
 
   /* The 15th of the next month on or after decidedDate: decided on the 1st–15th
@@ -718,6 +853,8 @@
     inferredCoverage: inferredCoverage,
     recordedCoverage: recordedCoverage,
     paymentCoverage: paymentCoverage,
+    paymentDateCoverage: paymentDateCoverage,
+    paidThroughReview: paidThroughReview,
     coverageDiffersFromDefault: coverageDiffersFromDefault,
     withDefaultCoverage: withDefaultCoverage,
     payoutDateFor: payoutDateFor,

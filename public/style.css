@@ -1,30 +1,35 @@
 :root {
-  --bg: #071410;
-  --bg-elev: #0b2019;
-  --panel: #13352a;
-  --panel-2: #1b4635;
-  --border: #2b6a51;
-  --text: #ffffff;
-  --text-soft: #eaf7ef;
-  --muted: #b8d5c8;
-  --green: #29d488;
-  --green-2: #4ff0a2;
-  --green-deep: #0f6a44;
-  --red: #ff7676;
-  --amber: #f2c355;
-  /* Cool accent — promoted from the existing chip-next / next-bill blue so the
-     patient-card treatment panel can share one source with the גבייה הבאה chip
-     (no new hue introduced). */
-  --blue-soft: #cce5ff;
-  --blue-deep: #004085;
-  /* Patient-card panel tints, derived from existing tokens so each half is
-     distinct from the card (--panel) and from each other: money = green family,
-     treatment plan = the promoted blue. */
-  --panel-money: color-mix(in srgb, var(--green-deep) 34%, var(--panel));
-  --panel-money-border: color-mix(in srgb, var(--green-deep) 60%, var(--border));
-  --panel-plan: color-mix(in srgb, var(--blue-deep) 30%, var(--panel));
-  --panel-plan-border: color-mix(in srgb, var(--blue-deep) 55%, var(--border));
-  --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  /* LIGHT theme (OP-CRM-4, CHANGELOG-crm-theme.md): the Dashboard CRM's format —
+     light page, white surfaces, dark text, one action colour, red = exception /
+     amber = waiting / green = done, always with a word or icon — but with the
+     Outpatient's OWN palette: sage-mint page instead of the Dashboard's slate,
+     forest green instead of teal. Token NAMES are unchanged so every rule below
+     keeps working; only their values moved to the light side. */
+  --bg: #EDF4EF;
+  --bg-elev: #E2ECE5;
+  --panel: #FFFFFF;
+  --panel-2: #DCE8DF;
+  --border: #B5CBBC;
+  --text: #0F2219;
+  --text-soft: #2F4A3C;
+  --muted: #4E665A;
+  --green: #157A52;
+  --green-2: #0E6B46;
+  --green-deep: #0B5236;
+  --red: #B42318;
+  --amber: #9A5B00;
+  /* Cool accent — the treatment-plan half of the patient card and the גבייה הבאה
+     chip share it (no new hue introduced). */
+  --blue-soft: #DCEBFA;
+  --blue-deep: #1D4F8C;
+  /* Patient-card panel tints, derived from the tokens so each half is distinct
+     from the white card and from each other: money = green family, plan = blue. */
+  --panel-money: color-mix(in srgb, var(--green-deep) 10%, var(--panel));
+  --panel-money-border: color-mix(in srgb, var(--green-deep) 45%, var(--border));
+  --panel-plan: color-mix(in srgb, var(--blue-deep) 9%, var(--panel));
+  --panel-plan-border: color-mix(in srgb, var(--blue-deep) 40%, var(--border));
+  --shadow: 0 1px 3px rgba(14, 27, 37, 0.10);
+  --menu-w: 220px;
 }
 
 * { box-sizing: border-box; }
@@ -32,9 +37,10 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 70% -10%, #123424 0%, var(--bg) 60%) fixed;
+  background: var(--bg);
   color: var(--text);
-  font-family: "Assistant", "Heebo", "Segoe UI", Arial, sans-serif;
+  font-family: "Heebo", "Assistant", "Segoe UI", "Arial Hebrew", Arial, sans-serif;
+  line-height: 1.45;
   direction: rtl;
 }
 
@@ -59,18 +65,18 @@ button, input, select, textarea {
 .btn:hover { background: var(--panel-2); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.55; cursor: default; }
-.btn-primary { background: linear-gradient(180deg, var(--green-2), var(--green)); border-color: var(--green); color: #062013; font-weight: 600; }
-.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary { background: var(--green); border-color: var(--green); color: #ffffff; font-weight: 600; }
+.btn-primary:hover { background: var(--green-2); }
 .btn-ghost { background: transparent; }
-.btn-danger { background: transparent; border-color: #6b2a2a; color: #ff9b9b; }
-.btn-danger:hover { background: #2a1515; }
+.btn-danger { background: transparent; border-color: #E3A5A5; color: #A31515; }
+.btn-danger:hover { background: #FDECEC; }
 /* positive session-credit balance accent on the patient card */
 .credit-pos { color: var(--green-2); }
 
 /* PIN screen */
 .pin-screen {
   position: fixed; inset: 0; display: grid; place-items: center;
-  background: radial-gradient(800px 400px at 50% 20%, #12392a, var(--bg));
+  background: var(--bg);
   z-index: 50;
 }
 .pin-card {
@@ -117,16 +123,16 @@ button, input, select, textarea {
 .conflict-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
-  background: #2a1515; border: 1px solid #6b2a2a; color: #ff9b9b; font-size: 14px;
+  background: #FDECEC; border: 1px solid #E3A5A5; color: #A31515; font-size: 14px;
 }
-.conflict-banner .link-btn { color: #ff9b9b; text-decoration: none; font-size: 16px; }
+.conflict-banner .link-btn { color: #A31515; text-decoration: none; font-size: 16px; }
 
 /* layout */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px;
-  background: rgba(10, 20, 16, 0.7);
+  background: #F3F8F4;
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 5;
   backdrop-filter: blur(8px);
@@ -190,7 +196,7 @@ button, input, select, textarea {
 .bar-row { display: grid; grid-template-columns: 140px 1fr auto; gap: 10px; align-items: center; }
 .bar-row .bar-label { color: var(--text); font-size: 13px; }
 .bar-row .bar-track { background: var(--bg-elev); height: 10px; border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
-.bar-row .bar-fill { background: linear-gradient(90deg, var(--green-2), var(--green)); height: 100%; }
+.bar-row .bar-fill { background: var(--green); height: 100%; }
 .bar-row .bar-value { color: var(--text-soft); font-size: 12px; min-width: 60px; text-align: left; }
 
 .pipeline-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -277,8 +283,8 @@ button, input, select, textarea {
    browser can't resolve becomes invalid at computed-value time and falls back to
    transparent — NOT to a prior declaration — so the hex must be the base and
    color-mix the enhancement, guaranteeing the tints always render. */
-.client-card .cc-money { background: #124733; border-color: #1a6a49; }
-.client-card .cc-plan  { background: #0d3845; border-color: #13536e; }
+.client-card .cc-money { background: #E6F4EC; border-color: #9FCFB4; }
+.client-card .cc-plan  { background: #E7F0FA; border-color: #9FC0E0; }
 @supports (background: color-mix(in srgb, red, blue)) {
   .client-card .cc-money { background: var(--panel-money); border-color: var(--panel-money-border); }
   .client-card .cc-plan  { background: var(--panel-plan);  border-color: var(--panel-plan-border); }
@@ -310,13 +316,13 @@ button, input, select, textarea {
 .status-badge {
   font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
 }
-.status-active { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
-.status-pause { background: #3a310f; color: var(--amber); border-color: #5a4818; }
-.status-done { background: #3a0f10; color: #ef8484; border-color: #5a1818; }
+.status-active { background: #E1F3E8; color: var(--green-2); border-color: var(--green-deep); }
+.status-pause { background: #FFF4D6; color: var(--amber); border-color: #E4C77A; }
+.status-done { background: #FDECEC; color: #A31515; border-color: #E3A5A5; }
 
 /* Modals */
 .modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  position: fixed; inset: 0; background: rgba(15, 34, 25, 0.45);
   display: grid; place-items: center; z-index: 40; padding: 12px;
 }
 .modal-card {
@@ -337,7 +343,7 @@ button, input, select, textarea {
   font-size: 14px;
 }
 .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
-  outline: none; border-color: var(--green); box-shadow: 0 0 0 2px rgba(41, 212, 136, 0.25);
+  outline: none; border-color: var(--green); box-shadow: 0 0 0 2px rgba(23, 138, 90, 0.25);
 }
 .checkgroup {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
@@ -373,7 +379,7 @@ button, input, select, textarea {
   padding: 10px 14px; border-radius: 10px; z-index: 60; box-shadow: var(--shadow);
   max-width: 90vw; font-size: 14px;
 }
-.toast.error { border-color: #6b2a2a; color: #ff9b9b; }
+.toast.error { border-color: #E3A5A5; color: #A31515; }
 
 body.viewer .edit-only { display: none !important; }
 
@@ -459,7 +465,7 @@ body.viewer .edit-only { display: none !important; }
   background: var(--panel-2); border: 1px solid var(--green-deep);
   color: var(--green-2); font-size: 10px; font-weight: 600;
 }
-.billing-row .billing-cov-badge.onetime { border-color: #5a4818; color: var(--amber); }
+.billing-row .billing-cov-badge.onetime { border-color: #E4C77A; color: var(--amber); }
 .billing-row .billing-cov-edit,
 .billing-row .billing-cov-reset {
   background: transparent; border: 1px solid var(--border);
@@ -505,7 +511,7 @@ body.viewer .edit-only { display: none !important; }
 .billing-row .billing-cov-part.deferred .cov-part-amount { color: var(--muted); }
 .billing-row .billing-cov-part .cov-part-tag {
   font-size: 10px; letter-spacing: .4px; color: var(--amber);
-  border: 1px solid #5a4818; border-radius: 999px; padding: 0 6px;
+  border: 1px solid #E4C77A; border-radius: 999px; padding: 0 6px;
 }
 .billing-row .billing-cov-split-err { color: var(--red); font-size: 12px; font-weight: 600; }
 .bt-chip {
@@ -514,8 +520,8 @@ body.viewer .edit-only { display: none !important; }
   color: var(--muted); font-size: 11px; margin-inline-start: 4px;
 }
 .bt-chip.monthly { color: var(--green-2); border-color: var(--green-deep); }
-.bt-chip.single  { color: var(--amber); border-color: #5a4818; }
-.bt-chip.bundle  { color: #9aa9ff; border-color: #2b3a6b; }
+.bt-chip.single  { color: var(--amber); border-color: #E4C77A; }
+.bt-chip.bundle  { color: #2F4FA8; border-color: #B7C3EA; }
 
 @media (max-width: 900px) {
   .billing-row { grid-template-columns: 1fr 1fr; }
@@ -542,8 +548,8 @@ body.viewer .edit-only { display: none !important; }
 .billing-breakdown .bd-line.muted { justify-content: center; color: var(--muted); }
 
 /* Bundle "+ מפגש" button on client cards and remaining-sessions chip. */
-.chip.bundle-remaining { background: #0f2d48; color: #9aa9ff; border-color: #2b3a6b; }
-.chip.bundle-remaining.warn { background: #3a1a1a; color: #ff9b9b; border-color: #6b2a2a; }
+.chip.bundle-remaining { background: #E8EEFA; color: #2F4FA8; border-color: #B7C3EA; }
+.chip.bundle-remaining.warn { background: #FDECEC; color: #A31515; border-color: #E3A5A5; }
 
 /* Direct-add modal helpers */
 .direct-bt-fields { display: contents; }
@@ -560,7 +566,7 @@ body.viewer .edit-only { display: none !important; }
 .chip-next    { background: var(--blue-soft); color: var(--blue-deep); font-weight: 600; }
 /* «חסר טלפון» / «טלפון לא תקין» on a patient card: no canonical mobile, so the
    therapists app cannot key this patient. Same amber family as .status-pause. */
-.chip-phone-issue { background: #3a310f; color: var(--amber); border-color: #5a4818; font-weight: 600; }
+.chip-phone-issue { background: #FFF4D6; color: var(--amber); border-color: #E4C77A; font-weight: 600; }
 
 /* Clickable monthly-payment chip on the patient card (editor, unpaid). */
 button.month-pay-btn {
@@ -577,8 +583,8 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .form-section-title {
   font-size: 0.82rem;
   font-weight: 700;
-  color: #1a2e4a;
-  border-top: 1px solid #e5e7eb;
+  color: #1D4F8C;
+  border-top: 1px solid #DCE8DF;
   padding-top: 10px;
   margin-top: 4px;
   letter-spacing: 0.02em;
@@ -587,16 +593,16 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .retention-section-title {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #9fcfcf;
+  color: #2F5F5F;
   padding: 18px 4px 8px;
-  border-bottom: 2px solid #2a3f5a;
+  border-bottom: 2px solid #B5CBBC;
   margin-bottom: 12px;
   letter-spacing: 0.03em;
 }
 
 .ret-card {
-  background: #1a2e4a;
-  border: 1px solid #2a3f5a;
+  background: #E7F0FA;
+  border: 1px solid #B5CBBC;
   border-radius: 10px;
   padding: 14px 18px;
   margin-bottom: 10px;
@@ -634,11 +640,11 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   display: flex;
   gap: 10px;
   font-size: 0.85rem;
-  color: #c5d5e8;
+  color: #3C4E5C;
 }
 
 .ret-label {
-  color: #7a9bbf
+  color: #4A6A8C
   min-width: 100px;
   font-weight: 600;
   flex-shrink: 0;
@@ -665,7 +671,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   flex-direction: row !important;
   gap: 12px;
   padding: 4px 0;
-  border-bottom: 1px solid #1e3a56;
+  border-bottom: 1px solid #B5CBBC;
 }.modal {
   overflow-y: auto !important;
 }
@@ -698,7 +704,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   background: rgba(255, 60, 60, 0.10);
   border-color: #d33;
 }
-.renewals-stop .renewals-section-title { color: #ff9d9d; }
+.renewals-stop .renewals-section-title { color: #A31515; }
 .renewals-warn {
   background: rgba(242, 195, 85, 0.10);
   border-color: var(--amber);
@@ -713,7 +719,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   gap: 8px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(0,0,0,0.18);
+  background: rgba(15, 34, 25, 0.06);
   margin-bottom: 6px;
 }
 .renewal-row:last-child { margin-bottom: 0; }
@@ -726,7 +732,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   font-size: 0.9rem;
 }
 .renewal-date { color: var(--muted); }
-.renewal-stop .renewal-days { color: #ff9d9d; font-weight: 700; }
+.renewal-stop .renewal-days { color: #A31515; font-weight: 700; }
 .renewal-warn .renewal-days { color: var(--amber); font-weight: 700; }
 .chip-amount { background: var(--panel-2); color: var(--green-2); font-weight: 600; }
 
@@ -739,16 +745,16 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   margin: -14px -14px 12px -14px;
 }
 .card-banner-stop {
-  background: #5c1a1a;
-  color: #ffe0e0;
-  border-bottom: 2px solid #ff7676;
+  background: #FDECEC;
+  color: #7A1212;
+  border-bottom: 2px solid #C8321F;
 }
 .card-banner-warn {
-  background: #5a4517;
-  color: #fff2cf;
+  background: #FFF4D6;
+  color: #6B4300;
   border-bottom: 2px solid var(--amber);
 }
-.client-card-stop { box-shadow: 0 0 0 2px #ff7676 inset, var(--shadow); }
+.client-card-stop { box-shadow: 0 0 0 2px #C8321F inset, var(--shadow); }
 .client-card-warn { box-shadow: 0 0 0 2px var(--amber) inset, var(--shadow); }
 
 /* ===== WhatsApp action buttons (Step 3) ===== */
@@ -772,7 +778,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   border: 1px solid #c33 !important;
   font-weight: 700;
 }
-.btn-wa-stop:hover { background: #ff7676 !important; }
+.btn-wa-stop:hover { background: #C8321F !important; }
 /* Two-way treatment-alert controls on an overdue row */
 .btn-resume {
   background: #1f6f4a !important;
@@ -782,8 +788,8 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 }
 .btn-resume:hover { background: #278a5c !important; }
 .stop-chip { font-weight: 700; align-self: center; }
-.stop-chip-sent { background: #3a1a1a; color: #ffb3b3; border-color: #6b2a2a; }
-.stop-chip-resumed { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
+.stop-chip-sent { background: #FDECEC; color: #A31515; border-color: #E3A5A5; }
+.stop-chip-resumed { background: #E1F3E8; color: var(--green-2); border-color: var(--green-deep); }
 .stop-chip-cancelled { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
 
 /* Extra charges (חיובים נוספים) */
@@ -822,7 +828,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   cursor: pointer;
   padding: 0;
 }
-.client-charges .charge-remove:hover { background: #2a1515; }
+.client-charges .charge-remove:hover { background: #FDECEC; }
 .client-charges .charge-edit {
   background: transparent;
   border: 1px solid var(--border);
@@ -843,9 +849,9 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
-.charge-status-paid    { background: #0f3a27; color: var(--green-2); border-color: var(--green-deep); }
-.charge-status-partial { background: #3a310f; color: var(--amber); border-color: #5a4818; }
-.charge-status-unpaid  { background: #3a0f10; color: #ef8484; border-color: #5a1818; }
+.charge-status-paid    { background: #E1F3E8; color: var(--green-2); border-color: var(--green-deep); }
+.charge-status-partial { background: #FFF4D6; color: var(--amber); border-color: #E4C77A; }
+.charge-status-unpaid  { background: #FDECEC; color: #A31515; border-color: #E3A5A5; }
 
 /* Editor toggle variant of the charge status: looks clickable, flips paid state. */
 .charge-status-btn { cursor: pointer; font-family: inherit; transition: filter 0.12s, transform 0.06s; }
@@ -863,19 +869,19 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 
 /* Read-only duplicate-clients report (clients view) */
 .dupreport {
-  background: #2a1a0f;
-  border: 1px solid #5a3a18;
+  background: #FFF1E0;
+  border: 1px solid #E4B77A;
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 14px;
 }
 .dupreport-head { font-weight: 700; color: var(--amber); margin-bottom: 8px; }
 .dupreport-group {
-  border-top: 1px solid #2a3f5a;
+  border-top: 1px solid #B5CBBC;
   padding: 8px 0;
 }
 .dupreport-group:first-of-type { border-top: none; }
-.dupreport-phone { font-weight: 600; color: #7a9bbf; margin-bottom: 4px; }
+.dupreport-phone { font-weight: 600; color: #4A6A8C; margin-bottom: 4px; }
 .dupreport-row {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 3px 0;
@@ -935,7 +941,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   button.month-pay-btn { min-height: 40px; }
   input, select, textarea { min-height: 40px; font-size: 16px; } /* 16px stops iOS zoom-on-focus */
   .search { min-height: 40px; }
-  * { -webkit-tap-highlight-color: rgba(41, 212, 136, 0.18); }
+  * { -webkit-tap-highlight-color: rgba(23, 138, 90, 0.18); }
 }
 
 /* Standalone (installed) mode: respect notches / home-indicator safe areas. */
@@ -958,7 +964,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 }
 .continuation-main { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 200px; flex: 1; }
 .continuation-name { font-weight: 600; }
-.continuation-phone { color: var(--blue-soft); text-decoration: none; font-size: 13px; }
+.continuation-phone { color: var(--blue-deep); text-decoration: none; font-size: 13px; }
 .continuation-phone:hover { text-decoration: underline; }
 
 /* Tenure badges — one green family, emphasis by whole-month bucket (1/2/3+). */
@@ -966,20 +972,20 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .continuation-tenure-0 { color: var(--muted); border-color: var(--border); }
 .continuation-tenure-1 { color: var(--green-2); border-color: var(--green-deep); }
 .continuation-tenure-2 {
-  color: #062013; font-weight: 700;
+  color: #ffffff; font-weight: 700;
   background: color-mix(in srgb, var(--green) 40%, var(--panel-2));
   border-color: var(--green-deep);
 }
 .continuation-tenure-3 {
-  color: #062013; font-weight: 700;
-  background: linear-gradient(180deg, var(--green-2), var(--green));
+  color: #ffffff; font-weight: 700;
+  background: var(--green-2);
   border-color: var(--green);
 }
 
 .continuation-outcome-chip { font-weight: 600; }
 .continuation-oc-continuing { color: var(--green-2); border-color: var(--green-deep); }
-.continuation-oc-to_outpatient { color: var(--blue-soft); border-color: var(--blue-deep); }
-.continuation-oc-stopping { color: var(--amber); border-color: #5a4818; }
+.continuation-oc-to_outpatient { color: var(--blue-deep); border-color: var(--blue-deep); }
+.continuation-oc-stopping { color: var(--amber); border-color: #E4C77A; }
 
 .continuation-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .continuation-ctl { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
@@ -1086,7 +1092,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
   border-radius: 8px; color: var(--text); font-size: 14px;
 }
 .credit-field input:focus, .credit-field select:focus {
-  outline: none; border-color: var(--green); box-shadow: 0 0 0 2px rgba(41, 212, 136, 0.25);
+  outline: none; border-color: var(--green); box-shadow: 0 0 0 2px rgba(23, 138, 90, 0.25);
 }
 .credit-payout-preview { color: var(--green-2); font-variant-numeric: tabular-nums; padding-top: 6px; }
 .credit-line-error { color: var(--red); font-size: 12px; margin: 8px 0 0; }
@@ -1145,7 +1151,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .revenue-kpi-received .kpi-value { color: var(--green-2); }
 /* EXPECTED — a forecast. Deliberately NOT green: it is not money. */
 .revenue-kpi-expected { border-inline-start: 3px solid var(--blue-soft); }
-.revenue-kpi-expected .kpi-value { color: var(--blue-soft); }
+.revenue-kpi-expected .kpi-value { color: var(--blue-deep); }
 /* CREDITS — money going back out. */
 .revenue-kpi-credits { border-inline-start: 3px solid var(--amber); }
 .revenue-kpi-credits .kpi-value { color: var(--amber); }
@@ -1161,7 +1167,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .revenue-basis-note strong { color: var(--text); }
 
 .billing-breakdown .bd-line.rev-warn { border-color: var(--amber); }
-.billing-breakdown .rev-exp { color: var(--blue-soft); }
+.billing-breakdown .rev-exp { color: var(--blue-deep); }
 .rev-loc-line .rev-loc-name { font-weight: 700; }
 .rev-loc-line .rev-loc-vals { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
@@ -1216,7 +1222,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .pkg-fam { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .pkg-fam-title { font-weight: 600; color: var(--muted); }
 .pkg-chip { white-space: normal; }
-.chip.warn { background: #3a2f12; color: var(--amber); border-color: #6b5a2a; }
+.chip.warn { background: #FFF4D6; color: var(--amber); border-color: #E4C77A; }
 .pkg-root .muted { color: var(--muted); }
 
 /* ---- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md) ---- */
@@ -1234,12 +1240,13 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 .md-card .l2 { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .acc-leads { --acc: #579BFC; } .acc-intros { --acc: #A25DDC; } .acc-plans { --acc: #00C875; } .acc-renewals { --acc: #FDAB3D; } .acc-approvals { --acc: #E2445C; } .acc-continuity { --acc: #0073EA; }
 .md-urgent { border: 1px solid #a33; background: rgba(226, 68, 92, 0.12); border-radius: 10px; padding: 4px 12px 10px; margin-bottom: 12px; }
+.md-sec-dated.md-urgent { border-color: #C98A1A; background: rgba(226, 160, 40, 0.10); } /* dated follow-ups/tasks: amber, under «תשלומים באיחור» */
 .md-domain { margin-bottom: 14px; }
 .md-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 15px; }
 .md-domain .md-title strong { border-inline-start: 4px solid var(--acc, var(--green)); padding-inline-start: 8px; }
 .md-n { display: inline-flex; min-width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0 6px; border-radius: 999px; background: var(--panel-2); font-size: 12px; font-weight: 700; }
 .md-rows { display: flex; flex-direction: column; gap: 6px; }
-.md-row { display: grid; grid-template-columns: 1.2fr 1.9fr 1fr 0.7fr auto; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.md-row { display: grid; grid-template-columns: 1.2fr 1.9fr 1fr 0.7fr 1.1fr auto; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
 .md-row.h { background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; padding-top: 0; padding-bottom: 0; }
 .md-row.is-exception { border-color: #a33; }
 .md-row .name { font-weight: 700; }
@@ -1253,6 +1260,294 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 @media (max-width: 760px) {
   .md-row { grid-template-columns: 1fr 1fr; }
   .md-row.h { display: none; }
+  .md-row .md-last { grid-column: 1 / -1; }
   .md-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .md-cards { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* OP-CRM-3A: operational session (body.ops-scope) — money never reaches the
+   browser (server-side), these rules only hide the empty money UI. */
+body.ops-scope .client-card .cc-money,
+body.ops-scope #panel-renewals,
+body.ops-scope #panel-credits,
+body.ops-scope .money-only,
+body.ops-scope .revenue-kpis,
+body.ops-scope .chip-paid, body.ops-scope .chip-partial, body.ops-scope .chip-unpaid, body.ops-scope .chip-next { display: none !important; }
+body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
+
+/* ===== CRM activity block on every lead / client card (OP-CRM-3B) ===== */
+.crm-block { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg-elev); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.crm-na { color: var(--muted); }
+.crm-line { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: start; }
+.crm-k { color: var(--muted); font-size: 12px; padding-top: 2px; }
+.crm-block .sub { color: var(--muted); font-size: 12px; }
+.crm-tasks { display: flex; flex-direction: column; gap: 4px; }
+.crm-task { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.crm-task-actions { display: flex; gap: 2px; }
+.crm-task-actions .btn-sm { padding: 2px 6px; font-size: 12px; }
+.crm-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.crm-history summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.crm-timeline { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.crm-timeline li { border-inline-start: 2px solid var(--border); padding-inline-start: 8px; }
+.crm-timeline .t { color: var(--muted); font-size: 12px; }
+.crm-next-modes { display: flex; gap: 14px; flex-wrap: wrap; }
+.crm-next-modes .inline { display: inline-flex; align-items: center; gap: 4px; }
+.form-grid-inline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+@media (max-width: 560px) { .crm-line { grid-template-columns: 1fr; } .crm-task { grid-template-columns: auto 1fr; } .crm-task-actions { grid-column: 1 / -1; } }
+/* Phase C — «היום שלי» priority sections + task cards */
+.acc-tasks { --acc: #0073EA; } .acc-calls { --acc: #579BFC; }
+.md-sec-critical .md-title strong { color: var(--red); }
+.md-actions .btn-sm { padding: 3px 7px; }
+
+/* ===== OP-CRM-4: Dashboard-CRM layout — fixed menu on the right, content left
+   (CHANGELOG-crm-theme.md). Desktop >= 900px only; below it the top bar and the
+   horizontally scrolling tabs stay exactly as before. ===== */
+.tab::before { margin-inline-end: 8px; }
+.tab[data-view="dashboard"]::before { content: "☀️"; }
+.tab[data-view="leads"]::before { content: "📥"; }
+.tab[data-view="clients"]::before { content: "👥"; }
+.tab[data-view="billing"]::before { content: "💳"; }
+.tab[data-view="revenue"]::before { content: "📈"; }
+.tab[data-view="retention"]::before { content: "🔁"; }
+.tab[data-view="inactive"]::before { content: "🗂️"; }
+.tab[data-view="payouts"]::before { content: "🧾"; }
+.tab[data-view="continuation"]::before { content: "🏠"; }
+.tab[data-view="packages"]::before { content: "🏷️"; }
+.tab.active { color: var(--green-2); font-weight: 600; background: var(--panel-2); border-color: var(--border); }
+.kpi-value, .pipeline-counts .pc .n { color: var(--green-2); }
+.logo { color: var(--green-deep); }
+.panel, .kpi { box-shadow: var(--shadow); }
+@media (min-width: 900px) {
+  .app { display: grid; grid-template-columns: var(--menu-w) minmax(0, 1fr); align-items: start; }
+  .topbar {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 10px;
+    padding: 16px 12px; border-bottom: 0; border-inline-start: 1px solid var(--border);
+    background: #F3F8F4; backdrop-filter: none;
+  }
+  .topbar .logo { font-size: 18px; margin: 4px 6px 10px; }
+  .topbar .tabs { flex-direction: column; gap: 4px; }
+  .topbar .tab { text-align: start; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; }
+  .topbar .tab:hover { background: var(--panel); color: var(--text); }
+  .topbar-right { margin-top: auto; flex-direction: column; align-items: stretch; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .topbar-right .session-user { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .main { max-width: none; padding: 18px 22px 40px; }
+}
+
+/* Landing KPIs above «היום שלי» (OP-CRM-G): compact, three across, stack on phones */
+.kpis-landing { margin: 0 0 12px; grid-template-columns: repeat(3, 1fr); }
+.kpis-landing .kpi { padding: 12px 14px; }
+.kpis-landing .kpi-value { font-size: 26px; }
+body.ops-scope .kpis-landing { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 800px) { .kpis-landing { grid-template-columns: 1fr 1fr; } .kpis-landing .kpi:nth-child(3) { grid-column: 1 / -1; } }
+
+/* ===== CRM nav order + archive views (שימור לידים / מטופלים לא פעילים), 2026-11-03 =====
+   Light-theme cards instead of the old inline dark colours; one quiet style for both archives. */
+.view-title { font-size: 1rem; font-weight: 600; color: var(--green-2); margin: 0; }
+.arc-heading { font-size: 0.95rem; font-weight: 700; color: var(--green-2); padding: 14px 4px 8px; border-bottom: 2px solid var(--border); margin-bottom: 12px; }
+.arc-card { margin-bottom: 12px; }
+.arc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.arc-name { font-weight: 700; font-size: 1rem; color: var(--text); }
+.arc-row { display: flex; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.arc-k { color: var(--muted); font-weight: 600; min-width: 110px; flex-shrink: 0; }
+.arc-v { color: var(--text); overflow-wrap: anywhere; }
+
+/* ===== Continuation CRM flow (מסלול המשך, 2026-11-03): milestone strip + CRM lines per patient ===== */
+.cont-card { flex-direction: column; align-items: stretch; gap: 8px; }
+.cont-ms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cont-ms-item { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--panel); font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.cont-ms-item.st-late { border-color: #E2445C; }
+.cont-ms-item.st-today { border-color: #FDAB3D; }
+.cont-ms-item.st-done { opacity: 0.75; }
+.cont-ms-item.st-past, .cont-ms-item.st-closed { opacity: 0.6; }
+.cont-ms-title { font-weight: 600; }
+.cont-ms-when { color: var(--muted); font-size: 12px; }
+.cont-ms-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cont-ms-missing { color: #A31515; background: #FDECEC; border: 1px solid #E3A5A5; border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.md-chip.st-done { background: var(--green-2); }
+.md-chip.st-pending, .md-chip.st-past, .md-chip.st-closed { background: #9aa8a2; }
+.cont-crm { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.cont-st { font-weight: 600; }
+.cont-st-not_contacted { color: var(--muted); }
+.cont-st-in_progress, .cont-st-interested { color: var(--green-2); border-color: var(--green-deep); }
+.cont-st-postponed { color: var(--amber); border-color: #E4C77A; }
+.cont-st-declined, .cont-st-closed { color: #A31515; border-color: #E3A5A5; }
+.cont-st-converted { color: var(--blue-deep); border-color: var(--blue-deep); }
+.chip-btn { cursor: pointer; background: var(--panel); }
+.chip-btn:hover { background: var(--panel-2); }
+.continuation-entrydate { color: var(--muted); font-size: 12px; }
+@media (max-width: 600px) { .cont-ms { grid-template-columns: 1fr; } }
+.md-row .md-last { font-size: 12px; color: var(--text); }
+
+/* ===== Offers CRM in תמחור חבילות (2026-11-03): filters, new-offer form, status chips, WhatsApp panel ===== */
+.pkg-filters { margin-bottom: 4px; }
+.pkg-chip-on { background: var(--panel-2); border-color: var(--green-deep); color: var(--green-2); font-weight: 600; }
+.pkg-new { display: flex; flex-direction: column; gap: 10px; }
+.pkg-new h3 { margin: 0; font-size: 16px; color: var(--green-2); }
+/* «למי ההצעה» (2026-11-04): a large full-width searchable picker, the unregistered-client row beneath */
+.pkg-who-box { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-input { width: 100%; flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.pkg-who-list { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 4px; }
+.pkg-who-list[hidden] { display: none; }
+.pkg-who-opt, .pkg-who-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; text-align: start; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.pkg-who-opt:hover, .pkg-who-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.pkg-who-picked { cursor: default; border-color: var(--green-deep); background: var(--panel-2); }
+.pkg-who-picked .btn { margin-inline-start: auto; }
+.pkg-who-name { font-weight: 600; font-size: 15px; }
+.pkg-who-none { padding: 8px 12px; }
+.pkg-who-more { padding: 6px 12px; font-size: 12px; font-style: italic; }
+.pkg-who-manual { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.pkg-root .pkg-who-manual input { flex: 1 1 200px; min-height: 42px; }
+.pkg-who-or { flex: 0 0 100%; font-size: 13px; }
+.pkg-pick { display: flex; flex-direction: column; gap: 6px; }
+.pkg-qty { max-width: 80px; flex: 0 0 80px; }
+.pkg-items { display: flex; flex-direction: column; gap: 4px; }
+.pkg-item-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.pkg-item-row > span:first-child { flex: 1; }
+.pkg-item-sum { font-weight: 600; white-space: nowrap; display: inline-flex; gap: 6px; align-items: baseline; }
+/* pricing flexibility (2026-11-04, ורד): custom lines + manual overrides — catalog price struck through */
+.pkg-item-label { flex: 1; display: inline-flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.pkg-item-catalog { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+.pkg-item-overridden .pkg-item-sum > span:last-child { color: var(--amber); }
+.pkg-chip-custom { font-size: 11px; padding: 1px 8px; background: #EEF3FF; color: var(--blue-deep); border-color: #B8C8F0; }
+.pkg-item-wrap { display: flex; flex-direction: column; gap: 6px; }
+.pkg-override { padding: 6px 8px 8px; background: var(--bg-elev); border-radius: 8px; }
+.pkg-root .pkg-override input, .pkg-root .pkg-custom input[type="text"] { flex: 1 1 180px; }
+.pkg-total-split { font-weight: 400; font-size: 13px; }
+.pkg-item-why { font-size: 13px; }
+.pkg-override-btn { white-space: nowrap; }
+@media (max-width: 480px) {
+  .pkg-item-row { flex-wrap: wrap; }
+  .pkg-item-row > span.pkg-item-label:first-child { flex: 1 1 100%; }
+  .pkg-item-row .pkg-item-sum { margin-inline-end: auto; }
+}
+.pkg-lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pkg-items-list { margin: 0; padding-inline-start: 18px; }
+.pkg-terms-line { font-size: 13px; }
+.pkg-st { font-weight: 600; }
+.pkg-st-draft { color: var(--muted); }
+.pkg-st-ready_to_send { color: var(--blue-deep); border-color: var(--blue-deep); }
+.pkg-st-sent, .pkg-st-awaiting_decision { color: var(--amber); border-color: #E4C77A; }
+.pkg-st-approved { color: var(--green-2); border-color: var(--green-deep); }
+.pkg-st-rejected, .pkg-st-expired { color: #A31515; border-color: #E3A5A5; }
+.pkg-card.pkg-crm-approved, .pkg-card.pkg-crm-rejected, .pkg-card.pkg-crm-expired { opacity: 0.85; }
+.pkg-fu { gap: 6px; }
+.pkg-wa { display: flex; flex-direction: column; gap: 8px; background: var(--bg-elev); }
+.pkg-wa-text { width: 100%; min-height: 140px; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); resize: vertical; }
+/* billing mode (אופן חיוב, 2026-11-04): per-session clients have no package cycle */
+.chip-per-session { background: #EEF3FF; color: var(--blue-deep); border: 1px solid #B8C8F0; font-weight: 600; }
+.chip-suggest-per-session { background: #fff3cd; color: #664d03; border: 1px dashed #e8cb75; cursor: pointer; font: inherit; font-size: 12px; }
+.chip-suggest-per-session:hover { background: #ffe9a8; }
+/* CRM follow-up 2 (2026-11-04): picker sections, card-embedded offer form, delete/reset confirm, WhatsApp links */
+.pkg-who-section { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 4px; border-top: 1px solid var(--border); }
+.pkg-who-section:first-child { border-top: 0; }
+.pkg-who-locked { border-style: solid; }
+.pkg-new-embedded { margin-top: 10px; }
+.cc-offer-host { padding: 0 12px 12px; }
+.cc-offer-host[hidden] { display: none; }
+.pkg-danger-zone { justify-content: flex-end; gap: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.pkg-confirm { display: flex; flex-direction: column; gap: 8px; background: #fff8f0; border: 1px solid #f0c9a0; }
+.pkg-reset-note { font-style: italic; }
+.pkg-wa-block { display: flex; flex-direction: column; gap: 4px; }
+.pkg-wa-links { align-items: center; gap: 8px; }
+.pkg-wa-links a.btn { text-decoration: none; }
+.pkg-wa-cap { font-weight: 600; }
+.pkg-wa-note { margin: 0; font-size: 12px; }
+.pkg-wa-missing { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pkg-root .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+
+/* Global patient search on «היום שלי» (CHANGELOG-global-patient-search.md).
+   Pinned above the KPI strip: full-width box, dropdown anchored under it.
+   The dropdown is absolutely positioned so it never pushes the KPI strip
+   down; `inset-inline: 0` keeps it inside the box in RTL and LTR alike, so
+   nothing can overflow sideways at 360px. */
+.gs-wrap { position: relative; width: 100%; margin: 0 0 12px; }
+.gs-wrap .gs-input { width: 100%; max-width: none; box-sizing: border-box; font-size: 16px; padding: 12px 14px; min-height: 46px; }
+.gs-results {
+  position: absolute; inset-inline: 0; top: calc(100% + 4px); z-index: 30;
+  max-height: 46vh; overflow-y: auto; overflow-x: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); padding: 4px;
+}
+.gs-results[hidden] { display: none; }
+.gs-opt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+  width: 100%; box-sizing: border-box; text-align: start;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.gs-opt:hover, .gs-opt.is-active, .gs-opt:focus { background: var(--panel-2); border-color: var(--green-deep); outline: none; }
+.gs-name { font-weight: 600; font-size: 15px; }
+.gs-sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.gs-hint { margin-inline-start: auto; font-size: 0.72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+.gs-hint.st-active { background: #d4edda; color: #155724; }
+.gs-hint.st-inactive { background: #e2e3e5; color: #41464b; }
+.gs-hint.st-lead { background: #fff3cd; color: #856404; }
+.gs-none { padding: 10px 12px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  .gs-results { max-height: 50vh; }
+  .gs-hint { margin-inline-start: 0; }
+}
+
+/* ===== Busy ("working…") indicator — see public/busy.js =====================
+   Any control that triggers a write or a reload is wrapped in
+   Busy.withBusy(el, fn): it is disabled, gets aria-busy="true" and the
+   .is-busy class, and a button's label is swapped for the pure-CSS spinner
+   below. The element's measured width/height are pinned inline by busy.js, so
+   nothing in the row moves. Direction-agnostic: a circle spins the same in
+   RTL. */
+.busy-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  opacity: 0.85;
+  animation: busy-spin 0.7s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Non-button controls (a <select>, an <input>) keep their content — they get a
+   soft moving sheen plus the progress cursor instead of a spinner. */
+.is-busy { cursor: progress !important; }
+select.is-busy,
+input.is-busy {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--green) 18%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: busy-sheen 1.1s linear infinite;
+}
+@keyframes busy-sheen {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Respect a reduced-motion preference: no spin, no sweep — a calm pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border-radius: 50%;
+    border-inline-end-color: currentColor;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  select.is-busy,
+  input.is-busy {
+    background-image: none;
+    animation: busy-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes busy-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.9; }
+  }
+}
+
+/* R6 (2026-11-07): explicit «עדכון משימות המשך» bar — the only control that writes milestone tasks. */
+.continuation-sync-bar { flex-wrap: wrap; gap: 8px; align-items: center; }
+.panel.data-unavailable { padding: 12px 16px; color: #b45309; }

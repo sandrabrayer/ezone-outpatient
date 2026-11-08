@@ -9,7 +9,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
   <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
-  <meta name="theme-color" content="#071410" />
+  <meta name="theme-color" content="#EDF4EF" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Outpatient" />
@@ -51,11 +51,12 @@
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
         <button class="tab" data-view="revenue">הכנסות חודשיות</button>
-        <button class="tab" data-view="retention">שימור לידים</button>
-        <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
-        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
         <button class="tab" data-view="continuation">מסלול המשך</button>
         <button class="tab" data-view="packages" id="packagesTab">תמחור חבילות</button>
+        <button class="tab" data-view="payouts">תשלומי מטפלים</button>
+        <!-- Archive-like views last (CRM nav order, 2026-11-03): win-back of lost leads, then inactive patients. -->
+        <button class="tab" data-view="retention">שימור לידים</button>
+        <button class="tab" data-view="inactive">מטופלים לא פעילים</button>
       </nav>
       <div class="topbar-right">
         <span id="sessionUser" class="session-user" hidden>מחובר/ת כ: <b id="sessionUserName"></b> · <button type="button" id="switchUserBtn" class="link-btn">החלף</button></span>
@@ -73,6 +74,11 @@
         <span id="conflictBannerText"></span>
         <button type="button" id="conflictBannerClose" class="link-btn" aria-label="סגור">✕</button>
       </div>
+      <!-- R10: a source the load could not read — «מידע לא זמין», never an empty list read as «nothing». -->
+      <div id="dataUnavailableBanner" class="conflict-banner" role="alert" hidden>
+        <span id="dataUnavailableText"></span>
+        <button type="button" id="dataUnavailableClose" class="link-btn" aria-label="סגור הודעת מידע לא זמין">✕</button>
+      </div>
       <div id="financialSaveWarning" class="conflict-banner" role="alert" hidden>
         <span id="financialSaveWarningText"></span>
         <button type="button" id="financialSaveWarningClose" class="link-btn" aria-label="סגור הודעת תשלום">✕</button>
@@ -81,6 +87,32 @@
       <section id="view-dashboard" class="view active">
         <!-- «היום שלי» (OP-CRM-1, CHANGELOG-my-day.md): the work screen — summary cards,
              the urgent band and the lists by domain come from public/my-day.js. -->
+        <!-- Global patient search (CHANGELOG-global-patient-search.md): pinned at the
+             very top of «היום שלי», above the KPI strip, so Vered jumps to a patient or
+             an open lead without going to the מטופלים tab. Name OR phone (digits-only
+             comparison). A result row carries NO financial field, so an operational
+             session (דנה) uses it exactly as ורד does. -->
+        <div class="gs-wrap" role="search">
+          <input id="globalSearch" class="search gs-input" type="search" autocomplete="off"
+                 role="combobox" aria-expanded="false" aria-controls="globalSearchResults"
+                 aria-autocomplete="list" aria-label="חיפוש מטופל"
+                 placeholder="חיפוש מטופל — שם או טלפון…" />
+          <div id="globalSearchResults" class="gs-results" role="listbox" aria-label="תוצאות חיפוש מטופל" hidden></div>
+        </div>
+        <!-- The three headline numbers Sandra wants on landing (restored 2026-10-31, OP-CRM-G):
+             above the work screen, always visible. הכנסה חודשית is a money figure — hidden for an
+             operational session (body.ops-scope) and never computed from stripped data. -->
+        <div class="kpis kpis-landing">
+          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
+          <div class="kpi money-only"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
+          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
+        </div>
+        <!-- R6 follow-up: pending continuation milestone changes (read-only dry run) + the one explicit action,
+             so a new admission is never silently missing from the daily queue. Opening this screen writes nothing. -->
+        <div id="myDayContSync" class="conflict-banner my-day-cont-sync" role="status" hidden>
+          <span id="myDayContSyncText"></span>
+          <button type="button" id="myDayContSyncBtn" class="btn edit-only">🔄 עדכון משימות המשך</button>
+        </div>
         <div id="myDay" class="my-day"></div>
 
         <!-- Cross-tab patient locator: searches Clients (any status), the
@@ -117,13 +149,8 @@
           <div id="extraRequestsAlerts" class="renewals-list"></div>
         </div>
 
-        <!-- Metrics (the former «דשבורד»): collapsed — the work comes first. -->
-        <details class="panel my-day-metrics"><summary class="panel-title">📊 מדדים ופילוחים</summary>
-        <div class="kpis">
-          <div class="kpi"><div class="kpi-label">מטופלים פעילים</div><div id="kpiActive" class="kpi-value">0</div></div>
-          <div class="kpi"><div class="kpi-label">הכנסה חודשית</div><div id="kpiRevenue" class="kpi-value">₪0</div></div>
-          <div class="kpi"><div class="kpi-label">לידים פתוחים</div><div id="kpiLeads" class="kpi-value">0</div></div>
-        </div>
+        <!-- Breakdowns (the former «דשבורד» charts): open by default again (Sandra, 2026-10-31). -->
+        <details class="panel my-day-metrics" open><summary class="panel-title">📊 פילוחים</summary>
         <div class="grid-2">
           <div class="panel">
             <div class="panel-title">פילוח לפי סוג טיפול</div>
@@ -223,7 +250,7 @@
           <label class="billing-date-label">חודש
             <input id="revenueMonth" type="month" />
           </label>
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">
+          <h2 class="view-title">
             הכנסות חודשיות <span id="revenueMonthLabel" class="panel-sub"></span>
           </h2>
           <div class="revenue-vat-note">כל הסכומים ללא מע״מ</div>
@@ -285,7 +312,7 @@
       <section id="view-retention" class="view">
         <div class="toolbar">
           <input id="retentionSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">שימור לידים — לא רלוונטים</h2>
+          <h2 class="view-title">שימור לידים — לא רלוונטים</h2>
         </div>
         <div id="retentionList"></div>
       </section>
@@ -297,7 +324,7 @@
       <section id="view-inactive" class="view">
         <div class="toolbar">
           <input id="inactiveSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
+          <h2 class="view-title">מטופלים לא פעילים — סיימו טיפול ולא פעילים</h2>
         </div>
         <div id="inactiveList"></div>
       </section>
@@ -309,7 +336,7 @@
           <label class="billing-date-label">חודש
             <input id="payoutMonth" type="month" />
           </label>
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">תשלומי מטפלים — סיכום חודשי</h2>
+          <h2 class="view-title">תשלומי מטפלים — סיכום חודשי</h2>
           <div style="margin-inline-start:auto;display:flex;gap:8px;">
             <button type="button" class="btn edit-only" id="payoutAddSessionBtn">+ הוסף סשן חסר</button>
             <button type="button" class="btn btn-primary" id="payoutExportBtn">ייצוא לאקסל</button>
@@ -328,7 +355,12 @@
       <section id="view-continuation" class="view">
         <div class="toolbar">
           <input id="continuationSearch" class="search" placeholder="חיפוש לפי שם…" />
-          <h2 style="font-size:1rem;font-weight:600;color:#9fcfcf">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
+          <h2 class="view-title">מסלול המשך — מטופלים מאושפזים כלידים פוטנציאליים לטיפול חוץ</h2>
+        </div>
+        <!-- R6: opening / refreshing this tab never writes; the milestone tasks change only on this button. -->
+        <div class="toolbar continuation-sync-bar">
+          <button type="button" id="continuationSyncBtn" class="btn edit-only">🔄 עדכון משימות המשך</button>
+          <span id="continuationSyncStatus" class="muted-hint" aria-live="polite"></span>
         </div>
         <div id="continuationList" class="continuation-list"></div>
       </section>
@@ -435,6 +467,12 @@
           </label>
           <div class="wide sessions-host" data-host="activateSessions"></div>
           <label class="wide">מחיר לחבילה חודשית (₪)<input name="pricePerSession" type="number" min="0" step="1" required /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
           <label>תאריך תחילת טיפול<input name="startDate" type="date" required /></label>
 
           <!-- Payment fields -->
@@ -502,6 +540,12 @@
           <div class="wide sessions-host" data-host="directSessions"></div>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">יום גבייה חודשי (ברירת מחדל: יום הכניסה)<input name="billingDay" type="date" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <!-- Payment fields -->
           <div class="wide form-section-title">פרטי תשלום חבילה</div>
@@ -533,6 +577,8 @@
           <label>סניף<input name="bankBranch" type="text" /></label>
           <label>מספר חשבון<input name="bankAccount" type="text" /></label>
           <label>ע"ש (שם בעל החשבון)<input name="bankHolder" type="text" /></label>
+          <div class="wide form-section-title">הצעות מחיר — WhatsApp</div>
+          <label class="wide">WhatsApp של אורן (05X-XXXXXXX)<input name="orenWhatsapp" type="tel" inputmode="tel" placeholder="05X-XXXXXXX" /></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
             <button type="submit" class="btn btn-primary" id="settingsSubmit">שמור</button>
@@ -585,6 +631,12 @@
           </label>
           <label>תאריך תשלום אחרון<input name="paymentDate" type="date" /></label>
           <label class="wide">סכום חודשי (₪)<input name="monthlyAmount" type="number" min="0" step="1" /></label>
+          <label>אופן חיוב
+            <select name="billingMode">
+              <option value="package">חבילה / חודשי</option>
+              <option value="per_session">תשלום לפי טיפול</option>
+            </select>
+          </label>
 
           <div class="wide form-section-title">פרטים נוספים</div>
           <label>בית מוצא
@@ -989,6 +1041,82 @@
     </div>
 
     <!-- Continuation → outpatient lead confirm (מסלול המשך) -->
+    <!-- CRM (OP-CRM-3B): contact log — the one form every «יצרתי קשר» goes through.
+         No default follow-up date: a date, «בעוד N ימים», or «אין המשך» + reason. -->
+    <div id="contactModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">תיעוד יצירת קשר — <span id="contactModalName"></span></div>
+        <form id="contactForm" class="form-grid">
+          <p id="contactTaskHint" class="wide" hidden style="margin:0;color:var(--muted);font-size:12px;">התיעוד יסגור את המשימה הפתוחה שממנה הגעתם.</p>
+          <label>ערוץ<select name="channel" id="contactChannel" required></select></label>
+          <label>מתי<input name="occurredAt" id="contactOccurredAt" type="datetime-local" required /></label>
+          <label>עם מי<input name="withWhom" type="text" maxlength="80" placeholder="המטופל/ת, הורה, גורם מפנה…" /></label>
+          <label>תוצאה<select name="outcome" id="contactOutcome" required></select></label>
+          <label class="wide">סיכום קצר<textarea name="summary" rows="3" maxlength="1000" placeholder="מה סוכם / מה נאמר"></textarea></label>
+          <div class="wide form-section-title">הצעד הבא</div>
+          <div class="wide crm-next-modes">
+            <label class="inline"><input type="radio" name="nextMode" value="date" checked /> בתאריך</label>
+            <label class="inline"><input type="radio" name="nextMode" value="days" /> בעוד</label>
+            <label class="inline"><input type="radio" name="nextMode" value="none" /> אין המשך</label>
+          </div>
+          <div id="contactNextDate" class="wide form-grid-inline">
+            <label>תאריך<input name="nextDate" type="date" /></label>
+            <label>שעה (רשות)<input name="nextTime" type="time" /></label>
+          </div>
+          <div id="contactNextDays" class="wide" hidden>
+            <label>ימים<input name="nextDays" type="number" min="1" max="365" placeholder="3" /></label>
+          </div>
+          <div id="contactNextNone" class="wide" hidden>
+            <label class="wide">למה אין המשך<input name="nextExplanation" type="text" maxlength="300" placeholder="למשל: ביקש/ה שלא נחזור" /></label>
+          </div>
+          <div id="contactNextTaskFields" class="wide form-grid-inline">
+            <label>סוג<select name="nextKind"><option value="call">שיחה</option><option value="meeting">פגישה</option><option value="intro">שיחת היכרות</option><option value="plan">תוכנית טיפול</option><option value="activation">הפעלת טיפול</option><option value="review">בירור</option><option value="other">אחר</option></select></label>
+            <label>כותרת (רשות)<input name="nextTitle" type="text" maxlength="160" placeholder="שיחה חוזרת עם …" /></label>
+            <label>אחראי/ת<select name="nextAssignee" id="contactNextAssignee"></select></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="contactSubmit">שמור תיעוד</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM (OP-CRM-3B): manual task -->
+    <div id="taskModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">משימה חדשה — <span id="taskModalName"></span></div>
+        <form id="taskForm" class="form-grid">
+          <label>סוג<select name="kind" id="taskKind" required></select></label>
+          <label>אחראי/ת<select name="assignee" id="taskAssignee" required></select></label>
+          <label class="wide">מה לעשות<input name="title" type="text" maxlength="160" required /></label>
+          <label>תאריך יעד<input name="dueDate" type="date" /></label>
+          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
+          <label class="wide">למה / הקשר (רשות)<input name="reason" type="text" maxlength="300" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="taskSubmit">צור משימה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM (OP-CRM-3B): defer a task — the previous date is kept in the history -->
+    <div id="deferModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">דחיית משימה</div>
+        <form id="deferForm" class="form-grid">
+          <label>מועד חדש<input name="dueDate" type="date" required /></label>
+          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
+          <label class="wide">סיבת הדחייה<input name="reason" type="text" maxlength="300" required minlength="2" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="deferSubmit">דחה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="continuationToOutpatientModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">העברה לטיפול חוץ</div>
@@ -1001,9 +1129,12 @@
     </div>
   </div>
 
+  <script src="busy.js?v=__BUILD__" defer></script>
   <script src="name-search.js?v=__BUILD__" defer></script>
+  <script src="global-search.js?v=__BUILD__" defer></script>
   <script src="patient-search.js?v=__BUILD__" defer></script>
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
+  <script src="crm-activity.js?v=__BUILD__" defer></script>
   <script src="my-day.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER

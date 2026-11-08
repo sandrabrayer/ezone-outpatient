@@ -5,15 +5,226 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Care-continuum identity foundation (OP-ID-1, draft 2026-10-30)
-- Adds append-only, server-owned Dashboard identity/provenance fields to active Leads and Clients (and Clients-removed): `dashboardPatientId`, `dashboardPersonId`, `dashboardLeadId`, `handoffSource`, `continuationKey`.
-- `createLead` becomes fail-closed link-or-create by stable ids: stay id → Dashboard lead id → person key (`dashboardPersonId || dashboardPatientId`). Phone+name is warning-only and never silently links records; with a stable id present, a PII collision fails closed (`possible_duplicate`, nothing written).
-- Existing browser `saveAll` cannot overwrite these server-owned fields. Closed historical leads/clients are not overwritten; a new episode may be created.
-- Backward-compatible callers with no identity still create a lead as before. No production release is authorized by this draft.
+### Read-only acceptance: continuation task names, navigation and missing-data labels (2026-11-08)
+- Refresh Today when the asynchronous admitted roster finishes loading, so existing continuation tasks show their patient names without leaving the screen.
+- Open a continuation task by its existing subject/workflow key, including a click before the roster arrives. Same-name patients are not substituted; an absent subject gets an explicit warning and a return-to-roster action.
+- A valid entry date with no usable identifier is labelled as missing phone/identifier, rather than missing entry date.
+- Four synthetic browser regressions verify these paths and unchanged source sheets/properties. The existing continuation/read-only browser suites are now explicitly included in browser CI. SW v33 → v34; no Apps Script change. See `CHANGELOG-continuation-readonly-acceptance.md` and `docs/crm/OUTPATIENT-READONLY-ACCEPTANCE-20261108.md`.
 
+### Read-only boot — opening / navigating / refreshing never writes (R6 + R10, #149, 2026-11-07)
+- **R6 fix (Work acceptance audit, issue #149):** `loadAll` no longer calls `persist()` to drop converted leads — they are hidden on screen only; the source's `_saveAll` already drops every lead a client's `fromLead` points to on the next deliberate save. `GET /api/continuation-roster` no longer runs the milestone sync: it is a pure read (cache hit, miss or `?fresh=1`).
+- **The milestone sync keeps working, explicitly:** «🔄 עדכון משימות המשך» in «מסלול המשך» → `POST /api/continuation-sync` (signed-in allow-listed session, JSON only → 401 / 415 otherwise; roster fetched by Node, never typed by a browser). Idempotent by stable task ids: a retry after a lost answer creates / closes nothing twice. A terminal CRM status save still triggers it (that is a deliberate write).
+- **Read-only preview:** `GET /api/continuation-sync/preview` → new source action `previewContinuationMilestones` (the same computation as a dry run: no lock, no write, not even sheet creation) so the tab shows «N שינויים ממתינים» / «מעודכנות» / «לא זמין». Old source without the action → «לא זמין», never a write.
+- **R10:** a failed payments / charges / stop flags / extra requests / settings / alerts / tasks / activity / offers read shows a «מידע לא זמין» banner (no more silent empty list read as «no debt»); a failed continuation-status read warns instead of showing everyone as «טרם נוצר קשר».
+- **Review follow-up (PR #174, 2026-11-07):** (1) pending milestone changes also surface at the top of «היום שלי» with the same one action, so a new admission is never silently missing from Vered's queue (read-only dry run at boot; no write). (2) A lost sync answer no longer claims «nothing changed»: the app reads back (dry run + tasks) and says «העדכון נשמר» / «N עדיין ממתינים — אפשר לנסות שוב בבטחה» / «לא ניתן לאמת». (3) **Finance fail-closed:** when payments or charges did not load, every money write (`savePayment` … `resolveExtraChargeReview`, credits) and any `saveAll` that changes a client's money fields is refused in the browser before sending; unloaded settings cannot be saved over the stored bank details. Non-money work continues. #164 guard untouched.
+- Tests: `test/read-only-boot-browser.test.js` (Chromium + real server.js + real Code.gs: open, every tab, 4 refreshes, 2 windows, forced roster miss → 0 writes; Today-only user sees a new admission's pending work and applies it once; finance outage → no money request sent (fails if the gate is removed); browser money list pinned to `lib/money-scope.js`; explicit sync once; lost-answer retry → nothing new; outage → «מידע לא זמין», nothing closed; unauthorized → 401/403/415) — fails on the deployed code, passes here. `test/continuation-milestones.test.js` +2 (dry run predicts the sync exactly, writes nothing; proxy-only). Existing continuation browser test now presses the button. SW **v32 → v33**. **Code.gs changed → Apps Script phase required** after Node. See `CHANGELOG-read-only-boot.md`.
+
+### Same-date future renewal confirmation — current-base candidate (2026-11-06)
+- Adapt existing draft #164 to production base `213ffa4609c3453d8ddf5a6eb8a890eacedac3dd`; preserve the newer busy spinner, pricing recovery and session counters.
+- Ask for explicit confirmation of a distinct additional payment before reserving a future renewal with the last recorded payment date. The source repeats the guard under the existing lock and persists strict boolean confirmation in the existing journal intent.
+- No new sheet, migration or historical financial adjustment. SW v31 → v32. Prepared locally only; not merged or deployed. See `CHANGELOG-op-bill01-advance-confirmation.md`.
+
+### A busy spinner on every action button (2026-11-05)
+- **Request (Sandra, production):** «כשלוחצים על כפתורים שמירה איפוס או כל שינוי תוסיף ספינר» — several actions gave no feedback between the click and the result, so users clicked twice (a double «יצירת הצעה» or «אישור מחיקה» is a duplicate-write risk).
+- **One shared helper, `public/busy.js` (`window.Busy`)**, wrapped around every control that starts a write or a reload: `Busy.withBusy(button, fn)` disables the pressed control, sets `aria-busy="true"`, replaces a button's label with a **pure-CSS inline spinner** after pinning its measured width/height (no layout jump), **drops a second click** (the wrapped action is never called twice), and restores the control **on success and on failure**. A `<select>` / `<input>` keeps its content and gets a soft sheen instead. RTL-safe (`border-inline-end`), and under `prefers-reduced-motion` it fades instead of spinning. For actions that reload a list the spinner is held until the refresh finishes, not just until the POST returns.
+- **Where:** the patient card (עריכה save, חידוש ותשלום, + הוסף טיפול, status select, «סמן כתשלום לפי טיפול?», שולם / בטל סימון, אימות תשלום, per-charge ✏️ / ✕ / שולם, סיים טיפול, ✕ מחיקה), גבייה rows (תקופת כיסוי save + ↺ איפוס, סכום גבייה, הסר), leads (save, stage ← →, convert, agreement, לא רלוונטי, הסרה, קליטה), «היום שלי» / CRM (✓ / 👤 / ✕ and the 📞 / ➕ / ⏩ submits), «מסלול המשך» (שמור, צור ליד), the alerts panels (אישור טיפול נוסף, הסרת בקשת הפסקה), **תמחור חבילות** (יצירת הצעה, אישור מחיקה / איפוס, אישור תמחור, בחירת מחיר, התאמת סכום, סמן כנשלחה, ממתינה להחלטה, אושר / נדחתה, הארכה, עדכון מעקב, שיוך, catalog saves, רענון), the header רענון, settings, credits, therapist payouts and sign-in. **No business logic, payload or #170 single-flight/recovery path changed — only wrapped.**
+- Tests: `test/busy.test.js` (19 unit tests — set/cleared on success, on a sync throw and on a rejection; re-entrancy blocked; a `<select>`'s options preserved) and `test/action-busy-spinner-browser.test.js` (Playwright 1280 + 360, the upstream held open: a patient-card save, the card's חידוש ותשלום, a quote creation, 🗑 מחיקה and רענון — spinner shown, button disabled, a second click sends nothing, restored after success **and** after a server error). Two source-shape guards updated; `test-support/financial-ui-fixture.cjs` loads the busy adapters. SW cache **v30 → v31**. **No `Code.gs` change — no Apps Script phase.** Supersedes the stale PR #105. See `CHANGELOG-action-busy-spinner.md`.
+
+### Session counters for the therapists app, monthly units, אינטייק (2026-11-05)
+- `getTreatmentPlans` adds **`monthQuota` / `monthUsed` / `monthRemaining` / `makeupSessions`** per client — counts only (this month's plan quota, «happened» rows in `SessionLog`, remaining ≥ 0 or `null`, `creditsOwed` as a session count). No amount crosses; the key set is pinned by tests.
+- **Monthly units honoured**: `_planMonthlyQuota` reads `sessionsPerWeek._units` — «1 / חודש» is 1 per month (the credit engine in `recordSessionOutcome` counted it as 4). Weekly / bare numbers unchanged (× 4).
+- **`אינטייק` is a clinical session type** in `CLINICAL_TO_BILLING` (Code.gs + `public/treatment-map.js`, 13 keys): a psychiatrist's intake (₪900 pay, ₪2,300 session value) was rejected as `unknown_type` and never reached SessionLog / «תשלומי מטפלים». `test-support/google-operational-drill-candidate.gs` regenerated (helpers changed).
+- Tests: `test/plan-session-counters.test.js` (6, real Code.gs) + updated pins. See `CHANGELOG-plan-session-counters.md`.
+
+### CI: the protected-price browser test no longer waits for `networkidle` (2026-11-05)
+- `test/protected-price-browser.test.js` reloaded the page with `waitUntil: 'networkidle'` while a service worker controlled it — that state does not settle reliably and timed out on slow runners, turning a green change red (and a red CI blocks the Railway deploy). Both reloads now wait for `domcontentloaded` plus the explicit signals the assertions need (`#app` visible, the protected globals present); nothing about what the test proves changed.
+
+### «תמחור חבילות» recovers after a server restart (2026-11-05)
+- **Report (production, 08:13, right after a Railway redeploy):** the pricing tab showed the admin tab bar over a bare «רשימת הבקשות לא נטענה.» — no error, no retry — «רענון» did nothing, and only a full page reload helped.
+- **Root cause (`public/package-pricing.js`)**: the catalog-admin privilege is a server-side in-memory record, so a restart forgets it under an open tab. `loadAll()` returned silently on `admin_required` / `unauthorized`, leaving `S.catalog` / `S.requests` `null` **with `S.loadError` empty** — so the red «הנתונים לא נטענו … נסי שוב» banner never rendered; the gate view had nothing to press; and «רענון» called a bare `loadAll()`, which never renews the privilege by itself.
+- **Fix:** `loadAll(renewed)` renews the privilege ONCE on `admin_required` and repeats the load transparently; if it cannot be re-obtained the gate comes back (now with a «נסי שוב» button, so no page reload is needed); anything else sets `S.loadError`. «רענון» and «נסי שוב» both route through the new `refresh()` → `boot()`, the same sequence as the first load. A successful load undoes a gate a sibling call had set. `unauthorized` still goes to sign-in; `adminFlight` / `bootFlight` single-flight untouched; `mountOfferForm` inherits the recovery.
+- Tests: `test/pricing-session-recovery-browser.test.js` (7 — Playwright 1280 + 360 with the restart emulated as the server experiences it, plus source invariants that run without a browser; two of them fail on the pre-fix code). SW cache **v29 → v30** (`package-pricing.js` changed). **No `Code.gs` change — no Apps Script phase.** See `CHANGELOG-pricing-session-recovery.md`.
+
+### Patient search on «היום שלי» + a browsable offer picker (2026-11-04)
+- **«חיפוש מטופל» pinned at the top of «היום שלי»**, above the KPI strip: one full-width RTL box, placeholder «חיפוש מטופל — שם או טלפון…», debounced ~150 ms. Partial name match anywhere (case-insensitive, Hebrew niqqud ignored) **or** phone matched digits-only, so `052-378-7911`, `0523787911` and `3787911` all find the same client. A dropdown of at most 8 rows — `name · phone · service/house` + a **פעיל / לא פעיל / ליד** hint — over the lists the app has already loaded (`state.clients`, `state.leads`; open leads only). **No new backend call and no new Apps Script action.** Picking a row reuses the existing navigation (`dashOpenInTab` / `openLeadModal`): the tab's own search is prefilled, the card is scrolled into view, the box clears. ↓ / ↑ / Enter / Esc, click-outside closes. **No financial field on a row**, so an operational session (דנה) uses it exactly as ורד does. Full width with no horizontal overflow at 360 px. New pure module `public/global-search.js`; the existing «🔎 איתור מטופל» forensic panel is untouched. See `CHANGELOG-global-patient-search.md`.
+- **«למי ההצעה» browses again:** since #167 the offer picker rendered only after 2+ typed characters, so clicking the empty field showed nothing and Vered could not scan the admitted patients / open leads (a regression against the pre-#167 `<select>`). Focus or a click now opens the grouped list at once — «מטופלים (n) · מאושפזים (n) · לידים פתוחים (n)», 15 rows per section, scrollable (`max-height` `280px → 45vh`), honest uncapped totals, a muted «הקלידי שם או טלפון לסינון…» under a truncated section; Esc / click-outside close. `matchTargetsGrouped(targets, '', perType)` now returns every target grouped via the new pure `browseTargets`; `matchTargets('')` still returns `[]`. Typing filters exactly as before, now from one character. See `CHANGELOG-offer-picker-browse.md`.
+- Tests: `test/global-search.test.js` (10), `test/offer-picker-browse.test.js` (6), `test/global-patient-search-browser.test.js` (Playwright, 1280 + 360, both features, ורד and דנה). SW cache **v28 → v29** (`index.html`, `app.js`, `style.css`, `package-pricing.js` changed). **No `Code.gs` change — no Apps Script phase.**
+
+### CRM follow-up 2 — Sandra's production review (2026-11-04)
+- **Billing mode per client:** `billingMode` ∈ {`package`, `per_session`} — append-only `Clients` column 39 (mirrored on the tombstone; blank = package; no migration). «אופן חיוב» toggle in עריכה / intake; a `per_session` client has no overdue banner, no renewal / collection row, never sits in «תשלומים באיחור», is excluded from the money KPIs and the billing tab's base due list; the card shows «משלם/ת לפי טיפול». One-click suggestion chip «סמן כתשלום לפי טיפול?» for פרטני-only clients without a package. Money key (ops sessions never change it).
+- **«💰 הצעת מחיר» on the client card** (ורד): the same new-offer form, target locked, inside the card; the quote shows on the card at once (`PackagePricing.mountOfferForm`).
+- **Delete / reset a quote** (ורד only, 403 `offer_delete_vered_only` at Node + `vered_only` at the source): soft delete (`deleted`, hidden everywhere, row + trail kept) and reset to an empty draft, both with an in-app confirmation and an `adjustLog` entry.
+- **Target picker:** one search field, three sections — «מטופלים», «מאושפזים» (Dashboard roster, stable ref `roster:<id:…|phone:…>`), «לידים פתוחים»; a roster / lead pick links the quote so it shows on the lead card and in «מסלול המשך».
+- **WhatsApp fix:** «הכן הודעת WhatsApp» did nothing (panel below the fold, recipient select with a disabled default, `window.open`); now two synchronous anchors «שליחה לאורן» / «שליחה למטופל» (`wa.me`, `target=_blank rel=noopener`), inline hint to הגדרות when Oren's number is missing; status still moves only via «סמן כנשלחה», which stores the recipient kind + last four digits only.
+- SW `v26 → v27`. See `CHANGELOG-crm-followup-2.md`.
+
+### Hotfix — client saves refused as stale after #163/#165; package change (2026-11-04)
+- **Root cause (Node proxy, `server.js`)**: the 60-second `getData` cache could be filled by an upstream read that a write had overtaken — a `GET /api/sheets` whose Apps Script read was in flight when a `saveAll` / renewal landed came back after the invalidation carrying the pre-write sheet and was stored. Every tab reloading in the next 60 s (the stale-conflict reload included) got rows without that write and its who/when stamps, so its next save echoed an old `updatedAt` against a changed row and was refused: «השינוי ל־… לא נשמר — אורן / ורד עדכן/ה קודם», with ורד's own earlier save named as the "other" editor, repeating on retry. Fix: a write generation counter; a read that lost the race is re-read once (`X-Cache: MISS`) or answered uncached (`X-Cache: BYPASS`), and never cached. The row-level conflict check is unchanged.
+- `public/app.js`: the reload after a conflict / `staleSave` asks the proxy for a fresh read (`?fresh=1`); ordinary loads keep the cache.
+- `public/conflicts.js`: a row refused because a renewal / extra-charge operation is still open on it (`reason: financial_operation_pending`) now says so and how to clear it («יש פעולה כספית פתוחה … לאשר את ההשלמה») instead of «ורד עדכן/ה קודם».
+- Package change re-pricing verified end to end (browser + real Code.gs): עריכה writes the new frequency and the amount entered; חידוש ותשלום writes `pricePerSession` = the renewal amount, the new frequency and `packageChangeDate` = paid date. There is no catalog-driven automatic price on the card today (the amount is entered); nothing new was invented.
+- Tests: `test/proxy-read-after-write.test.js` (race, re-read, bypass, cache contents), `test/package-change-save-browser.test.js` (Playwright: edit → persisted after reload; stale-for-others tab saves its own change and reloads fresh; renewal re-prices, reserved-row wording, saves after «אישור וסגירה»), `test/name-picker-conflicts.test.js` (wording). SW cache v26 → **v27** (app.js, conflicts.js changed). No `Code.gs` change — no Apps Script phase. See `CHANGELOG-hotfix-stale-save.md`.
+
+### OUT → Therapists request status synchronization (2026-11-04; DRAFT)
+- Manager-originated package requests now return their actual price-free Outpatient CRM milestones to the requesting coordinator: `pending`/`priced` legacy values retained, plus `sent`, `awaiting_decision`, `approved`, `rejected`, `expired`. Before this fix the existing source returned **pending** for every state except literal **priced**, causing an accepted or rejected offer to appear «ממתין לתמחור» in Therapists.
+- No prices, patient data, financial records or source schema are exposed/changed. Exact requester scope and same-ID retry behavior retained; source fixture tests cover all milestones. Requires coordinated Therapists status-label support before a production rollout. See `CHANGELOG-manager-offer-sync-20261104.md`.
+
+### CRM follow-up 1 — Sandra's production review (2026-11-04)
+- «היום שלי»: the first section is now **«תשלומים באיחור»** and holds ONLY overdue payment / collection rows (unpaid cycle, collection task past its date); every other late or dated item (continuation offers, offer follow-ups, contacts, today's tasks) moved to the new **«מעקבים ומשימות במועד»** right below it. The «חידושים וגבייה» card hint counts the same rows (`overduePayments`).
+- Offer form («הצעת מחיר חדשה»): the «למי ההצעה» picker is a full-width searchable field (name or phone → matches with name · phone · house/type); «שם לקוח לא רשום» + phone on their own row beneath. No horizontal scroll at 360px.
+- Pricing flexibility for ורד only (server-enforced): custom line item (free-text name + quantity + unit price) and per-line manual price override on catalog items with a required reason (catalog price struck through); totals computed server-side from the submitted lines, non-Vered → 403, override without reason → 400, every override / custom line appended to `adjustLog` (actor, catalog price, new price, reason, timestamp). No new sheet columns. See `CHANGELOG-crm-followup-1.md`.
+
+### Offers CRM in «תמחור חבילות» + WhatsApp (2026-11-03)
+- «➕ הצעת מחיר חדשה» (lead/client, packages + single treatments + quantities, Solo tier, validity, follow-up, owner, notes; double click = one request); statuses draft · ready_to_send · sent · awaiting_decision · approved · rejected · expired (legacy mapped at read, expired computed at read); prices from the catalog server-side only; discount = existing adjust with reason; «אושרה» creates no charge/payment. Price-free `GET /api/offers` feeds the cards, «היום שלי» and «מסלול המשך»; דנה 403. Nine appended `PackageRequests` columns.
+- WhatsApp: prepared message to אורן (number in Settings) or another number, opened via `wa.me` for human sending; only «סמן כנשלחה» moves the offer to `sent` (date, recipient, follow-up). See `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`.
+
+### מסלול המשך — CRM flow with milestones from the entry date (2026-11-03)
+- Milestones +1/+2/+3 calendar months from the ACTUAL entry date (clamped, leap-safe), a contact task 14 days before each (`cont::<ref>::<entryDate>::m1|m2|m3` in the existing Tasks sheet, subject `cont:<ref>`, ref = Dashboard id or normalized phone — never the name); server-only idempotent sync (`syncContinuationMilestones`, run by Node from its own roster fetch + `POST /api/continuation-sync`): corrected entry date moves, discharge / terminal status closes. No entry date → «חסר תאריך כניסה», no task.
+- Tab: status / owner / last contact / next contact / offer / history per patient; phone-only linking with manual-check chip; five appended columns on the workflow sheet. «היום שלי» names the milestone rows and shows last contact + outcome on every row. See `CHANGELOG-continuation-milestones.md`.
+
+### CRM navigation order + win-back follow-up (2026-11-03)
+- «שימור לידים» and «מטופלים לא פעילים» move to the end of the menu; lost leads carry the CRM block (last contact / next contact / owner); archive cards restyled to the light theme. `test/crm-nav-order.test.js`. See `CHANGELOG-crm-nav-order.md`.
+
+### «תמחור חבילות» buttons opened nothing (fix, 2026-11-03)
+- `public/package-pricing.js`: single-flight catalog login/boot (two mounts during the load ran two logins that revoked each other → `401 admin_required` → redraw loop); an expired 15-minute privilege is renewed once and the clicked action retried instead of dropped; a failed load shows «הנתונים לא נטענו» + «נסי שוב» instead of an empty catalog; an unrelated host re-render no longer wipes the open screen. Browser regression `test/package-pricing-buttons-browser.test.js` (1280px + 360px). See `CHANGELOG-package-pricing-buttons-fix.md`.
+
+### OP-BILL-01 review fix B1: coverage starts on max(paymentDate, cycleDate) (draft, 2026-11-03)
+- An ordinary new monthly receipt paid BEFORE its due cycle is an advance from the due date (due 1 Nov, paid 28 Oct → 1 Nov–30 Nov, next 1 Dec); paid on/after it covers one month from the actual payment (due 1 Nov, paid 10 Nov → 10 Nov–9 Dec, next 10 Dec). Paid 25 Oct on a 25 Oct cycle → through 24 Nov, next 25 Nov (unchanged).
+- Why: the pure paid-date rule put an early payment's next collection in the SAME month key as the settled cycle, so the following renewal was refused forever (`pay::<id>::base::<YYYY-MM>` already existed) and the chip refused it as already paid.
+- `CL.paymentDateCoverage(paymentDate, cycleDate)` / `_finPaidDateCoverage(paymentDate, cycleDate)` are exact mirrors (parity-tested incl. month-end/leap clamps). Applied in the renewal modal, the quick chip, עריכה, intake and activation; `withDefaultCoverage` uses the row's own dueDate. The card's paid-through review projects the same window, so a legacy early payment stamped with its due window now reads as confirmed instead of review.
+- Historical rows are not rewritten; stored journal intents replay unchanged. The shared renewal fixture (paid 25 Feb for the 28 Feb cycle) now expects 28 Feb–27 Mar / next 28 Mar. See `docs/OP-BILL-01-PAYMENT-DATE-POLICY.md`.
+
+### OP-BILL-01 review fix B2: settle an existing unpaid/partial cycle row in place (draft, 2026-11-03)
+- The journalled renewal accepts `priorPayment {id, status, amountPaid}` for an existing unpaid/partial row of the same cycle: the source verifies it against the sheet under the lock, pins the full observed row in the journal intent, re-checks it at apply and UPDATES that row (same id) instead of appending or refusing `renewal_payment_exists`. A stale/paid/foreign expectation → `prior_payment_changed` / `invalid_renewal_payment` with no journal write; a row changed mid-flight → review `source_changed_before_apply`. A browser-supplied pinned row is ignored.
+- Quick chip: an OVERDUE unpaid/partial cycle is settleable again (today-based B1 window written explicitly on the row, anchor = window end + 1). A PAID row is still never re-dated, and an explicitly recorded different period is never overwritten.
+- גבייה editor: unpaid/partial → paid for the client's DUE cycle opens the renewal (which settles the row in place); older arrears are settled directly with the B1 window and do not move the anchor. No header change, no legacy-id row rewrite. Regressions in `test/op-bill01-b1-b2-regressions.test.js`.
+
+### CRM money scope — review fixes on #162 (2026-11-03)
+- **Price table refused for an operational session.** `treatment-map.js` holds the client price table (per-session and per-month amounts incl. VAT), not only the clinical→billing map; it is now in `MONEY_STATIC` → 403 for דנה, like `therapist-pay.js`. `loadProtectedScripts` tolerates that refusal for an ops session (`CHANGELOG-crm-money-scope.md` corrected).
+- **Money-task trail hidden from an operational session.** `getActivity` for ops filtered on an event kind that never occurs; the created / completed / deferred / reassigned / cancelled events of a collection task (free-text title) and the contacts that close or spawn one reached דנה. Events now carry `money:true` + task id in `detailsJson`, and the ops read also drops anything referencing a money task on the Tasks sheet (legacy rows), read without creating it (`CHANGELOG-crm-tasks-activity.md`).
+- **`getHandoffStatus` no longer creates or re-heads sheets.** The Dashboard feed read via `_ensureSheet`; it now uses `getSheetByName` and treats a missing sheet as `[]` (`CHANGELOG-crm-handoff-status.md`).
+- **Contact / task modals mint a fresh idempotency key per opening.** A `dataset.sid` left by a timed-out save survived cancel + reopen and made the next patient's contact / task a server-side «replay» (never saved).
+- Follow-up (not in this change): `MONEY_GET_ACTIONS` / `MONEY_POST_ACTIONS` are a deny-list — a future money action must be added there explicitly or an operational session can call it. An allow-list of permitted actions would fail closed.
+
+### Deploy-window guard for operational saves (2026-11-03)
+- `apps-script/Code.gs`: new read-only `getCapabilities` GET (proxy-secret gated, no Sheets access) reporting `{ moneyScope, paidDateCoverage, recoveryHold }`; append-only flags.
+- `lib/backend-capabilities.js` + `server.js`: an ops-scope (דנה) `saveAll` is forwarded only after the live backend reports `capabilities.moneyScope === true`; otherwise `503 { ok:false, error:'backend_upgrade_pending' }` with nothing forwarded. Positive answers cached 5 min in memory; negatives and probe failures fail closed and re-probe. Closes the Railway-first / Apps-Script-second window in which the OLD source would have overwritten every client's stored money with the stripped fields. ורד / אורן unaffected.
+- `public/app.js`: that refusal shows «המערכת בעדכון, נסי שוב בעוד מספר דקות»; forms stay open.
+- Tests: `test/backend-capabilities.test.js` (6). Docs: DEPLOY.md «Node-first window» + «Operational notes», release record step.
+
+### Sandbox drill push workflow (2026-11-03)
+- New dispatch-only `.github/workflows/sandbox-drill-push.yml` builds the OP-03 drill from the exact checked-out source and pushes it with clasp to an ISOLATED standalone Apps Script test project (input script ID). It refuses the production script ID, pins the dispatched ref to `expected_commit`, never deploys and grants `contents: read` only. Guard test `test/sandbox-drill-push-workflow.test.js`. Replaces the failed 137 KB browser clipboard transfer.
+
+### OP-BILL-01 integration/recovery qualification (draft, 2026-11-03)
+- Reuse existing CRM #142–148 and OP-03 #139/#160 on the sole #162 candidate; preserve deployed #158/#161 and the 2 November acceptance patch. No new CRM or billing engine.
+- CRM writes recheck the recovery hold after acquiring their lock; CRM reads never create/extend sheets. Eight reproduced failures are covered by 20 integration regressions.
+- Backup assertions verify exact source inventories across pre/post-CRM schemas. A separate disabled candidate drill exercises nonempty Tasks/Activity recovery and replay. Historical native files and the original generated drill are unchanged.
+- See `docs/OP-BILL-01-INTEGRATED-RELEASE-20261103.md` for validation and the remaining native-execution/approval gates. No production changes.
+
+### OP-BILL-01 release acceptance: retain the missing-receipt action (draft, 2026-11-02)
+- The paid-period review renderer no longer hides #161's guarded historical missing-receipt confirmation. Irregular anchors and already-paid disputed receipts remain read-only review cases.
+- Real-browser regressions cover confirmation, reload, an independent reader, no duplicate receipt and unchanged historical anchor. Six release-transition checks preserve old journal intents and expose the pending-operation rollback boundary.
+- Replaced the policy TODO with a persisted-source → card → revenue acceptance check for an ordinary renewal and explicit two-month prepayment.
+- Current-base, backup metadata, CRM/OP-03 compatibility and exact remaining release gates are recorded in `docs/OP-BILL-01-RELEASE-ACCEPTANCE-20261102.md`. No merge, deploy, permission change or live financial data operation.
+
+### Fix: «נדרש אימות תשלום» after marking a patient paid (2026-11-02)
+- עריכה: setting the status to «שולם» without changing the paid date saved the client as paid with no payment row. It now records the CURRENT cycle's base row when the anchor is already ahead (anchor not moved).
+- The «נדרש אימות תשלום» chip is now a confirm button for editors: records that cycle's row (package amount, stored paid date) after an explicit confirm; failures show the financial-save warning. SW v22 → v23. No Apps Script change. See `CHANGELOG-payment-verify.md`.
+
+### Fix: «סיים טיפול» did not persist after another edit of the same card (2026-11-02)
+- `saveAll` now returns `stamps` (id → updatedAt, stamps only); `persist()` adopts them, so a second edit of the same row from the same tab is no longer refused as a conflict with the tab's own first edit.
+- Discharge uses `persistClientChange`: a refused save rolls back and shows «סיום הטיפול לא נשמר» instead of a false «סיום נשמר». Real concurrent-edit protection unchanged. SW v21 → v22. Code.gs changed (Deploy Apps Script after merge). See `CHANGELOG-discharge-persist.md`.
+### Landing KPIs back on top (OP-CRM-G, draft 2026-10-31)
+- מטופלים פעילים / הכנסה חודשית (ורד, אורן) / לידים פתוחים above «היום שלי»; breakdowns open by default; clearer card label. See `CHANGELOG-crm-landing-kpis.md`.
+
+### CRM program — acceptance record + release checklist (Phase F, draft 2026-10-31)
+- `docs/crm/ACCEPTANCE-OUTPATIENT.md`, `docs/crm/RELEASE-CHECKLIST.md`; ops sessions skip money reads at boot. See `CHANGELOG-crm-acceptance.md`.
+
+### Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D, draft 2026-10-31)
+- New read-only cross-app action `getHandoffStatus` (fail-closed `HANDOFF_STATUS_SECRET`): by exact `outpatientIds` / `dashboardPatientIds` only → operational state, owner, next action, dates; no money/clinical/phone. See `CHANGELOG-crm-handoff-status.md`.
+
+### «היום שלי» — one task engine, priority order (Phase C, draft 2026-10-31, stacked on 3B)
+- Persisted tasks become rows; derived rows are suppressed when an open task covers the subject; the day is shown in the program's priority order with inline ✓ / 📞 / ⏩; new «משימות לביצוע» / «שיחות להיום» cards (null-not-0). See `CHANGELOG-crm-my-day-tasks.md`.
+
+### Tasks, Activity and contact history (OP-CRM-3B, draft 2026-10-31, stacked on 3A)
+- New append-only `Tasks` + `Activity` sheets and 8 internal actions (`getTasks getActivity createTask completeTask deferTask reassignTask withdrawTask logContact`), idempotent by submissionId, actor from the session; every lead/client card shows last contact, next action, open tasks with direct actions and the history; «יצרתי קשר» form with no default follow-up date; money tasks invisible to an ops session. See `CHANGELOG-crm-tasks-activity.md`.
+
+### Server-side money scope — דנה operational (OP-CRM-3A, draft 2026-10-31)
+- The Node proxy decides each session's money scope from the signed cookie (fail-closed) and enforces it: money actions 403, every `/api/sheets` answer deep-stripped of money for an operational session (fresh/cached/stale), pay constants refused, `saveAll` carries the scope so Apps Script keeps stored money on her saves. UI hides money tabs/fields. See `CHANGELOG-crm-money-scope.md`.
+### Light CRM theme on the Outpatient's own palette (OP-CRM-4, 2026-10-29)
+- Same format as the Dashboard CRM — light page, white surfaces, fixed right-side menu with an icon per screen on desktop — on the Outpatient's own sage/forest palette (not the Dashboard's slate/teal). Token names unchanged; all hard-coded dark colours mapped to light; AA contrast pinned by test. Mobile layout untouched. `theme-color`/manifest updated. SW v21 → v22. No Apps Script change. See `CHANGELOG-crm-theme.md`.
 
 ### «היום שלי» — CRM opening screen (OP-CRM-1, 2026-10-29)
 - The first tab is now «היום שלי»: summary cards, an urgent band and work lists by domain (פניות/היכרויות, תוכניות להפעלה, חידושים וגבייה, ממתין לאישור, המשך טיפול) built by the pure `public/my-day.js`; KPIs and breakdowns collapsed below. No urgency by lead age; a source that did not load shows «המידע אינו זמין», never 0; money hidden for דנה (display only — server-side separation is a later PR). SW v20 → v21. No Apps Script change. See `CHANGELOG-my-day.md`, `docs/crm/OUTPATIENT-STAGE0.md`.
+
+### OP-03 operational recovery (draft)
+- Add two regressions and runbook clarifications for the uninstalled,
+  default-disabled removed-leads S1:U1 header helper (see
+  `CHANGELOG-removed-leads-header-correction.md`). Tests and documentation only;
+  the helper, runtime and frozen evidence are unchanged. The original
+  three-cell consent remains conditional, there is no new production approval,
+  and the nine native Google runs remain completed and are not rerun.
+- Integrate merged PR133 (`b14db799`) into this draft, preserving its roster,
+  personal-PIN authentication, historical assignees, SW20 and updated tests.
+  Resolve the two documentation conflicts without restoring obsolete release
+  labels. Apps Script, drill tooling and all retained native evidence are
+  unchanged. Record the newly exposed actual base and current integration gate.
+- Record a read-only release-readiness check of the existing source and latest
+  nightly snapshots. Three affected header prefixes match; removed-leads still
+  lacks its final three current headers. Retain the exact correction proposal
+  and the legacy backup-coverage gap without changing production. Refresh the
+  main runbook to recognize the completed native acceptance.
+- Complete a separate synthetic approved-policy acceptance extension for the
+  already completed test project: retained native evidence, isolated namespaces,
+  immutable setup and fixed-policy verifier modules, and measured two-pass finish.
+  Read-only Advanced Sheets observations cover cell formatting and dimension
+  visibility. After the owner's explicit Google API terms consent, activate
+  Sheets v4 in the existing project without changing its Sheets-only scope.
+  Native prepare/capture/restore/verify each pass once
+  (9.226/123.653/106.596/104.427s), with
+  exact packets, three owner-only permission checkpoints and committed evidence
+  binding. The separate fixed verifier refuses a changed policy, passes both
+  finish proofs and the late native comparison, then removes the fixture hold
+  last. Final state is verified and idle; the original five results are unchanged.
+  See the [result addendum](docs/evidence/op03-manual-tabs-2026-10-27-result.md).
+  The production pin stays blank.
+- Harden the acceptance tooling after bounded static review: require a generated
+  evidence-binding block in the exact committed record, three chronological
+  owner-only permission observations with stable identities and creation times,
+  and a cooperative four-minute phase budget checked before hold deletion.
+  Preserve diagnostics on deadline refusal; a single in-flight Google call or
+  hard execution termination remains outside the cooperative guard.
+- Record all five native Google phases passing on integrated candidate 3297311c
+  on October27, using the already prepared project. Verify owner-only files,
+  preferred-house preservation, held-writer refusal and exact retries; preserve
+  original state/artifacts without reruns. Retain separate candidate evidence
+  and measured 35.615/55.475/39.284/45.727/81.587s execution durations.
+- Integrate released PR132 (336c8ef9), keeping its preferred-house UI/SW19.
+  The new writer rechecks recovery hold after acquiring its lock, before even
+  extending headers. Add queued-write and four-schema recovery regressions;
+  regenerate the isolated drill with a nonempty preferred house and hold refusal.
+  Older-width snapshots remain inspection-only; no automatic schema migration.
+  Earlier native evidence stays attributable to 09a00ab5, not this integration.
+- Record five passing native Google drill phases on candidate 09a00ab5 with
+  private synthetic workbooks, exact saved-code comparison and measured timings.
+  Add retained evidence and narrow test-project consent to Sheets only. This is
+  documentation-only; production and approved manual-policy gates remain open.
+- Add a default-disabled, evidence-pinned manual-tab recovery verifier, retaining
+  all known-table/journal/configuration checks and hold-last ordering. Synthetic
+  tests cover exact scope, changed grids/types, formulas, missing evidence and
+  late target edits. No approved real policy yet; the isolated native drill
+  passed on October 26 (see the evidence document).
+- Refresh compatible Express/body-parser/qs lockfile patches after the current
+  audit found GHSA-27r3-jxmh-p828 (body-parser denial of service). See the OP-03
+  changelog for validation; application routes and dependency ranges unchanged.
+- Integrate released base 8b68cd75 without changing its public assets; add an
+  isolated phased Google acceptance runner with explicit project binding,
+  synthetic mixed journals/sessions/packages and local failure-path tests.
+- Integrate released packages and gate recovery completion on whole-run backup
+  drainage; retain marker on uncatchable termination for operator review.
+- Nightly backup now includes session/rate/configuration and operational history,
+  a complete inventory, and guarded recovery verification. Unknown tabs remain
+  explicit recovery blockers. See `CHANGELOG-operational-recovery.md`.
 
 ### User roster: שירן → אורן, יעל → דנה + personal PINs (2026-10-26)
 - Login/assignee roster is now ורד / אורן / דנה; שירן, יעל (and ירדן) are retired (refused at login, stale cookies refused, history untouched).
@@ -1283,3 +1494,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Apps Script: manual redeploy required** (paste Code.gs → Save → new version of
   the EXISTING deployment). On the next recorded session the TherapistRates sheet
   is created and seeded automatically — then add the missing therapists' rows.
+
+## Draft OP-ID-1 exact identity (2026-11-08; unmerged)
+
+Integrate stay/lead source identity and preserve it through activation on current #175 codebase. See CHANGELOG-care-continuum-identity.md.

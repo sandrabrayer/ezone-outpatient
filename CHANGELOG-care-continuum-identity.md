@@ -33,3 +33,7 @@ OP-ID-2 will connect the pre-discharge continuation row to these fields and copy
 
 ## Release
 Apps Script changes require the explicit Outpatient second-phase release after a separately approved merge. This draft is not authorized for merge or deployment.
+
+## 2026-11-08 — exact current-production source reconciliation (DRAFT ONLY)
+
+Re-integrated the original OP-ID-1 design onto currently deployed Outpatient #175, preserving #164 payment safeguards, #174 read-only boot, #175 exact task navigation and the current appended billingMode column. Cross-app identity fields appended LAST to Leads, Clients and Clients-removed. Browser save preserves source-owned IDs; a lead→client conversion inherits IDs directly from its source lead. An incoming stable stay ID is idempotent under source lock: duplicate requests or committed-writes with lost ACK return same id, except an already-closed lead fails closed. Different stay episodes with one person root are not silently merged. Duplicate PII never auto-links. This draft is unmerged, un-deployed and must be reviewed with Dashboard #329/#330 before the multi-phase release. Exact-head CI remains required.
