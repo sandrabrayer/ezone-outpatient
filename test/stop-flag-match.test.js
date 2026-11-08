@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe source identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the stop-flag → client matching fix (the ליעם בריאר "no match"
@@ -150,7 +158,7 @@ test('schema guard: Clients headers mirror the frozen physical order (2026-07-06
   // unwritten on the live sheet — followed by the appended paymentAmountOverrides
   // are the trailing columns now.
   assert.deepEqual(
-    cols.slice(-9),
+    withoutCareIdentityTail(cols).slice(-9),
     ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode'],
     'volta-only + paymentAmountOverrides must be the trailing (physically-unwritten) columns'
   );
