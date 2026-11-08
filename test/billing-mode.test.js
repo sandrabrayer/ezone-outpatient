@@ -1,4 +1,14 @@
 'use strict';
+// Preserve the frozen physical schema while checking the five new append-only
+// care-continuum columns are EXACTLY the expected end suffix.
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity column order');
+  return a.slice(0,-5);
+}
+
 
 /**
  * billingMode (אופן חיוב, CRM follow-up 2, 2026-11-04) — package vs. per-session clients.
@@ -36,7 +46,7 @@ const base = (over) => Object.assign({
 
 test('A: billingMode is the ONE new column, appended LAST on Clients (position 39) and on the tombstone', () => {
   const { ctx } = sandbox();
-  const H = plain(ctx.CLIENTS_HEADERS), R = plain(ctx.CLIENTS_REMOVED_HEADERS);
+  const H = withoutCareIdentityTail(plain(ctx.CLIENTS_HEADERS)), R = withoutCareIdentityTail(plain(ctx.CLIENTS_REMOVED_HEADERS));
   assert.equal(H.length, 39);
   assert.equal(H[38], 'billingMode');
   assert.equal(H.indexOf('billingMode'), H.lastIndexOf('billingMode'), 'exactly once');
