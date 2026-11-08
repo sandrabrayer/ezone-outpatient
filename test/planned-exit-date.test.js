@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe care identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * plannedExitDate — the PLANNED discharge date of an active outpatient,
@@ -44,8 +52,8 @@ const plansById = (ctx) => Object.fromEntries(
 
 test('A: plannedExitDate is appended after the stamps on Clients and on the tombstone literal', () => {
   const { ctx } = sandbox();
-  const H = plain(ctx.CLIENTS_HEADERS);
-  const R = plain(ctx.CLIENTS_REMOVED_HEADERS);
+  const H = withoutCareIdentityTail(plain(ctx.CLIENTS_HEADERS));
+  const R = withoutCareIdentityTail(plain(ctx.CLIENTS_REMOVED_HEADERS));
   // preferredHouse (position 38) and billingMode (position 39) were appended
   // after it later — see test/preferred-house.test.js, test/billing-mode.test.js.
   assert.equal(H.length, 39);

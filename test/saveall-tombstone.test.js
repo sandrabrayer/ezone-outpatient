@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe care identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the _saveAll row-loss guard + Clients-removed tombstone
@@ -119,8 +127,8 @@ test('blank-id rows cannot be diffed and are never tombstoned', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('CLIENTS_REMOVED_HEADERS = every CLIENTS_HEADERS column + removedAt/removedVia/restoredAt, as its OWN literal', () => {
-  const clients = namedArray('CLIENTS_HEADERS');
-  const removed = namedArray('CLIENTS_REMOVED_HEADERS');
+  const clients = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
+  const removed = withoutCareIdentityTail(namedArray('CLIENTS_REMOVED_HEADERS'));
   // The who/when stamps are appended at the very END of BOTH literals: on the
   // tombstone they trail the removedAt/removedVia/restoredAt bookkeeping columns
   // (this sheet's own append-only rule), so the mirror is "every Clients column

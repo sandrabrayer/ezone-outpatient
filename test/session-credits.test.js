@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe care identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for session accounting + credits (auto-draw) in apps-script/Code.gs:
@@ -299,7 +307,7 @@ test('Clients.creditsOwed round-trips positionally (frozen physical order: last 
   // phone, immediately before the physically-unwritten volta-only columns.
   assert.equal(CLIENTS_H[CLIENTS_H.indexOf('nextBillingDate') + 1], 'creditsOwed');
   assert.equal(CLIENTS_H[CLIENTS_H.indexOf('creditsOwed') + 1], 'clinicalTreatmentType');
-  assert.deepEqual(CLIENTS_H.slice(-9), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.deepEqual(withoutCareIdentityTail(CLIENTS_H).slice(-9), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
   const row = writeRow(CLIENTS_H, { id: 'c1', phone: '0501234567', clinicalTreatmentType: 'פרטני CBT', creditsOwed: 3 });
   assert.equal(row[CLIENTS_H.indexOf('creditsOwed')], 3);
   assert.equal(row[CLIENTS_H.indexOf('clinicalTreatmentType')], 'פרטני CBT'); // not shifted
