@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe source identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the one-off stale nextBillingDate repair (apps-script/Code.gs):
@@ -451,7 +459,7 @@ test('editor helpers exist: preview logs the plan; apply logs before/after', () 
 
 test('CLIENTS_HEADERS: 39 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, preferredHouse, then billingMode', () => {
   assert.equal(CLIENTS_HEADERS[0], 'id');
-  assert.deepEqual(CLIENTS_HEADERS.slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
-  assert.equal(CLIENTS_HEADERS.length, 39);
+  assert.deepEqual(withoutCareIdentityTail(CLIENTS_HEADERS).slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.equal(withoutCareIdentityTail(CLIENTS_HEADERS).length, 39);
   assert.ok(CLIENTS_HEADERS.includes('nextBillingDate'));
 });

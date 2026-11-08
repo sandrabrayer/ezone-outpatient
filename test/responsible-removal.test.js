@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe care identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for task 4.4 — removal of the אחראי concept (responsiblePerson +
@@ -74,7 +82,7 @@ function clientsHeaders() {
 }
 
 test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', () => {
-  const H = clientsHeaders();
+  const H = withoutCareIdentityTail(clientsHeaders());
   // the dead concept is still reserved...
   assert.ok(H.includes('responsiblePerson'), 'responsiblePerson slot was dropped (positional risk!)');
   assert.ok(H.includes('serviceScope'), 'serviceScope slot was dropped (positional risk!)');

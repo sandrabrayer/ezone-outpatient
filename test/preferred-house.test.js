@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe care identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * preferredHouse (בית מועדף) — an optional preferred house on Outpatient
@@ -49,7 +57,7 @@ const base = (over) => Object.assign({
 
 test('A: preferredHouse is appended at position 38 on Clients (billingMode was appended after it, 2026-11-04)', () => {
   const { ctx } = sandbox();
-  const H = plain(ctx.CLIENTS_HEADERS);
+  const H = withoutCareIdentityTail(plain(ctx.CLIENTS_HEADERS));
   assert.equal(H.length, 39);
   assert.equal(H[37], 'preferredHouse');
   assert.equal(H.indexOf('preferredHouse'), H.lastIndexOf('preferredHouse'), 'exactly once');
@@ -60,12 +68,12 @@ test('A: preferredHouse is appended at position 38 on Clients (billingMode was a
 test('A: mirrored at the END of the tombstone, Leads and removed-leads literals', () => {
   const { ctx } = sandbox();
   for (const name of ['CLIENTS_REMOVED_HEADERS', 'LEADS_HEADERS', 'REMOVED_LEADS_HEADERS']) {
-    const H = plain(ctx[name]);
+    const H = name === 'REMOVED_LEADS_HEADERS' ? plain(ctx[name]) : withoutCareIdentityTail(plain(ctx[name]));
     // the Clients tombstone later appended billingMode after it (same mirror rule)
     assert.equal(H[H.length - (name === 'CLIENTS_REMOVED_HEADERS' ? 2 : 1)], 'preferredHouse', name);
     assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
-  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(withoutCareIdentityTail(plain(ctx.LEADS_HEADERS)).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
 });
 
 test('A: allowed list is identical in Code.gs, app.js and index.html', () => {

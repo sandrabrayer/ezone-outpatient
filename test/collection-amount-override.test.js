@@ -1,4 +1,14 @@
 'use strict';
+// Preserve the frozen physical schema while checking the five new append-only
+// care-continuum columns are EXACTLY the expected end suffix.
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity column order');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the editable collection amount (סכום גבייה) feature.
@@ -150,7 +160,7 @@ test('parse tolerates blank / malformed JSON -> {}', () => {
 // 4) Source guards — the real wiring must match the mirror (Code.gs)
 // ─────────────────────────────────────────────────────────────────────────────
 test('CLIENTS_HEADERS appends paymentAmountOverrides after the volta-only columns (who/when stamps trail it)', () => {
-  const H = gsHeaders('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(gsHeaders('CLIENTS_HEADERS'));
   assert.deepEqual(H.slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
 });
 test('_writePaymentAmountOverride derives columns via CLIENTS_HEADERS.indexOf (never a literal)', () => {

@@ -35,12 +35,14 @@ var LEADS_HEADERS = [
   // _saveAll carries the on-sheet value for existing leads, so a browser
   // snapshot can never change or blank it. Follows the lead onto the client on
   // activation. Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  // OP-ID-1: append-only, server-owned exact identity/provenance; never browser-editable.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
 ];
 
 /* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
  * _leadDiffCols ignores them so an echoed stale stamp never reads as an edit. */
-var LEADS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy'];
+var LEADS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
 
 /* Extra columns (source, notes, billingType, billingDay, bundleSize,
  * bundlePrice, sessionsUsed, bundlePaid) added after launch. _ensureSheet
@@ -160,7 +162,9 @@ var CLIENTS_HEADERS = [
   //     payload WITHOUT the key keeps the sheet value; a sent value is validated
   //     (_billingModeOrBlank). A money key (OPS_CLIENT_MONEY_KEYS): an ops
   //     session never changes it. NO data migration flips an existing client.
-  'billingMode'
+  'billingMode',
+  // OP-ID-1: append-only identity fields AFTER all live money/billing columns.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
 ];
 /* Stable billing-mode keys (Hebrew labels are render-time only in the UI). */
 var BILLING_MODES = ['package', 'per_session'];
@@ -175,7 +179,7 @@ function _billingModeOrBlank(v) {
  * preserved by id on every save, so a payload echo of them is never an edit).
  * _clientDiffCols ignores all five: two rows differing only in these are the
  * same client content-wise, and an echoed stale stamp never re-stamps. */
-var CLIENTS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides'];
+var CLIENTS_META_COLUMNS = ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides', 'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
 
 /* Columns whose cells hold who/when stamps. Forced to plain-text ('@') on
  * ensure/write (same mechanism as PHONE_COLUMNS) so Sheets never coerces the
@@ -235,7 +239,9 @@ var CLIENTS_REMOVED_HEADERS = [
   // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
   'preferredHouse',
   // APPEND-ONLY mirror of the Clients billing mode (billingMode), same reason.
-  'billingMode'
+  'billingMode',
+  // OP-ID-1: preserve exact source IDs in deleted-client recovery snapshots.
+  'dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -1497,6 +1503,12 @@ function _saveAll(payload) {
     var existingCredits = {};
     var existingOverrides = {};
     var existingById = {};
+    // Preserve exact Dashboard identity through lead→client activation using the
+    // SOURCE lead, never a browser-provided identity or same-name/phone guess.
+    var careLeadById = Object.create(null);
+    _readAll(leadsSh, LEADS_HEADERS).forEach(function (l) {
+      if (l && l.id) careLeadById[String(l.id)] = l;
+    });
     var existing = _readAll(clientsSh, CLIENTS_HEADERS);
     for (var e = 0; e < existing.length; e++) {
       var eid = (existing[e] && existing[e].id != null) ? String(existing[e].id) : '';
@@ -1553,6 +1565,9 @@ function _saveAll(payload) {
       // sheet's values, brand-new rows start blank. Done BEFORE the diff so a
       // stripped field never reads as an edit.
       _opsPreserveMoney(payload, clients[i], existingRow, OPS_CLIENT_MONEY_KEYS);
+      // Exact ID persists through normal conversion and stale browser saves.
+      var fromIdentityLead = clients[i].fromLead ? careLeadById[String(clients[i].fromLead)] : null;
+      _carePreserveExisting(clients[i], existingRow, fromIdentityLead);
       if (reservedClients[cid] && existingRow) {
         var pendingChanges = _clientDiffCols(clients[i], existingRow);
         if (pendingChanges.length) {
@@ -1715,6 +1730,7 @@ function _saveAll(payload) {
           ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
           : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
         _opsPreserveMoney(payload, leads[li], existingLead, OPS_LEAD_MONEY_KEYS); // OP-CRM-3A
+        _carePreserveExisting(leads[li], existingLead, null);
       }
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {
@@ -4119,6 +4135,129 @@ function _getMyStopAlerts() {
   };
 }
 
+/* ===== Care-continuum identity (OP-ID-1) ================================ */
+var CARE_ID_FIELDS = ['dashboardPatientId', 'dashboardPersonId', 'dashboardLeadId', 'handoffSource', 'continuationKey'];
+var CARE_ID_TOKEN_RE = /^[A-Za-z0-9_-]{1,100}$/;
+var CARE_HANDOFF_SOURCES = {
+  dashboard_discharge: true, dashboard_ambulatory: true, continuation: true,
+  therapists_alumni: true, direct: true
+};
+var CARE_ASSIGNEES = { 'ורד': true, 'אורן': true, 'דנה': true };
+
+function _careId(v) {
+  var x = String(v == null ? '' : v).trim();
+  return !x ? '' : (CARE_ID_TOKEN_RE.test(x) ? x : null);
+}
+function _careSource(v) {
+  var x = String(v == null ? '' : v).trim();
+  return CARE_HANDOFF_SOURCES[x] ? x : '';
+}
+function _careContinuationKey(v) {
+  var x = _sanitizeLeadText(v, 300).replace(/^[=+\-@\s]+/, '');
+  return x;
+}
+function _careAssignee(v) {
+  var x = String(v == null ? '' : v).trim();
+  return CARE_ASSIGNEES[x] ? x : '';
+}
+function _carePersonKey(row) {
+  if (!row) return '';
+  return _careId(row.dashboardPersonId) || _careId(row.dashboardPatientId) || '';
+}
+function _careOpenLead(row) {
+  if (!row) return false;
+  var st = String(row.stage == null ? '' : row.stage).trim();
+  return st !== 'not_relevant' && st !== 'לא רלוונטי' && st !== 'active' && st !== 'מטופל פעיל';
+}
+function _careActiveClient(row) {
+  if (!row) return false;
+  var st = String(row.status == null ? '' : row.status).trim();
+  return st !== DISCHARGED_CLIENT_STATUS_HE && st !== DEACTIVATED_CLIENT_STATUS_HE;
+}
+function _careNormName(v) {
+  return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toLowerCase();
+}
+/* Exact stay/lead id only. A shared person root is NOT sufficient to merge two distinct
+ * residential episodes: it is a warning/continuity context, not an operation id.
+ * During an already-committed lead→client conversion both the old lead and new
+ * client can be present until a deliberate save cleans the converted lead. */
+function _careCandidates(leads, clients, field, value) {
+  if (!value) return [];
+  var out = [];
+  (leads || []).forEach(function (r) {
+    if (String(r[field] == null ? '' : r[field]) === value) out.push({ entity: 'lead', row: r });
+  });
+  (clients || []).forEach(function (r) {
+    if (String(r[field] == null ? '' : r[field]) === value) out.push({ entity: 'client', row: r });
+  });
+  return out;
+}
+function _careResolveCandidates(hits, matchedBy) {
+  if (!hits.length) return null;
+  if (hits.length === 1) return { conflict: false, matchedBy: matchedBy, hit: hits[0] };
+  // Converted lead + linked client is one entity; never return the obsolete lead.
+  if (hits.length === 2) {
+    var lead = hits.filter(function (x) { return x.entity === 'lead'; })[0];
+    var client = hits.filter(function (x) { return x.entity === 'client'; })[0];
+    if (lead && client && String(client.row.fromLead || '') === String(lead.row.id || '') && client.row.id) {
+      return { conflict: false, matchedBy: matchedBy, hit: client };
+    }
+  }
+  return { conflict: true, matchedBy: matchedBy, hits: hits };
+}
+function _careFindExact(leads, clients, ids) {
+  if (ids.dashboardPatientId) {
+    var byStay = _careResolveCandidates(_careCandidates(leads, clients, 'dashboardPatientId', ids.dashboardPatientId), 'dashboardPatientId');
+    if (byStay) return byStay;
+  }
+  if (ids.dashboardLeadId) {
+    var byLead = _careResolveCandidates(_careCandidates(leads, clients, 'dashboardLeadId', ids.dashboardLeadId), 'dashboardLeadId');
+    if (byLead && !byLead.conflict && ids.dashboardPatientId && byLead.hit.row.dashboardPatientId &&
+      String(byLead.hit.row.dashboardPatientId) !== ids.dashboardPatientId) {
+      return { conflict: true, matchedBy: 'dashboardPatientId', hits: [byLead.hit] };
+    }
+    if (byLead) return byLead;
+  }
+  return null;
+}
+function _carePossibleDuplicates(leads, clients, phone, name) {
+  if (!phone || !name) return [];
+  var n = _careNormName(name), out = [];
+  (leads || []).forEach(function (r) {
+    if (_careOpenLead(r) && _recoverPhone(r.phone) === phone && _careNormName(r.name) === n) {
+      out.push('lead:' + String(r.id || ''));
+    }
+  });
+  (clients || []).forEach(function (r) {
+    if (_careActiveClient(r) && _recoverPhone(r.phone) === phone && _careNormName(r.name) === n) {
+      out.push('client:' + String(r.id || ''));
+    }
+  });
+  return out.filter(function (x) { return !/:$/.test(x); });
+}
+function _carePreserveExisting(row, existing, originatingLead) {
+  for (var i = 0; i < CARE_ID_FIELDS.length; i++) {
+    var k = CARE_ID_FIELDS[i];
+    var source = existing || originatingLead;
+    row[k] = source ? (source[k] == null ? '' : source[k]) : '';
+  }
+  return row;
+}
+function _careWriteLeadById(sh, lead) {
+  var idCol = LEADS_HEADERS.indexOf('id') + 1;
+  var lastRow = sh.getLastRow();
+  if (idCol < 1 || lastRow < 2 || !lead || !lead.id) return false;
+  var ids = sh.getRange(2, idCol, lastRow - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) !== String(lead.id)) continue;
+    sh.getRange(i + 2, 1, 1, LEADS_HEADERS.length).setValues([LEADS_HEADERS.map(function (h) {
+      var v = lead[h]; return v == null ? '' : v;
+    })]);
+    return true;
+  }
+  return false;
+}
+
 /* ===== Create lead (inbound, fail-closed write) =====
  *
  * Inbound: the E-Zone Dashboard POSTs { action:'createLead', secret, name,
@@ -4196,19 +4335,96 @@ function _createLeadAuthOk(params) {
 function _createLead(payload) {
   var name = _sanitizeLeadText(payload && payload.name, 200);
   if (!name) return { ok: false, error: 'missing_name' };
-  var phone = _recoverPhone(payload && payload.phone); // '' stays '' (valid)
+  var phone = _recoverPhone(payload && payload.phone);
   var note  = _sanitizeLeadText(payload && payload.note, 2000);
   var house = _mapLeadHouse(payload && payload.house);
   var preferredHouse = _preferredHouseOrNull(payload ? payload.preferredHouse : null);
   if (preferredHouse === null) return { ok: false, error: 'invalid_preferred_house' };
 
+  // Existing callers may omit identity completely. A PRESENT malformed stable id
+  // is refused; silently dropping it would destroy the only safe cross-app link.
+  var dashboardPatientId = _careId(payload && payload.dashboardPatientId);
+  var dashboardPersonId  = _careId(payload && payload.dashboardPersonId);
+  var dashboardLeadId    = _careId(payload && payload.dashboardLeadId);
+  if (dashboardPatientId === null || dashboardPersonId === null || dashboardLeadId === null) {
+    return { ok: false, error: 'invalid_identity' };
+  }
+  var ids = {
+    dashboardPatientId: dashboardPatientId || '',
+    dashboardPersonId: dashboardPersonId || '',
+    dashboardLeadId: dashboardLeadId || ''
+  };
+  ids.personKey = ids.dashboardPersonId || ids.dashboardPatientId;
+  var handoffSource = _careSource(payload && payload.source);
+  var continuationKey = _careContinuationKey(payload && payload.continuationKey);
+  var rawAssignee = String(payload && payload.assignedTo == null ? '' : payload.assignedTo).trim();
+  var assignedTo = _careAssignee(rawAssignee);
+  var ownerUnmapped = !!rawAssignee && !assignedTo;
+
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
-    // _ensureSheet applies the '@' plain-text format to the phone column for
-    // the grid rows, so the appended phone keeps its leading zero.
-    var sh = _ensureSheet('Leads', LEADS_HEADERS);
+    var leadsSh = _ensureSheet('Leads', LEADS_HEADERS);
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var leads = _readAll(leadsSh, LEADS_HEADERS);
+    var clients = _readAll(clientsSh, CLIENTS_HEADERS);
+    var exact = _careFindExact(leads, clients, ids);
+
+    if (exact && exact.conflict) {
+      return {
+        ok: false, error: 'identity_conflict', matchedBy: exact.matchedBy,
+        possibleDuplicateOf: exact.hits.map(function (h) {
+          return h.entity + ':' + String(h.row.id || '');
+        })
+      };
+    }
+
+    if (exact && exact.hit) {
+      var found = exact.hit.row;
+      if (exact.hit.entity === 'lead' && !_careOpenLead(found)) return { ok: false, error: 'identity_closed', id: String(found.id || '') };
+      var result = {
+        ok: true, id: String(found.id || ''), matched: true,
+        entity: exact.hit.entity, matchedBy: exact.matchedBy
+      };
+      if (ownerUnmapped) result.ownerUnmapped = true;
+
+      // A linked ACTIVE client is already past intake: never create a lead and
+      // never rewrite its clinical/billing row from a handoff.
+      if (exact.hit.entity === 'client') return result;
+
+      // Existing lead wins. Fill only blank operational/identity fields; do not
+      // overwrite notes/name or an existing owner. Replays are therefore idempotent.
+      var changed = false;
+      function fill(k, v) {
+        if ((found[k] === '' || found[k] == null) && v !== '' && v != null) {
+          found[k] = v; changed = true;
+        }
+      }
+      fill('phone', phone);
+      fill('house_of_origin', house);
+      fill('preferredHouse', preferredHouse);
+      fill('assignedTo', assignedTo);
+      fill('dashboardPatientId', ids.dashboardPatientId);
+      fill('dashboardPersonId', ids.dashboardPersonId);
+      fill('dashboardLeadId', ids.dashboardLeadId);
+      fill('handoffSource', handoffSource);
+      fill('continuationKey', continuationKey);
+      if (changed) {
+        _stampRow(found, '');
+        if (!_careWriteLeadById(leadsSh, found)) return { ok: false, error: 'lead_not_found' };
+      }
+      return result;
+    }
+
+    // Phone+name is ONLY a duplicate warning, never an identity link.
+    var possible = _carePossibleDuplicates(leads, clients, phone, name);
+    // A request carrying a stable Dashboard identity with no exact id match must
+    // not create beside an open/active PII collision: fail closed, write nothing.
+    // Legacy callers (no stable identity) keep the warning-only behaviour.
+    var hasStableIdentity = !!(ids.dashboardPatientId || ids.dashboardPersonId || ids.dashboardLeadId);
+    if (hasStableIdentity && possible.length) {
+      return { ok: false, error: 'possible_duplicate', possibleDuplicateOf: possible };
+    }
     var lead = {
       id: _leadUid(),
       name: name,
@@ -4226,13 +4442,22 @@ function _createLead(payload) {
       house_of_origin: house,
       not_relevant_reason: '',
       not_relevant_note: '',
-      preferredHouse: preferredHouse
+      preferredHouse: preferredHouse,
+      assignedTo: assignedTo,
+      dashboardPatientId: ids.dashboardPatientId,
+      dashboardPersonId: ids.dashboardPersonId,
+      dashboardLeadId: ids.dashboardLeadId,
+      handoffSource: handoffSource,
+      continuationKey: continuationKey
     };
-    _stampRow(lead, ''); // who/when — cross-app (dashboard) receiver: WHEN only
-    sh.appendRow(LEADS_HEADERS.map(function (h) {
+    _stampRow(lead, ''); // who/when — cross-app receiver: WHEN only, no user
+    leadsSh.appendRow(LEADS_HEADERS.map(function (h) {
       return lead[h] == null ? '' : lead[h];
     }));
-    return { ok: true, id: lead.id };
+    var created = { ok: true, id: lead.id, matched: false };
+    if (ownerUnmapped) created.ownerUnmapped = true;
+    if (possible.length) created.possibleDuplicateOf = possible;
+    return created;
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }

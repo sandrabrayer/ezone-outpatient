@@ -1,4 +1,14 @@
 'use strict';
+// Preserve the frozen physical schema while checking the five new append-only
+// care-continuum columns are EXACTLY the expected end suffix.
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity column order');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Source-scan guards for the continuation-track backend in apps-script/Code.gs.
@@ -71,7 +81,7 @@ test('both continuation actions are routed', () => {
 });
 
 test('CLIENTS_HEADERS is untouched: append-only tail intact, phone join key preserved', () => {
-  const CLIENTS_H = headers('CLIENTS_HEADERS');
+  const CLIENTS_H = withoutCareIdentityTail(headers('CLIENTS_HEADERS'));
   // Physical order: the volta-only columns, followed by the appended
   // paymentAmountOverrides, are the exact tail.
   assert.deepEqual(CLIENTS_H.slice(-9), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);

@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe source identity suffix');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Session cookie + who/when stamping (session-who-when PR — port of the
@@ -412,19 +420,19 @@ test('C: CLIENTS_HEADERS, LEADS_HEADERS and both tombstone mirrors END with upda
   for (const name of ['CLIENTS_HEADERS', 'LEADS_HEADERS', 'CLIENTS_REMOVED_HEADERS', 'REMOVED_LEADS_HEADERS']) {
     // Clients + its tombstone later appended plannedExitDate after the stamps;
     // all four then appended preferredHouse (בית מועדף) last.
-    const H = headersOf(ctx, name);
+    const H = name === 'REMOVED_LEADS_HEADERS' ? headersOf(ctx, name) : withoutCareIdentityTail(headersOf(ctx, name));
     // (Clients + its tombstone also appended billingMode after preferredHouse, 2026-11-04)
     const tail = /^CLIENTS/.test(name) ? H.slice(-5, -3) : H.slice(-3, -1);
     assert.deepEqual(tail, ['updatedAt', 'updatedBy'], name);
   }
-  assert.equal(ctx.CLIENTS_HEADERS.length, 39);
+  assert.equal(withoutCareIdentityTail(ctx.CLIENTS_HEADERS).length, 39);
   assert.equal(ctx.CLIENTS_HEADERS[36], 'plannedExitDate');
   assert.equal(ctx.CLIENTS_HEADERS[37], 'preferredHouse');
   assert.equal(ctx.CLIENTS_HEADERS[38], 'billingMode');
   assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides', 'everything before the stamps unchanged');
-  assert.equal(ctx.LEADS_HEADERS[ctx.LEADS_HEADERS.length - 4], 'assignedTo');
-  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides']);
-  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy']);
+  assert.equal(withoutCareIdentityTail(ctx.LEADS_HEADERS)[withoutCareIdentityTail(ctx.LEADS_HEADERS).length - 4], 'assignedTo');
+  assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides'].concat(CARE_ID_SUFFIX));
+  assert.deepEqual(plain(ctx.LEADS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy'].concat(CARE_ID_SUFFIX));
 });
 
 test('C: _ensureSheet adds the headers to a legacy sheet and text-forces the two stamp columns; _writeAll text-forces them too', () => {

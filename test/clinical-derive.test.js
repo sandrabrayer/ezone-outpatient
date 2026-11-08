@@ -1,4 +1,14 @@
 'use strict';
+// Preserve the frozen physical schema while checking the five new append-only
+// care-continuum columns are EXACTLY the expected end suffix.
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity column order');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for task 4.5a — the outpatient receiver: a new `clinicalTreatmentType`
@@ -159,7 +169,7 @@ test('strict clinicalToBilling primitive still throws on unknown', () => {
 
 // --- FROZEN physical order (verified against the live sheet 2026-07-06) ------
 test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)', () => {
-  const H = clientsHeaders();
+  const H = withoutCareIdentityTail(clientsHeaders());
   // FROZEN 2026-07-06: this tail mirrors the PHYSICAL live Clients sheet (as written
   // by the deployed dashboard-hKjf9 script), NOT merely the previous header array.
   // The payment tail (paymentStatus/paymentDate/nextBillingDate/creditsOwed) sits

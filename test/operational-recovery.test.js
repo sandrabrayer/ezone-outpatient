@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe append-only care identity schema');
+  return a.slice(0,-5);
+}
+
 
 const test = require('node:test');
 const { assertInventory } = require('../test-support/recovery-scope.cjs');
@@ -81,7 +89,9 @@ test('preferred house survives typed capture and isolated recovery in all four a
 for (const [name, header] of preferredSchemas) {
   test('old-width ' + name + ' backup stays inspection-only and cannot release recovery', () => {
     const s = world();
-    const oldHeader = Array.from(s.ctx[header]).slice(0, -1);
+    // Removed Leads is owned by OP-03 and intentionally has NO care identity columns.
+    const schema = Array.from(s.ctx[header]);
+    const oldHeader = (name === 'לידים שהוסרו' ? schema : withoutCareIdentityTail(schema)).slice(0, -1);
     // Clients + its tombstone appended billingMode after preferredHouse (2026-11-04); the lead schemas end with preferredHouse
     assert.equal(s.ctx[header][oldHeader.length], /^Clients/.test(name) ? 'billingMode' : 'preferredHouse');
     s.seed(name, oldHeader, [{ id: 'synthetic-old-schema' }]);

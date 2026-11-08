@@ -1494,3 +1494,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Apps Script: manual redeploy required** (paste Code.gs → Save → new version of
   the EXISTING deployment). On the next recorded session the TherapistRates sheet
   is created and seeded automatically — then add the missing therapists' rows.
+
+## Draft OP-ID-1 exact identity (2026-11-08; unmerged)
+
+Integrate stay/lead source identity and preserve it through activation on current #175 codebase. See CHANGELOG-care-continuum-identity.md.

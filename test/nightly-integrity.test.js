@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity schema');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for the nightly data-integrity job (apps-script/Code.gs):
@@ -342,7 +350,7 @@ test('Script Property keys are pinned', () => {
 });
 
 test('CLIENTS_HEADERS: append-only tail — paymentAmountOverrides then the who/when stamps', () => {
-  const headers = gsHeaders('CLIENTS_HEADERS');
+  const headers = withoutCareIdentityTail(gsHeaders('CLIENTS_HEADERS'));
   assert.equal(headers[0], 'id');
   assert.deepEqual(headers.slice(-6), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
   assert.equal(headers.length, 39);

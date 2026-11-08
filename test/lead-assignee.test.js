@@ -1,4 +1,12 @@
 'use strict';
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity schema');
+  return a.slice(0,-5);
+}
+
 
 /**
  * Coverage for "משוייך ל" (assigned-to) — the staff member a lead is assigned to,
@@ -60,13 +68,13 @@ test('assignedTo is last on the leads arrays; on CLIENTS it trails the payment t
   // The who/when stamps (session-who-when PR) were appended AFTER assignedTo,
   // and preferredHouse (בית מועדף) after them, so it is now fourth-from-last
   // on both leads arrays.
-  assert.deepEqual(LEADS_H.slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(withoutCareIdentityTail(LEADS_H).slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
   assert.deepEqual(REMOVED_H.slice(-4), ['assignedTo', 'updatedAt', 'updatedBy', 'preferredHouse']);
   // assignedTo is a volta-only column (physically unwritten on the live sheet) that
   // appended after the payment tail. The later paymentAmountOverrides column appended
   // after it, so assignedTo now sits second-from-last on CLIENTS.
-  assert.equal(CLIENTS_H[CLIENTS_H.length - 6], 'paymentAmountOverrides');
-  assert.deepEqual(CLIENTS_H.slice(-9),
+  assert.equal(withoutCareIdentityTail(CLIENTS_H)[withoutCareIdentityTail(CLIENTS_H).length - 6], 'paymentAmountOverrides');
+  assert.deepEqual(withoutCareIdentityTail(CLIENTS_H).slice(-9),
     ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
 });
 

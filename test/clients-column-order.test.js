@@ -1,4 +1,14 @@
 'use strict';
+// Preserve the frozen physical schema while checking the five new append-only
+// care-continuum columns are EXACTLY the expected end suffix.
+const CARE_ID_SUFFIX = Object.freeze(['dashboardPatientId','dashboardPersonId',
+  'dashboardLeadId','handoffSource','continuationKey']);
+function withoutCareIdentityTail(v) {
+  const a = Array.from(v);
+  if (a.slice(-5).join('|') !== CARE_ID_SUFFIX.join('|')) throw Error('unsafe identity column order');
+  return a.slice(0,-5);
+}
+
 
 /**
  * FROZEN Clients column-order guard + by-index-write guard.
@@ -71,13 +81,13 @@ const FROZEN_CLIENTS_HEADERS = [
 ];
 
 test('CLIENTS_HEADERS equals the frozen physical order', () => {
-  const H = namedArray('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
   assert.equal(H.length, 39, 'Clients has 39 columns');
 });
 
 test('updatedAt/updatedBy are APPEND-ONLY: directly before plannedExitDate, everything before them unchanged', () => {
-  const H = namedArray('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
   assert.deepEqual(H.slice(-5, -3), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
   assert.equal(H[H.length - 6], 'paymentAmountOverrides', 'the previous tail column is directly before them');
   // every earlier column keeps the frozen pre-append order
@@ -87,19 +97,19 @@ test('updatedAt/updatedBy are APPEND-ONLY: directly before plannedExitDate, ever
 });
 
 test('phone (join key) stays at physical column 26 (index 25)', () => {
-  const H = namedArray('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
   assert.equal(H.indexOf('phone'), 25);
 });
 
 test('the payment tail sits directly after phone, in physical live order', () => {
-  const H = namedArray('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
   const pi = H.indexOf('phone');
   assert.deepEqual(H.slice(pi + 1, pi + 5),
     ['paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed']);
 });
 
 test('the volta-only (physically-unwritten) columns sit at positions 31-33', () => {
-  const H = namedArray('CLIENTS_HEADERS');
+  const H = withoutCareIdentityTail(namedArray('CLIENTS_HEADERS'));
   assert.deepEqual(H.slice(30, 33), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo']);
 });
 
