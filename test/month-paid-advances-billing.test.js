@@ -122,8 +122,10 @@ test('app.js: renew / intake / activate / agreement / derive all use the cycle r
   assert.match(APP, /nextBillingDate: paidCoverage\.next/);
   assert.match(APP, /payStatus === 'paid' \? intakeCoverage\.next : startDate/);
   assert.match(APP, /payStatus === 'paid' \? activateCoverage\.next : startDate/);
-  // agreement payment
-  assert.match(APP, /lead\.nextBillingDate = nextCycleDueDateAfter\(lead, agPayDate\)/);
+  // agreement payment — first-payment rule (2026-11-09): the payment DEFINES
+  // the cycle, so the next collection is payDate + 1 month, never the lead's
+  // startDate day-of-month (see test/first-payment-cycle-anchor.test.js).
+  assert.match(APP, /lead\.nextBillingDate = addMonth\(agPayDate\)/);
 });
 
 test('app.js: the edit modal no longer recomputes nextBillingDate unconditionally', () => {

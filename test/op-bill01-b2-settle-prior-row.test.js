@@ -218,6 +218,8 @@ test('B1/B2 UI wiring: renewal, edit, intake and activation pass the cycle to th
   assert.match(renew, /renewRow\.coverageStart = paidCoverage\.start/);
   assert.match(renew, /request\.priorPayment = \{ id: priorRow\.id, status: priorRow\.status, amountPaid: priorRow\.amountPaid \}/);
   assert.match(source, /CL\.paymentDateCoverage\(client\.paymentDate, cycleDueISO\)/);
-  assert.match(source, /CL\.paymentDateCoverage\(payDate, startDate\)/);
-  assert.equal((source.match(/CL\.paymentDateCoverage\(payDate, startDate\)/g) || []).length, 2);
+  // First-payment rule (2026-11-09): the intake / activation first cycle is
+  // anchored on the payment date itself — see test/first-payment-cycle-anchor.test.js.
+  assert.match(source, /CL\.paymentDateCoverage\(payDate, payDate\)/);
+  assert.equal((source.match(/CL\.paymentDateCoverage\(payDate, payDate\)/g) || []).length, 2);
 });

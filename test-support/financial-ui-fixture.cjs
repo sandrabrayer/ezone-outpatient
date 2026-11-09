@@ -58,9 +58,16 @@ function fixture(fields = {}) {
   vm.runInContext(source.match(/var PREFERRED_HOUSES = \[[^\]]*\];/)[0], ctx);
   // אופן חיוב helpers the intake / edit handlers call (real list + functions).
   vm.runInContext(source.match(/var BILLING_MODES = \[[^\]]*\];/)[0], ctx);
+  // plan-metadata helpers (טיפול משלים / שני מטפלים, 2026-11-09) the creation
+  // handlers call (real constants + functions; the stub $ yields no pickers,
+  // so the meta reads back empty and valid).
+  vm.runInContext(source.match(/var COMPLEMENTARY_LABEL = '[^']*';/)[0], ctx);
+  vm.runInContext(source.match(/var COMPLEMENTARY_TYPES = \[[^\]]*\];/)[0], ctx);
+  vm.runInContext(source.match(/var COMPLEMENTARY_HE = \{[^}]*\};/)[0], ctx);
   // the shared busy-spinner adapters the submit handlers call (public/busy.js is absent here → plain disabled)
   for (const name of ['busyApi', 'busyRun', 'busyStart', 'busyEnd', 'busyIs', 'preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
+    'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);
   return { ctx, client, lead, out, button, warning, warningText,

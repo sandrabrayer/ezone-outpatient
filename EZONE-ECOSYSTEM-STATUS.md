@@ -1,3 +1,23 @@
+# Outpatient — first-payment billing anchor + plan metadata, 2026-11-09
+
+A new client's FIRST recorded payment now defines the billing cycle (billingDay
+= the payment day; first cycle = one calendar month FROM the payment date; the
+agreement payment anchors the lead's next collection the same way; the
+pay-before-start refusal is gone — advance payment is the normal pattern).
+Root cause of עוז קורסיה's wrong גבייה הבאה (01.01 instead of 25.12): billingDay
+was derived from startDate. One-off editor-run repair
+`previewOzBillingCycleRepairNow` / `applyOzBillingCycleRepairNow` re-keys his
+two paid rows to the 25th cycles (exact-state verified, never routed over HTTP).
+Plan features: «טיפול משלים» treatment type with a closed subtype menu
+(יוגה/דיקור/רפלקסולוגיה/אמנות; stable keys in the new append-only
+`complementaryType` column) and two DISTINCT therapists for טיפול פרטני 2+/שבוע
+(new append-only `privateTherapists` JSON column; names from the new pure-read,
+names-only `getTherapistNames` internal action). CLIENTS_HEADERS is now **41**
+columns (both appended last; tombstone mirrored; guard tests updated
+deliberately). `getTreatmentPlans` projects both fields — the therapists-app
+display is a follow-up in `ezone-therapists`. SW v35. See
+`CHANGELOG-first-payment-anchor.md`, `CHANGELOG-complementary-and-dual-therapist.md`.
+
 # Outpatient — read-only acceptance continuation, 2026-11-08
 
 PR #174 is merged and released at `5f6225f5c85cc3ed17db2a31e3339fa868a74cab`;

@@ -82,8 +82,9 @@ for (const [name, header] of preferredSchemas) {
   test('old-width ' + name + ' backup stays inspection-only and cannot release recovery', () => {
     const s = world();
     const oldHeader = Array.from(s.ctx[header]).slice(0, -1);
-    // Clients + its tombstone appended billingMode after preferredHouse (2026-11-04); the lead schemas end with preferredHouse
-    assert.equal(s.ctx[header][oldHeader.length], /^Clients/.test(name) ? 'billingMode' : 'preferredHouse');
+    // Clients + its tombstone appended billingMode (2026-11-04) then the plan
+    // metadata (2026-11-09) after preferredHouse; the lead schemas end with preferredHouse
+    assert.equal(s.ctx[header][oldHeader.length], /^Clients/.test(name) ? 'privateTherapists' : 'preferredHouse');
     s.seed(name, oldHeader, [{ id: 'synthetic-old-schema' }]);
     const h = snapshot(s), r = restored(h);
     assert.ok(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length);

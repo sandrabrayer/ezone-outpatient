@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### First-payment billing-cycle anchor + עוז one-off repair (2026-11-09)
+- A new client's FIRST recorded payment now defines the billing cycle (OP-BILL-01 requested rule): billingDay = the payment day-of-month (an explicit direct-intake billing day still wins; startDate day only as the no-payment fallback), the paid first cycle covers one calendar month FROM the payment date, the intake row's due date / month key follow it and record explicit coverage, and the agreement payment sets the next collection to payDate + 1 month. The pay-before-start refusal is removed from the creation guards (advance payment is the normal pattern); a future/malformed date is still refused. Renewals and the no-drift cycle rule are unchanged.
+- One-off editor-run repair `previewOzBillingCycleRepairNow` / `applyOzBillingCycleRepairNow` re-keys עוז קורסיה's two paid rows to the 25th cycles and sets billingDay 25 / גבייה הבאה 2026-12-25 — exact-state verified, drift/second-run refuses, not routed via doGet/doPost. See `CHANGELOG-first-payment-anchor.md`.
+
+### טיפול משלים + שני מטפלים לפרטני (2026-11-09)
+- New treatment type «טיפול משלים» in the plan menu with a subtype picker — יוגה / דיקור / רפלקסולוגיה / אמנות (stable keys `yoga/acupuncture/reflexology/art`, Hebrew at render; new append-only Clients column `complementaryType`, server-validated).
+- טיפול פרטני at 2+ a week can now name two DIFFERENT therapists (new append-only Clients column `privateTherapists`, JSON array of up to two distinct roster names, server-validated; roster via the new names-only `getTherapistNames` read — no rates cross). Both fields are projected in `getTreatmentPlans` for the therapists app. SW v34 → v35. See `CHANGELOG-complementary-and-dual-therapist.md`.
+
 ### Read-only acceptance: continuation task names, navigation and missing-data labels (2026-11-08)
 - Refresh Today when the asynchronous admitted roster finishes loading, so existing continuation tasks show their patient names without leaving the screen.
 - Open a continuation task by its existing subject/workflow key, including a click before the roster arrives. Same-name patients are not substituted; an absent subject gets an explicit warning and a return-to-roster action.

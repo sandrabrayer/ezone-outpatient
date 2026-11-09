@@ -37,12 +37,12 @@ const base = (over) => Object.assign({
 test('A: billingMode is the ONE new column, appended LAST on Clients (position 39) and on the tombstone', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS), R = plain(ctx.CLIENTS_REMOVED_HEADERS);
-  assert.equal(H.length, 39);
+  assert.equal(H.length, 41); // complementaryType + privateTherapists appended 2026-11-09
   assert.equal(H[38], 'billingMode');
   assert.equal(H.indexOf('billingMode'), H.lastIndexOf('billingMode'), 'exactly once');
-  assert.deepEqual(H.slice(-3), ['plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.deepEqual(H.slice(-5), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
-  assert.equal(R[R.length - 1], 'billingMode');
+  assert.deepEqual(R.slice(-3), ['billingMode', 'complementaryType', 'privateTherapists']);
   assert.deepEqual(plain(ctx.BILLING_MODES), ['package', 'per_session']);
   // Leads carry no billing mode
   assert.ok(!plain(ctx.LEADS_HEADERS).includes('billingMode'));
@@ -125,7 +125,7 @@ test('C: nothing in Code.gs writes per_session by itself — the only literal is
 
 test('D: app.js reads, sends, labels and short-circuits the renewal cycle for per-session clients', () => {
   assert.match(APP, /billingMode: billingModeStored\(row\.billingMode\)/, 'read from the sheet as a stable key (blank stays blank)');
-  assert.match(APP, /billingMode: billingModeStored\(c\.billingMode\)\n\s*\};/, 'always sent on save, blank never rewritten');
+  assert.match(APP, /billingMode: billingModeStored\(c\.billingMode\),/, 'always sent on save, blank never rewritten');
   assert.match(APP, /var BILLING_MODE_HE = \{ package: 'חבילה \/ חודשי', per_session: 'תשלום לפי טיפול' \};/);
   assert.match(APP, /if \(isPerSession\(c\)\) return \{ status: 'per_session' \};/, 'renewalInfo: no overdue / due_soon');
   assert.match(APP, /'paymentLink', 'billingMode'\];/, 'a money form field: disabled for an ops session');
