@@ -2527,6 +2527,137 @@ function applyStaleNextBillingRepairNow() {
   return res;
 }
 
+/* ===== One-off data repair: עוז קורסיה first-payment billing cycle =========
+ *
+ * The patient paid on the 25th (first payment 2026-10-25, two months), but the
+ * cycle was anchored on his startDate day (billingDay=1), so his paid cycles
+ * were keyed 2026-11-01 / 2026-12-01 and the anchor landed on 2027-01-01.
+ * Under the first-payment rule the cycles run 25th→25th: covered
+ * 2026-10-25→2026-12-24, next collection 2026-12-25.
+ *
+ * This repair re-keys his two paid rows to the payment-date cycles and fixes
+ * the client's billingDay + nextBillingDate. EVERY current value is verified
+ * byte-for-byte first — any drift (incl. a second run) refuses with a report
+ * and writes NOTHING. EDITOR-RUN ONLY: not routed through doGet/doPost.
+ * Re-key order matters: the 2026-11 row becomes 2026-10 BEFORE the 2026-12 row
+ * becomes 2026-11, so two rows never share an id even transiently. */
+var OZ_CYCLE_REPAIR = {
+  clientId: 'id_mvxnplnn_t6w0k6',
+  client: { expect: { billingDay: '1', nextBillingDate: '2027-01-01' },
+            write:  { billingDay: '25', nextBillingDate: '2026-12-25' } },
+  rows: [
+    { expectId: 'pay::id_mvxnplnn_t6w0k6::base::2026-11', expect: { dueDate: '2026-11-01', status: 'paid', paymentDate: '2026-10-25' },
+      write: { id: 'pay::id_mvxnplnn_t6w0k6::base::2026-10', dueDate: '2026-10-25', coverageStart: '2026-10-25', coverageEnd: '2026-11-24' } },
+    { expectId: 'pay::id_mvxnplnn_t6w0k6::base::2026-12', expect: { dueDate: '2026-12-01', status: 'paid', paymentDate: '2026-10-25' },
+      write: { id: 'pay::id_mvxnplnn_t6w0k6::base::2026-11', dueDate: '2026-11-25', coverageStart: '2026-11-25', coverageEnd: '2026-12-24' } }
+  ]
+};
+function _repairOzBillingCycle(apply) {
+  var doApply = apply === '1' || apply === 1 || apply === true;
+  var lock = null;
+  if (doApply) {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  }
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var spec = OZ_CYCLE_REPAIR;
+    _finGuard([spec.clientId]); // refuse while a renewal/charge op is open for him
+    var clientsSh = _ensureSheet('Clients', CLIENTS_HEADERS);
+    var paymentsSh = _ensurePaymentsSheet();
+    var mismatches = [], plan = [];
+    // --- client row ---
+    var idCol = CLIENTS_HEADERS.indexOf('id') + 1;
+    var lastRow = clientsSh.getLastRow();
+    var clientRow = 0;
+    if (lastRow >= 2) {
+      var ids = clientsSh.getRange(2, idCol, lastRow - 1, 1).getValues();
+      for (var r = 0; r < ids.length; r++) {
+        if (String(ids[r][0]) === spec.clientId) { clientRow = r + 2; break; }
+      }
+    }
+    if (!clientRow) mismatches.push('client row not found: ' + spec.clientId);
+    else {
+      Object.keys(spec.client.expect).forEach(function (h) {
+        var col = CLIENTS_HEADERS.indexOf(h) + 1;
+        var cur = clientsSh.getRange(clientRow, col).getValue();
+        var curIso = (cur instanceof Date)
+          ? Utilities.formatDate(cur, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd')
+          : String(cur);
+        if (curIso !== spec.client.expect[h]) {
+          mismatches.push('client.' + h + ': expected "' + spec.client.expect[h] + '", found "' + curIso + '"');
+        }
+      });
+      plan.push({ target: 'client ' + spec.clientId, write: spec.client.write });
+    }
+    // --- payment rows ---
+    var payIdCol = PAYMENTS_HEADERS.indexOf('id') + 1;
+    var payLast = paymentsSh.getLastRow();
+    var payIds = payLast >= 2 ? paymentsSh.getRange(2, payIdCol, payLast - 1, 1).getValues() : [];
+    function payRowOf(id) {
+      for (var r = 0; r < payIds.length; r++) if (String(payIds[r][0]) === id) return r + 2;
+      return 0;
+    }
+    // Target-id collision check: an id freed by an earlier spec entry in this
+    // same run is NOT a collision (row 2026-11→2026-10 frees 2026-11 for the
+    // 2026-12 row), so collide against (current ids − re-keyed ids) ∪ targets.
+    var finalIds = {};
+    spec.rows.forEach(function (s) { finalIds[s.expectId] = true; });
+    var occupied = {};
+    payIds.forEach(function (r) { var id = String(r[0]); if (id && !finalIds[id]) occupied[id] = true; });
+    var rowNums = spec.rows.map(function (s) {
+      var rn = payRowOf(s.expectId);
+      if (!rn) { mismatches.push('payment row not found: ' + s.expectId); return 0; }
+      Object.keys(s.expect).forEach(function (h) {
+        var col = PAYMENTS_HEADERS.indexOf(h) + 1;
+        var cur = paymentsSh.getRange(rn, col).getValue();
+        var curIso = (cur instanceof Date)
+          ? Utilities.formatDate(cur, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd')
+          : String(cur);
+        if (curIso !== s.expect[h]) {
+          mismatches.push(s.expectId + '.' + h + ': expected "' + s.expect[h] + '", found "' + curIso + '"');
+        }
+      });
+      if (occupied[s.write.id]) mismatches.push('target id already exists: ' + s.write.id);
+      occupied[s.write.id] = true; // no two spec rows may land on the same id either
+      plan.push({ target: s.expectId, write: s.write });
+      return rn;
+    });
+    if (mismatches.length) return { ok: false, error: 'state_mismatch', mismatches: mismatches, applied: 0 };
+    if (!doApply) return { ok: true, dryRun: true, applied: 0, plan: plan };
+    // --- apply: payment rows first (in spec order — collision-free), then the client ---
+    spec.rows.forEach(function (s, i) {
+      var rn = rowNums[i];
+      Object.keys(s.write).forEach(function (h) {
+        var col = PAYMENTS_HEADERS.indexOf(h) + 1;
+        paymentsSh.getRange(rn, col).setNumberFormat('@').setValue(s.write[h]);
+      });
+      Logger.log('repairOzBillingCycle: ' + s.expectId + ' -> ' + JSON.stringify(s.write));
+    });
+    Object.keys(spec.client.write).forEach(function (h) {
+      var col = CLIENTS_HEADERS.indexOf(h) + 1;
+      clientsSh.getRange(clientRow, col).setNumberFormat('@').setValue(spec.client.write[h]);
+    });
+    _stampClientRowAt(clientsSh, clientRow, 'repair'); // who/when
+    Logger.log('repairOzBillingCycle: client ' + spec.clientId + ' -> ' + JSON.stringify(spec.client.write));
+    return { ok: true, dryRun: false, applied: spec.rows.length + 1, plan: plan };
+  } finally {
+    if (lock) { try { lock.releaseLock(); } catch (_) {} }
+  }
+}
+/* Editor helper: log the עוז repair plan. Writes NOTHING. */
+function previewOzBillingCycleRepairNow() {
+  var res = _repairOzBillingCycle('0');
+  Logger.log('repairOzBillingCycle DRY-RUN: ' + JSON.stringify(res, null, 2));
+  return res;
+}
+/* Editor helper: APPLY the עוז repair (verifies first; any drift refuses). */
+function applyOzBillingCycleRepairNow() {
+  var res = _repairOzBillingCycle('1');
+  Logger.log('repairOzBillingCycle APPLY: ' + JSON.stringify(res, null, 2));
+  return res;
+}
+
 /* ===== Client charges ===== */
 function _getCharges() {
   var sh = _ensureSheet('ClientCharges', CHARGES_HEADERS);

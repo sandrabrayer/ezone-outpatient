@@ -8075,12 +8075,15 @@
           busyEnd(submit);
           return;
         }
-        // Next collection = the cycle AFTER the intake month, on the client's
-        // billing day (else the startDate day-of-month, clamped) — anchored on
-        // the startDate cycle, never payDate+30, so the billing day never drifts.
-        var intakeCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate, startDate);
-        if (payStatus === 'paid' && (!intakeCoverage || payDate < startDate || payDate > today())) {
-          toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+        // First-payment rule (OP-BILL-01): the client's FIRST payment DEFINES the
+        // billing cycle — it covers one calendar month FROM the payment date
+        // (25.10 → 25.10-24.11, next collection 25.11), so the cycle is anchored
+        // on payDate, never snapped to the startDate day-of-month. Paying in
+        // advance BEFORE the treatment start date is the normal pattern and is
+        // allowed; only a future or malformed date is refused.
+        var intakeCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate, payDate);
+        if (payStatus === 'paid' && (!intakeCoverage || payDate > today())) {
+          toast('תאריך תשלום עתידי או לא תקין דורש בירור בגבייה', true);
           busyEnd(submit);
           return;
         }
@@ -8094,7 +8097,12 @@
           fromLead: '', source: 'direct_admin',
           notes: (fd.get('notes') || '').trim(),
           billingType: 'monthly',
-          billingDay: bdDay || dayOfMonth(startDate) || '',
+          // Billing day: an explicitly chosen day wins; otherwise the FIRST
+          // payment's day-of-month defines the cycle day (first-payment rule),
+          // falling back to the startDate day only when no payment is recorded.
+          billingDay: bdDay ||
+            (((payStatus === 'paid' || payStatus === 'partial') && payDate && dayOfMonth(payDate)) ||
+             dayOfMonth(startDate)) || '',
           paymentStatus: payStatus,
           paymentDate: payDate,
           nextBillingDate: nextBill,
@@ -8108,7 +8116,10 @@
         // rows, not client.paymentStatus). Same shape as setCurrentMonthPaid.
         var directIntakePayment = null;
         if (payStatus === 'paid' || payStatus === 'partial') {
-          var dDue = currentMonthBaseDueDate(client);
+          // First-payment rule: the row's cycle IS the payment date (the month
+          // key the id carries follows it), so the next renewal never collides
+          // with this cycle's month key. No payDate → the billing-day fallback.
+          var dDue = payDate || currentMonthBaseDueDate(client);
           var dAmount = clientAmountDue(client) || 0;
           directIntakePayment = {
             id: paymentId(client, dDue, 'base'),
@@ -8123,6 +8134,13 @@
             method: '', notes: '',
             bundleSize: 0, sessionsUsed: 0
           };
+          // A fully-paid intake records the covered window explicitly (the same
+          // window that set nextBillingDate), so the coverage split and the
+          // paid-through views read the truth instead of inferring it.
+          if (payStatus === 'paid' && intakeCoverage) {
+            directIntakePayment.coverageStart = intakeCoverage.start;
+            directIntakePayment.coverageEnd = intakeCoverage.end;
+          }
         }
         // Keep the client visible while saving; paid remains source-confirmed.
         closeDirectClientModal();
@@ -8215,10 +8233,11 @@
       if (agPayStatus) lead.paymentStatus = agPayStatus;
       if (agPayDate) {
         lead.paymentDate = agPayDate;
-        // The agreement payment opens the cycle anchored on its own date; the
-        // next collection is one cycle later (billing day / day-of-month kept,
-        // short-month clamp — one MONTH, not 30 days).
-        lead.nextBillingDate = nextCycleDueDateAfter(lead, agPayDate);
+        // First-payment rule (OP-BILL-01): the agreement payment DEFINES the
+        // cycle — it covers one calendar month FROM the payment date, so the
+        // next collection is payDate + 1 month (short-month clamp), never
+        // snapped to the lead's startDate day-of-month.
+        lead.nextBillingDate = addMonth(agPayDate);
       }
       if (agreementAdvance) lead.stage = 'agreement';
       persist()
@@ -8253,12 +8272,14 @@
         toast('יש להזין תאריך תשלום', true);
         return;
       }
-      // Next collection = the cycle AFTER the activation month, on the
-      // startDate day-of-month (clamped) — anchored on the startDate cycle,
-      // never payDate+30, so the billing day never drifts.
-      var activateCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate, startDate);
-      if (payStatus === 'paid' && (!activateCoverage || payDate < startDate || payDate > today())) {
-        toast('תשלום לפני תחילת טיפול או תאריך עתידי דורש בירור בגבייה', true);
+      // First-payment rule (OP-BILL-01): the activation payment DEFINES the
+      // billing cycle — one calendar month FROM the payment date (25.10 →
+      // 25.10-24.11, next collection 25.11), never snapped to the startDate
+      // day-of-month. Paying in advance BEFORE the treatment start date is the
+      // normal pattern and is allowed; only a future/malformed date is refused.
+      var activateCoverage = payStatus === 'paid' && CL && CL.paymentDateCoverage(payDate, payDate);
+      if (payStatus === 'paid' && (!activateCoverage || payDate > today())) {
+        toast('תאריך תשלום עתידי או לא תקין דורש בירור בגבייה', true);
         busyEnd(submit);
         return;
       }
@@ -8274,7 +8295,10 @@
         startDate: startDate,
         status: 'פעיל', exitDate: '', fromLead: lead.id,
         source: 'lead', notes: '', billingType: 'monthly',
-        billingDay: dayOfMonth(startDate) || '',
+        // First-payment rule: the first payment's day-of-month defines the
+        // billing day; startDate's day is only the no-payment fallback.
+        billingDay: (((payStatus === 'paid' || payStatus === 'partial') && payDate && dayOfMonth(payDate)) ||
+          dayOfMonth(startDate)) || '',
         paymentStatus: payStatus,
         paymentDate: payDate,
         nextBillingDate: nextBill,
@@ -8293,7 +8317,9 @@
       // the intake «שולם» didn't surface and Vered had to re-mark it manually.
       // Same row shape as setCurrentMonthPaid; the button stays editable after.
       if (payStatus === 'paid' || payStatus === 'partial') {
-        var intakeDue = currentMonthBaseDueDate(client);
+        // First-payment rule: the row's cycle IS the payment date (its month
+        // key follows it), so the next renewal never collides with this cycle.
+        var intakeDue = payDate || currentMonthBaseDueDate(client);
         var intakeAmount = clientAmountDue(client) || 0;
         var intakePayment = {
           id: paymentId(client, intakeDue, 'base'),
@@ -8308,6 +8334,12 @@
           method: '', notes: '',
           bundleSize: 0, sessionsUsed: 0
         };
+        // A fully-paid activation records the covered window explicitly (the
+        // same window that set nextBillingDate).
+        if (payStatus === 'paid' && activateCoverage) {
+          intakePayment.coverageStart = activateCoverage.start;
+          intakePayment.coverageEnd = activateCoverage.end;
+        }
         intakePaymentToPersist = intakePayment;
       }
       var leadIdx = state.leads.findIndex(function (x) { return x.id === lead.id; });
