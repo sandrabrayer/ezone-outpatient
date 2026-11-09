@@ -1229,6 +1229,42 @@ function _getTherapistNames() {
   return { ok: true, names: names };
 }
 
+/* addTherapistToRoster (2026-11-09): INTERNAL write (OUTPATIENT_PROXY_SECRET,
+ * posted through the Node proxy by a FULL money-scope session only — the
+ * proxy refuses it for 'ops', and it is re-checked here). Appends ONE
+ * TherapistRates row carrying the NAME ONLY — every rate cell stays blank, so
+ * payouts for the name keep failing closed until ורד fills the rates.
+ * Idempotent: an existing exact (trimmed) name answers {ok, existed:true} and
+ * writes nothing. Never renames, never deletes, never touches a rate. */
+function _therapistNameOrNull(v) {
+  var s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  if (s.length < 2 || s.length > 80) return null;
+  // letters (any script), spaces, and the punctuation real names use: ' " . - ״ ׳
+  if (!/^[\p{L}\p{M} '".\-\u05F3\u05F4]+$/u.test(s)) return null;
+  if (!/\p{L}/u.test(s)) return null;
+  return s;
+}
+function _addTherapistToRoster(payload) {
+  if (String(payload && payload.moneyScope) !== 'full') return { ok: false, error: 'forbidden_money_action' };
+  var name = _therapistNameOrNull(payload ? payload.name : null);
+  if (name === null) return { ok: false, error: 'invalid_name' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var sh = _ensureSheet(THERAPIST_RATES_SHEET, THERAPIST_RATES_HEADERS);
+    var rows = _readAll(sh, THERAPIST_RATES_HEADERS);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].name == null ? '' : rows[i].name).trim() === name) return { ok: true, existed: true, name: name };
+    }
+    sh.appendRow([name, '', '', '']);
+    try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) {}
+    return { ok: true, existed: false, name: name };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _therapistPay(therapistName, treatmentType) {
   var name = String(therapistName == null ? '' : therapistName).trim();
   var type = String(treatmentType == null ? '' : treatmentType).trim();
@@ -7138,6 +7174,7 @@ var SOURCE_POST_AUTH = {
   saveCredit: 'OUTPATIENT_PROXY_SECRET',
   savePaymentAmountOverride: 'OUTPATIENT_PROXY_SECRET',
   setPreferredHouse: 'OUTPATIENT_PROXY_SECRET',
+  addTherapistToRoster: 'OUTPATIENT_PROXY_SECRET',
   repairStaleNextBilling: 'OUTPATIENT_PROXY_SECRET',
   saveCharge: 'OUTPATIENT_PROXY_SECRET',
   updateCharge: 'OUTPATIENT_PROXY_SECRET',
@@ -7511,6 +7548,11 @@ function doPost(e) {
       // INTERNAL write (same trust level as savePayment) — the outpatient app posts
       // it same-origin through the Node proxy; no cross-app secret.
       return _json(_setPaymentAmountOverride(payload));
+    }
+    if (action === 'addTherapistToRoster') {
+      // INTERNAL names-only roster append (TherapistRates, blank rates) — full
+      // money scope only; validated + idempotent in _addTherapistToRoster.
+      return _json(_addTherapistToRoster(payload));
     }
     if (action === 'setPreferredHouse') {
       // INTERNAL single-cell write (בית מועדף) — same trust level as

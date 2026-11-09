@@ -69,6 +69,62 @@ test('A: the explicit setClinicalType receiver still derives + overwrites', () =
   assert.equal(h.rows('Clients')[0].serviceType, 'פרטני');
 });
 
+/* ======================= B. addTherapistToRoster ============================ */
+
+function withRates() {
+  const h = sandbox();
+  h.seed('TherapistRates', h.ctx.THERAPIST_RATES_HEADERS, [
+    { name: 'הילה תבור', flatRate: 300 },
+    { name: 'ד"ר מיכאל שפרינץ', intakeRate: 900, followupRate: 700 }
+  ]);
+  return h;
+}
+
+test('B: a full-scope add appends ONE names-only row (rates blank), then is idempotent', () => {
+  const h = withRates();
+  const res = h.post({ action: 'addTherapistToRoster', moneyScope: 'full', user: 'ורד', name: '  אוהד   לביא ' });
+  assert.deepEqual(JSON.parse(JSON.stringify(res)), { ok: true, existed: false, name: 'אוהד לביא' });
+  const rows = h.rows('TherapistRates');
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows[2], { name: 'אוהד לביא', flatRate: '', intakeRate: '', followupRate: '' });
+  assert.equal(rows[0].flatRate, 300, 'existing rates untouched');
+  const again = h.post({ action: 'addTherapistToRoster', moneyScope: 'full', user: 'ורד', name: 'אוהד לביא' });
+  assert.equal(again.existed, true);
+  assert.equal(h.rows('TherapistRates').length, 3, 'no duplicate row');
+  const names = h.get({ action: 'getTherapistNames', proxySecret: h.props.OUTPATIENT_PROXY_SECRET }).names;
+  assert.ok(names.includes('אוהד לביא'));
+});
+
+test('B: an operational (ops) or scope-less request is refused and writes nothing', () => {
+  const h = withRates();
+  for (const moneyScope of ['ops', undefined, '']) {
+    const res = h.post({ action: 'addTherapistToRoster', moneyScope, user: 'דנה', name: 'אוהד לביא' });
+    assert.equal(res.ok, false);
+    assert.equal(res.error, 'forbidden_money_action');
+  }
+  assert.equal(h.rows('TherapistRates').length, 2);
+});
+
+test('B: invalid names are refused before any write', () => {
+  const h = withRates();
+  for (const name of ['', ' ', 'א', '<script>x</script>', 'a'.repeat(81), '12345', '=HYPERLINK("x")', null]) {
+    const res = h.post({ action: 'addTherapistToRoster', moneyScope: 'full', user: 'ורד', name });
+    assert.equal(res.error, 'invalid_name', String(name));
+  }
+  assert.equal(h.rows('TherapistRates').length, 2);
+  // real-world punctuation is accepted
+  assert.equal(h.post({ action: 'addTherapistToRoster', moneyScope: 'full', name: 'ד"ר רות בן-חיים' }).ok, true);
+});
+
+test('B: the action is behind the proxy key like every internal write', () => {
+  const h = withRates();
+  const res = JSON.parse(h.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify(
+    { action: 'addTherapistToRoster', moneyScope: 'full', name: 'אוהד לביא', proxySecret: 'wrong' }) } }).getContent());
+  assert.equal(res.ok, false);
+  assert.equal(h.rows('TherapistRates').length, 2);
+  assert.equal(h.ctx.SOURCE_POST_AUTH.addTherapistToRoster, 'OUTPATIENT_PROXY_SECRET');
+});
+
 /* ================= C. app.js read-side recovery (pure function) ============= */
 
 function loadRecover() {
@@ -106,4 +162,11 @@ test('C: anything outside the exact signature is left as stored', () => {
   // legacy plain-number / malformed frequency
   assert.deepEqual([...recover({ serviceType: 'פרטני', clinicalTreatmentType: 'x', sessionsPerWeek: '2' })], ['פרטני']);
   assert.deepEqual([...recover({ serviceType: 'פרטני', clinicalTreatmentType: 'x', sessionsPerWeek: '{bad' })], ['פרטני']);
+});
+
+test('C: the picker search + add are wired without innerHTML of names', () => {
+  assert.match(APP, /dataset\.therapistSearch = '1'/);
+  assert.match(APP, /apiPostAction\('addTherapistToRoster', \{ name: typed \}\)/);
+  assert.match(APP, /o\.textContent = n; \/\/ textContent only/);
+  assert.match(APP, /var canAdd = !isOpsScope\(\)/);
 });
