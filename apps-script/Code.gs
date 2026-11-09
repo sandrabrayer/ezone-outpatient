@@ -964,6 +964,18 @@ function _deriveClientServiceType(client) {
   return client;
 }
 
+/* Save-path variant (2026-11-09, CHANGELOG-plan-types-save-fix.md): derive the
+ * serviceType from clinicalTreatmentType ONLY when the row has none. A saved
+ * plan (one or more comma-joined types picked in the app) is never replaced —
+ * _deriveClientServiceType (which DOES overwrite) stays for the explicit
+ * cross-app setClinicalType receiver only. Fail-soft like the original. */
+function _fillBlankServiceType(client) {
+  if (!client) return client;
+  var current = String(client.serviceType == null ? '' : client.serviceType).trim();
+  if (current) return client;
+  return _deriveClientServiceType(client);
+}
+
 /* ===== Clients column-shift pre-condition scan (2026-07-06 incident) ========
  *
  * READ-ONLY forensic gate for the CLIENTS_HEADERS reorder (option a). It reads the
@@ -1597,7 +1609,11 @@ function _saveAll(payload) {
     var reservedClients = Object.create(null);
     _finJournal().ops.filter(_finActive).forEach(function (op) { reservedClients[op.clientId] = true; });
     for (var i = 0; i < clients.length; i++) {
-      _deriveClientServiceType(clients[i]);
+      // serviceType (2026-11-09 fix): the plan the person picked in the app is
+      // AUTHORITATIVE. The clinical type only fills a BLANK serviceType — it
+      // used to overwrite every save, collapsing a multi-type plan
+      // («פרטני, ליווי יומי בקהילה, …») to the single clinical type.
+      _fillBlankServiceType(clients[i]);
       var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
       clients[i].creditsOwed = _hasOwn(existingCredits, cid)
         ? existingCredits[cid]

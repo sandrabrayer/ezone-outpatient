@@ -832,8 +832,33 @@
       preferredHouse: preferredHouseOrBlank(row.preferredHouse)
     };
   }
+  // Plan-types save fix (2026-11-09, CHANGELOG-plan-types-save-fix.md): until
+  // the fix, every save let the server overwrite a multi-type plan with the
+  // single type derived from clinicalTreatmentType, while sessionsPerWeek kept
+  // every picked type. READ-SIDE recovery of exactly that signature — a
+  // clinical type is set, the stored serviceType is ONE of the per-type
+  // frequency keys, and the other keys are known plan types — restores the
+  // picked plan from the frequency keys (their saved order). Nothing is
+  // written here; the next deliberate save stores the restored plan.
+  function recoverPlanServices(row) {
+    var stored = parseServices(row.serviceType);
+    var clinical = String(row.clinicalTreatmentType == null ? '' : row.clinicalTreatmentType).trim();
+    if (!clinical || stored.length !== 1) return stored;
+    var raw = row.sessionsPerWeek, obj = null;
+    if (raw && typeof raw === 'object') obj = raw;
+    else if (typeof raw === 'string' && raw.trim().charAt(0) === '{') {
+      try { obj = JSON.parse(raw); } catch (_) { obj = null; }
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return stored;
+    var keys = Object.keys(obj).filter(function (k) { return k && k.charAt(0) !== '_'; });
+    if (keys.length < 2 || keys.indexOf(stored[0]) < 0) return stored;
+    var known = keys.every(function (k) {
+      return k === stored[0] || SERVICE_TYPES.indexOf(k) >= 0 || DAY_CENTER_ALIASES.indexOf(k) >= 0;
+    });
+    return known ? keys : stored;
+  }
   function normalizeClientFromSheet(row) {
-    var services = formatServices(parseServices(row.serviceType));
+    var services = formatServices(recoverPlanServices(row));
     return {
       id: row.id || uid(),
       name: row.name || '',
