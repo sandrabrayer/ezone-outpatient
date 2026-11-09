@@ -362,6 +362,12 @@ button, input, select, textarea {
 .sessions-host { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 @media (max-width: 600px) { .sessions-host { grid-template-columns: 1fr; } }
 .sessions-host .empty { color: var(--text-soft); font-size: 13px; grid-column: 1 / -1; }
+/* Plan metadata rows inside the sessions host (טיפול משלים subtype, שני מטפלים
+ * לפרטני): full-width sub-rows under their treatment's frequency row. */
+.sessions-host .plan-meta { grid-column: 1 / -1; }
+.sessions-host .plan-therapists { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (max-width: 600px) { .sessions-host .plan-therapists { grid-template-columns: 1fr; } }
+.sessions-host .plan-therapists[hidden] { display: none; }
 .client-tabs .ct.active { color: var(--green-2); border-color: var(--green); }
 .inline-field {
   display: flex; flex-direction: column; gap: 4px;

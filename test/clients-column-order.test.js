@@ -67,22 +67,28 @@ const FROZEN_CLIENTS_HEADERS = [
   'preferredHouse',
   // APPEND-ONLY: billing mode (אופן חיוב: package / per_session). Physically
   // unwritten on the live sheet -> position 39, no migration. See test/billing-mode.test.js.
-  'billingMode'
+  'billingMode',
+  // APPEND-ONLY: plan metadata (2026-11-09) — טיפול משלים subtype (stable key)
+  // and שני מטפלים לפרטני (JSON array of ≤2 distinct names). Physically
+  // unwritten on the live sheet -> positions 40-41, no migration. See
+  // test/complementary-and-dual-therapist.test.js.
+  'complementaryType', 'privateTherapists'
 ];
 
 test('CLIENTS_HEADERS equals the frozen physical order', () => {
   const H = namedArray('CLIENTS_HEADERS');
   assert.deepEqual(H, FROZEN_CLIENTS_HEADERS);
-  assert.equal(H.length, 39, 'Clients has 39 columns');
+  assert.equal(H.length, 41, 'Clients has 41 columns (complementaryType + privateTherapists appended 2026-11-09)');
 });
 
 test('updatedAt/updatedBy are APPEND-ONLY: directly before plannedExitDate, everything before them unchanged', () => {
   const H = namedArray('CLIENTS_HEADERS');
-  assert.deepEqual(H.slice(-5, -3), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
-  assert.equal(H[H.length - 6], 'paymentAmountOverrides', 'the previous tail column is directly before them');
+  // (complementaryType + privateTherapists appended after billingMode, 2026-11-09)
+  assert.deepEqual(H.slice(-7, -5), ['updatedAt', 'updatedBy'], 'the who/when stamps precede plannedExitDate');
+  assert.equal(H[H.length - 8], 'paymentAmountOverrides', 'the previous tail column is directly before them');
   // every earlier column keeps the frozen pre-append order
-  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -5);
-  assert.deepEqual(H.slice(0, -5), PRE_APPEND);
+  const PRE_APPEND = FROZEN_CLIENTS_HEADERS.slice(0, -7);
+  assert.deepEqual(H.slice(0, -7), PRE_APPEND);
   assert.equal(PRE_APPEND.length, 34, 'exactly two columns were appended (34 -> 36)');
 });
 

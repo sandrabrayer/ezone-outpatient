@@ -74,7 +74,7 @@ test('CLIENTS_HEADERS is untouched: append-only tail intact, phone join key pres
   const CLIENTS_H = headers('CLIENTS_HEADERS');
   // Physical order: the volta-only columns, followed by the appended
   // paymentAmountOverrides, are the exact tail.
-  assert.deepEqual(CLIENTS_H.slice(-9), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.deepEqual(CLIENTS_H.slice(-11), ['clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
   // The continuation sheet is separate — CLIENTS_HEADERS must never mention it.
   assert.ok(CLIENTS_H.indexOf('meetingDate') === -1, 'continuation column leaked into CLIENTS_HEADERS');
   assert.ok(CLIENTS_H.indexOf('outcome') === -1, 'continuation column leaked into CLIENTS_HEADERS');

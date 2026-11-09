@@ -28,6 +28,36 @@
   var DAY_CENTER_LABEL = 'ליווי יומי בקהילה';          // display only
   var DAY_CENTER_ALIASES = ['מרכז יום', DAY_CENTER_LABEL, DAY_CENTER_KEY];
 
+  // טיפול משלים (2026-11-09): a plan treatment type with a SUBTYPE picked from
+  // a closed menu. The subtype is stored as a stable English key on the client
+  // (complementaryType, server-validated); Hebrew labels are render-time only.
+  var COMPLEMENTARY_LABEL = 'טיפול משלים';
+  var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art'];
+  var COMPLEMENTARY_HE = { yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות' };
+  function complementaryTypeOrBlank(v) {
+    var s = typeof v === 'string' ? v.trim() : '';
+    return COMPLEMENTARY_TYPES.indexOf(s) >= 0 ? s : '';
+  }
+  function complementaryLabel(key) { return COMPLEMENTARY_HE[complementaryTypeOrBlank(key)] || ''; }
+  // שני מטפלים לפרטני: up to two DISTINCT therapist names (the TherapistRates
+  // roster) for a plan with טיפול פרטני 2+ a week. Kept as an array in memory,
+  // JSON text on the sheet (server-validated).
+  function privateTherapistsArray(v) {
+    var arr = Array.isArray(v) ? v : null;
+    if (!arr && typeof v === 'string' && v.trim()) {
+      try { arr = JSON.parse(v); } catch (_) { arr = null; }
+    }
+    if (!Array.isArray(arr)) return [];
+    var names = [];
+    arr.forEach(function (n) {
+      var s = String(n == null ? '' : n).trim();
+      if (s && s.length <= 80) names.push(s);
+    });
+    if (names.length > 2) names = names.slice(0, 2);
+    if (names.length === 2 && names[0] === names[1]) names = [names[0]];
+    return names;
+  }
+
   var SERVICE_TYPES = [
     'פרטני',
     'פרטני CBT',
@@ -35,7 +65,8 @@
     'קבוצה',
     'טיפול משפחתי',
     DAY_CENTER_LABEL,
-    'מעקב פסיכיאטרי'
+    'מעקב פסיכיאטרי',
+    COMPLEMENTARY_LABEL
   ];
   var LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
   // בית מועדף: closed set of exact labels. Mirrors PREFERRED_HOUSES in
@@ -209,6 +240,7 @@
     sessionLog: null,    // SessionLog rows for the payout view; null = not yet fetched
     sessionLogLoading: false,
     sessionLogError: '',
+    therapistNames: [],  // names-only TherapistRates roster for the plan UI (fail-soft [])
     payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
     payoutSearch: '',    // per-tab name search (therapist name) for the payout view
     payoutExpanded: {},  // therapist name -> expanded session detail (bool)
@@ -733,6 +765,13 @@
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return Array.isArray(data.offers) ? data.offers : [];
   }
+  // Names-only therapist roster (no rates) for the plan UI's therapist pickers.
+  async function apiGetTherapistNames() {
+    var r = await apiFetch('/api/sheets?action=getTherapistNames', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return { names: Array.isArray(data.names) ? data.names : [] };
+  }
   function offersReload() {
     if (isOpsScope()) { state.offers = null; return Promise.resolve(null); }
     return apiGetOffers().then(function (o) { state.offers = o; return o; }).catch(function (e) { console.warn('[ezone] offers failed:', e.message); state.offers = null; return null; });
@@ -849,7 +888,11 @@
       // בית מועדף ('' = none). Edited via the single-cell setPreferredHouse action.
       preferredHouse: preferredHouseOrBlank(row.preferredHouse),
       // אופן חיוב: '' (legacy = package), 'package' or 'per_session'. Kept as the stable key, blank stays blank.
-      billingMode: billingModeStored(row.billingMode)
+      billingMode: billingModeStored(row.billingMode),
+      // טיפול משלים subtype (stable key, '' = none) + up to two therapists for
+      // the weekly טיפול פרטני sessions (array in memory, JSON on the sheet).
+      complementaryType: complementaryTypeOrBlank(row.complementaryType),
+      privateTherapists: privateTherapistsArray(row.privateTherapists)
     };
   }
 
@@ -963,7 +1006,15 @@
       // אופן חיוב: always sent (blank stays blank — a save never migrates a legacy row
       // to 'package'); the server validates; a pre-column tab that omits the key
       // leaves the sheet value alone.
-      billingMode: billingModeStored(c.billingMode)
+      billingMode: billingModeStored(c.billingMode),
+      // Plan metadata (2026-11-09): always sent (blank when none) so a cleared
+      // value is a real edit; the server validates both (invalid → blank) and
+      // only carries the sheet value when the key is absent (a pre-column tab).
+      complementaryType: complementaryTypeOrBlank(c.complementaryType),
+      privateTherapists: (function () {
+        var names = privateTherapistsArray(c.privateTherapists);
+        return names.length ? JSON.stringify(names) : '';
+      })()
     };
   }
 
@@ -6131,9 +6182,20 @@
     var planRows = services.map(function (s) {
       var n = breakdown[s];
       var freq = (n || n === 0) ? n + '/' + sessionUnitFor(s, planUnits) : '';
-      return '<div class="cc-line"><span class="cc-k">' + escapeHtml(serviceLabel(s)) + '</span>' +
+      var label = serviceLabel(s);
+      // טיפול משלים carries its subtype label (render-time Hebrew for the stable key).
+      if (s === COMPLEMENTARY_LABEL && complementaryLabel(c.complementaryType)) {
+        label += ' — ' + complementaryLabel(c.complementaryType);
+      }
+      return '<div class="cc-line"><span class="cc-k">' + escapeHtml(label) + '</span>' +
              '<span class="cc-v">' + freq + '</span></div>';
     }).join('');
+    // שני מטפלים לפרטני — shown when assigned.
+    var planTherapists = privateTherapistsArray(c.privateTherapists);
+    if (planTherapists.length) {
+      planRows += '<div class="cc-line"><span class="cc-k">מטפלים — פרטני</span>' +
+        '<span class="cc-v">' + escapeHtml(planTherapists.join(' · ')) + '</span></div>';
+    }
     if (!planRows) planRows = '<div class="cc-line cc-muted">לא נקבעו מפגשים</div>';
 
     var hooLabelClient = houseOfOriginLabel(c.house_of_origin);
@@ -6607,7 +6669,7 @@
   }
 
   // --- dynamic per-service sessions fields
-  function renderSessionsHost(host, services, values, unitValues) {
+  function renderSessionsHost(host, services, values, unitValues, planMeta) {
     host.innerHTML = '';
     var list = parseServices(services);
     if (!list.length) {
@@ -6639,7 +6701,96 @@
       unitSel.value = sessionUnitFor(svc, units);
       label.appendChild(unitSel);
       host.appendChild(label);
+      // --- Plan metadata (client-backed forms only; planMeta carries the stored
+      // values). Not rendered in the agreement / renewal / extra-charge hosts —
+      // those flows do not persist these fields.
+      if (planMeta && svc === COMPLEMENTARY_LABEL) {
+        // טיפול משלים subtype — a closed menu (stable keys, Hebrew labels).
+        var compLabel = document.createElement('label');
+        compLabel.className = 'plan-meta';
+        compLabel.textContent = 'סוג טיפול משלים';
+        var compSel = document.createElement('select');
+        compSel.dataset.complementaryType = '1';
+        var blank = document.createElement('option');
+        blank.value = ''; blank.textContent = '— בחרו סוג —';
+        compSel.appendChild(blank);
+        COMPLEMENTARY_TYPES.forEach(function (key) {
+          var o = document.createElement('option');
+          o.value = key; o.textContent = COMPLEMENTARY_HE[key];
+          compSel.appendChild(o);
+        });
+        compSel.value = complementaryTypeOrBlank(planMeta.complementaryType);
+        compLabel.appendChild(compSel);
+        host.appendChild(compLabel);
+      }
+      if (planMeta && svc === 'פרטני') {
+        // Two therapists for weekly טיפול פרטני ×2+: each weekly session has its
+        // own therapist. Shown only while the frequency is 2+ a week; the picks
+        // are kept (hidden) when the frequency drops, so a slip doesn't erase them.
+        var stored = privateTherapistsArray(planMeta.privateTherapists);
+        var wrap = document.createElement('div');
+        wrap.className = 'plan-meta plan-therapists';
+        wrap.dataset.privateTherapistsWrap = '1';
+        [0, 1].forEach(function (idx) {
+          var tLabel = document.createElement('label');
+          tLabel.textContent = 'מטפל/ת ' + (idx + 1) + ' — פרטני';
+          var sel = document.createElement('select');
+          sel.dataset.privateTherapist = String(idx + 1);
+          var none = document.createElement('option');
+          none.value = ''; none.textContent = '— ללא —';
+          sel.appendChild(none);
+          var roster = (state.therapistNames || []).slice();
+          // keep a stored name visible even if it left the roster
+          if (stored[idx] && roster.indexOf(stored[idx]) < 0) roster.push(stored[idx]);
+          roster.forEach(function (n) {
+            var o = document.createElement('option');
+            o.value = n; o.textContent = n;
+            sel.appendChild(o);
+          });
+          sel.value = stored[idx] || '';
+          tLabel.appendChild(sel);
+          wrap.appendChild(tLabel);
+        });
+        host.appendChild(wrap);
+        var syncTherapistVisibility = function () {
+          var n = wholeSessions(input.value);
+          var weekly = unitSel.value === 'שבוע';
+          wrap.hidden = !(weekly && n >= 2);
+        };
+        input.addEventListener('input', syncTherapistVisibility);
+        unitSel.addEventListener('change', syncTherapistVisibility);
+        syncTherapistVisibility();
+      }
     });
+  }
+  // Read the plan metadata out of a sessions host rendered with planMeta.
+  // The therapist picks are returned only while the פרטני frequency is 2+ a
+  // week (the wrap is hidden otherwise — hidden picks are not persisted).
+  function readPlanMeta(host) {
+    var compSel = $('select[data-complementary-type]', host);
+    var wrap = $('[data-private-therapists-wrap]', host);
+    var names = [];
+    if (wrap && !wrap.hidden) {
+      $$('select[data-private-therapist]', wrap).forEach(function (sel) {
+        var v = (sel.value || '').trim();
+        if (v) names.push(v);
+      });
+    }
+    return {
+      complementaryType: compSel ? complementaryTypeOrBlank(compSel.value) : '',
+      privateTherapists: names
+    };
+  }
+  // Validate the plan metadata against the picked services. Returns an error
+  // message to toast, or '' when valid.
+  function planMetaError(pickedServices, meta) {
+    if (pickedServices.indexOf(COMPLEMENTARY_LABEL) >= 0 && !meta.complementaryType) {
+      return 'יש לבחור סוג טיפול משלים (יוגה / דיקור / רפלקסולוגיה / אמנות)';
+    }
+    if (meta.privateTherapists.length === 2 && meta.privateTherapists[0] === meta.privateTherapists[1]) {
+      return 'יש לבחור שני מטפלים שונים לטיפול פרטני';
+    }
+    return '';
   }
   function readSessionsHost(host) {
     var out = {};
@@ -6766,12 +6917,13 @@
     populateServiceGroup(group, lead.serviceType);
     if (lead.location) f.location.value = lead.location;
     var host = $('[data-host="activateSessions"]', f);
-    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit);
+    renderSessionsHost(host, lead.serviceType, lead.sessionsPerWeek, lead.sessionsUnit,
+      { complementaryType: '', privateTherapists: [] });
     $$('input[type="checkbox"]', group).forEach(function (cb) {
       cb.addEventListener('change', function () {
         var picked = readServiceGroup(group);
         var current = readSessionsHost(host);
-        renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
+        renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host), readPlanMeta(host));
       });
     });
     f.pricePerSession.value = lead.pricePerSession || '';
@@ -6793,7 +6945,8 @@
     if (f.billingDay) f.billingDay.value = '';
     if (f.monthlyAmount) f.monthlyAmount.value = '';
     if (f.paymentDate) f.paymentDate.value = today();
-    renderSessionsHost($('[data-host="directSessions"]', f), '', {}, {});
+    renderSessionsHost($('[data-host="directSessions"]', f), '', {}, {},
+      { complementaryType: '', privateTherapists: [] });
     updateLocationVisibilityForDirect(f);
     m.hidden = false;
   }
@@ -6853,12 +7006,13 @@
     var ecHost = $('[data-host="editClientSessions"]', form);
     if (ecGroup && ecHost) {
       populateServiceGroup(ecGroup, client.serviceType);
-      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
+      renderSessionsHost(ecHost, client.serviceType, client.sessionsPerWeek, client.sessionsUnit,
+        { complementaryType: client.complementaryType, privateTherapists: client.privateTherapists });
       $$('input[type="checkbox"]', ecGroup).forEach(function (cb) {
         cb.addEventListener('change', function () {
           var picked = readServiceGroup(ecGroup);
           var current = readSessionsHost(ecHost);
-          renderSessionsHost(ecHost, formatServices(picked), current, readSessionsUnits(ecHost));
+          renderSessionsHost(ecHost, formatServices(picked), current, readSessionsUnits(ecHost), readPlanMeta(ecHost));
         });
       });
     }
@@ -7681,12 +7835,16 @@
         apiGetTasks().catch(function (te) { noteLoadGap(gaps, 'משימות', te); return null; }),
         apiGetActivity().catch(function (ae) { noteLoadGap(gaps, 'היסטוריית פעילות', ae); return null; }),
         // Offers CRM (2026-11-03): price-free summaries for «היום שלי» / cards; an ops session never asks
-        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { noteLoadGap(gaps, 'הצעות חבילה', oe); return null; })
+        ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { noteLoadGap(gaps, 'הצעות חבילה', oe); return null; }),
+        // Names-only therapist roster for the plan UI (שני מטפלים לפרטני) — no
+        // rates ever cross. Fail-soft: the pickers just show no roster options.
+        apiGetTherapistNames().catch(function () { return { names: [] }; })
       ]);
       state.loadGaps = gaps;
       state.tasks = results[7];
       state.activity = results[8];
       state.offers = results[9];
+      state.therapistNames = (results[10] && Array.isArray(results[10].names)) ? results[10].names : [];
       // The main read succeeded, so the session is valid: only now fetch the price / pay
       // constants (a signed-out page never even requests them). Render below needs them.
       await loadProtectedScripts();
@@ -8035,7 +8193,7 @@
           var picked = readServiceGroup(group);
           var host = $('[data-host="directSessions"]', f);
           var current = readSessionsHost(host);
-          renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host));
+          renderSessionsHost(host, formatServices(picked), current, readSessionsUnits(host), readPlanMeta(host));
           updateLocationVisibilityForDirect(f);
         });
       }
@@ -8062,6 +8220,9 @@
         var monthlyAmount = toNum(fd.get('monthlyAmount'));
         if (!monthlyAmount) { toast('יש להזין סכום חודשי', true); busyEnd(submit); return; }
         var host = $('[data-host="directSessions"]', form);
+        var directMeta = readPlanMeta(host);
+        var directMetaErr = planMetaError(services, directMeta);
+        if (directMetaErr) { toast(directMetaErr, true); busyEnd(submit); return; }
         var breakdown = readSessionsHost(host);
         var cleanUnits = readSessionsUnits(host);
         var clean = {};
@@ -8108,7 +8269,9 @@
           nextBillingDate: nextBill,
           house_of_origin: (fd.get('house_of_origin') || '').trim(),
           preferredHouse: preferredHouseOrBlank(fd.get('preferredHouse')),
-          billingMode: billingModeStored(fd.get('billingMode'))
+          billingMode: billingModeStored(fd.get('billingMode')),
+          complementaryType: services.indexOf(COMPLEMENTARY_LABEL) >= 0 ? directMeta.complementaryType : '',
+          privateTherapists: directMeta.privateTherapists
         };
         state.clients.push(client);
         // Mirror an already-paid/partial intake into a current-month payment ROW
@@ -8260,6 +8423,9 @@
       var services = readServiceGroup(group);
       if (!services.length) { busyEnd(submit); toast('יש לבחור לפחות סוג טיפול אחד', true); return; }
       var host = $('[data-host="activateSessions"]', e.target);
+      var activateMeta = readPlanMeta(host);
+      var activateMetaErr = planMetaError(services, activateMeta);
+      if (activateMetaErr) { busyEnd(submit); toast(activateMetaErr, true); return; }
       var breakdown = readSessionsHost(host);
       var cleanUnits = readSessionsUnits(host);
       var cleanBreakdown = {};
@@ -8307,7 +8473,9 @@
         assignedTo: lead.assignedTo || '',
         // בית מועדף (createLead handoff) follows the person too.
         preferredHouse: preferredHouseOrBlank(lead.preferredHouse),
-        billingMode: billingModeStored(fd.get('billingMode'))
+        billingMode: billingModeStored(fd.get('billingMode')),
+        complementaryType: services.indexOf(COMPLEMENTARY_LABEL) >= 0 ? activateMeta.complementaryType : '',
+        privateTherapists: activateMeta.privateTherapists
       };
       state.clients.push(client);
       var intakePaymentToPersist = null;
@@ -8566,7 +8734,9 @@
         house_of_origin: client.house_of_origin, notes: client.notes,
         preferredHouse: client.preferredHouse,
         plannedExitDate: client.plannedExitDate,
-        billingMode: client.billingMode
+        billingMode: client.billingMode,
+        complementaryType: client.complementaryType,
+        privateTherapists: client.privateTherapists
       };
       var newName = (fd.get('name') || '').trim();
       if (newName) client.name = newName;
@@ -8612,6 +8782,16 @@
       if (ecGroup2 && ecHost2) {
         var pickedSvc = readServiceGroup(ecGroup2);
         if (pickedSvc.length) {
+          // Plan metadata (טיפול משלים subtype / שני מטפלים לפרטני) travels with
+          // the plan. Invalid picks refuse the save BEFORE anything is changed.
+          var editMeta = readPlanMeta(ecHost2);
+          var editMetaErr = planMetaError(pickedSvc, editMeta);
+          if (editMetaErr) {
+            Object.assign(client, prev);
+            toast(editMetaErr, true);
+            busyEnd(submit);
+            return;
+          }
           var bd = readSessionsHost(ecHost2);
           var bdUnits = readSessionsUnits(ecHost2);
           var cleanBd = {};
@@ -8619,6 +8799,8 @@
           client.serviceType = formatServices(pickedSvc);
           client.sessionsPerWeek = cleanBd;
           client.sessionsUnit = bdUnits;
+          client.complementaryType = pickedSvc.indexOf(COMPLEMENTARY_LABEL) >= 0 ? editMeta.complementaryType : '';
+          client.privateTherapists = editMeta.privateTherapists;
         }
       }
       // Bug A: a deliberately changed paid-date with status=paid must reach the

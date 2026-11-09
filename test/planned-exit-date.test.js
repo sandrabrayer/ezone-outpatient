@@ -48,10 +48,10 @@ test('A: plannedExitDate is appended after the stamps on Clients and on the tomb
   const R = plain(ctx.CLIENTS_REMOVED_HEADERS);
   // preferredHouse (position 38) and billingMode (position 39) were appended
   // after it later — see test/preferred-house.test.js, test/billing-mode.test.js.
-  assert.equal(H.length, 39);
+  assert.equal(H.length, 41); // complementaryType + privateTherapists appended 2026-11-09
   assert.equal(H[36], 'plannedExitDate');
-  assert.deepEqual(H.slice(-5), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode']);
-  assert.deepEqual(R.slice(-3), ['plannedExitDate', 'preferredHouse', 'billingMode']);
+  assert.deepEqual(H.slice(-7), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
+  assert.deepEqual(R.slice(-5), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
   assert.equal(H.indexOf('exitDate'), 8, 'existing exitDate column untouched');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });
@@ -109,7 +109,9 @@ test('B: every existing field is unchanged — plannedExitDate is purely additiv
     startDate: '2026-09-01', exitDate: '', renewalDate: '2026-11-01',
     plannedExitDate: '2026-12-31',
     // + the session counters (2026-11-05, test/plan-session-counters.test.js): counts only
-    monthQuota: 4, monthUsed: 0, monthRemaining: 4, makeupSessions: 0
+    monthQuota: 4, monthUsed: 0, monthRemaining: 4, makeupSessions: 0,
+    // + the plan metadata (2026-11-09): subtype key + therapist names, no amounts
+    complementaryType: '', privateTherapists: []
   });
 });
 
@@ -186,7 +188,7 @@ test('D: app.js loads, prefills, saves (set or clear) and rolls back plannedExit
   assert.match(APP, /plannedExitDate: fmtDate\(row\.plannedExitDate\)/, 'read from sheet');
   assert.match(APP, /plannedExitDate: c\.plannedExitDate \|\| ''/, 'always sent on save');
   assert.match(APP, /form\.plannedExitDate\.value = client\.plannedExitDate \|\| ''/, 'prefilled');
-  assert.match(APP, /plannedExitDate: client\.plannedExitDate,\n\s*billingMode: client\.billingMode\n\s*\};/, 'captured in prev for rollback');
+  assert.match(APP, /plannedExitDate: client\.plannedExitDate,\n\s*billingMode: client\.billingMode,/, 'captured in prev for rollback');
   assert.match(APP, /client\.plannedExitDate = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(ped\) \? ped : ''/, 'validated on submit');
 });
 

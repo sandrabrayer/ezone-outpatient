@@ -97,8 +97,10 @@ test('reserved slots are KEPT in CLIENTS_HEADERS to preserve column positions', 
     'plannedExitDate',
     // preferred house (בית מועדף) — appended
     'preferredHouse',
-    // billing mode (אופן חיוב) — appended last
-    'billingMode'
+    // billing mode (אופן חיוב) — appended
+    'billingMode',
+    // plan metadata (טיפול משלים subtype + שני מטפלים לפרטני) — appended last (2026-11-09)
+    'complementaryType', 'privateTherapists'
   ]);
 });
 

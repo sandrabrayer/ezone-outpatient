@@ -160,10 +160,60 @@ var CLIENTS_HEADERS = [
   //     payload WITHOUT the key keeps the sheet value; a sent value is validated
   //     (_billingModeOrBlank). A money key (OPS_CLIENT_MONEY_KEYS): an ops
   //     session never changes it. NO data migration flips an existing client.
-  'billingMode'
+  'billingMode',
+  //   complementaryType (טיפול משלים, 2026-11-09): APPEND-ONLY, physically
+  //     unwritten on the live sheet so it lands at the very END (position 40)
+  //     with no migration. The subtype of the «טיפול משלים» treatment when the
+  //     plan includes it — one of COMPLEMENTARY_TYPES (stable English keys;
+  //     Hebrew labels are render-time only) or blank. Carried in the saveAll
+  //     payload like billingMode: a payload WITHOUT the key keeps the sheet
+  //     value; a sent value is validated (_complementaryTypeOrBlank).
+  //     getTreatmentPlans projects it for the therapists app. Old rows blank.
+  'complementaryType',
+  //   privateTherapists (שני מטפלים לפרטני, 2026-11-09): APPEND-ONLY, physically
+  //     unwritten on the live sheet so it lands at the very END (position 41)
+  //     with no migration. A JSON array of up to TWO DISTINCT therapist names
+  //     (the TherapistRates roster names) giving the patient's טיפול פרטני
+  //     sessions — set when the plan has 2+ a week so each weekly session has
+  //     its own therapist. Validated (_privateTherapistsOrBlank: trimmed,
+  //     non-empty, distinct, ≤2, ≤80 chars each → normalized JSON, else blank);
+  //     a payload WITHOUT the key keeps the sheet value. getTreatmentPlans
+  //     projects it (as an array) for the therapists app. Old rows blank.
+  'privateTherapists'
 ];
 /* Stable billing-mode keys (Hebrew labels are render-time only in the UI). */
 var BILLING_MODES = ['package', 'per_session'];
+/* Stable complementary-treatment subtype keys (Hebrew at render time only):
+ * יוגה / דיקור / רפלקסולוגיה / אמנות. */
+var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art'];
+/* Validate a complementaryType at a write boundary: one of COMPLEMENTARY_TYPES or '' (none). */
+function _complementaryTypeOrBlank(v) {
+  var s = String(v == null ? '' : v).trim();
+  return COMPLEMENTARY_TYPES.indexOf(s) >= 0 ? s : '';
+}
+/* Validate a privateTherapists value at a write boundary: a JSON array (or an
+ * array) of 1-2 DISTINCT non-empty therapist names (≤80 chars each) →
+ * normalized JSON text; anything else (incl. duplicates) is stored blank. */
+function _privateTherapistsOrBlank(v) {
+  var arr = null;
+  if (Array.isArray(v)) arr = v;
+  else {
+    var s = String(v == null ? '' : v).trim();
+    if (!s) return '';
+    try { arr = JSON.parse(s); } catch (_) { return ''; }
+  }
+  if (!Array.isArray(arr)) return '';
+  var names = [];
+  for (var i = 0; i < arr.length; i++) {
+    var n = String(arr[i] == null ? '' : arr[i]).trim();
+    if (!n) continue;
+    if (n.length > 80) return '';
+    names.push(n);
+  }
+  if (!names.length || names.length > 2) return '';
+  if (names.length === 2 && names[0] === names[1]) return '';
+  return JSON.stringify(names);
+}
 /* Validate a billingMode at a write boundary: one of BILLING_MODES, or '' (legacy = package). Never coerced. */
 function _billingModeOrBlank(v) {
   var s = String(v == null ? '' : v).trim();
@@ -235,7 +285,11 @@ var CLIENTS_REMOVED_HEADERS = [
   // APPEND-ONLY mirror of the Clients preferred house (preferredHouse), same reason.
   'preferredHouse',
   // APPEND-ONLY mirror of the Clients billing mode (billingMode), same reason.
-  'billingMode'
+  'billingMode',
+  // APPEND-ONLY mirrors of the Clients plan metadata (complementaryType,
+  // privateTherapists), same reason — a tombstoned row keeps them and
+  // restoreRemovedClient copies them back.
+  'complementaryType', 'privateTherapists'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -1138,6 +1192,31 @@ function _loadTherapistRates() {
   return map;
 }
 
+/* Names-only therapist roster for the plan UI (שני מטפלים לפרטני, 2026-11-09).
+ * INTERNAL (reached through the Node proxy like getData). Returns the
+ * TherapistRates names, sorted — NO rates or any other column ever cross this
+ * endpoint; the minimal-projection contract of the roster holds.
+ * PURE READ: it is fetched at boot, and opening the app must perform ZERO
+ * source writes (read-only-boot contract), so it never _ensureSheet()s or
+ * seeds TherapistRates (unlike _loadTherapistRates) — a missing sheet simply
+ * answers an empty roster. */
+function _getTherapistNames() {
+  var names = [];
+  try {
+    var sh = _ss().getSheetByName(THERAPIST_RATES_SHEET);
+    if (sh) {
+      var rows = _readAll(sh, THERAPIST_RATES_HEADERS);
+      var seen = {};
+      for (var i = 0; i < rows.length; i++) {
+        var n = String(rows[i].name == null ? '' : rows[i].name).trim();
+        if (n && !seen[n]) { seen[n] = true; names.push(n); }
+      }
+    }
+  } catch (_) { names = []; }
+  names.sort(function (a, b) { return a.localeCompare(b, 'he'); });
+  return { ok: true, names: names };
+}
+
 function _therapistPay(therapistName, treatmentType) {
   var name = String(therapistName == null ? '' : therapistName).trim();
   var type = String(treatmentType == null ? '' : treatmentType).trim();
@@ -1547,6 +1626,15 @@ function _saveAll(payload) {
       clients[i].billingMode = (clients[i] && _hasOwn(clients[i], 'billingMode'))
         ? _billingModeOrBlank(clients[i].billingMode)
         : (existingRow ? _billingModeOrBlank(existingRow.billingMode) : '');
+      // complementaryType / privateTherapists (2026-11-09): same rule — a payload
+      // WITHOUT the key (pre-column tab) carries the sheet's value; a sent value
+      // is validated and anything invalid is stored blank.
+      clients[i].complementaryType = (clients[i] && _hasOwn(clients[i], 'complementaryType'))
+        ? _complementaryTypeOrBlank(clients[i].complementaryType)
+        : (existingRow ? _complementaryTypeOrBlank(existingRow.complementaryType) : '');
+      clients[i].privateTherapists = (clients[i] && _hasOwn(clients[i], 'privateTherapists'))
+        ? _privateTherapistsOrBlank(clients[i].privateTherapists)
+        : (existingRow ? _privateTherapistsOrBlank(existingRow.privateTherapists) : '');
       // OP-CRM-3A: an operational session (moneyScope 'ops', decided by the Node
       // proxy from the signed cookie — never by the browser) never saw the money
       // fields, so its snapshot cannot change them: existing rows keep the
@@ -3227,7 +3315,16 @@ function _getTreatmentPlans() {
       monthRemaining: quota ? Math.max(0, quota - used) : null,
       // Make-up sessions the patient is owed (a therapist cancellation adds one; a session
       // beyond the quota draws one) — a COUNT of sessions, never an amount.
-      makeupSessions: _toCredits(cl.creditsOwed)
+      makeupSessions: _toCredits(cl.creditsOwed),
+      // Plan metadata (2026-11-09), no amounts: the «טיפול משלים» subtype
+      // (stable key — yoga/acupuncture/reflexology/art — Hebrew at render) and
+      // the up-to-two therapists giving the weekly טיפול פרטני sessions.
+      complementaryType: _complementaryTypeOrBlank(cl.complementaryType),
+      privateTherapists: (function () {
+        var j = _privateTherapistsOrBlank(cl.privateTherapists);
+        if (!j) return [];
+        try { return JSON.parse(j); } catch (_) { return []; }
+      })()
     });
   }
   return { ok: true, clients: out };
@@ -6950,6 +7047,7 @@ var SOURCE_GET_AUTH = {
   getStopAlerts: 'STOP_ALERTS_SECRET',
   getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
+  getTherapistNames: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   getPackageOfferSummaries: 'OUTPATIENT_PROXY_SECRET',
   getTasks: 'OUTPATIENT_PROXY_SECRET',
@@ -7000,6 +7098,7 @@ var SOURCE_POST_AUTH = {
   resumeTreatmentAlert: 'OUTPATIENT_PROXY_SECRET',
   getMyStopAlerts: 'OUTPATIENT_PROXY_SECRET',
   getSessionLog: 'OUTPATIENT_PROXY_SECRET',
+  getTherapistNames: 'OUTPATIENT_PROXY_SECRET',
   getContinuation: 'OUTPATIENT_PROXY_SECRET',
   saveContinuation: 'OUTPATIENT_PROXY_SECRET',
   syncContinuationMilestones: 'OUTPATIENT_PROXY_SECRET',
@@ -7132,6 +7231,7 @@ function doGet(e) {
       return _json(_getMyStopAlerts());
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    if (action === 'getTherapistNames') return _json(_getTherapistNames());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'getPackageOfferSummaries') return _json(_pkgOfferSummaries());
     if (action === 'getTasks') return _json(_getTasks(e && e.parameter, { moneyScope: e && e.parameter && e.parameter.moneyScope }));
@@ -7347,6 +7447,7 @@ function doPost(e) {
       return _json(_getMyStopAlerts());
     }
     if (action === 'getSessionLog') return _json(_getSessionLog());
+    if (action === 'getTherapistNames') return _json(_getTherapistNames());
     if (action === 'getContinuation') return _json(_getContinuation());
     if (action === 'saveContinuation') return _json(_saveContinuation(payload));
     if (action === 'syncContinuationMilestones') return _json(_syncContinuationMilestones(payload));
