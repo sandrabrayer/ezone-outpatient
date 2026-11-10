@@ -148,7 +148,7 @@ For each separately approved release:
    to succeed. Do not dispatch Apps Script while Node is waiting for checks.
 3. When `apps-script/**`, `.clasp.json`, the workflow or its gate changed, open
    GitHub **Actions → Deploy Apps Script → Run workflow**. Select
-   `claude/youthful-volta-laarnk`; set `expected_commit` to the full approved SHA.
+   `claude/youthful-volta-laarnk`; set `expected_commit` to the full approved SHA (surrounding spaces from a paste are ignored; anything else must be exactly the 40-character SHA).
    This is the releasing agent/operator's next step, not a new configuration
    request for Sandra. GitHub also supports the same dispatch through its API.
 4. The gate rejects a non-dispatch event, wrong branch, invalid SHA or advanced

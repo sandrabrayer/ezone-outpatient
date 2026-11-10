@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Apps Script release gate ignores paste whitespace around the SHA (2026-11-10)
+- `scripts/wait-for-source-proxy.js` trims leading/trailing spaces and line breaks from `expected_commit`; the SHA must still be exactly 40 lowercase hex and equal the checked-out commit. Two release runs failed on a copied SHA with leading spaces. See `CHANGELOG-deploy-sha-trim.md`.
+
 ### Plan types kept on save + therapist search / roster add (2026-11-09)
 - **Fix «לא נשמרים שינויים»:** `_saveAll` overwrote every client's `serviceType` with the single type derived from `clinicalTreatmentType`, so a multi-type plan picked in עריכה collapsed back to one type after each save (11 live rows affected). The clinical type now only fills a BLANK serviceType; the plan picked in the app is authoritative. `setClinicalType` (explicit cross-app receiver) is unchanged. Read-side recovery restores the damaged rows from their per-type frequency keys (no write on read; the next save stores it).
 - **חיפוש מטפל/ת** in the «מטפל/ת 1/2 — פרטני» pickers (filters both; Enter picks a single match) and **«+ הוסף … לרשימת המטפלים»** for a missing name — new internal action `addTherapistToRoster` (proxy key, full money scope only, validated, idempotent, appends a TherapistRates row with the NAME ONLY — rates stay blank and payouts fail closed until filled). SW v35 → v36. See `CHANGELOG-plan-types-save-fix.md`.

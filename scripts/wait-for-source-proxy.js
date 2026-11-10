@@ -21,9 +21,13 @@ function deploymentTarget(env) {
   if (env.GITHUB_REF !== 'refs/heads/claude/youthful-volta-laarnk') {
     throw new Error('Source deployment is restricted to the production branch');
   }
-  const commit = env.EXPECTED_COMMIT || '';
+  // Surrounding spaces / line breaks only (a copy-pasted SHA picked up list
+  // indentation on 2026-11-10 and failed two release runs). Nothing else is
+  // normalised: the value must still be exactly 40 lowercase hex characters
+  // AND equal the checked-out commit below.
+  const commit = String(env.EXPECTED_COMMIT || '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
   if (commit.length !== 40 || !/^[a-f0-9]{40}$/.test(commit)) {
-    throw new Error('Expected a full approved commit SHA');
+    throw new Error('Expected a full approved commit SHA (40 lowercase hex characters, nothing else)');
   }
   if (env.GITHUB_SHA !== commit) {
     throw new Error('Dispatch commit differs from the approved SHA; recheck the release');
