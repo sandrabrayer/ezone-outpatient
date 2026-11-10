@@ -368,6 +368,10 @@ button, input, select, textarea {
 .sessions-host .plan-therapists { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 @media (max-width: 600px) { .sessions-host .plan-therapists { grid-template-columns: 1fr; } }
 .sessions-host .plan-therapists[hidden] { display: none; }
+.sessions-host .plan-therapist-search { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.sessions-host .plan-therapist-search input[type="search"] { width: 100%; box-sizing: border-box; }
+.sessions-host .plan-therapist-search button[hidden] { display: none; }
+.sessions-host .plan-therapist-search button { align-self: flex-start; }
 .client-tabs .ct.active { color: var(--green-2); border-color: var(--green); }
 .inline-field {
   display: flex; flex-direction: column; gap: 4px;

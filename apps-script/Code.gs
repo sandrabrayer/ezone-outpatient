@@ -964,6 +964,18 @@ function _deriveClientServiceType(client) {
   return client;
 }
 
+/* Save-path variant (2026-11-09, CHANGELOG-plan-types-save-fix.md): derive the
+ * serviceType from clinicalTreatmentType ONLY when the row has none. A saved
+ * plan (one or more comma-joined types picked in the app) is never replaced —
+ * _deriveClientServiceType (which DOES overwrite) stays for the explicit
+ * cross-app setClinicalType receiver only. Fail-soft like the original. */
+function _fillBlankServiceType(client) {
+  if (!client) return client;
+  var current = String(client.serviceType == null ? '' : client.serviceType).trim();
+  if (current) return client;
+  return _deriveClientServiceType(client);
+}
+
 /* ===== Clients column-shift pre-condition scan (2026-07-06 incident) ========
  *
  * READ-ONLY forensic gate for the CLIENTS_HEADERS reorder (option a). It reads the
@@ -1215,6 +1227,42 @@ function _getTherapistNames() {
   } catch (_) { names = []; }
   names.sort(function (a, b) { return a.localeCompare(b, 'he'); });
   return { ok: true, names: names };
+}
+
+/* addTherapistToRoster (2026-11-09): INTERNAL write (OUTPATIENT_PROXY_SECRET,
+ * posted through the Node proxy by a FULL money-scope session only — the
+ * proxy refuses it for 'ops', and it is re-checked here). Appends ONE
+ * TherapistRates row carrying the NAME ONLY — every rate cell stays blank, so
+ * payouts for the name keep failing closed until ורד fills the rates.
+ * Idempotent: an existing exact (trimmed) name answers {ok, existed:true} and
+ * writes nothing. Never renames, never deletes, never touches a rate. */
+function _therapistNameOrNull(v) {
+  var s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  if (s.length < 2 || s.length > 80) return null;
+  // letters (any script), spaces, and the punctuation real names use: ' " . - ״ ׳
+  if (!/^[\p{L}\p{M} '".\-\u05F3\u05F4]+$/u.test(s)) return null;
+  if (!/\p{L}/u.test(s)) return null;
+  return s;
+}
+function _addTherapistToRoster(payload) {
+  if (String(payload && payload.moneyScope) !== 'full') return { ok: false, error: 'forbidden_money_action' };
+  var name = _therapistNameOrNull(payload ? payload.name : null);
+  if (name === null) return { ok: false, error: 'invalid_name' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: 'busy' };
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var sh = _ensureSheet(THERAPIST_RATES_SHEET, THERAPIST_RATES_HEADERS);
+    var rows = _readAll(sh, THERAPIST_RATES_HEADERS);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].name == null ? '' : rows[i].name).trim() === name) return { ok: true, existed: true, name: name };
+    }
+    sh.appendRow([name, '', '', '']);
+    try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) {}
+    return { ok: true, existed: false, name: name };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 function _therapistPay(therapistName, treatmentType) {
@@ -1597,7 +1645,11 @@ function _saveAll(payload) {
     var reservedClients = Object.create(null);
     _finJournal().ops.filter(_finActive).forEach(function (op) { reservedClients[op.clientId] = true; });
     for (var i = 0; i < clients.length; i++) {
-      _deriveClientServiceType(clients[i]);
+      // serviceType (2026-11-09 fix): the plan the person picked in the app is
+      // AUTHORITATIVE. The clinical type only fills a BLANK serviceType — it
+      // used to overwrite every save, collapsing a multi-type plan
+      // («פרטני, ליווי יומי בקהילה, …») to the single clinical type.
+      _fillBlankServiceType(clients[i]);
       var cid = (clients[i] && clients[i].id != null) ? String(clients[i].id) : '';
       clients[i].creditsOwed = _hasOwn(existingCredits, cid)
         ? existingCredits[cid]
@@ -7122,6 +7174,7 @@ var SOURCE_POST_AUTH = {
   saveCredit: 'OUTPATIENT_PROXY_SECRET',
   savePaymentAmountOverride: 'OUTPATIENT_PROXY_SECRET',
   setPreferredHouse: 'OUTPATIENT_PROXY_SECRET',
+  addTherapistToRoster: 'OUTPATIENT_PROXY_SECRET',
   repairStaleNextBilling: 'OUTPATIENT_PROXY_SECRET',
   saveCharge: 'OUTPATIENT_PROXY_SECRET',
   updateCharge: 'OUTPATIENT_PROXY_SECRET',
@@ -7495,6 +7548,11 @@ function doPost(e) {
       // INTERNAL write (same trust level as savePayment) — the outpatient app posts
       // it same-origin through the Node proxy; no cross-app secret.
       return _json(_setPaymentAmountOverride(payload));
+    }
+    if (action === 'addTherapistToRoster') {
+      // INTERNAL names-only roster append (TherapistRates, blank rates) — full
+      // money scope only; validated + idempotent in _addTherapistToRoster.
+      return _json(_addTherapistToRoster(payload));
     }
     if (action === 'setPreferredHouse') {
       // INTERNAL single-cell write (בית מועדף) — same trust level as

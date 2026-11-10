@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Plan types kept on save + therapist search / roster add (2026-11-09)
+- **Fix «לא נשמרים שינויים»:** `_saveAll` overwrote every client's `serviceType` with the single type derived from `clinicalTreatmentType`, so a multi-type plan picked in עריכה collapsed back to one type after each save (11 live rows affected). The clinical type now only fills a BLANK serviceType; the plan picked in the app is authoritative. `setClinicalType` (explicit cross-app receiver) is unchanged. Read-side recovery restores the damaged rows from their per-type frequency keys (no write on read; the next save stores it).
+- **חיפוש מטפל/ת** in the «מטפל/ת 1/2 — פרטני» pickers (filters both; Enter picks a single match) and **«+ הוסף … לרשימת המטפלים»** for a missing name — new internal action `addTherapistToRoster` (proxy key, full money scope only, validated, idempotent, appends a TherapistRates row with the NAME ONLY — rates stay blank and payouts fail closed until filled). SW v35 → v36. See `CHANGELOG-plan-types-save-fix.md`.
+
 ### First-payment billing-cycle anchor + עוז one-off repair (2026-11-09)
 - A new client's FIRST recorded payment now defines the billing cycle (OP-BILL-01 requested rule): billingDay = the payment day-of-month (an explicit direct-intake billing day still wins; startDate day only as the no-payment fallback), the paid first cycle covers one calendar month FROM the payment date, the intake row's due date / month key follow it and record explicit coverage, and the agreement payment sets the next collection to payDate + 1 month. The pay-before-start refusal is removed from the creation guards (advance payment is the normal pattern); a future/malformed date is still refused. Renewals and the no-drift cycle rule are unchanged.
 - One-off editor-run repair `previewOzBillingCycleRepairNow` / `applyOzBillingCycleRepairNow` re-keys עוז קורסיה's two paid rows to the 25th cycles and sets billingDay 25 / גבייה הבאה 2026-12-25 — exact-state verified, drift/second-run refuses, not routed via doGet/doPost. See `CHANGELOG-first-payment-anchor.md`.

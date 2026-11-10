@@ -1,3 +1,16 @@
+# Outpatient — plan types kept on save + therapist search, 2026-11-09
+
+Fix for «לא נשמרים שינויים»: `_saveAll` overwrote every client's
+`serviceType` with the single type derived from `clinicalTreatmentType` (set by
+the therapists app), collapsing multi-type plans on each save (11 live rows).
+The clinical type now only fills a BLANK serviceType; `setClinicalType` keeps
+its explicit overwrite. Damaged rows are recovered read-side from their
+frequency keys and stored on the next save. Therapist pickers get a search box
+and a full-scope-only «הוסף לרשימה» → new internal action
+`addTherapistToRoster` (TherapistRates row, NAME ONLY — rates blank, payouts
+fail closed until filled; spelling must match the therapists app). SW v36.
+See `CHANGELOG-plan-types-save-fix.md`.
+
 # Outpatient — first-payment billing anchor + plan metadata, 2026-11-09
 
 A new client's FIRST recorded payment now defines the billing cycle (billingDay

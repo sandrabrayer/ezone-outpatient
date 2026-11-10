@@ -832,8 +832,33 @@
       preferredHouse: preferredHouseOrBlank(row.preferredHouse)
     };
   }
+  // Plan-types save fix (2026-11-09, CHANGELOG-plan-types-save-fix.md): until
+  // the fix, every save let the server overwrite a multi-type plan with the
+  // single type derived from clinicalTreatmentType, while sessionsPerWeek kept
+  // every picked type. READ-SIDE recovery of exactly that signature — a
+  // clinical type is set, the stored serviceType is ONE of the per-type
+  // frequency keys, and the other keys are known plan types — restores the
+  // picked plan from the frequency keys (their saved order). Nothing is
+  // written here; the next deliberate save stores the restored plan.
+  function recoverPlanServices(row) {
+    var stored = parseServices(row.serviceType);
+    var clinical = String(row.clinicalTreatmentType == null ? '' : row.clinicalTreatmentType).trim();
+    if (!clinical || stored.length !== 1) return stored;
+    var raw = row.sessionsPerWeek, obj = null;
+    if (raw && typeof raw === 'object') obj = raw;
+    else if (typeof raw === 'string' && raw.trim().charAt(0) === '{') {
+      try { obj = JSON.parse(raw); } catch (_) { obj = null; }
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return stored;
+    var keys = Object.keys(obj).filter(function (k) { return k && k.charAt(0) !== '_'; });
+    if (keys.length < 2 || keys.indexOf(stored[0]) < 0) return stored;
+    var known = keys.every(function (k) {
+      return k === stored[0] || SERVICE_TYPES.indexOf(k) >= 0 || DAY_CENTER_ALIASES.indexOf(k) >= 0;
+    });
+    return known ? keys : stored;
+  }
   function normalizeClientFromSheet(row) {
-    var services = formatServices(parseServices(row.serviceType));
+    var services = formatServices(recoverPlanServices(row));
     return {
       id: row.id || uid(),
       name: row.name || '',
@@ -6731,27 +6756,83 @@
         var wrap = document.createElement('div');
         wrap.className = 'plan-meta plan-therapists';
         wrap.dataset.privateTherapistsWrap = '1';
+        // חיפוש מטפל/ת (2026-11-09): one search box filters BOTH pickers (a
+        // picked name always stays visible). Enter puts a single match into the
+        // first empty picker. A name missing from the roster can be added by a
+        // full-scope user (names only — the rate cells stay blank). Nothing here
+        // has a `name` attribute, so none of it is serialized with the form.
+        var searchLabel = document.createElement('label');
+        searchLabel.className = 'plan-therapist-search';
+        searchLabel.textContent = 'חיפוש מטפל/ת';
+        var search = document.createElement('input');
+        search.type = 'search';
+        search.dataset.therapistSearch = '1';
+        search.placeholder = 'הקלידו שם…';
+        search.autocomplete = 'off';
+        searchLabel.appendChild(search);
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-ghost';
+        addBtn.dataset.therapistAdd = '1';
+        addBtn.hidden = true;
+        searchLabel.appendChild(addBtn);
+        wrap.appendChild(searchLabel);
+        var therapistSelects = [];
         [0, 1].forEach(function (idx) {
           var tLabel = document.createElement('label');
           tLabel.textContent = 'מטפל/ת ' + (idx + 1) + ' — פרטני';
           var sel = document.createElement('select');
           sel.dataset.privateTherapist = String(idx + 1);
-          var none = document.createElement('option');
-          none.value = ''; none.textContent = '— ללא —';
-          sel.appendChild(none);
-          var roster = (state.therapistNames || []).slice();
-          // keep a stored name visible even if it left the roster
-          if (stored[idx] && roster.indexOf(stored[idx]) < 0) roster.push(stored[idx]);
-          roster.forEach(function (n) {
-            var o = document.createElement('option');
-            o.value = n; o.textContent = n;
-            sel.appendChild(o);
-          });
-          sel.value = stored[idx] || '';
+          fillTherapistOptions(sel, stored[idx] || '', '');
           tLabel.appendChild(sel);
           wrap.appendChild(tLabel);
+          therapistSelects.push(sel);
         });
         host.appendChild(wrap);
+        var refreshTherapistSearch = function () {
+          var q = therapistQuery(search.value);
+          therapistSelects.forEach(function (sel) { fillTherapistOptions(sel, sel.value, q); });
+          var typed = therapistDisplayName(search.value);
+          var exists = (state.therapistNames || []).some(function (n) { return therapistQuery(n) === therapistQuery(typed); });
+          var canAdd = !isOpsScope() && typed.length >= 2 && !exists;
+          addBtn.hidden = !canAdd;
+          addBtn.textContent = canAdd ? '+ הוסף את «' + typed + '» לרשימת המטפלים' : '';
+        };
+        search.addEventListener('input', refreshTherapistSearch);
+        search.addEventListener('keydown', function (ev) {
+          if (ev.key !== 'Enter') return;
+          ev.preventDefault(); // never submit the whole form from the search box
+          var q = therapistQuery(search.value);
+          var hits = (state.therapistNames || []).filter(function (n) { return q && therapistQuery(n).indexOf(q) >= 0; });
+          if (hits.length !== 1) return;
+          var target = therapistSelects.filter(function (sel) { return !sel.value; })[0];
+          if (!target || therapistSelects.some(function (sel) { return sel.value === hits[0]; })) return;
+          fillTherapistOptions(target, hits[0], '');
+          target.value = hits[0];
+          search.value = '';
+          refreshTherapistSearch();
+        });
+        addBtn.addEventListener('click', function () {
+          var typed = therapistDisplayName(search.value);
+          if (!typed || addBtn.disabled) return;
+          addBtn.disabled = true;
+          apiPostAction('addTherapistToRoster', { name: typed })
+            .then(function (res) {
+              var name = (res && typeof res.name === 'string' && res.name) ? res.name : typed;
+              if ((state.therapistNames || []).indexOf(name) < 0) {
+                state.therapistNames = (state.therapistNames || []).concat([name])
+                  .sort(function (a, b) { return a.localeCompare(b, 'he'); });
+              }
+              var target = therapistSelects.filter(function (sel) { return !sel.value; })[0];
+              search.value = '';
+              therapistSelects.forEach(function (sel) { fillTherapistOptions(sel, sel.value, ''); });
+              if (target && !therapistSelects.some(function (sel) { return sel.value === name; })) target.value = name;
+              refreshTherapistSearch();
+              toast(res && res.existed ? 'כבר ברשימה: ' + name : 'נוסף/ה לרשימת המטפלים: ' + name + ' (יש להשלים תעריף בגיליון TherapistRates)');
+            })
+            .catch(function (err) { toast('ההוספה לרשימה נכשלה: ' + err.message, true); })
+            .finally(function () { addBtn.disabled = false; });
+        });
         var syncTherapistVisibility = function () {
           var n = wholeSessions(input.value);
           var weekly = unitSel.value === 'שבוע';
@@ -6762,6 +6843,31 @@
         syncTherapistVisibility();
       }
     });
+  }
+  // Therapist picker helpers (חיפוש מטפל/ת). Matching ignores spaces, quotes
+  // and case so «דר ילנה» finds «ד"ר ילנה …».
+  function therapistDisplayName(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+  function therapistQuery(v) {
+    return therapistDisplayName(v).toLowerCase().replace(/["'״׳.\-\s]/g, '');
+  }
+  // Rebuild one picker: «— ללא —», then the roster filtered by `q`. The
+  // currently picked name always stays (also when it left the roster).
+  function fillTherapistOptions(sel, picked, q) {
+    var roster = (state.therapistNames || []).slice();
+    if (picked && roster.indexOf(picked) < 0) roster.push(picked);
+    sel.innerHTML = '';
+    var none = document.createElement('option');
+    none.value = ''; none.textContent = '— ללא —';
+    sel.appendChild(none);
+    roster.forEach(function (n) {
+      if (q && n !== picked && therapistQuery(n).indexOf(q) < 0) return;
+      var o = document.createElement('option');
+      o.value = n; o.textContent = n; // textContent only — never innerHTML with a name
+      sel.appendChild(o);
+    });
+    sel.value = picked || '';
   }
   // Read the plan metadata out of a sessions host rendered with planMeta.
   // The therapist picks are returned only while the פרטני frequency is 2+ a
