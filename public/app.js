@@ -6828,7 +6828,7 @@
               therapistSelects.forEach(function (sel) { fillTherapistOptions(sel, sel.value, ''); });
               if (target && !therapistSelects.some(function (sel) { return sel.value === name; })) target.value = name;
               refreshTherapistSearch();
-              toast(res && res.existed ? 'כבר ברשימה: ' + name : 'נוסף/ה לרשימת המטפלים: ' + name + ' (יש להשלים תעריף בגיליון TherapistRates)');
+              toast(res && res.existed ? 'כבר ברשימה: ' + name : 'נוסף/ה לרשימת המטפלים: ' + name + ' (יש להשלים בגיליון TherapistRates תעריף או «גלובלי»)');
             })
             .catch(function (err) { toast('ההוספה לרשימה נכשלה: ' + err.message, true); })
             .finally(function () { addBtn.disabled = false; });

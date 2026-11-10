@@ -456,14 +456,15 @@ test('multiple phone matches log flagged multi_match', () => {
 // ============================================================================
 // Positional safety on the new tab.
 // ============================================================================
-test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, forwardedToPayroll last', () => {
+test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, append order kept', () => {
   assert.equal(H[0], 'sessionId');
   assert.ok(H.indexOf('phone') !== -1);
-  // forwardedToPayroll (payout forwarding) was appended after creditStatus, which
-  // itself was appended after recordedAt.
-  assert.equal(H[H.length - 1], 'forwardedToPayroll');
-  assert.equal(H[H.length - 2], 'creditStatus');
-  assert.equal(H[H.length - 3], 'recordedAt');
+  // payModel (salaried «גלובלי», 2026-11-10) was appended after forwardedToPayroll
+  // (payout forwarding), which was appended after creditStatus, after recordedAt.
+  assert.equal(H[H.length - 1], 'payModel');
+  assert.equal(H[H.length - 2], 'forwardedToPayroll');
+  assert.equal(H[H.length - 3], 'creditStatus');
+  assert.equal(H[H.length - 4], 'recordedAt');
   // every field the receiver writes has a column
   ['sessionId', 'phone', 'patientName', 'clientId', 'therapist', 'clinicalTreatmentType',
    'billingType', 'date', 'outcome', 'therapistPay', 'clientSessionValue',

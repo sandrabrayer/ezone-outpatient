@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Salaried («גלובלי») therapists (2026-11-10)
+- `גלובלי` in `TherapistRates.flatRate` marks a salaried therapist: their sessions are now RECORDED (before: refused as `unknown_therapist`) with `therapistPay` 0 and the new appended SessionLog column `payModel: 'global'`, and are kept out of «תשלומי מטפלים» and the payroll forward. A blank rate still fails closed. All 14 blank-rate names were marked `גלובלי` in the sheet. See `CHANGELOG-global-therapists.md`.
+
 ### Apps Script release gate ignores paste whitespace around the SHA (2026-11-10)
 - `scripts/wait-for-source-proxy.js` trims leading/trailing spaces and line breaks from `expected_commit`; the SHA must still be exactly 40 lowercase hex and equal the checked-out commit. Two release runs failed on a copied SHA with leading spaces. See `CHANGELOG-deploy-sha-trim.md`.
 

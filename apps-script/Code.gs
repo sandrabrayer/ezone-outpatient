@@ -1171,6 +1171,26 @@ var THERAPIST_RATES_HEADERS = ['name', 'flatRate', 'intakeRate', 'followupRate']
 // (no code redeploy). Auto-seeded once from the hardcoded maps. Cached 120s via
 // CacheService so per-session calls don't re-read the sheet; a sheet edit
 // therefore takes effect within ~2 minutes.
+// «גלובלי» in flatRate (2026-11-10, CHANGELOG-global-therapists.md): a SALARIED
+// therapist. Their outpatient sessions are recorded with per-session pay 0 and
+// payModel 'global', and never enter the per-session payroll forward. A BLANK
+// rate still means "missing" and fails closed (session refused) — a forgotten
+// rate must never read as salaried. Exact word only (trimmed); 'global' too.
+var GLOBAL_RATE_WORD = 'גלובלי';
+function _isGlobalRate(v) {
+  var s = String(v == null ? '' : v).trim();
+  return s === GLOBAL_RATE_WORD || s.toLowerCase() === 'global';
+}
+// 'global' when the roster marks the name salaried, else ''. Never throws.
+function _therapistPayModel(therapistName) {
+  var name = String(therapistName == null ? '' : therapistName).trim();
+  try {
+    var rates = _loadTherapistRates();
+    return (rates && _hasOwn(rates, name) && rates[name].global === true) ? 'global' : '';
+  } catch (_) {
+    return '';
+  }
+}
 function _loadTherapistRates() {
   var cached = null;
   try { cached = CacheService.getScriptCache().get('therapistRates_v1'); } catch (_) {}
@@ -1195,6 +1215,7 @@ function _loadTherapistRates() {
     var n = String(rows[i].name == null ? '' : rows[i].name).trim();
     if (!n) continue;
     map[n] = {
+      global: _isGlobalRate(rows[i].flatRate),
       flat: parseFloat(rows[i].flatRate),
       intake: parseFloat(rows[i].intakeRate),
       followup: parseFloat(rows[i].followupRate)
@@ -1273,6 +1294,7 @@ function _therapistPay(therapistName, treatmentType) {
   try { rates = _loadTherapistRates(); } catch (_) { rates = null; }
   if (rates && _hasOwn(rates, name)) {
     var r = rates[name];
+    if (r.global === true) return 0;   // salaried — paid by salary, not per session
     if (!isNaN(r.flat) && r.flat > 0) return r.flat;
     if (type === 'אינטייק' && !isNaN(r.intake) && r.intake > 0) return r.intake;
     if (type === 'מעקב פסיכיאטרי' && !isNaN(r.followup) && r.followup > 0) return r.followup;
@@ -3632,7 +3654,11 @@ var SESSION_LOG_HEADERS = [
   // view). Once stamped the row is SETTLED and is filtered out of the payout view;
   // a session logged late for an already-stamped month surfaces as a הפרש.
   // Set ONLY by _markForwarded; preserved (never cleared) across outcome upserts.
-  'forwardedToPayroll'
+  'forwardedToPayroll',
+  // APPEND-ONLY (2026-11-10): 'global' = the therapist is SALARIED («גלובלי» in
+  // TherapistRates.flatRate) — therapistPay is 0 and the row never enters the
+  // per-session payout / payroll forward. '' = per-session pay (the default).
+  'payModel'
 ];
 
 var SESSION_STATUS_BY_OUTCOME = {
@@ -3751,6 +3777,7 @@ function _recordSessionOutcome(payload) {
       matchStatus:        matchStatus,
       recordedAt:         new Date().toISOString(),
       creditStatus:       '',
+      payModel:           _therapistPayModel(therapist),
       // Preserved below from the existing row on an upsert — a re-sent / corrected
       // outcome must NOT lose an already-forwarded stamp (only _markForwarded sets it).
       forwardedToPayroll: ''
@@ -3936,6 +3963,7 @@ function _markForwarded(payload) {
       var row = rows[i];
       if (String(row.therapist || '').trim() !== therapist) continue;
       if (_payoutMonthOf(row.date) !== month) continue;
+      if (String(row.payModel || '').trim() === 'global') continue; // salaried — never forwarded
       if (String(row.forwardedToPayroll || '').trim() !== '') continue; // already settled
       row.forwardedToPayroll = month;
       forwarded++;
