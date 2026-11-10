@@ -19,6 +19,12 @@ test('explicit approved production dispatch selects exactly its commit', () => {
   assert.equal(deploymentTarget(valid), sha);
 });
 
+test('surrounding spaces / line breaks from a paste are ignored, the SHA is still exact', () => {
+  for (const padded of [`   ${sha}`, `${sha} `, `${sha}\n`, `\t${sha}\r\n`]) {
+    assert.equal(deploymentTarget({ ...valid, EXPECTED_COMMIT: padded }), sha);
+  }
+});
+
 for (const [name, overrides] of [
   ['push event', { GITHUB_EVENT_NAME: 'push' }],
   ['missing event', { GITHUB_EVENT_NAME: undefined }],
@@ -27,7 +33,10 @@ for (const [name, overrides] of [
   ['missing approved SHA', { EXPECTED_COMMIT: undefined }],
   ['abbreviated SHA', { EXPECTED_COMMIT: sha.slice(0, 8) }],
   ['non-hex SHA', { EXPECTED_COMMIT: 'x'.repeat(40) }],
-  ['padded SHA', { EXPECTED_COMMIT: `${sha}\n` }],
+  ['embedded space', { EXPECTED_COMMIT: `${sha.slice(0, 20)} ${sha.slice(20)}` }],
+  ['invisible character', { EXPECTED_COMMIT: `\u200f${sha}` }],
+  ['uppercase SHA', { EXPECTED_COMMIT: sha.toUpperCase() }],
+  ['41 characters', { EXPECTED_COMMIT: `${sha}a` }],
   ['branch advanced after approval', { GITHUB_SHA: 'b'.repeat(40) }],
   ['missing checked-out SHA', { GITHUB_SHA: undefined }]
 ]) {

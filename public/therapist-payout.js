@@ -77,6 +77,11 @@
   // already gone to payroll and must never appear in any view again.
   function isForwarded(row) { return str(row.forwardedToPayroll) !== ''; }
 
+  // SALARIED (2026-11-10): payModel 'global' rows belong to a «גלובלי» therapist
+  // — paid by salary, never per session — so they are kept out of every payout
+  // view (and Code.gs _markForwarded never stamps them).
+  function isGlobalPay(row) { return str(row.payModel) === 'global'; }
+
   // Group an arbitrary subset of SessionLog rows into the per-therapist payout
   // shape (the same shape for the live month and for the הפרשים block). Pure.
   function groupSummary(subset) {
@@ -191,6 +196,7 @@
     for (var j = 0; j < rows.length; j++) {
       var row = rows[j] || {};
       if (isForwarded(row)) continue;                 // settled -> never shown
+      if (isGlobalPay(row)) continue;                 // salaried -> not a payout line
       var rm = monthOf(row.date);
       if (!rm) continue;
       var name = str(row.therapist);
@@ -215,6 +221,7 @@
     EXCLUDED_OUTCOME: EXCLUDED_OUTCOME,
     monthOf: monthOf,
     isForwarded: isForwarded,
+    isGlobalPay: isGlobalPay,
     monthlyPayoutSummary: monthlyPayoutSummary
   };
 });

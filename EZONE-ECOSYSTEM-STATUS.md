@@ -1,3 +1,11 @@
+# Outpatient — salaried («גלובלי») therapists, 2026-11-10
+
+`גלובלי` in `TherapistRates.flatRate` = salaried: sessions reported by the
+therapists app are now recorded (were refused as `unknown_therapist`) with
+`therapistPay` 0 and appended SessionLog column `payModel: 'global'`; excluded
+from «תשלומי מטפלים» / payroll forward. Blank rate still fails closed. 14
+names marked in the sheet. See `CHANGELOG-global-therapists.md`.
+
 # Outpatient — plan types kept on save + therapist search, 2026-11-09
 
 Fix for «לא נשמרים שינויים»: `_saveAll` overwrote every client's
