@@ -7,6 +7,15 @@
 > Use the [isolated Google drill](docs/google-operational-drill.md) for runtime
 > evidence. It is not part of deployment and must not use this repo's clasp target.
 
+## One-time sessions — configuration (2026-11-11)
+
+New Apps Script Script Property **`ONE_TIME_SESSIONS_SECRET`** on the outpatient
+script: random, ≥ 32 characters, distinct from every other key, never in code,
+PR, chat or log. It unlocks ONLY the price-free `getOneTimeSessionsFeed` read for
+the therapists app (which stores the same value). Unset → the feed answers
+`unauthorized`; scheduling, charging and ורד's marking work without it.
+No Railway variable is added. See `CHANGELOG-one-time-session.md`.
+
 ## Source authentication — configuration prerequisites
 
 OP-01 was released in PR #115 on 2026-10-17 (Node `76de4cc5`, Apps Script @94).

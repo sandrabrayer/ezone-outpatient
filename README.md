@@ -402,6 +402,13 @@ checkout ever drifts back.
   reason:'unknown_type' }` — all three **write nothing**. Only the two fields
   change on the matched row; every other cell is preserved. See
   `CHANGELOG-set-clinical-type.md`. **Requires an Apps Script redeploy.**
+- **One-time sessions (טיפול חד פעמי, 2026-11-11)** — `GET /exec?action=getOneTimeSessionsFeed&secret=<ONE_TIME_SESSIONS_SECRET>`
+  is the therapists app's **price-free** schedule feed (fail-closed, ≥ 32-char secret; the
+  Node proxy refuses it from a browser). The outcome comes back through
+  `recordSessionOutcome` with `oneTimeSessionId` (below). Internal actions:
+  `createOneTimeSession` / `updateOneTimeSession` / `cancelOneTimeSession` /
+  `markOneTimeSession` / `getOneTimeSessions` / `getOneTimeServices`. See
+  `docs/one-time-session-therapists-contract.md` and `CHANGELOG-one-time-session.md`.
 - `POST /exec { action:'recordSessionOutcome', secret:<SESSION_OUTCOME_SECRET>,
   sessionId, phone, therapist, clinicalTreatmentType, date, outcome }`
   — the E-Zone Therapists app reports a session outcome; the receiver computes the
