@@ -241,6 +241,7 @@
     sessionLogLoading: false,
     sessionLogError: '',
     therapistNames: [],  // names-only TherapistRates roster for the plan UI (fail-soft [])
+    oneTimeSessions: null, // טיפולים חד פעמיים (getOneTimeSessions); null = not loaded — never shown as «none»
     payoutMonth: '',     // 'YYYY-MM' for the payout view; defaults to current month
     payoutSearch: '',    // per-tab name search (therapist name) for the payout view
     payoutExpanded: {},  // therapist name -> expanded session detail (bool)
@@ -699,7 +700,8 @@
     'saveCredit', 'savePaymentAmountOverride', 'markForwarded', 'correctSessionOutcome',
     'saveSettings', 'repairStaleNextBilling', 'mergeClients',
     'reserveRenewal', 'applyRenewal', 'cancelRenewal', 'acknowledgeRenewal', 'resolveRenewalReview',
-    'reserveExtraCharge', 'applyExtraCharge', 'acknowledgeExtraCharge', 'cancelExtraCharge', 'resolveExtraChargeReview'
+    'reserveExtraCharge', 'applyExtraCharge', 'acknowledgeExtraCharge', 'cancelExtraCharge', 'resolveExtraChargeReview',
+    'createOneTimeSession', 'updateOneTimeSession', 'cancelOneTimeSession', 'markOneTimeSession'
   ];
   var CLIENT_MONEY_COMPARE = ['pricePerSession', 'paymentStatus', 'paymentDate', 'billingDay', 'billingType', 'bundleSize', 'bundlePrice', 'bundlePaid', 'paymentLink', 'billingMode', 'nextBillingDate'];
   var FINANCE_UNAVAILABLE_MSG = 'פעולה כספית חסומה: נתוני התשלומים / החיובים לא נטענו. רעננו את המסך ונסו שוב.';
@@ -1779,7 +1781,7 @@
     var m = window.MyDay.build({
       leads: state.leads, clients: state.clients, stopFlags: state.stopFlags, extraRequests: state.extraRequests,
       continuation: state.continuationRows, continuationNames: contNames, offers: state.offers, tasks: state.tasks, activity: state.activity,
-      today: today(), user: state.user, renewalInfo: renewalInfo
+      today: today(), user: state.user, renewalInfo: renewalInfo, oneTimeRows: otsMyDayRows()
     });
     var dayName = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'][new Date(today() + 'T12:00:00').getDay()];
     var card = function (k) {
@@ -6448,6 +6450,7 @@
         ((phoneChip || phoneIssueChip || locationChip || assignedChip) ? '<div class="client-meta">' + phoneChip + phoneIssueChip + locationChip + assignedChip + '</div>' : '') +
       '</div>' +
       '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
+      otsPanelHtml(c) +
       crmBlockHtml('client', c) +
       '<div class="client-actions edit-only"></div>';
 
@@ -6478,6 +6481,22 @@
       addChargeBtn.title = 'הוסף חיוב חד-פעמי או חודשי';
       addChargeBtn.onclick = function () { busyRun(addChargeBtn, function () { return openAddChargeModal(c); }); };
       actions.appendChild(addChargeBtn);
+
+      // «+ טיפול חד פעמי» (2026-11-11): one scheduled session priced from the catalog,
+      // with its own charge. Full money scope only (the server refuses it for ops too).
+      if (!isOpsScope() && window.OneTimeSessions) {
+        var otsBtn = document.createElement('button');
+        otsBtn.className = 'btn btn-ghost edit-only cc-ots-btn';
+        otsBtn.textContent = '+ טיפול חד פעמי';
+        otsBtn.title = 'קביעת טיפול בודד (מחוץ לחבילה) — מחיר מהקטלוג, חיוב ותיאום מטפל/ת';
+        otsBtn.onclick = function () { busyRun(otsBtn, function () { return openOtsModal(c); }); };
+        actions.appendChild(otsBtn);
+      }
+      $$('[data-ots-act]', card).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          busyRun(btn, function () { return otsAction(c, btn.getAttribute('data-ots-act'), btn.getAttribute('data-ots-id')); });
+        });
+      });
 
       // «💰 הצעת מחיר» — ורד only (display rule; the server's catalog privilege decides): the shared new-offer
       // form opens INSIDE the card with this client locked as the target.
@@ -7220,6 +7239,259 @@
     extraLoadToken++;
   }
 
+  // ===== One-time sessions (טיפול חד פעמי, CHANGELOG-one-time-session.md) =====
+  // ONE scheduled session for a patient: a package patient's extra session OUTSIDE the
+  // package, or a per-session payer's session. The source prices it from the catalog;
+  // the charge is created right here through the SAME durable extra-charge protocol
+  // «+ הוסף טיפול» uses (reserve → apply → acknowledge), with the source's id/amount.
+  async function apiGetOneTimeSessions() {
+    var r = await apiFetch('/api/sheets?action=getOneTimeSessions', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return Array.isArray(data.sessions) ? data.sessions : [];
+  }
+  async function apiGetOneTimeServices() {
+    var r = await apiFetch('/api/sheets?action=getOneTimeServices', { cache: 'no-store' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
+    return Array.isArray(data.services) ? data.services : [];
+  }
+  function otsSessionById(id) {
+    return (state.oneTimeSessions || []).find(function (x) { return x.id === id; }) || null;
+  }
+  function otsChargeStateOf(session) {
+    var client = state.clients.find(function (c) { return String(c.id) === String(session.clientId); });
+    var loaded = !isOpsScope() && !financeUnavailable();
+    return window.OneTimeSessions.chargeState(session, state.charges, loaded, function (ch) {
+      return client ? chargeStatusFor(client, ch) : 'unpaid';
+    });
+  }
+  function otsMyDayRows() {
+    if (!window.OneTimeSessions || !Array.isArray(state.oneTimeSessions)) return null;
+    var decorated = state.oneTimeSessions.map(function (x) { return Object.assign({}, x, { chargeState: otsChargeStateOf(x) }); });
+    return window.OneTimeSessions.myDayRows(decorated, today());
+  }
+  async function otsReload() {
+    try { state.oneTimeSessions = await apiGetOneTimeSessions(); }
+    catch (e) { console.warn('[ezone] one-time sessions failed:', e.message); }
+    render();
+  }
+  var OTS_ACTION_LABELS = {
+    edit: ['✏️ שינוי מועד', 'שינוי תאריך, שעה, מטפל/ת או מיקום'],
+    happened: ['✅ התקיים', 'סימון שהטיפול התקיים'],
+    patient_no_show: ['🚫 לא הגיע/ה', 'המטופל/ת לא הגיע/ה'],
+    therapist_cancelled: ['↩︎ המטפל/ת ביטל/ה', 'המטפל/ת ביטל/ה את הטיפול'],
+    cancel: ['✖ ביטול', 'ביטול הטיפול (עם סיבה)'],
+    complete_charge: ['💳 השלמת חיוב', 'יצירת החיוב שלא הושלם'],
+    remove_charge: ['הסרת החיוב', 'הטיפול בוטל והחיוב לא שולם — הסרת החיוב']
+  };
+  function otsPanelHtml(c) {
+    var OTS = window.OneTimeSessions;
+    if (!OTS || !Array.isArray(state.oneTimeSessions)) return '';
+    var list = OTS.forClient(state.oneTimeSessions, c.id, 3);
+    if (!list.length) return '';
+    var full = !isOpsScope(), editor = state.role === 'editor';
+    var rows = list.map(function (x) {
+      var cs = full ? otsChargeStateOf(x) : 'unknown';
+      var acts = editor && full ? OTS.actionsFor(x, today(), cs) : [];
+      var chargeNote = x.status === 'cancelled' && cs === 'paid' ? 'שולם — לבדיקת זיכוי' : OTS.chargeLabel(cs);
+      return '<li class="ots-row ots-' + escapeHtml(x.status) + '">' +
+        '<span class="ots-when">' + escapeHtml(displayDate(x.date) + ' ' + x.time) + '</span>' +
+        '<span class="ots-what">' + escapeHtml(OTS.serviceLabel(x.catalogKey, x.clinicalTreatmentType)) + ' · ' + escapeHtml(x.therapist) +
+          (x.location ? ' · ' + escapeHtml(x.location) : '') + '</span>' +
+        '<span class="chip ots-status ots-st-' + escapeHtml(x.status) + '">' + escapeHtml(OTS.statusLabel(x.status)) + '</span>' +
+        (full ? '<span class="ots-money">' + money(x.amount) + ' · <span class="ots-charge ots-charge-' + escapeHtml(cs) + '">' + escapeHtml(chargeNote) + '</span></span>' : '') +
+        (x.statusReason ? '<span class="ots-reason">' + escapeHtml(x.statusReason) + '</span>' : '') +
+        (acts.length ? '<span class="ots-actions edit-only">' + acts.map(function (a) {
+          var l = OTS_ACTION_LABELS[a] || [a, a];
+          return '<button type="button" class="btn btn-ghost btn-mini" data-ots-act="' + escapeHtml(a) + '" data-ots-id="' + escapeHtml(x.id) + '" title="' + escapeHtml(l[1]) + '">' + escapeHtml(l[0]) + '</button>';
+        }).join('') + '</span>' : '') +
+      '</li>';
+    }).join('');
+    return '<div class="cc-ots"><div class="cc-panel-title">טיפולים חד פעמיים</div><ul class="ots-list">' + rows + '</ul></div>';
+  }
+
+  // The charge, through the durable extra-charge protocol. `src` is a fresh
+  // getExtraChargeState answer with NO open operation. A 'done' operation is
+  // acknowledged here (this window shows the result); anything else is left for
+  // «+ הוסף טיפול», which already knows how to resume / review it.
+  async function otsRunCharge(src, draft, paid) {
+    var day = src.cycleDate, cid = String(draft.clientId);
+    var charge = Object.assign({}, draft, { active: true, created: day });
+    var payment = paid ? extraInitialPayment(cid, src.client, charge.id, toNum(charge.amount), false, day) : null;
+    var request = { opId: 'extra-' + uid(), clientId: cid, snapshot: src.snapshot, cycleDate: day, charge: chargeForSheet(charge), payment: payment };
+    var reserved = await apiPostAction('reserveExtraCharge', request);
+    if (!reserved || reserved.ok !== true || !reserved.operation) throw new Error('extra_not_reserved');
+    var result = await apiPostAction('applyExtraCharge', { opId: reserved.operation.id });
+    if (!result || result.ok !== true || !result.operation) throw new Error('extra_not_confirmed');
+    if (result.operation.state !== 'done') throw new Error('extra_review');
+    var ack = await apiPostAction('acknowledgeExtraCharge', { opId: result.operation.id });
+    if (!ack || ack.ok !== true) throw new Error('extra_not_confirmed');
+  }
+  async function otsFreshExtraState(clientId) {
+    var src = await apiPostAction('getExtraChargeState', { clientId: clientId });
+    if (!src || src.ok !== true || src.protocol !== 1) throw new Error('extra_protocol_unavailable');
+    if (src.operation) throw new Error('extra_pending');
+    if (!src.client || !src.snapshot || !src.cycleDate) throw new Error('extra_state_missing');
+    return src;
+  }
+  function otsErrorText(err) {
+    var m = String(err && err.message || '');
+    if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG;
+    if (m === 'extra_pending') return window.OneTimeSessions.errorText('extra_pending');
+    if (m === 'extra_review') return 'החיוב דורש בדיקה — יש להמשיך ב«+ הוסף טיפול» בכרטיס.';
+    if (/^extra_|renewal_pending/.test(m)) return extraErrorMessage(err);
+    return window.OneTimeSessions.errorText(m);
+  }
+
+  var otsCtx = null;   // { clientId, session (edit) | null, draftId (create) }
+  async function openOtsModal(client, session) {
+    var form = $('#otsForm');
+    if (!form || !window.OneTimeSessions) return;
+    form.reset();
+    otsCtx = { clientId: client.id, session: session || null, draftId: session ? null : window.OneTimeSessions.newId() };
+    var token = otsCtx;
+    $('#otsTitle').textContent = session ? 'שינוי מועד — טיפול חד פעמי' : 'טיפול חד פעמי';
+    $('#otsClientName').textContent = client.name || '';
+    $('#otsMsg').textContent = '';
+    var loc = form.location;
+    loc.innerHTML = '<option value="">—</option>' + LOCATIONS.map(function (l) { return '<option value="' + escapeHtml(l) + '">' + escapeHtml(l) + '</option>'; }).join('');
+    var names = (state.therapistNames || []).slice();
+    form.therapist.innerHTML = '<option value="">בחירת מטפל/ת…</option>' + names.map(function (n) { return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>'; }).join('');
+    if (!names.length) $('#otsMsg').textContent = 'רשימת המטפלים לא נטענה — רעננו את המסך.';
+    $('#otsPaidRow').hidden = !!session;
+    form.catalogKey.disabled = !!session;
+    if (session) {
+      form.catalogKey.innerHTML = '<option value="' + escapeHtml(session.catalogKey) + '">' + escapeHtml(window.OneTimeSessions.serviceLabel(session.catalogKey, session.clinicalTreatmentType)) + '</option>';
+      form.therapist.value = session.therapist; form.date.value = session.date; form.time.value = session.time;
+      form.location.value = session.location || ''; form.note.value = session.note || '';
+    } else {
+      form.date.value = today();
+      if (LOCATIONS.indexOf(client.location) >= 0) form.location.value = client.location;
+      form.catalogKey.innerHTML = '<option value="">טוען את הקטלוג…</option>';
+    }
+    $('#otsSubmit').disabled = !session;
+    $('#otsModal').hidden = false;
+    if (session) return;
+    try {
+      var services = await apiGetOneTimeServices();
+      if (otsCtx !== token) return;
+      if (!services.length) {
+        form.catalogKey.innerHTML = '<option value="">—</option>';
+        $('#otsMsg').textContent = 'אין בקטלוג טיפול בודד פעיל — יש לייבא / לעדכן את הקטלוג ב«תמחור חבילות».';
+        return;
+      }
+      form.catalogKey.innerHTML = '<option value="">בחירת שירות…</option>' + services.map(function (sv) {
+        return '<option value="' + escapeHtml(sv.key) + '">' + escapeHtml(window.OneTimeSessions.serviceLabel(sv.key, sv.clinicalTreatmentType) + ' — ' + money(sv.amount)) + '</option>';
+      }).join('');
+      $('#otsSubmit').disabled = false;
+    } catch (e) {
+      if (otsCtx !== token) return;
+      form.catalogKey.innerHTML = '<option value="">—</option>';
+      $('#otsMsg').textContent = 'הקטלוג לא נטען: ' + otsErrorText(e);
+    }
+  }
+  function closeOtsModal() {
+    var m = $('#otsModal');
+    if (m) m.hidden = true;
+    otsCtx = null;
+  }
+  async function submitOts(form) {
+    var ctx = otsCtx;
+    if (!ctx) return;
+    var fd = new FormData(form);
+    var fields = { therapist: String(fd.get('therapist') || ''), date: String(fd.get('date') || ''), time: String(fd.get('time') || ''),
+      location: String(fd.get('location') || ''), note: String(fd.get('note') || '').trim() };
+    if (!fields.therapist || !fields.date || !fields.time) { $('#otsMsg').textContent = 'יש לבחור מטפל/ת, תאריך ושעה.'; return; }
+    $('#otsMsg').textContent = '';
+    if (ctx.session) {
+      try {
+        await apiPostAction('updateOneTimeSession', { id: ctx.session.id, expectedRevision: ctx.session.revision, opId: window.OneTimeSessions.newId(), changes: fields });
+        closeOtsModal();
+        toast('מועד הטיפול עודכן');
+        await otsReload();
+      } catch (e) { $('#otsMsg').textContent = otsErrorText(e); }
+      return;
+    }
+    var catalogKey = String(fd.get('catalogKey') || '');
+    if (!catalogKey) { $('#otsMsg').textContent = 'יש לבחור שירות מהקטלוג.'; return; }
+    var created;
+    try {
+      // An open extra-charge operation for this patient blocks a new charge — check
+      // BEFORE scheduling, so nothing is half-created for a known reason.
+      var src = await otsFreshExtraState(ctx.clientId);
+      created = await apiPostAction('createOneTimeSession', { session: Object.assign({ id: ctx.draftId, clientId: ctx.clientId, catalogKey: catalogKey }, fields) });
+      if (!created || created.ok !== true || !created.charge) throw new Error('not_confirmed');
+      try {
+        await otsRunCharge(src, created.charge, !!fd.get('paid'));
+        toast(created.duplicate ? 'הטיפול כבר נקבע — החיוב הושלם' : 'נקבע טיפול חד פעמי ונוצר חיוב');
+      } catch (chargeErr) {
+        toast('הטיפול נקבע, אך החיוב לא הושלם: ' + otsErrorText(chargeErr) + ' — אפשר להשלים ב«💳 השלמת חיוב» בכרטיס.', true);
+      }
+      closeOtsModal();
+      await loadAll();
+    } catch (e) {
+      // nothing scheduled (or the same id is safely replayable): the form stays as typed
+      $('#otsMsg').textContent = otsErrorText(e);
+    }
+  }
+
+  var otsCancelTarget = null;
+  function openOtsCancelModal(session) {
+    otsCancelTarget = session;
+    var f = $('#otsCancelForm'); if (f) f.reset();
+    $('#otsCancelMsg').textContent = '';
+    $('#otsCancelModal').hidden = false;
+  }
+  function closeOtsCancelModal() { var m = $('#otsCancelModal'); if (m) m.hidden = true; otsCancelTarget = null; }
+  async function submitOtsCancel(form) {
+    var x = otsCancelTarget;
+    if (!x) return;
+    var reason = String(new FormData(form).get('reason') || '').trim();
+    if (reason.length < 2 || reason.length > 200) { $('#otsCancelMsg').textContent = window.OneTimeSessions.errorText('bad_reason'); return; }
+    try {
+      await apiPostAction('cancelOneTimeSession', { id: x.id, expectedRevision: x.revision, opId: window.OneTimeSessions.newId(), reason: reason });
+      closeOtsCancelModal();
+      toast('הטיפול בוטל');
+      await otsReload();
+    } catch (e) { $('#otsCancelMsg').textContent = otsErrorText(e); }
+  }
+
+  async function otsAction(client, act, id) {
+    var x = otsSessionById(id);
+    if (!x || state.role !== 'editor' || isOpsScope()) return;
+    if (act === 'edit') return openOtsModal(client, x);
+    if (act === 'cancel') return openOtsCancelModal(x);
+    if (act === 'remove_charge') return handleRemoveCharge(x.chargeId);
+    if (act === 'complete_charge') {
+      try {
+        var src = await otsFreshExtraState(client.id);
+        await otsRunCharge(src, window.OneTimeSessions.chargeDraft(x), false);
+        toast('החיוב הושלם');
+        await loadAll();
+      } catch (e) { toast(otsErrorText(e), true); }
+      return;
+    }
+    if (['happened', 'patient_no_show', 'therapist_cancelled'].indexOf(act) >= 0) {
+      if (!confirm('לסמן את הטיפול החד פעמי (' + displayDate(x.date) + ' ' + x.time + ', ' + x.therapist + ') כ«' + window.OneTimeSessions.OUTCOME_HE[act] + '»?')) return;
+      try {
+        await apiPostAction('markOneTimeSession', { id: x.id, outcome: act, expectedRevision: x.revision, opId: window.OneTimeSessions.newId() });
+        toast('עודכן: ' + window.OneTimeSessions.OUTCOME_HE[act]);
+        await otsReload();
+      } catch (e) { toast(otsErrorText(e), true); }
+    }
+  }
+
+  // The optional paid record created together with a new extra charge (the existing
+  // once/month key and recording-day semantics). Shared by «+ הוסף טיפול» and «+ טיפול חד פעמי».
+  function extraInitialPayment(cid, client, chargeId, amount, monthly, day) {
+    return paymentForSheet({
+      id: 'pay::' + cid + '::chg-' + chargeId + '::' + (monthly ? day.slice(0,7) : 'once'),
+      clientId: cid, clientName: client.name || '', billingType: 'extra', dueDate: day,
+      amountDue: amount, amountPaid: amount, status: 'paid', paymentDate: day,
+      method: '', notes: '', bundleSize: 0, sessionsUsed: 0 });
+  }
+
   async function submitDurableExtraCharge(form) {
     if (busyIs($('#addChargeSubmit')) || !addChargeClientId || !extraSourceState || extraSourceState.operation) return;
     var cid = addChargeClientId, token = extraLoadToken, client = extraSourceState.client;
@@ -7234,11 +7506,7 @@
       frequencyPerWeek: monthly && fd.get('frequencyPerWeek') ? toNum(fd.get('frequencyPerWeek')) : '' };
     // Do not add an optimistic charge merely so paymentId can find its kind.
     // Preserve the existing once/month key and initial recording-day semantics.
-    var payment = fd.get('chargePaid') ? paymentForSheet({
-      id: 'pay::' + cid + '::chg-' + charge.id + '::' + (monthly ? day.slice(0,7) : 'once'),
-      clientId: cid, clientName: client.name || '', billingType: 'extra', dueDate: day,
-      amountDue: amount, amountPaid: amount, status: 'paid', paymentDate: day,
-      method: '', notes: '', bundleSize: 0, sessionsUsed: 0 }) : null;
+    var payment = fd.get('chargePaid') ? extraInitialPayment(cid, client, charge.id, amount, monthly, day) : null;
     var request = { opId: 'extra-' + uid(), clientId: cid, snapshot: extraSourceState.snapshot,
       cycleDate: day, charge: chargeForSheet(charge), payment: payment };
     extraFormEnabled(false);
@@ -7944,13 +8212,16 @@
         ops ? Promise.resolve(null) : apiGetOffers().catch(function (oe) { noteLoadGap(gaps, 'הצעות חבילה', oe); return null; }),
         // Names-only therapist roster for the plan UI (שני מטפלים לפרטני) — no
         // rates ever cross. Fail-soft: the pickers just show no roster options.
-        apiGetTherapistNames().catch(function () { return { names: [] }; })
+        apiGetTherapistNames().catch(function () { return { names: [] }; }),
+        // One-time sessions (טיפול חד פעמי): soft — a failed read is a load gap, never «none».
+        apiGetOneTimeSessions().catch(function (ote) { noteLoadGap(gaps, 'טיפולים חד פעמיים', ote); return null; })
       ]);
       state.loadGaps = gaps;
       state.tasks = results[7];
       state.activity = results[8];
       state.offers = results[9];
       state.therapistNames = (results[10] && Array.isArray(results[10].names)) ? results[10].names : [];
+      state.oneTimeSessions = Array.isArray(results[11]) ? results[11] : null;
       // The main read succeeded, so the session is valid: only now fetch the price / pay
       // constants (a signed-out page never even requests them). Render below needs them.
       await loadProtectedScripts();
@@ -8174,7 +8445,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal(); closeOtsModal(); closeOtsCancelModal();
       });
     });
 
@@ -8257,6 +8528,21 @@
     var editAmountRevert = $('#editAmountRevert');
     if (editAmountRevert) editAmountRevert.addEventListener('click', function () {
       applyAmountOverride('');   // clear the override -> revert to the computed amount
+    });
+
+    var otsForm = $('#otsForm');
+    if (otsForm) otsForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = $('#otsSubmit');
+      if (busyIs(btn)) return;   // a second tap while saving is ignored (one session, one charge)
+      busyRun(btn, function () { return submitOts(e.target); });
+    });
+    var otsCancelForm = $('#otsCancelForm');
+    if (otsCancelForm) otsCancelForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = $('#otsCancelSubmit');
+      if (busyIs(btn)) return;
+      busyRun(btn, function () { return submitOtsCancel(e.target); });
     });
 
     var addChargeForm = $('#addChargeForm');

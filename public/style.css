@@ -1561,3 +1561,35 @@ input.is-busy {
 /* R6 (2026-11-07): explicit «עדכון משימות המשך» bar — the only control that writes milestone tasks. */
 .continuation-sync-bar { flex-wrap: wrap; gap: 8px; align-items: center; }
 .panel.data-unavailable { padding: 12px 16px; color: #b45309; }
+
+/* One-time sessions (טיפול חד פעמי, CHANGELOG-one-time-session.md) — a full-width strip
+   under the two card panels. State is always a word in a chip, never colour alone. */
+.cc-ots {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-plan-border);
+  background: var(--panel-plan);
+  border-radius: 8px;
+}
+.ots-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ots-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  font-size: 13px; color: var(--text-soft);
+  padding: 6px 8px; background: var(--panel); border-radius: 6px; border: 1px solid var(--border);
+  min-width: 0;
+}
+.ots-row .ots-when { font-weight: 700; color: var(--text); white-space: nowrap; }
+.ots-row .ots-what { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.ots-row .ots-money { white-space: nowrap; }
+.ots-row .ots-reason { flex-basis: 100%; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ots-row .ots-actions { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.ots-row .btn-mini { font-size: 12px; padding: 4px 10px; min-height: 32px; }
+.ots-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.ots-st-scheduled { background: var(--blue-soft); color: var(--blue-deep); }
+.ots-st-completed { background: #E1F3E8; color: var(--green-2); }
+.ots-st-no_show, .ots-st-therapist_cancelled { background: #FFF4DC; color: var(--amber); }
+.ots-st-cancelled { background: var(--panel-2); color: var(--muted); }
+.ots-row.ots-cancelled .ots-when, .ots-row.ots-cancelled .ots-what { text-decoration: line-through; }
+.ots-charge-unpaid, .ots-charge-missing { color: var(--red); font-weight: 700; }
+.ots-charge-paid { color: var(--green-2); font-weight: 700; }
+.ots-msg { margin: 0; min-height: 1.2em; color: var(--red); font-size: 13px; }
