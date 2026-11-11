@@ -128,19 +128,16 @@ test('PRICE_FLAG_PER_CLIENT sentinel is still null (kept for any undecided type)
   assert.equal(TM.PRICE_FLAG_PER_CLIENT, null);
 });
 
-test('no billing type is left flagged null except the deliberately unpriced טיפול משלים', () => {
+test('no billing type is left flagged null after pricing קבוצה / טיפול משפחתי / טיפול משלים', () => {
   const stillNull = Object.keys(TM.BILLING_PRICES).filter(
     (k) => TM.BILLING_PRICES[k] === null
   );
-  // 2026-11-11: טיפול משלים has no clinic-wide price yet — the session value is a
-  // blank flag on SessionLog, never a guessed number. Any OTHER null is a regression.
-  assert.deepEqual(stillNull, ['טיפול משלים'], 'unexpected undecided (null) prices: ' + stillNull.join(', '));
+  assert.deepEqual(stillNull, [], 'unexpected undecided (null) prices: ' + stillNull.join(', '));
 });
 
-test('טיפול משלים maps to itself and is flagged unpriced (null), not thrown', () => {
+test('טיפול משלים maps to itself and is priced ₪500 per session (2026-11-11)', () => {
   assert.equal(TM.clinicalToBilling('טיפול משלים'), 'טיפול משלים');
-  assert.equal(TM.billingPrice('טיפול משלים'), TM.PRICE_FLAG_PER_CLIENT);
-  assert.equal(TM.billingPrice('טיפול משלים'), null);
+  assert.equal(TM.billingPrice('טיפול משלים'), 500);
 });
 
 test('billingPrice throws on an unknown billing type', () => {
