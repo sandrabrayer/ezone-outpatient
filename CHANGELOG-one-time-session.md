@@ -1,6 +1,6 @@
 # One-time session (טיפול חד פעמי) — 2026-11-11
 
-Branch `claude/one-time-session-20261111`, base `claude/youthful-volta-laarnk` @ `c169743`.
+Branch `claude/one-time-session-20261111`, base `claude/youthful-volta-laarnk` @ `d62fe41`.
 
 ## What
 

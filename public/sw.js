@@ -99,7 +99,7 @@
 // v31 → v32: explicit second-payment confirmation for a same-date future renewal (#164).
 // v38 (2026-11-11, one-time session): new public/one-time-sessions.js + its script tag, index.html, app.js,
 //   my-day.js and style.css changed (CHANGELOG-one-time-session.md). Bumped from the deploy-branch value v37
-//   (c169743); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it serves v37
+//   (d62fe41); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it serves v37
 //   before release.
 var CACHE = 'ezone-outpatient-v38';
 var SHELL = [
