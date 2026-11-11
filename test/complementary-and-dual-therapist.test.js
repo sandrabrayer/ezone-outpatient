@@ -153,8 +153,8 @@ test('D: getTherapistNames is a PURE read — it never creates or seeds Therapis
 test('E: the menu, pickers, gating and round-trip fields exist in app.js', () => {
   // menu entry + stable keys + Hebrew labels
   assert.match(APP, /COMPLEMENTARY_LABEL = 'טיפול משלים'/);
-  assert.match(APP, /COMPLEMENTARY_TYPES = \['yoga', 'acupuncture', 'reflexology', 'art'\]/);
-  assert.match(APP, /yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות'/);
+  assert.match(APP, /COMPLEMENTARY_TYPES = \['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'\]/);
+  assert.match(APP, /yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות', somatic: 'טיפול סומטי'/);
   assert.match(APP, /'מעקב פסיכיאטרי',\s*\n\s*COMPLEMENTARY_LABEL\s*\n\s*\];/, 'added to SERVICE_TYPES');
   // subtype picker + therapist selects, gated on פרטני 2+/שבוע
   assert.match(APP, /dataset\.complementaryType = '1'/);
