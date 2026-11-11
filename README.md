@@ -496,8 +496,10 @@ checkout ever drifts back.
   + variants ₪500, מעקב פסיכיאטרי ₪1,100, אינטייק ₪2,300, ליווי יומי בקהילה by
   monthly frequency (3×→₪15,000 / 5×→₪18,000), **קבוצה ₪0 (intentionally free —
   a decided price, not `null`)**, **טיפול משפחתי ₪600**. `PRICE_FLAG_PER_CLIENT`
-  (`null`) stays reserved for any still-undecided type (none today). See
-  `CHANGELOG-clinical-billing-map.md`.
+  (`null`) marks a still-undecided type — today only **טיפול משלים** (added
+  2026-11-11: its sessions are recorded and the therapist is paid; the
+  SessionLog session value stays blank until a price is decided). See
+  `CHANGELOG-clinical-billing-map.md`, `CHANGELOG-complementary-clinical-type.md`.
 - `_readAll`/`_writeAll` map sheet columns **by position**, and `_ensureSheet`
   does not migrate data — so a column can never be dropped from the middle of
   `CLIENTS_HEADERS` without shifting everything after it. The removed אחראי
