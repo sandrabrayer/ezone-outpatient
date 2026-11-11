@@ -69,7 +69,7 @@
   // Monthly price by weekly frequency. The ONLY frequency-dependent price.
   var DAY_CENTER_MONTHLY_BY_FREQ = { 3: 15000, 5: 18000 };
 
-  // --- Clinical → billing (one-to-one, 13 clinical keys; אינטייק added 2026-11-05) ---------------------
+  // --- Clinical → billing (one-to-one, 14 clinical keys; אינטייק added 2026-11-05, טיפול משלים 2026-11-11) ---------------------
   var CLINICAL_TO_BILLING = {
     'פרטני כללי':                'פרטני',                  // RENAME (generic individual)
     'פרטני CBT':                 'פרטני CBT',
@@ -83,7 +83,8 @@
     'עיסוי טיפולי':              'עיסוי טיפולי',           // newly billable
     'טיפול ממוקד התמכרויות':     'טיפול ממוקד התמכרויות',  // newly billable
     'טיפול אינטגרטיבי':          'טיפול אינטגרטיבי',       // newly billable
-    'אינטייק':                   'אינטייק'                 // 2026-11-05: a psychiatrist's intake is a paid session
+    'אינטייק':                   'אינטייק',                // 2026-11-05: a psychiatrist's intake is a paid session
+    'טיפול משלים':               'טיפול משלים'             // 2026-11-11: complementary (e.g. somatic) sessions reach SessionLog / payout
   };
 
   // Sentinel: this billing type has no clinic-wide price; bill per client
@@ -112,7 +113,10 @@
     // 0 == intentionally free (bundled in larger packages), a DECIDED price.
     // Distinct from PRICE_FLAG_PER_CLIENT (null == undecided / set per client).
     'קבוצה':                  0,
-    'טיפול משפחתי':           600
+    'טיפול משפחתי':           600,
+    // 2026-11-11: no clinic-wide price decided yet — the session value is left
+    // blank (flag) on SessionLog; therapist pay is unaffected (TherapistRates).
+    'טיפול משלים':            PRICE_FLAG_PER_CLIENT
     // DAY_CENTER_BILLING ('ליווי יומי בקהילה') priced by frequency, see below.
   };
 

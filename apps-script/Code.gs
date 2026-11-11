@@ -908,7 +908,7 @@ function _getData() {
  * the debt/phone rules are. test/clinical-derive.test.js parses this literal and
  * asserts it deep-equals the module — any drift fails the suite. Keep in sync.
  *
- * One-to-one over 13 clinical keys (אינטייק added 2026-11-05); two renames are pinned (פרטני כללי→פרטני and
+ * One-to-one over 14 clinical keys (אינטייק added 2026-11-05, טיפול משלים 2026-11-11); two renames are pinned (פרטני כללי→פרטני and
  * מרכז יום→ליווי יומי בקהילה, here keyed under the NEW name); the five
  * newly-billable types map to their own names.
  */
@@ -927,7 +927,10 @@ var CLINICAL_TO_BILLING = {
   'טיפול אינטגרטיבי':       'טיפול אינטגרטיבי',
   // 2026-11-05: a psychiatrist's intake IS a session (PSYCHIATRIST_RATES pays ₪900 for it) —
   // it was rejected as unknown_type, so intakes never reached SessionLog / the payout.
-  'אינטייק':                'אינטייק'
+  'אינטייק':                'אינטייק',
+  // 2026-11-11: «טיפול משלים» (e.g. somatic) was rejected as unknown_type, so those
+  // sessions were booked under another type (טיפול משפחתי) to reach the payout.
+  'טיפול משלים':            'טיפול משלים'
 };
 
 function _clinicalToBilling(clinicalType) {
@@ -1150,7 +1153,9 @@ var BILLING_PRICES = {
   'מעקב פסיכיאטרי':         1100,
   'אינטייק':                2300,
   'קבוצה':                  0,
-  'טיפול משפחתי':           600
+  'טיפול משפחתי':           600,
+  // 2026-11-11: price not decided — null = blank clientSessionValue (flag), never a guess.
+  'טיפול משלים':            null
 };
 
 // Day-center is priced by weekly frequency, not in BILLING_PRICES. Mirror of

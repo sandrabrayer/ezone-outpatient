@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «טיפול משלים» is a recordable clinical type (2026-11-11)
+- `CLINICAL_TO_BILLING` (+ its Code.gs mirror) gains `טיפול משלים → טיפול משלים`. Before, the therapists app's `setClinicalType` / `recordSessionOutcome` for a complementary session (e.g. somatic — אילנה יופה) was refused as `unknown_type`, so the session never reached SessionLog / «תשלומי מטפלים» and was booked under another type (טיפול משפחתי) as a workaround.
+- `BILLING_PRICES['טיפול משלים'] = null` (`PRICE_FLAG_PER_CLIENT`): no clinic-wide price yet — the session's `clientSessionValue` is a blank flag, never a guessed number; therapist pay is unchanged (TherapistRates, fail-closed). Tests: map counts 13 → 14, null allow-list pinned to this one type, outcome end-to-end. No header, sheet or UI change. See `CHANGELOG-complementary-clinical-type.md`.
+
 ### Salaried («גלובלי») therapists (2026-11-10)
 - `גלובלי` in `TherapistRates.flatRate` marks a salaried therapist: their sessions are now RECORDED (before: refused as `unknown_therapist`) with `therapistPay` 0 and the new appended SessionLog column `payModel: 'global'`, and are kept out of «תשלומי מטפלים» and the payroll forward. A blank rate still fails closed. All 14 blank-rate names were marked `גלובלי` in the sheet. See `CHANGELOG-global-therapists.md`.
 

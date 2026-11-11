@@ -412,6 +412,21 @@ test('unknown clinical type is rejected and writes nothing; אינטייק is ac
   assert.equal(ok.rows[0].therapistPay, 900, 'the psychiatrist intake rate reaches the payout');
 });
 
+test('טיפול משלים is accepted (2026-11-11): therapist paid, session value a blank flag', () => {
+  const { res, rows } = recordSessionOutcome(
+    { sessionId: 'cmp1', therapist: 'מעיין דלומי', clinicalTreatmentType: 'טיפול משלים', outcome: 'happened' }, []
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].billingType, 'טיפול משלים');
+  assert.equal(res.therapistPay, 250, 'the flat rate reaches the payout');
+  assert.equal(res.clientSessionValue, null, 'no clinic-wide price yet: flagged, never guessed');
+  const unknown = recordSessionOutcome(
+    { sessionId: 'cmp2', therapist: 'מעיין דלומי', clinicalTreatmentType: 'טיפול סומטי', outcome: 'happened' }, []
+  );
+  assert.deepEqual(unknown.res, { ok: false, reason: 'unknown_type' }, 'a subtype label is not a clinical type');
+});
+
 test('missing sessionId is rejected', () => {
   const { res } = recordSessionOutcome(
     { therapist: 'מעיין דלומי', clinicalTreatmentType: 'פרטני CBT', outcome: 'happened' }, []

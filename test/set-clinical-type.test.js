@@ -136,7 +136,7 @@ function freshClients() {
 // --- the map is reused, not duplicated --------------------------------------
 test('setClinicalType uses the SAME map as the on-save derive (parsed from Code.gs)', () => {
   assert.deepEqual(CLINICAL_MAP, TreatmentMap.CLINICAL_TO_BILLING);
-  assert.equal(Object.keys(CLINICAL_MAP).length, 13);   // + אינטייק (2026-11-05)
+  assert.equal(Object.keys(CLINICAL_MAP).length, 14);   // + אינטייק (2026-11-05), + טיפול משלים (2026-11-11)
 });
 
 // --- auth is fail-closed -----------------------------------------------------
