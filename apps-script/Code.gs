@@ -1154,8 +1154,8 @@ var BILLING_PRICES = {
   'אינטייק':                2300,
   'קבוצה':                  0,
   'טיפול משפחתי':           600,
-  // 2026-11-11: price not decided — null = blank clientSessionValue (flag), never a guess.
-  'טיפול משלים':            null
+  // 2026-11-11: ₪500 per session (incl. VAT), decided by Sandra.
+  'טיפול משלים':            500
 };
 
 // Day-center is priced by weekly frequency, not in BILLING_PRICES. Mirror of

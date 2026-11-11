@@ -114,9 +114,8 @@
     // Distinct from PRICE_FLAG_PER_CLIENT (null == undecided / set per client).
     'קבוצה':                  0,
     'טיפול משפחתי':           600,
-    // 2026-11-11: no clinic-wide price decided yet — the session value is left
-    // blank (flag) on SessionLog; therapist pay is unaffected (TherapistRates).
-    'טיפול משלים':            PRICE_FLAG_PER_CLIENT
+    // 2026-11-11: ₪500 per session (incl. VAT), decided by Sandra.
+    'טיפול משלים':            INDIVIDUAL_SESSION_PRICE
     // DAY_CENTER_BILLING ('ליווי יומי בקהילה') priced by frequency, see below.
   };
 

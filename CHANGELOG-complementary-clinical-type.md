@@ -23,9 +23,10 @@ under «טיפול משפחתי» to get paid — which also valued them at the 
 - No sheet header, no SW / UI change, no historical SessionLog rewrite. Sessions already
   recorded as «טיפול משפחתי» stay as recorded.
 
-## Open decision
-- Price per «טיפול משלים» session for the patient: set `BILLING_PRICES` (both files) once
-  decided; the null allow-list test then goes back to `[]`.
+## Price (follow-up, 2026-11-11)
+- Sandra set the patient price: **₪500 per session (incl. VAT)** — `BILLING_PRICES`
+  in both files; the null allow-list test is back to `[]`. Sessions recorded before this
+  deploy keep their blank value (not rewritten).
 
 ## Deploy
 Two-phase per CLAUDE.md: merge → `/api/version` = merge SHA → dispatch «Deploy Apps Script»

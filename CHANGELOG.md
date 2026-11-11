@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «טיפול משלים» priced ₪500 per session (2026-11-11)
+- `BILLING_PRICES['טיפול משלים']` null → **500** (incl. VAT) in `public/treatment-map.js` and the Code.gs mirror, so SessionLog `clientSessionValue` is ₪500 instead of a blank flag. Therapist pay unchanged (TherapistRates). Null allow-list test back to `[]`. See `CHANGELOG-complementary-clinical-type.md` → "Price".
+
 ### «טיפול משלים» is a recordable clinical type (2026-11-11)
 - `CLINICAL_TO_BILLING` (+ its Code.gs mirror) gains `טיפול משלים → טיפול משלים`. Before, the therapists app's `setClinicalType` / `recordSessionOutcome` for a complementary session (e.g. somatic — אילנה יופה) was refused as `unknown_type`, so the session never reached SessionLog / «תשלומי מטפלים» and was booked under another type (טיפול משפחתי) as a workaround.
 - `BILLING_PRICES['טיפול משלים'] = null` (`PRICE_FLAG_PER_CLIENT`): no clinic-wide price yet — the session's `clientSessionValue` is a blank flag, never a guessed number; therapist pay is unchanged (TherapistRates, fail-closed). Tests: map counts 13 → 14, null allow-list pinned to this one type, outcome end-to-end. No header, sheet or UI change. See `CHANGELOG-complementary-clinical-type.md`.
