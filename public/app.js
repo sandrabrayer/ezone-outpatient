@@ -32,8 +32,8 @@
   // a closed menu. The subtype is stored as a stable English key on the client
   // (complementaryType, server-validated); Hebrew labels are render-time only.
   var COMPLEMENTARY_LABEL = 'טיפול משלים';
-  var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art'];
-  var COMPLEMENTARY_HE = { yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות' };
+  var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'];
+  var COMPLEMENTARY_HE = { yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות', somatic: 'טיפול סומטי' };
   function complementaryTypeOrBlank(v) {
     var s = typeof v === 'string' ? v.trim() : '';
     return COMPLEMENTARY_TYPES.indexOf(s) >= 0 ? s : '';

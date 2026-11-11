@@ -44,7 +44,7 @@ test('A: the two columns are appended LAST on Clients (40-41) and mirrored on th
   assert.equal(H.indexOf('billingMode'), 38, 'nothing before them moves');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
   assert.deepEqual(R.slice(-2), ['complementaryType', 'privateTherapists']);
-  assert.deepEqual(plain(ctx.COMPLEMENTARY_TYPES), ['yoga', 'acupuncture', 'reflexology', 'art']);
+  assert.deepEqual(plain(ctx.COMPLEMENTARY_TYPES), ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic']);
   // Leads carry neither column.
   const L = plain(ctx.LEADS_HEADERS);
   assert.ok(!L.includes('complementaryType') && !L.includes('privateTherapists'));
@@ -54,7 +54,7 @@ test('A: the two columns are appended LAST on Clients (40-41) and mirrored on th
 
 test('B: _complementaryTypeOrBlank — closed set, anything else blank', () => {
   const { ctx } = sandbox();
-  for (const k of ['yoga', 'acupuncture', 'reflexology', 'art']) {
+  for (const k of ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic']) {
     assert.equal(ctx._complementaryTypeOrBlank(' ' + k + ' '), k);
   }
   for (const bad of ['', null, undefined, 'יוגה', 'pilates', 'YOGA', 0, {}]) {
@@ -153,8 +153,8 @@ test('D: getTherapistNames is a PURE read — it never creates or seeds Therapis
 test('E: the menu, pickers, gating and round-trip fields exist in app.js', () => {
   // menu entry + stable keys + Hebrew labels
   assert.match(APP, /COMPLEMENTARY_LABEL = 'טיפול משלים'/);
-  assert.match(APP, /COMPLEMENTARY_TYPES = \['yoga', 'acupuncture', 'reflexology', 'art'\]/);
-  assert.match(APP, /yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות'/);
+  assert.match(APP, /COMPLEMENTARY_TYPES = \['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'\]/);
+  assert.match(APP, /yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות', somatic: 'טיפול סומטי'/);
   assert.match(APP, /'מעקב פסיכיאטרי',\s*\n\s*COMPLEMENTARY_LABEL\s*\n\s*\];/, 'added to SERVICE_TYPES');
   // subtype picker + therapist selects, gated on פרטני 2+/שבוע
   assert.match(APP, /dataset\.complementaryType = '1'/);

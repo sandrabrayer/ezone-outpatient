@@ -97,7 +97,7 @@
 //   value v30 (2ea3314, Apps Script v106); the LIVE /sw.js was NOT reachable from this sandbox
 //   (proxy 403 on egress) — re-check it serves v30 before release.
 // v31 → v32: explicit second-payment confirmation for a same-date future renewal (#164).
-var CACHE = 'ezone-outpatient-v36';
+var CACHE = 'ezone-outpatient-v37';
 var SHELL = [
   './',
   './index.html',

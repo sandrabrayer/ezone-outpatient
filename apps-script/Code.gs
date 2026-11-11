@@ -185,7 +185,7 @@ var CLIENTS_HEADERS = [
 var BILLING_MODES = ['package', 'per_session'];
 /* Stable complementary-treatment subtype keys (Hebrew at render time only):
  * יוגה / דיקור / רפלקסולוגיה / אמנות. */
-var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art'];
+var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'];
 /* Validate a complementaryType at a write boundary: one of COMPLEMENTARY_TYPES or '' (none). */
 function _complementaryTypeOrBlank(v) {
   var s = String(v == null ? '' : v).trim();
