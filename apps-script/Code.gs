@@ -8328,7 +8328,9 @@ function nightlyIntegrityJob() {
   var admission = LockService.getScriptLock();
   if (!admission.tryLock(5000)) {
     _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
-    return { ok: false, error: 'backup_busy' };
+    // The scheduled trigger must not report success for a missed backup.
+    // Never bypass or delete a lock/marker automatically.
+    throw new Error('backup_busy');
   }
   var runMarker = '', admissionError = '';
   try {
@@ -8340,8 +8342,12 @@ function nightlyIntegrityJob() {
     }
   } finally { admission.releaseLock(); }
   if (admissionError) {
-    if (admissionError === 'backup_busy') _integritySendAlert('Backup not started: another backup is active or its execution marker requires operator review.');
-    return { ok: false, error: admissionError };
+    if (admissionError === 'backup_busy') {
+      _integritySendAlert('Backup not started: another backup is active or its execution marker requires operator review.');
+      Logger.log('nightlyIntegrityJob: backup_busy marker/lock; operator review required, no auto-clear');
+      throw new Error('backup_busy');
+    }
+    return { ok: false, error: admissionError }; // intentional recovery hold is not bypassed
   }
   // This marker spans the WHOLE run, including publication, retention, alerts
   // and sentinel writes. It uses Script Properties/ScriptLock across users;
