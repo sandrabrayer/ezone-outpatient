@@ -564,7 +564,7 @@ test('one backup execution is admitted across the whole run; a competing caller 
     if (!tested) {
       tested = true; const marker = h.props.INTEGRITY_ACTIVE_BACKUP;
       assert.ok(JSON.parse(marker).startedAt);
-      assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+      assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
       assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, marker);
     }
     return capture(ss);
@@ -589,7 +589,7 @@ test('an abandoned execution marker is never expired or removed automatically to
   const h = snapshot(world()), r = restored(h);
   h.props.INTEGRITY_ACTIVE_BACKUP = '{"id":"stale-synthetic-run","startedAt":"2000-01-01T00:00:00Z"}';
   const marker = h.props.INTEGRITY_ACTIVE_BACKUP;
-  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
   assert.equal(h.ctx.beginOutpatientRecovery().error, 'backup_draining');
   h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
   assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), /backup still running/);
@@ -599,7 +599,7 @@ test('an abandoned execution marker is never expired or removed automatically to
 
 test('an admission lock timeout reports the missed backup without writing or claiming another execution marker', () => {
   const h = harness(); h.faults.captureLock = true;
-  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
   assert.ok(h.logs.some(l => l.includes('script lock unavailable')));
   assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
   assert.equal(h.events.some(e => e[0] === 'write'), false);
@@ -617,7 +617,7 @@ test('a completion lock timeout leaves the marker fail-closed and logs an action
   assert.throws(() => h.ctx.nightlyIntegrityJob(), /synthetic completion timeout/);
   assert.ok(h.props.INTEGRITY_ACTIVE_BACKUP);
   assert.ok(h.logs.some(l => l.includes('marker stranded')));
-  assert.equal(h.ctx.nightlyIntegrityJob().error, 'backup_busy');
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
   assert.deepEqual(h.locks(), [false, false]);
 });
 
