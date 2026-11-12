@@ -8433,6 +8433,9 @@ function nightlyIntegrityJob() {
   } catch (err) { errors.push('בדיקת תשלומים יתומים נכשלה: ' + err); }
 
   // ---- CHECK 3: daily snapshots + retention (AFTER check 1's name lookup) ----
+  // Scheduled trigger success is NOT proof of a published backup if a caught
+  // capture/verify exception merely emailed an alert. Track the manifest gate.
+  var backupPublished = false;
   try {
     if (clientsReadOk && clientsGrid && clientsGrid.length) {
       var sourceSs = _ss();
@@ -8459,6 +8462,7 @@ function nightlyIntegrityJob() {
       });
       _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
       _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
+      backupPublished = true; // only after a coherent, checksum-verified snapshot set
       // Once observed, disappearing operational/manual tables are a backup
       // failure, not a new legitimate empty baseline that ages out good history.
       props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
@@ -8490,6 +8494,14 @@ function nightlyIntegrityJob() {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+  }
+  // Do not return a GREEN time-trigger invocation after catching a failed
+  // backup. The existing email is best-effort; Apps Script execution failure
+  // must independently signal the missing publication. Nothing is retried or
+  // written here, and the finally block still clears only our run marker.
+  if (!backupPublished) {
+    Logger.log('nightlyIntegrityJob: no verified backup manifest published; execution FAILED');
+    throw new Error('nightly_backup_not_published');
   }
   } finally {
     var completion = LockService.getScriptLock();
