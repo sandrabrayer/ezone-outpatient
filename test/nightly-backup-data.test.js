@@ -84,7 +84,7 @@ test('capture and writer lock contention fail without writing or releasing an un
 test('any source capture failure suppresses all writes and retention, and produces an alert', () => {
   const h = harness(); h.faults.read = 'Leads';
   h.backup.insertSheet('outpatient-leads-2000-01-01', [['id'],['retain']]);
-  h.ctx.nightlyIntegrityJob();
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /nightly_backup_not_published/);
   assert.equal(h.events.some(e => e[0] === 'write' || e[0] === 'delete'), false);
   assert.ok(h.logs.some(l => l.includes('INTEGRITY ALERT')));
 });
@@ -92,14 +92,14 @@ test('any source capture failure suppresses all writes and retention, and produc
 test('verification failure suppresses retention, protecting all existing history', () => {
   const h = harness(); h.faults.corrupt = true;
   h.backup.insertSheet('outpatient-2000-01-01', [['id'],['retain']]);
-  h.ctx.nightlyIntegrityJob();
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /nightly_backup_not_published/);
   assert.ok(h.backup.getSheetByName('outpatient-2000-01-01'));
   assert.ok(h.logs.some(l => l.includes('Backup value mismatch')));
 });
 
 test('misconfigured live workbook as backup is rejected before any write', () => {
   const h = harness(); h.props.INTEGRITY_BACKUP_SSID = 'live';
-  h.ctx.nightlyIntegrityJob();
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /nightly_backup_not_published/);
   assert.equal(h.events.some(e => e[0] === 'write' || e[0] === 'delete'), false);
   assert.ok(h.logs.some(l => l.includes('Backup destination is the live spreadsheet')));
 });
@@ -117,7 +117,7 @@ test('retention matches the eight exact data families and their manifest, never 
 test('missing Clients sheet never seeds a false zero sentinel', () => {
   const h = harness(); h.props.INTEGRITY_LAST_COUNT = '12';
   const get = h.live.getSheetByName; h.live.getSheetByName = n => n === 'Clients' ? null : get(n);
-  h.ctx.nightlyIntegrityJob();
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /nightly_backup_not_published/);
   assert.equal(h.props.INTEGRITY_LAST_COUNT,'12');
   assert.ok(h.logs.some(l => l.includes('Missing Clients sheet')));
 });
@@ -125,7 +125,7 @@ test('missing Clients sheet never seeds a false zero sentinel', () => {
 
 test('financial snapshots and manifest verify as one set; mixed generation is refused', () => {
   const h = harness();
-  h.ctx.nightlyIntegrityJob();
+  assert.doesNotThrow(() => h.ctx.nightlyIntegrityJob(), 'a verified manifest keeps the scheduled trigger green');
   const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
   const result = h.ctx._integrityValidateRestoreSet(h.backup, day);
   assertInventory(h.ctx, result);
@@ -195,7 +195,7 @@ test('interleaved backup replacement is detected before retention can remove old
     }
     return result;
   };
-  h.ctx.nightlyIntegrityJob();
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /nightly_backup_not_published/);
   assert.ok(h.backup.getSheetByName('outpatient-2000-01-01'));
   assert.ok(h.logs.some(l=>l.includes('Restore snapshot mismatch')));
 });
