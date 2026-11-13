@@ -412,7 +412,7 @@ test('unknown clinical type is rejected and writes nothing; אינטייק is ac
   assert.equal(ok.rows[0].therapistPay, 900, 'the psychiatrist intake rate reaches the payout');
 });
 
-test('טיפול משלים is accepted (2026-11-11): therapist paid, session value a blank flag', () => {
+test('טיפול משלים is accepted (2026-11-11): therapist paid, session valued ₪500', () => {
   const { res, rows } = recordSessionOutcome(
     { sessionId: 'cmp1', therapist: 'מעיין דלומי', clinicalTreatmentType: 'טיפול משלים', outcome: 'happened' }, []
   );
@@ -420,7 +420,7 @@ test('טיפול משלים is accepted (2026-11-11): therapist paid, session va
   assert.equal(rows.length, 1);
   assert.equal(rows[0].billingType, 'טיפול משלים');
   assert.equal(res.therapistPay, 250, 'the flat rate reaches the payout');
-  assert.equal(res.clientSessionValue, null, 'no clinic-wide price yet: flagged, never guessed');
+  assert.equal(res.clientSessionValue, 500, 'the patient session price');
   const unknown = recordSessionOutcome(
     { sessionId: 'cmp2', therapist: 'מעיין דלומי', clinicalTreatmentType: 'טיפול סומטי', outcome: 'happened' }, []
   );
