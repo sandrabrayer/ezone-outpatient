@@ -7244,18 +7244,23 @@
   // package, or a per-session payer's session. The source prices it from the catalog;
   // the charge is created right here through the SAME durable extra-charge protocol
   // «+ הוסף טיפול» uses (reserve → apply → acknowledge), with the source's id/amount.
-  async function apiGetOneTimeSessions() {
-    var r = await apiFetch('/api/sheets?action=getOneTimeSessions', { cache: 'no-store' });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
-    return Array.isArray(data.sessions) ? data.sessions : [];
+  // A read counts as successful ONLY with the real backend envelope: HTTP 2xx, JSON
+  // object, ok === true and an actual array. Anything else (HTML, {}, {ok:true},
+  // a non-array list) is «feature unavailable», never an empty list.
+  var OTS_GAP_LABEL = 'טיפולים חד פעמיים';
+  async function otsReadList(action, listKey) {
+    var r = await apiFetch('/api/sheets?action=' + action, { cache: 'no-store' });
+    var data = null;
+    try { data = await r.json(); } catch (_) { data = null; }
+    if (!r.ok || !data || typeof data !== 'object' || data.ok !== true || !Array.isArray(data[listKey])) {
+      var e = new Error('ots_unavailable');
+      if (data && typeof data === 'object' && data.ok === false && data.error) e.detail = String(data.error);
+      throw e;
+    }
+    return data[listKey];
   }
-  async function apiGetOneTimeServices() {
-    var r = await apiFetch('/api/sheets?action=getOneTimeServices', { cache: 'no-store' });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
-    return Array.isArray(data.services) ? data.services : [];
-  }
+  function apiGetOneTimeSessions() { return otsReadList('getOneTimeSessions', 'sessions'); }
+  function apiGetOneTimeServices() { return otsReadList('getOneTimeServices', 'services'); }
   function otsSessionById(id) {
     return (state.oneTimeSessions || []).find(function (x) { return x.id === id; }) || null;
   }
@@ -7271,10 +7276,32 @@
     var decorated = state.oneTimeSessions.map(function (x) { return Object.assign({}, x, { chargeState: otsChargeStateOf(x) }); });
     return window.OneTimeSessions.myDayRows(decorated, today());
   }
+  // Re-read the sessions after an ACCEPTED write. Returns true only when the source
+  // answered with a valid list. On failure the list is UNKNOWN (null — cards, My Day
+  // and every action disappear instead of showing stale actionable rows) and only this
+  // feature's load gap is set; a later successful read clears only that gap.
   async function otsReload() {
-    try { state.oneTimeSessions = await apiGetOneTimeSessions(); }
-    catch (e) { console.warn('[ezone] one-time sessions failed:', e.message); }
+    var ok = false;
+    try {
+      state.oneTimeSessions = await apiGetOneTimeSessions();
+      state.loadGaps = (state.loadGaps || []).filter(function (g) { return g !== OTS_GAP_LABEL; });
+      ok = true;
+    } catch (e) {
+      state.oneTimeSessions = null;
+      state.loadGaps = Array.isArray(state.loadGaps) ? state.loadGaps.slice() : [];
+      noteLoadGap(state.loadGaps, OTS_GAP_LABEL, e);
+    }
     render();
+    renderLoadGaps();
+    return ok;
+  }
+  // Toast for an accepted write: the success wording is only used when the readback
+  // confirmed it; otherwise say the change WAS accepted but the list is unconfirmed,
+  // without inviting the user to repeat it.
+  async function otsAfterWrite(okMsg) {
+    var ok = await otsReload();
+    if (ok) toast(okMsg);
+    else toast(okMsg + ' — אך רענון הרשימה נכשל. אין לבצע את הפעולה שוב; רעננו את המסך לאימות.', true);
   }
   var OTS_ACTION_LABELS = {
     edit: ['✏️ שינוי מועד', 'שינוי תאריך, שעה, מטפל/ת או מיקום'],
@@ -7337,6 +7364,7 @@
   }
   function otsErrorText(err) {
     var m = String(err && err.message || '');
+    if (m === 'ots_unavailable') return 'שירות הטיפולים החד פעמיים אינו זמין כרגע — נסו שוב בעוד רגע.';
     if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG;
     if (m === 'extra_pending') return window.OneTimeSessions.errorText('extra_pending');
     if (m === 'extra_review') return 'החיוב דורש בדיקה — יש להמשיך ב«+ הוסף טיפול» בכרטיס.';
@@ -7408,8 +7436,7 @@
       try {
         await apiPostAction('updateOneTimeSession', { id: ctx.session.id, expectedRevision: ctx.session.revision, opId: window.OneTimeSessions.newId(), changes: fields });
         closeOtsModal();
-        toast('מועד הטיפול עודכן');
-        await otsReload();
+        await otsAfterWrite('מועד הטיפול עודכן');
       } catch (e) { $('#otsMsg').textContent = otsErrorText(e); }
       return;
     }
@@ -7452,8 +7479,7 @@
     try {
       await apiPostAction('cancelOneTimeSession', { id: x.id, expectedRevision: x.revision, opId: window.OneTimeSessions.newId(), reason: reason });
       closeOtsCancelModal();
-      toast('הטיפול בוטל');
-      await otsReload();
+      await otsAfterWrite('הטיפול בוטל');
     } catch (e) { $('#otsCancelMsg').textContent = otsErrorText(e); }
   }
 
@@ -7476,8 +7502,7 @@
       if (!confirm('לסמן את הטיפול החד פעמי (' + displayDate(x.date) + ' ' + x.time + ', ' + x.therapist + ') כ«' + window.OneTimeSessions.OUTCOME_HE[act] + '»?')) return;
       try {
         await apiPostAction('markOneTimeSession', { id: x.id, outcome: act, expectedRevision: x.revision, opId: window.OneTimeSessions.newId() });
-        toast('עודכן: ' + window.OneTimeSessions.OUTCOME_HE[act]);
-        await otsReload();
+        await otsAfterWrite('עודכן: ' + window.OneTimeSessions.OUTCOME_HE[act]);
       } catch (e) { toast(otsErrorText(e), true); }
     }
   }
@@ -8214,7 +8239,7 @@
         // rates ever cross. Fail-soft: the pickers just show no roster options.
         apiGetTherapistNames().catch(function () { return { names: [] }; }),
         // One-time sessions (טיפול חד פעמי): soft — a failed read is a load gap, never «none».
-        apiGetOneTimeSessions().catch(function (ote) { noteLoadGap(gaps, 'טיפולים חד פעמיים', ote); return null; })
+        apiGetOneTimeSessions().catch(function (ote) { noteLoadGap(gaps, OTS_GAP_LABEL, ote); return null; })
       ]);
       state.loadGaps = gaps;
       state.tasks = results[7];

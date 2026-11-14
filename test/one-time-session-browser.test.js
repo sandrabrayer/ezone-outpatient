@@ -65,9 +65,10 @@ async function fixture(t) {
     for (const k of keys) { if (oldEnv[k] === undefined) delete process.env[k]; else process.env[k] = oldEnv[k]; }
     delete require.cache[modulePath];
   });
-  async function open(viewport, who = 'ורד', pin = '424242') {
+  async function open(viewport, who = 'ורד', pin = '424242', setup = null) {
     const context = await browser.newContext({ serviceWorkers: 'block', viewport, timezoneId: 'UTC' });
     await context.route('**/*', (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    if (setup) await setup(context);
     const page = await context.newPage();
     page.setDefaultTimeout(15000);
     const errors = [], consoleErrors = [];
@@ -175,3 +176,100 @@ test('one-time session: דנה (operational) sees the session without any amount
   assert.deepEqual(res, [403, 403, 403]);
   assert.deepEqual(errors, []);
 });
+
+// ---- read-contract hardening: unknown is never «empty», a failed readback never leaves stale actions ----
+const BAD_BODIES = {
+  'empty object': { status: 200, contentType: 'application/json', body: '{}' },
+  'ok without list': { status: 200, contentType: 'application/json', body: '{"ok":true}' },
+  'non-array list': { status: 200, contentType: 'application/json', body: '{"ok":true,"sessions":{"a":1},"services":"x"}' },
+  'HTML 200': { status: 200, contentType: 'text/html', body: '<html>maintenance</html>' },
+  'invalid JSON': { status: 200, contentType: 'application/json', body: '{not json' }
+};
+const SID = '00000000-0000-4000-8000-0000000000aa';
+function seedSession(f) {
+  f.sb.ctx._todayISODate = () => todayUTC();
+  const r = f.sb.post({ action: 'createOneTimeSession', user: 'ורד', moneyScope: 'full', session: { id: SID, clientId: CLIENT.id, catalogKey: 'cbt_single', therapist: 'הילה תבור', date: todayUTC(), time: '09:00' } });
+  assert.equal(r.ok, true);
+}
+const isAction = (name) => (url) => new URL(url).pathname === '/api/sheets' && new URL(url).searchParams.get('action') === name;
+
+for (const [label, bad] of Object.entries(BAD_BODIES)) {
+  test('one-time session: malformed successful read (' + label + ') is a load gap, never an empty list', skipOpt, async (t) => {
+    const f = await fixture(t); if (!f) return;
+    seedSession(f);
+    const { page, errors } = await f.open({ width: 1280, height: 900 }, 'ורד', '424242', (ctx) => ctx.route(isAction('getOneTimeSessions'), (route) => route.fulfill(bad)));
+    await page.click('.tab[data-view="clients"]');
+    const card = page.locator('.client-card', { hasText: CLIENT.name }).first();
+    await card.waitFor();
+    assert.match(await page.locator('#dataUnavailableText').textContent(), /טיפולים חד פעמיים/, 'visible gap');
+    assert.equal(await page.locator('#dataUnavailableBanner').isHidden(), false);
+    assert.equal(await card.locator('.ots-row').count(), 0, 'no rows rendered as if none exist');
+    assert.equal(await card.locator('[data-ots-act]').count(), 0, 'no actions on unknown data');
+    assert.deepEqual(errors, []);
+  });
+
+  test('one-time session: malformed catalogue read (' + label + ') says unavailable, not «import the catalogue»', skipOpt, async (t) => {
+    const f = await fixture(t); if (!f) return;
+    const { page } = await f.open({ width: 1280, height: 900 }, 'ורד', '424242', (ctx) => ctx.route(isAction('getOneTimeServices'), (route) => route.fulfill(bad)));
+    await page.click('.tab[data-view="clients"]');
+    const card = page.locator('.client-card', { hasText: CLIENT.name }).first();
+    await card.locator('.cc-ots-btn').click();
+    await page.waitForFunction(() => /הקטלוג לא נטען/.test(document.querySelector('#otsMsg').textContent));
+    const msg = await page.locator('#otsMsg').textContent();
+    assert.match(msg, /אינו זמין/);
+    assert.equal(/לייבא|ייבוא/.test(msg), false, 'no misleading import instruction');
+    assert.equal(await page.locator('#otsSubmit').isDisabled(), true, 'cannot submit without a valid catalogue');
+  });
+}
+
+test('one-time session: valid EMPTY list is a genuine empty (no gap) and valid catalogue still selectable', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const { page } = await f.open({ width: 1280, height: 900 });
+  assert.equal(await page.locator('#dataUnavailableBanner').isHidden(), true, 'no gap for a real empty list');
+  await page.click('.tab[data-view="clients"]');
+  const card = page.locator('.client-card', { hasText: CLIENT.name }).first();
+  await card.locator('.cc-ots-btn').click();
+  await page.locator('#otsForm select[name="catalogKey"] option[value="cbt_single"]').waitFor({ state: 'attached' });
+  assert.equal(await page.locator('#otsSubmit').isDisabled(), false);
+});
+
+for (const [label, bad] of [['network failure', null], ['malformed 200', BAD_BODIES['ok without list']]]) {
+  test('one-time session: accepted cancel + failed readback (' + label + ') → unconfirmed, no stale actions, no duplicate POST, recovery clears the gap', skipOpt, async (t) => {
+    const f = await fixture(t); if (!f) return;
+    seedSession(f);
+    let fail = false, cancelPosts = 0;
+    const { page, errors } = await f.open({ width: 1280, height: 900 }, 'ורד', '424242', async (ctx) => {
+      await ctx.route(isAction('getOneTimeSessions'), (route) => (fail ? (bad ? route.fulfill(bad) : route.abort()) : route.continue()));
+      await ctx.route('**/api/sheets', (route) => {
+        const req = route.request();
+        if (req.method() === 'POST' && /"cancelOneTimeSession"/.test(req.postData() || '')) cancelPosts++;
+        return route.continue();
+      });
+    });
+    await page.click('.tab[data-view="clients"]');
+    const card = page.locator('.client-card', { hasText: CLIENT.name }).first();
+    await card.locator('[data-ots-act="cancel"]').waitFor();
+    fail = true;
+    await card.locator('[data-ots-act="cancel"]').click();
+    await page.fill('#otsCancelForm textarea[name="reason"]', 'סיבה לבדיקה');
+    await page.locator('#otsCancelForm button[type="submit"]').click();
+    await page.waitForFunction(() => /טיפולים חד פעמיים/.test(document.querySelector('#dataUnavailableText').textContent));
+    // the source accepted it exactly once
+    assert.equal(cancelPosts, 1);
+    assert.equal(f.sb.rows('OneTimeSessions')[0].status, 'cancelled');
+    // the UI no longer offers the stale scheduled row or any write
+    assert.equal(await card.locator('.ots-row').count(), 0);
+    assert.equal(await card.locator('[data-ots-act]').count(), 0);
+    const toastText = await page.locator('#toast').textContent();
+    assert.match(toastText, /אין לבצע את הפעולה שוב/, 'accepted-but-unconfirmed, no prompt to repeat');
+    assert.equal(/^הטיפול בוטל$/.test(toastText), false, 'plain success wording not used without a confirmed readback');
+    // recovery: the next successful read shows the cancelled row and clears the gap
+    fail = false;
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.click('.tab[data-view="clients"]');
+    await card.locator('.ots-row .ots-status', { hasText: 'בוטל' }).waitFor();
+    assert.equal(await page.locator('#dataUnavailableBanner').isHidden(), true);
+    assert.equal(cancelPosts, 1, 'recovery never re-posts');
+    assert.deepEqual(errors, []);
+  });
+}

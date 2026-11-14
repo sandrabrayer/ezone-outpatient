@@ -16,3 +16,10 @@ NOT guarded. `_otsConflict` (Code.gs) sees only OneTimeSessions rows; `_otsExter
 who already has a regular THR appointment with another therapist can be booked for an overlapping
 one-time session. Pinned by the characterisation test in `test/one-time-session.test.js`.
 Needs a product decision / a patient dimension in the busy contract (both repos) before broad release.
+
+## Frontend read contract (public/app.js)
+`otsReadList` accepts a read only with HTTP 2xx, a JSON object, `ok === true` and an array; everything
+else throws `ots_unavailable`. `otsReload` (after an accepted write) sets `state.oneTimeSessions = null`
+and the «טיפולים חד פעמיים» load gap on failure and clears only that gap on success. Covered by the
+Chromium tests in `test/one-time-session-browser.test.js` (malformed sessions/catalogue reads, valid empty
+list, accepted cancel + failed readback, recovery, no duplicate POST). Not covered: paired THR.
