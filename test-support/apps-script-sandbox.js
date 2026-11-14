@@ -44,7 +44,7 @@ function sandbox(leads = [], clients = []) {
     LockService: { getScriptLock: () => lock }, Logger: { log() {} },
     UrlFetchApp: { fetch(url, options) {
       if (!String(url).startsWith('https://ezone-therapists.up.railway.app/feeds/out-one-time-busy?')) throw new Error('unrecognized synthetic HTTP request');
-      busy.calls.push({ url: String(url), method: options.method, headerPresent: !!(options.headers && options.headers['X-One-Time-Busy-Secret']) });
+      busy.calls.push({ url: String(url), method: options.method, headerPresent: !!(options.headers && options.headers['X-One-Time-Busy-Secret']), lockHeld: held });
       if (!busy.available) throw new Error('synthetic busy source offline');
       return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, busy: !!busy.occupied }) };
     } },
