@@ -611,7 +611,8 @@ function _isTextForcedColumn(name, headers) {
   // generic names (createdAt, dueTime …) must not change how other sheets store
   // same-named cells.
   var crm = (headers === TASKS_HEADERS || headers === ACTIVITY_HEADERS) && CRM_TEXT_COLUMNS[name];
-  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name] || PACKAGE_TEXT_COLUMNS[name] || crm);
+  var ots = typeof ONE_TIME_SESSION_HEADERS !== 'undefined' && headers === ONE_TIME_SESSION_HEADERS && ONE_TIME_TEXT_COLUMNS[name];
+  return !!(PHONE_COLUMNS[name] || STAMP_COLUMNS[name] || PACKAGE_TEXT_COLUMNS[name] || crm || ots);
 }
 
 /* Force '@' (plain text) format on any phone / stamp columns in this sheet,
@@ -1546,6 +1547,8 @@ function _happenedInMonth(logRows, clientId, month, excludeSessionId) {
   for (var i = 0; i < logRows.length; i++) {
     var r = logRows[i];
     if (excludeSessionId && String(r.sessionId) === String(excludeSessionId)) continue;
+    // A one-time session (טיפול חד פעמי) is outside the package: never counts toward the quota.
+    if (String(r.oneTimeSessionId == null ? '' : r.oneTimeSessionId).trim() !== '') continue;
     if (String(r.clientId) === String(clientId) && r.outcome === 'happened' && _monthKey(r.date) === month) n++;
   }
   return n;
@@ -3663,7 +3666,12 @@ var SESSION_LOG_HEADERS = [
   // APPEND-ONLY (2026-11-10): 'global' = the therapist is SALARIED («גלובלי» in
   // TherapistRates.flatRate) — therapistPay is 0 and the row never enters the
   // per-session payout / payroll forward. '' = per-session pay (the default).
-  'payModel'
+  'payModel',
+  // APPEND-ONLY (2026-11-11): the OneTimeSessions id when this row records a
+  // one-time session (טיפול חד פעמי, sessionId 'ots::<id>'). Such a row is
+  // OUTSIDE the package: _happenedInMonth skips it, no credit effect. '' = a
+  // regular package session.
+  'oneTimeSessionId'
 ];
 
 var SESSION_STATUS_BY_OUTCOME = {
@@ -3702,6 +3710,8 @@ function _computeSessionValue(billingType, freqPerWeek) {
 function _recordSessionOutcome(payload) {
   var sessionId = String((payload && payload.sessionId) || '').trim();
   if (!sessionId) return { ok: false, reason: 'missing_session_id' };
+  // 'ots::' rows belong to one-time sessions (_otsRecordOutcome) — never through the package path.
+  if (sessionId.indexOf('ots::') === 0) return { ok: false, reason: 'reserved_session_id' };
 
   var outcome = String((payload && payload.outcome) || '').trim();
   if (!_hasOwn(SESSION_STATUS_BY_OUTCOME, outcome)) {
@@ -7116,6 +7126,420 @@ function _finishExtraCharge(payload, cancel, manual) {
   } finally { lock.releaseLock(); }
 }
 
+/* ===== One-time sessions (טיפול חד פעמי, 2026-11-11) =========================
+ *
+ * A single scheduled session for a patient — a package patient's extra session
+ * OUTSIDE the package, or a per-session payer's session. CHANGELOG-one-time-session.md.
+ *
+ * WHAT IT IS
+ *   - one OneTimeSessions row per session (append-only headers): client,
+ *     catalog service (a SINGLE-SESSION PackageCatalog row), therapist, date,
+ *     time, location, status, the linked extra charge id and its SessionLog id.
+ *   - the price is computed HERE from the catalog row (integer agorot,
+ *     VAT-inclusive) and stored as an immutable snapshot. A browser amount is
+ *     never read.
+ *   - the CHARGE is NOT written here: createOneTimeSession returns a charge draft
+ *     and the browser creates it through the EXISTING durable extra-charge
+ *     protocol (reserve/apply/acknowledge, docs/extra-charge-journal.md) with
+ *     the pre-assigned id 'ots-<sessionId>'. The money path is therefore the
+ *     same audited path «+ הוסף טיפול» uses; this sheet only links to it. A
+ *     session whose charge is missing is shown as such (derived at read time).
+ *   - OUTSIDE THE PACKAGE: a one-time session never reads or writes
+ *     creditsOwed, and its SessionLog row (oneTimeSessionId set) is excluded
+ *     from _happenedInMonth, so it never consumes the monthly package quota.
+ *   - the outcome (happened / patient_no_show / therapist_cancelled) comes from
+ *     the therapists app (recordSessionOutcome + oneTimeSessionId, SESSION_OUTCOME_SECRET)
+ *     or from ורד (markOneTimeSession). Both write ONE SessionLog row keyed
+ *     'ots::<id>' (upsert) with the usual therapist pay (TherapistRates, fail
+ *     closed) and clientSessionValue = the session price (0 when the therapist
+ *     cancelled). Forwarded rows keep their pay (same freeze as the main path).
+ *   - the therapists app reads a PRICE-FREE feed (getOneTimeSessionsFeed,
+ *     ONE_TIME_SESSIONS_SECRET, fail-closed): no amount ever crosses.
+ *
+ * Status keys are stable English; Hebrew labels are render-time only. */
+var ONE_TIME_SESSIONS_SHEET = 'OneTimeSessions';
+var ONE_TIME_SESSION_HEADERS = [
+  'id', 'clientId', 'patientName', 'phone',
+  'catalogKey', 'catalogRowId', 'catalogEpoch', 'clinicalTreatmentType', 'priceAgorot',
+  'therapist', 'date', 'time', 'location', 'note',
+  'status', 'statusReason', 'chargeId', 'sessionLogId',
+  'payloadHash', 'revision', 'opLog',
+  'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+];
+/* Forced to plain text on this sheet only: '09:30' would otherwise become a
+ * time value, a date a Date, a hash a number. */
+var ONE_TIME_TEXT_COLUMNS = { date: true, time: true, createdAt: true, payloadHash: true };
+var ONE_TIME_STATUSES = ['scheduled', 'completed', 'no_show', 'therapist_cancelled', 'cancelled'];
+var ONE_TIME_OUTCOME_STATUS = { happened: 'completed', patient_no_show: 'no_show', therapist_cancelled: 'therapist_cancelled' };
+/* Catalog → clinical treatment type (what the therapist delivers; decides the
+ * therapist pay rule). By key first, then by family. A single-session catalog
+ * row with no mapping is NOT offered (fail closed — never a guessed pay type). */
+var ONE_TIME_CLINICAL_BY_KEY = { psychiatric_consult: 'מעקב פסיכיאטרי', psychiatric_diagnosis: 'אינטייק' };
+var ONE_TIME_CLINICAL_BY_FAMILY = { emdr: 'פרטני EMDR', cbt: 'פרטני CBT' };
+/* The charge's treatmentType must be one the frozen v1 extra-charge contract
+ * accepts (_extraIntentV1Error); anything else is written blank. */
+var ONE_TIME_CHARGE_TREATMENT_TYPES = ['פרטני', 'פרטני CBT', 'פרטני EMDR', 'קבוצה', 'טיפול משפחתי', 'ליווי יומי בקהילה', 'מעקב פסיכיאטרי'];
+var ONE_TIME_MAX_OPLOG = 40;
+var ONE_TIME_FEED_PAST_DAYS = 60;
+
+function _otsClinicalFor(row) {
+  var key = String(row && row.key || ''), fam = String(row && row.family || '');
+  if (_hasOwn(ONE_TIME_CLINICAL_BY_KEY, key)) return ONE_TIME_CLINICAL_BY_KEY[key];
+  if (_hasOwn(ONE_TIME_CLINICAL_BY_FAMILY, fam)) return ONE_TIME_CLINICAL_BY_FAMILY[fam];
+  return '';
+}
+function _otsIsSingle(row) {
+  var unit = String(row && row.unit || '');
+  return _pkgInt(row.sessions) === 1 && (unit === 'per_session_pack' || unit === 'flat') && !!_otsClinicalFor(row);
+}
+function _otsCatalogRows() {
+  var sh = _ss().getSheetByName(PACKAGE_CATALOG_SHEET);
+  return sh ? _readAll(sh, PACKAGE_CATALOG_HEADERS) : [];
+}
+function _otsRows() {
+  var sh = _ss().getSheetByName(ONE_TIME_SESSIONS_SHEET);
+  return sh ? _readAll(sh, ONE_TIME_SESSION_HEADERS) : [];
+}
+function _otsIsoDateOrNull(v) {
+  var t = String(v == null ? '' : v).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) && _coverageDateISO(t) === t ? t : null;
+}
+function _otsTimeOrNull(v) {
+  var t = String(v == null ? '' : v).trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : null;
+}
+function _otsMoneyScopeOps(payload) { return String(payload && payload.moneyScope || '') === 'ops'; }
+function _otsOpLog(row) {
+  try { var l = JSON.parse(String(row.opLog || '[]')); return Array.isArray(l) ? l : []; } catch (_) { return []; }
+}
+function _otsHasOp(row, opId) {
+  return !!opId && _otsOpLog(row).some(function (e) { return e && e.opId === opId; });
+}
+function _otsPushOp(row, entry) {
+  var log = _otsOpLog(row);
+  log.push(entry);
+  if (log.length > ONE_TIME_MAX_OPLOG) log = log.slice(log.length - ONE_TIME_MAX_OPLOG);
+  row.opLog = JSON.stringify(log);
+}
+/* Browser view (internal proxy). `amount` is SHEKELS and is a money key, so the
+ * Node proxy strips it for an operational session. No agorot / epoch / hash. */
+function _otsView(r) {
+  return {
+    id: String(r.id), clientId: String(r.clientId), patientName: String(r.patientName || ''),
+    catalogKey: String(r.catalogKey || ''), clinicalTreatmentType: String(r.clinicalTreatmentType || ''),
+    amount: _pkgInt(r.priceAgorot) / 100,
+    therapist: String(r.therapist || ''), date: String(r.date || ''), time: String(r.time || ''),
+    location: String(r.location || ''), note: String(r.note || ''),
+    status: String(r.status || ''), statusReason: String(r.statusReason || ''),
+    chargeId: String(r.chargeId || ''), sessionLogId: String(r.sessionLogId || ''),
+    revision: _pkgInt(r.revision) || 1,
+    createdAt: String(r.createdAt || ''), createdBy: String(r.createdBy || ''),
+    updatedAt: String(r.updatedAt || ''), updatedBy: String(r.updatedBy || '')
+  };
+}
+/* The charge the browser creates through the durable extra-charge protocol. */
+function _otsChargeDraft(r) {
+  var billing = '';
+  try { billing = _clinicalToBilling(r.clinicalTreatmentType); } catch (_) { billing = ''; }
+  return {
+    id: String(r.chargeId), clientId: String(r.clientId),
+    description: 'טיפול חד פעמי — ' + String(r.clinicalTreatmentType) + ' · ' + String(r.therapist) + ' · ' + String(r.date) + ' ' + String(r.time),
+    amount: _pkgInt(r.priceAgorot) / 100,
+    billingType: ONE_TIME_BILLING_TYPE, chargeDate: String(r.date), billingDay: '',
+    notes: 'oneTimeSession:' + String(r.id),
+    treatmentType: ONE_TIME_CHARGE_TREATMENT_TYPES.indexOf(billing) >= 0 ? billing : '',
+    frequencyPerWeek: ''
+  };
+}
+
+/* GET getOneTimeServices (proxy; MONEY action — the proxy refuses it for ops):
+ * the active single-session catalog rows with their server-computed price. */
+function _otsServices() {
+  var rows = _pkgActiveRows(_otsCatalogRows());
+  var out = [];
+  rows.forEach(function (r) {
+    if (!_otsIsSingle(r)) return;
+    var q = _pkgComputeQuote(r, 0);
+    if (!q.ok || q.grossAgorot == null) return;
+    out.push({ key: String(r.key), family: String(r.family), tier: String(r.tier),
+      clinicalTreatmentType: _otsClinicalFor(r), amount: q.grossAgorot / 100 });
+  });
+  return { ok: true, services: out, catalogReady: rows.length > 0 };
+}
+
+/* GET getOneTimeSessions (proxy): every session, newest date first. */
+function _otsList() {
+  var rows = _otsRows().map(_otsView);
+  rows.sort(function (a, b) { return (b.date + b.time) < (a.date + a.time) ? -1 : (b.date + b.time) > (a.date + a.time) ? 1 : 0; });
+  return { ok: true, sessions: rows };
+}
+
+/* GET getOneTimeSessionsFeed (ONE_TIME_SESSIONS_SECRET): the therapists app's
+ * PRICE-FREE projection, built field by field (an allowlist — never "copy the
+ * row and delete the price"). The current client name/phone wins over the
+ * snapshot. Window: from ONE_TIME_FEED_PAST_DAYS ago onward. */
+var ONE_TIME_FEED_KEYS = ['id', 'patientName', 'phone', 'therapist', 'date', 'time', 'location', 'status', 'clinicalTreatmentType', 'catalogKey'];
+function _otsFeed() {
+  var clientsSh = _ss().getSheetByName('Clients');
+  var byId = {};
+  if (clientsSh) _readAll(clientsSh, CLIENTS_HEADERS).forEach(function (c) { byId[String(c.id)] = c; });
+  var from = new Date(_todayISODate() + 'T00:00:00Z');
+  from.setUTCDate(from.getUTCDate() - ONE_TIME_FEED_PAST_DAYS);
+  var fromIso = from.toISOString().slice(0, 10);
+  var out = [];
+  _otsRows().forEach(function (r) {
+    if (String(r.date || '') < fromIso) return;
+    var c = byId[String(r.clientId)];
+    out.push({
+      id: String(r.id),
+      patientName: String(c && c.name ? c.name : r.patientName || '').trim(),
+      phone: _recoverPhone(c && c.phone ? c.phone : r.phone),
+      therapist: String(r.therapist || ''), date: String(r.date || ''), time: String(r.time || ''),
+      location: String(r.location || ''), status: String(r.status || ''),
+      clinicalTreatmentType: String(r.clinicalTreatmentType || ''), catalogKey: String(r.catalogKey || '')
+    });
+  });
+  out.sort(function (a, b) { return (a.date + a.time) < (b.date + b.time) ? -1 : (a.date + a.time) > (b.date + b.time) ? 1 : 0; });
+  return { ok: true, sessions: out };
+}
+
+function _otsFindIndex(sh, id) {
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return -1;
+  var ids = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
+  return -1;
+}
+function _otsWriteRow(sh, rowNum, row) {
+  sh.getRange(rowNum, 1, 1, ONE_TIME_SESSION_HEADERS.length).setValues([_pkgRowToCells(ONE_TIME_SESSION_HEADERS, row)]);
+}
+/* Another SCHEDULED session that would collide: the same patient at the same
+ * date+time, or the same therapist at the same date+time. */
+function _otsConflict(rows, cand, exceptId) {
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r.id) === String(exceptId || '') || String(r.status) !== 'scheduled') continue;
+    if (String(r.date) !== cand.date || String(r.time) !== cand.time) continue;
+    if (String(r.clientId) === cand.clientId) return 'duplicate_session';
+    if (String(r.therapist) === cand.therapist) return 'therapist_busy';
+  }
+  return '';
+}
+/* Shared field validation for create / update. Returns {error} or the clean fields. */
+function _otsFields(s, needAll) {
+  var f = {};
+  if (needAll || s.therapist !== undefined) {
+    f.therapist = _therapistNameOrNull(s.therapist);
+    if (!f.therapist || _getTherapistNames().names.indexOf(f.therapist) < 0) return { error: 'unknown_therapist' };
+  }
+  if (needAll || s.date !== undefined) { f.date = _otsIsoDateOrNull(s.date); if (!f.date) return { error: 'bad_date' }; }
+  if (needAll || s.time !== undefined) { f.time = _otsTimeOrNull(s.time); if (!f.time) return { error: 'bad_time' }; }
+  if (needAll || s.location !== undefined) {
+    f.location = _pkgText(s.location, 60);
+    if (String(s.location == null ? '' : s.location).length > 60) return { error: 'bad_location' };
+  }
+  if (needAll || s.note !== undefined) {
+    if (String(s.note == null ? '' : s.note).length > 300) return { error: 'note_too_long' };
+    f.note = _pkgText(s.note, 300);
+  }
+  return f;
+}
+
+/* POST createOneTimeSession (proxy; MONEY action). Idempotent by the client
+ * UUID: the same id + the same payload answers the stored row (duplicate:true)
+ * at any later time; the same id + a different payload is refused. */
+function _otsCreate(payload) {
+  if (_otsMoneyScopeOps(payload)) return { ok: false, error: 'forbidden_money_action' };
+  var s = (payload && payload.session) || {};
+  var id = String(s.id == null ? '' : s.id).trim();
+  if (!PACKAGE_UUID_RE.test(id)) return { ok: false, error: 'bad_id' };
+  var clientId = String(s.clientId == null ? '' : s.clientId).trim();
+  if (!clientId || clientId.length > 120) return { ok: false, error: 'client_not_found' };
+  var catalogKey = String(s.catalogKey == null ? '' : s.catalogKey).trim();
+  if (!/^[a-z0-9_]{1,60}$/.test(catalogKey)) return { ok: false, error: 'invalid_service' };
+  var f = _otsFields(s, true);
+  if (f.error) return { ok: false, error: f.error };
+  var canonical = { clientId: clientId, catalogKey: catalogKey, therapist: f.therapist, date: f.date, time: f.time, location: f.location, note: f.note };
+  var hash = _pkgSha256Hex(_pkgCanonicalJson(canonical));
+  var user = _requestUser(payload);
+  var lock = _pkgLock(10000);
+  if (!lock) return { ok: false, error: 'busy' };
+  try {
+    var sh = _ensureSheet(ONE_TIME_SESSIONS_SHEET, ONE_TIME_SESSION_HEADERS);
+    var rows = _readAll(sh, ONE_TIME_SESSION_HEADERS);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].id) !== id) continue;
+      if (String(rows[i].payloadHash) !== hash) return { ok: false, error: 'id_conflict' };
+      return { ok: true, duplicate: true, session: _otsView(rows[i]), charge: _otsChargeDraft(rows[i]) };
+    }
+    var clientsSh = _ss().getSheetByName('Clients');
+    var client = null;
+    if (clientsSh) _readAll(clientsSh, CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === clientId) client = c; });
+    if (!client) return { ok: false, error: 'client_not_found' };
+    var cat = _pkgActiveRowByKey(_otsCatalogRows(), catalogKey);
+    if (!cat || !_otsIsSingle(cat)) return { ok: false, error: 'invalid_service' };
+    var q = _pkgComputeQuote(cat, 0);
+    if (!q.ok || !_pkgIsIntInRange(q.grossAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_service' };
+    var conflict = _otsConflict(rows, { clientId: clientId, therapist: f.therapist, date: f.date, time: f.time }, '');
+    if (conflict) return { ok: false, error: conflict };
+    var now = new Date().toISOString();
+    var row = {
+      id: id, clientId: clientId, patientName: String(client.name || '').trim(), phone: _recoverPhone(client.phone),
+      catalogKey: catalogKey, catalogRowId: String(cat.id), catalogEpoch: _pkgInt(cat.epoch),
+      clinicalTreatmentType: _otsClinicalFor(cat), priceAgorot: q.grossAgorot,
+      therapist: f.therapist, date: f.date, time: f.time, location: f.location, note: f.note,
+      status: 'scheduled', statusReason: '', chargeId: 'ots-' + id, sessionLogId: '',
+      payloadHash: hash, revision: 1, opLog: '',
+      createdAt: now, createdBy: user, updatedAt: now, updatedBy: user
+    };
+    _otsPushOp(row, { op: 'create', at: now, by: user });
+    sh.appendRow(_pkgRowToCells(ONE_TIME_SESSION_HEADERS, row));
+    return { ok: true, created: true, session: _otsView(row), charge: _otsChargeDraft(row) };
+  } finally { _pkgUnlock(lock); }
+}
+
+/* Locked read-modify-write of ONE session row with op-id idempotency and an
+ * expectedRevision guard. `mutate(row, rows)` returns an error code or ''. */
+function _otsMutate(payload, mutate) {
+  if (_otsMoneyScopeOps(payload)) return { ok: false, error: 'forbidden_money_action' };
+  var id = String(payload && payload.id || '').trim();
+  if (!PACKAGE_UUID_RE.test(id)) return { ok: false, error: 'bad_id' };
+  var opId = String(payload && payload.opId || '').trim();
+  if (!PACKAGE_UUID_RE.test(opId)) return { ok: false, error: 'bad_op_id' };
+  var user = _requestUser(payload);
+  var lock = _pkgLock(10000);
+  if (!lock) return { ok: false, error: 'busy' };
+  try {
+    var sh = _ss().getSheetByName(ONE_TIME_SESSIONS_SHEET);
+    if (!sh) return { ok: false, error: 'not_found' };
+    _ensureSheet(ONE_TIME_SESSIONS_SHEET, ONE_TIME_SESSION_HEADERS);
+    var rows = _readAll(sh, ONE_TIME_SESSION_HEADERS);
+    var row = null;
+    rows.forEach(function (r) { if (String(r.id) === id) row = r; });
+    if (!row) return { ok: false, error: 'not_found' };
+    if (_otsHasOp(row, opId)) return { ok: true, replayed: true, session: _otsView(row) };
+    var expected = payload.expectedRevision;
+    if (expected === undefined || expected === null || _pkgInt(expected) !== (_pkgInt(row.revision) || 1)) return { ok: false, error: 'revision_conflict', session: _otsView(row) };
+    var err = mutate(row, rows, user);
+    if (err) return { ok: false, error: err };
+    var now = new Date().toISOString();
+    row.revision = (_pkgInt(row.revision) || 1) + 1;
+    row.updatedAt = now; row.updatedBy = user;
+    _otsPushOp(row, { op: String(payload.action || ''), opId: opId, at: now, by: user, status: String(row.status) });
+    var rowNum = _otsFindIndex(sh, id);
+    if (rowNum < 0) return { ok: false, error: 'not_found' };
+    _otsWriteRow(sh, rowNum, row);
+    return { ok: true, session: _otsView(row) };
+  } finally { _pkgUnlock(lock); }
+}
+
+/* POST updateOneTimeSession: reschedule / change therapist, location, note —
+ * a SCHEDULED session only. The linked charge keeps its own date (a one-off
+ * charge is not editable; see the user guide). */
+function _otsUpdate(payload) {
+  var s = (payload && payload.changes) || {};
+  var f = _otsFields(s, false);
+  if (f.error) return { ok: false, error: f.error };
+  if (!Object.keys(f).length) return { ok: false, error: 'no_changes' };
+  return _otsMutate(payload, function (row, rows) {
+    if (String(row.status) !== 'scheduled') return 'not_scheduled';
+    var cand = { clientId: String(row.clientId), therapist: f.therapist || String(row.therapist), date: f.date || String(row.date), time: f.time || String(row.time) };
+    var conflict = _otsConflict(rows, cand, row.id);
+    if (conflict) return conflict;
+    Object.keys(f).forEach(function (k) { row[k] = f[k]; });
+    return '';
+  });
+}
+
+/* POST cancelOneTimeSession: a scheduled (or therapist-cancelled) session is
+ * closed with a required reason. Money is NOT touched here: the card then
+ * offers the existing charge removal for an UNPAID linked charge, and flags a
+ * PAID one «שולם — לבדיקת זיכוי». */
+function _otsCancel(payload) {
+  var reason = _pkgText(payload && payload.reason, 200);
+  if (reason.length < 2 || String(payload && payload.reason || '').length > 200) return { ok: false, error: 'bad_reason' };
+  return _otsMutate(payload, function (row) {
+    var st = String(row.status);
+    if (st !== 'scheduled' && st !== 'therapist_cancelled') return 'not_cancellable';
+    row.status = 'cancelled';
+    row.statusReason = reason;
+    return '';
+  });
+}
+
+/* The ONE outcome writer (therapists receiver + ורד's markOneTimeSession).
+ * Writes the SessionLog row 'ots::<id>' and the session status under ONE lock.
+ * Never touches Clients / creditsOwed. */
+function _otsRecordOutcome(payload, source) {
+  var id = String(payload && (source === 'therapists' ? payload.oneTimeSessionId : payload.id) || '').trim();
+  if (!PACKAGE_UUID_RE.test(id)) return { ok: false, error: 'bad_id', reason: 'bad_id' };
+  var outcome = String(payload && payload.outcome || '').trim();
+  if (!_hasOwn(ONE_TIME_OUTCOME_STATUS, outcome)) return { ok: false, error: 'unknown_outcome', reason: 'unknown_outcome' };
+  if (source !== 'therapists' && _otsMoneyScopeOps(payload)) return { ok: false, error: 'forbidden_money_action' };
+  var user = source === 'therapists' ? '' : _requestUser(payload);
+  var lock = _pkgLock(10000);
+  if (!lock) return { ok: false, error: 'busy', reason: 'busy' };
+  try {
+    var sh = _ss().getSheetByName(ONE_TIME_SESSIONS_SHEET);
+    if (!sh) return { ok: false, error: 'not_found', reason: 'not_found' };
+    var rows = _readAll(sh, ONE_TIME_SESSION_HEADERS), row = null;
+    rows.forEach(function (r) { if (String(r.id) === id) row = r; });
+    if (!row) return { ok: false, error: 'not_found', reason: 'not_found' };
+    if (String(row.status) === 'cancelled') return { ok: false, error: 'session_cancelled', reason: 'session_cancelled' };
+    if (source === 'therapists') {
+      // the therapist named in the event must be the one the session is booked with
+      if (String(payload.therapist == null ? '' : payload.therapist).trim() !== String(row.therapist)) return { ok: false, error: 'therapist_mismatch', reason: 'therapist_mismatch' };
+    } else {
+      var opId = String(payload.opId || '').trim();
+      if (!PACKAGE_UUID_RE.test(opId)) return { ok: false, error: 'bad_op_id' };
+      if (_otsHasOp(row, opId)) return { ok: true, replayed: true, session: _otsView(row) };
+      if (payload.expectedRevision === undefined || _pkgInt(payload.expectedRevision) !== (_pkgInt(row.revision) || 1)) return { ok: false, error: 'revision_conflict', session: _otsView(row) };
+    }
+    if (outcome !== 'therapist_cancelled' && String(row.date) > _todayISODate()) return { ok: false, error: 'session_in_future', reason: 'session_in_future' };
+    var clinical = String(row.clinicalTreatmentType);
+    var billingType;
+    try { billingType = _clinicalToBilling(clinical); } catch (_) { return { ok: false, error: 'unknown_type', reason: 'unknown_type' }; }
+    var therapistPay;
+    try { therapistPay = _computeSessionPay(outcome, String(row.therapist), clinical, billingType); }
+    catch (_) { return { ok: false, error: 'unknown_therapist', reason: 'unknown_therapist' }; }
+    var sessionId = 'ots::' + id;
+    var logSh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var logRows = _readAll(logSh, SESSION_LOG_HEADERS), oldLog = null;
+    logRows.forEach(function (r) { if (String(r.sessionId) === sessionId) oldLog = r; });
+    var forwarded = !!(oldLog && String(oldLog.forwardedToPayroll || '').trim() !== '');
+    var logRow = {
+      sessionId: sessionId, phone: _recoverPhone(row.phone), patientName: String(row.patientName || ''),
+      clientId: String(row.clientId), therapist: String(row.therapist), clinicalTreatmentType: clinical,
+      billingType: billingType, date: String(row.date), outcome: outcome,
+      therapistPay: forwarded ? _toNumberOrZero(oldLog.therapistPay) : therapistPay,
+      clientSessionValue: outcome === 'therapist_cancelled' ? 0 : _pkgInt(row.priceAgorot) / 100,
+      sessionStatus: SESSION_STATUS_BY_OUTCOME[outcome], matchStatus: 'matched',
+      recordedAt: new Date().toISOString(), creditStatus: 'one_time',
+      forwardedToPayroll: forwarded ? String(oldLog.forwardedToPayroll).trim() : '',
+      payModel: _therapistPayModel(String(row.therapist)), oneTimeSessionId: id
+    };
+    var cells = SESSION_LOG_HEADERS.map(function (h) { var v = logRow[h]; return v === undefined || v === null ? '' : v; });
+    var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId'), lastRow = logSh.getLastRow(), written = false;
+    if (lastRow > 1) {
+      var ids = logSh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
+      for (var k = 0; k < ids.length; k++) {
+        if (String(ids[k][0]) === sessionId) { logSh.getRange(k + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([cells]); written = true; break; }
+      }
+    }
+    if (!written) logSh.appendRow(cells);
+    var now = new Date().toISOString();
+    row.status = ONE_TIME_OUTCOME_STATUS[outcome];
+    row.statusReason = '';
+    row.sessionLogId = sessionId;
+    row.revision = (_pkgInt(row.revision) || 1) + 1;
+    row.updatedAt = now; row.updatedBy = user;
+    _otsPushOp(row, { op: 'outcome', opId: source === 'therapists' ? '' : String(payload.opId), at: now, by: user || source, status: row.status });
+    var rowNum = _otsFindIndex(sh, id);
+    if (rowNum > 0) _otsWriteRow(sh, rowNum, row);
+    return { ok: true, sessionId: sessionId, status: row.status, session: source === 'therapists' ? undefined : _otsView(row) };
+  } finally { _pkgUnlock(lock); }
+}
+
 var SOURCE_GET_AUTH = {
   getData: 'OUTPATIENT_PROXY_SECRET',
   getPayments: 'OUTPATIENT_PROXY_SECRET',
@@ -7139,6 +7563,10 @@ var SOURCE_GET_AUTH = {
   getActivity: 'OUTPATIENT_PROXY_SECRET',
   getCredits: 'OUTPATIENT_PROXY_SECRET',
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
+  // One-time sessions (2026-11-11): internal reads + the therapists app's price-free feed.
+  getOneTimeSessions: 'OUTPATIENT_PROXY_SECRET',
+  getOneTimeServices: 'OUTPATIENT_PROXY_SECRET',
+  getOneTimeSessionsFeed: 'ONE_TIME_SESSIONS_SECRET',
   // Package catalog (managers): price-free reads, their own scoped secret.
   getPackageCatalogPublic: 'PACKAGE_CATALOG_SECRET',
   getPackageRequestStatus: 'PACKAGE_CATALOG_SECRET'
@@ -7216,6 +7644,11 @@ var SOURCE_POST_AUTH = {
   removeChargesForClient: 'OUTPATIENT_PROXY_SECRET',
   removePaymentsForClient: 'OUTPATIENT_PROXY_SECRET',
   removeLead: 'OUTPATIENT_PROXY_SECRET',
+  // One-time sessions (2026-11-11): internal writes through the Node proxy only.
+  createOneTimeSession: 'OUTPATIENT_PROXY_SECRET',
+  updateOneTimeSession: 'OUTPATIENT_PROXY_SECRET',
+  cancelOneTimeSession: 'OUTPATIENT_PROXY_SECRET',
+  markOneTimeSession: 'OUTPATIENT_PROXY_SECRET',
   // Package catalog: managers submit with their own secret; every admin
   // action ALSO needs the CATALOG_ADMIN assertion (see _sourceAuthOk).
   createPackageRequest: 'PACKAGE_REQUEST_SECRET',
@@ -7249,6 +7682,7 @@ function _sourceAuthOk(action, method, params, payload) {
   var expected = PropertiesService.getScriptProperties().getProperty(key);
   if (typeof expected !== 'string' || !expected || typeof got !== 'string') return false;
   if (key === 'OUTPATIENT_PROXY_SECRET' && expected.trim().length < 32) return false;
+  if (key === 'ONE_TIME_SESSIONS_SECRET' && expected.trim().length < 32) return false;
   if ((key === 'PACKAGE_CATALOG_SECRET' || key === 'PACKAGE_REQUEST_SECRET') && !_pkgConfigSecretOk(key, expected)) return false;
   if (got.length !== expected.length) return false;
   var diff = 0;
@@ -7329,6 +7763,10 @@ function doGet(e) {
     // INTERNAL dashboard read (same trust level as getData): un-restored
     // Clients-removed tombstones, for the admin restore surface.
     if (action === 'getRemovedClients') return _json(_getRemovedClients());
+    // One-time sessions (טיפול חד פעמי): internal list / services, cross-app price-free feed.
+    if (action === 'getOneTimeSessions') return _json(_otsList());
+    if (action === 'getOneTimeServices') return _json(_otsServices());
+    if (action === 'getOneTimeSessionsFeed') return _json(_otsFeed());
     // Package catalog (managers): price-free explicit views only.
     if (action === 'getPackageCatalogPublic') return _json(_pkgPublicCatalog());
     if (action === 'getPackageRequestStatus') return _json(_pkgManagerStatus(e && e.parameter));
@@ -7475,6 +7913,11 @@ function doPost(e) {
       if (!_sessionOutcomeAuthOk(soParams)) {
         return _json({ ok: false, error: 'unauthorized' });
       }
+      // One-time session (טיפול חד פעמי): its own writer — outside the package
+      // quota and the credit engine. The session row is authoritative.
+      if (payload && payload.oneTimeSessionId != null && payload.oneTimeSessionId !== '') {
+        return _json(_otsRecordOutcome(payload, 'therapists'));
+      }
       // Cross-app receiver (therapists → /exec directly, no proxy): stamps
       // WHEN only — a caller-supplied `user` is never taken as updatedBy.
       return _json(_recordSessionOutcome(Object.assign({}, payload, { user: '' })));
@@ -7620,6 +8063,10 @@ function doPost(e) {
       return _json(_removePaymentsForClient(payload.clientId));
     }
     if (action === 'removeLead') return _json(_removeLead(payload.lead, _requestUser(payload)));
+    if (action === 'createOneTimeSession') return _json(_otsCreate(payload));
+    if (action === 'updateOneTimeSession') return _json(_otsUpdate(payload));
+    if (action === 'cancelOneTimeSession') return _json(_otsCancel(payload));
+    if (action === 'markOneTimeSession') return _json(_otsRecordOutcome(payload, 'outpatient'));
     // Package catalog. Managers: createPackageRequest (own secret, safe view).
     // Vered-only admin actions already passed the CATALOG_ADMIN assertion in
     // _sourceAuthOk above; each handler returns fixed error codes only.
