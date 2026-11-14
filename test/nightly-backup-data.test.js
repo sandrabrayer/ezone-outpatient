@@ -104,12 +104,12 @@ test('misconfigured live workbook as backup is rejected before any write', () =>
   assert.ok(h.logs.some(l => l.includes('Backup destination is the live spreadsheet')));
 });
 
-test('retention matches the eight exact data families and their manifest, never staging remnants or other apps', () => {
+test('retention matches registered typed snapshot families, including one-time sessions, never unrelated sheets', () => {
   const h = harness();
-  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-', 'payments-', 'charges-', 'credits-', 'financial-ops-', 'manifest-']) {
+  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-', 'payments-', 'charges-', 'credits-', 'financial-ops-', 'one-time-sessions-', 'manifest-']) {
     assert.equal(h.ctx._integrityIsExpiredSnapshot('outpatient-'+family+'2026-01-01','outpatient-2026-10-09',30),true);
   }
-  for (const name of ['outpatient-pending-2026-01-01','outpatient-previous-2026-01-01','outpatient-payments-manual-2026-01-01','dashboard-2026-01-01','outpatient-leads-2026-1-1','manual']) {
+  for (const name of ['outpatient-pending-2026-01-01','outpatient-previous-2026-01-01','outpatient-payments-manual-2026-01-01','outpatient-one-time-sessions-manual-2026-01-01','dashboard-2026-01-01','outpatient-leads-2026-1-1','manual']) {
     assert.equal(h.ctx._integrityIsExpiredSnapshot(name,'outpatient-2026-10-09',30),false);
   }
 });
