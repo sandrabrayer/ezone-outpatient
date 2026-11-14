@@ -180,6 +180,33 @@ test('therapists receiver: recordSessionOutcome + oneTimeSessionId, secret fail-
   assert.equal(send({ secret: OUTCOME_SECRET }).error, 'unauthorized', 'unset secret → fail closed');
 });
 
+test('cross-app parity: valid one-time UUID accepts missing phone, uses OUT source identity and upserts one pay row', () => {
+  const { sb, raw, create } = fixture();
+  const booked = create(1);
+  assert.equal(booked.ok, true);
+  const before = sb.rows('Clients')[0];
+  const credits = before.creditsOwed;
+  const send = (event) => raw(Object.assign({
+    action: 'recordSessionOutcome', secret: OUTCOME_SECRET,
+    oneTimeSessionId: U(1), therapist: 'הילה תבור', outcome: 'happened',
+    phone: '', sessionId: 'untrusted-app-row', clinicalTreatmentType: 'טיפול אחר',
+    date: '2020-01-01', amount: -99
+  }, event || {}));
+  const once = send();
+  assert.equal(once.ok, true, JSON.stringify(once));
+  assert.equal(once.sessionId, 'ots::' + U(1), 'OUT alone owns the one-time session identity');
+  assert.equal(sb.rows('SessionLog').length, 1);
+  const log = sb.rows('SessionLog')[0];
+  assert.equal(log.sessionId, 'ots::' + U(1));
+  assert.equal(log.phone, '0501234567', 'OUT owns original client details even without phone in THR event');
+  assert.equal(log.clinicalTreatmentType, 'פרטני EMDR', 'forged type cannot replace original source');
+  assert.equal(log.therapist, 'הילה תבור');
+  assert.equal(sb.rows('Clients')[0].creditsOwed, credits, 'no package credit is consumed');
+  const again = send();
+  assert.equal(again.ok, true);
+  assert.equal(sb.rows('SessionLog').length, 1, 'retry/upsert does not create duplicate payout rows');
+});
+
 test('feed: price-free allowlist, current client name/phone, fail-closed secret (unset or short)', () => {
   const { sb, create } = fixture();
   create(1, { catalogKey: 'psychiatric_diagnosis', therapist: 'ד"ר מיכאל שפרינץ' });
