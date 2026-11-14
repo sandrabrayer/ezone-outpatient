@@ -8305,6 +8305,11 @@ function _integritySourceSpecs() {
     { source: 'Credits', prefix: 'credits-', key: 'id', headers: CREDIT_COLUMNS },
     { source: 'FinancialOps', prefix: 'financial-ops-', key: 'id', headers: FINANCIAL_OP_HEADERS },
     { source: 'SessionLog', prefix: 'session-log-', key: 'sessionId', headers: SESSION_LOG_HEADERS },
+    // One-time sessions own their schedule, charge link and source outcome; typed
+    // backup/restore must preserve the full append-only schema and stable ID.
+    // Optional until the first OTS booking creates the sheet; then tracked like
+    // every other named operational source (not an anonymous legacy fallback).
+    { source: ONE_TIME_SESSIONS_SHEET, prefix: 'one-time-sessions-', key: 'id', headers: ONE_TIME_SESSION_HEADERS },
     { source: 'TherapistRates', prefix: 'therapist-rates-', key: 'name', headers: THERAPIST_RATES_HEADERS },
     { source: 'Settings', prefix: 'settings-', key: 'key', headers: SETTINGS_HEADERS },
     { source: 'StopFlags', prefix: 'stop-flags-', key: 'id', headers: STOP_FLAGS_HEADERS },
