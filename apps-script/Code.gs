@@ -7406,6 +7406,19 @@ function _otsCreate(payload) {
   var canonical = { clientId: clientId, catalogKey: catalogKey, therapist: f.therapist, date: f.date, time: f.time, location: f.location, note: f.note };
   var hash = _pkgSha256Hex(_pkgCanonicalJson(canonical));
   var user = _requestUser(payload);
+  // Idempotent replay must succeed EVEN if the remote calendar is now busy
+  // with this exact booking or its source feed is temporarily unavailable.
+  // This is a read-only fast path; the locked writer repeats the same ID guard.
+  var known = _otsRows();
+  for (var pre = 0; pre < known.length; pre++) {
+    if (String(known[pre].id) !== id) continue;
+    if (String(known[pre].payloadHash) !== hash) return { ok: false, error: 'id_conflict' };
+    return { ok: true, duplicate: true, session: _otsView(known[pre]), charge: _otsChargeDraft(known[pre]) };
+  }
+  // The THR/house source can be slow. NEVER hold the OUT ScriptLock while
+  // doing a cross-app network request: this lock also serves finance writes.
+  var preflightBusy = _otsExternalBusy(f.therapist, f.date, f.time, '');
+  if (preflightBusy) return { ok: false, error: preflightBusy };
   var lock = _pkgLock(10000);
   if (!lock) return { ok: false, error: 'busy' };
   try {
@@ -7424,10 +7437,10 @@ function _otsCreate(payload) {
     if (!cat || !_otsIsSingle(cat)) return { ok: false, error: 'invalid_service' };
     var q = _pkgComputeQuote(cat, 0);
     if (!q.ok || !_pkgIsIntInRange(q.grossAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_service' };
+    // Recheck against the freshest OUT rows under lock; a second OUT writer
+    // may have booked the slot while the THR preflight was in progress.
     var conflict = _otsConflict(rows, { clientId: clientId, therapist: f.therapist, date: f.date, time: f.time }, '');
     if (conflict) return { ok: false, error: conflict };
-    var externalConflict = _otsExternalBusy(f.therapist, f.date, f.time, '');
-    if (externalConflict) return { ok: false, error: externalConflict };
     var now = new Date().toISOString();
     var row = {
       id: id, clientId: clientId, patientName: String(client.name || '').trim(), phone: _recoverPhone(client.phone),
@@ -7487,18 +7500,35 @@ function _otsUpdate(payload) {
   var f = _otsFields(s, false);
   if (f.error) return { ok: false, error: f.error };
   if (!Object.keys(f).length) return { ok: false, error: 'no_changes' };
+  // Preflight a move without the global lock. The locked _otsMutate will
+  // check expectedRevision, opId replay, status and OUT-local conflicts again.
+  // Never preflight note/location-only edits, unauthorized writes or replays.
+  var preId = String(payload && payload.id || '').trim();
+  var preOpId = String(payload && payload.opId || '').trim();
+  if (!_otsMoneyScopeOps(payload) && PACKAGE_UUID_RE.test(preId) && PACKAGE_UUID_RE.test(preOpId)) {
+    var preRows = _otsRows(), original = null;
+    preRows.forEach(function (r) { if (String(r.id) === preId) original = r; });
+    if (original && String(original.status) === 'scheduled' &&
+        !_otsHasOp(original, preOpId) &&
+        payload.expectedRevision !== undefined &&
+        _pkgInt(payload.expectedRevision) === (_pkgInt(original.revision) || 1)) {
+      var target = { therapist: f.therapist || String(original.therapist),
+        date: f.date || String(original.date), time: f.time || String(original.time) };
+      if (target.therapist !== String(original.therapist) ||
+          target.date !== String(original.date) ||
+          target.time !== String(original.time)) {
+        var preflightError = _otsExternalBusy(target.therapist, target.date, target.time, original.id);
+        if (preflightError) return { ok: false, error: preflightError };
+      }
+    }
+  }
   return _otsMutate(payload, function (row, rows) {
     if (String(row.status) !== 'scheduled') return 'not_scheduled';
     var cand = { clientId: String(row.clientId), therapist: f.therapist || String(row.therapist), date: f.date || String(row.date), time: f.time || String(row.time) };
     var conflict = _otsConflict(rows, cand, row.id);
     if (conflict) return conflict;
-    // A note/location-only edit does not occupy new time. A moved booking or
-    // changed therapist must pass a fresh THR availability check, excluding
-    // ONLY the same OTS id if its old mirror still exists in THR.
-    if (cand.therapist !== String(row.therapist) || cand.date !== String(row.date) || cand.time !== String(row.time)) {
-      var externalConflict = _otsExternalBusy(cand.therapist, cand.date, cand.time, row.id);
-      if (externalConflict) return externalConflict;
-    }
+    // Outpatient overlap and revision checks remain locked. Remote THR
+    // availability was verified before acquiring the global lock.
     Object.keys(f).forEach(function (k) { row[k] = f[k]; });
     return '';
   });
