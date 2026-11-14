@@ -37,6 +37,17 @@ function fixture() {
   return { sb, raw, post, get, create };
 }
 
+test('OP03 typed backup recognises the new source-of-truth OneTimeSessions before first booking', () => {
+  const { sb } = fixture();
+  const specs = plain(sb.ctx._integritySourceSpecs());
+  const ours = specs.filter(x => x.source === 'OneTimeSessions');
+  assert.equal(ours.length, 1, 'single typed family, not unknown/unclassified fallback');
+  assert.equal(ours[0].prefix, 'one-time-sessions-');
+  assert.equal(ours[0].key, 'id');
+  assert.deepEqual(ours[0].headers, plain(sb.ctx.ONE_TIME_SESSION_HEADERS));
+  assert.equal(ours[0].required, undefined, 'new optional sheet is not required before first appointment');
+});
+
 test('schema + auth: append-only headers, proxy-only internal actions, the feed has its own secret', () => {
   const { sb } = fixture();
   assert.deepEqual(plain(sb.ctx.ONE_TIME_SESSION_HEADERS), ['id', 'clientId', 'patientName', 'phone', 'catalogKey', 'catalogRowId', 'catalogEpoch', 'clinicalTreatmentType', 'priceAgorot', 'therapist', 'date', 'time', 'location', 'note', 'status', 'statusReason', 'chargeId', 'sessionLogId', 'payloadHash', 'revision', 'opLog', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy']);
