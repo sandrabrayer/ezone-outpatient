@@ -7345,6 +7345,35 @@ function _otsFields(s, needAll) {
   return f;
 }
 
+/* One-time therapist availability comes from the THR application's OWN
+ * Schedule + weekly assignments, never from stale browser calendars. This is
+ * a dedicated price-free, read-only server-to-server query. Fail CLOSED if its
+ * secret is absent, backend unavailable, schedule incomplete, or answer
+ * malformed: an unchecked booking must not be created or moved. We do not
+ * change the existing Coordinators busy feed/credential. */
+var OTS_THERAPIST_BUSY_URL = 'https://ezone-therapists.up.railway.app/feeds/out-one-time-busy';
+function _otsExternalBusy(therapist, date, time, excludeId) {
+  var key = String(PropertiesService.getScriptProperties().getProperty('OUT_ONE_TIME_BUSY_SECRET') || '');
+  if (key.length < 32) return 'calendar_unavailable';
+  try {
+    var url = OTS_THERAPIST_BUSY_URL +
+      '?therapist=' + encodeURIComponent(String(therapist)) +
+      '&date=' + encodeURIComponent(String(date)) +
+      '&time=' + encodeURIComponent(String(time)) +
+      (excludeId ? '&excludeOneTimeId=' + encodeURIComponent(String(excludeId)) : '');
+    var resp = UrlFetchApp.fetch(url, {
+      method: 'get', headers: { 'X-One-Time-Busy-Secret': key },
+      muteHttpExceptions: true, followRedirects: true
+    });
+    if (resp.getResponseCode() !== 200) return 'calendar_unavailable';
+    var data = JSON.parse(resp.getContentText());
+    if (!data || data.ok !== true || typeof data.busy !== 'boolean') return 'calendar_unavailable';
+    return data.busy ? 'therapist_busy_existing' : '';
+  } catch (_) {
+    return 'calendar_unavailable';
+  }
+}
+
 /* POST createOneTimeSession (proxy; MONEY action). Idempotent by the client
  * UUID: the same id + the same payload answers the stored row (duplicate:true)
  * at any later time; the same id + a different payload is refused. */
@@ -7382,6 +7411,8 @@ function _otsCreate(payload) {
     if (!q.ok || !_pkgIsIntInRange(q.grossAgorot, 1, PACKAGE_MAX_AGOROT)) return { ok: false, error: 'invalid_service' };
     var conflict = _otsConflict(rows, { clientId: clientId, therapist: f.therapist, date: f.date, time: f.time }, '');
     if (conflict) return { ok: false, error: conflict };
+    var externalConflict = _otsExternalBusy(f.therapist, f.date, f.time, '');
+    if (externalConflict) return { ok: false, error: externalConflict };
     var now = new Date().toISOString();
     var row = {
       id: id, clientId: clientId, patientName: String(client.name || '').trim(), phone: _recoverPhone(client.phone),
@@ -7446,6 +7477,13 @@ function _otsUpdate(payload) {
     var cand = { clientId: String(row.clientId), therapist: f.therapist || String(row.therapist), date: f.date || String(row.date), time: f.time || String(row.time) };
     var conflict = _otsConflict(rows, cand, row.id);
     if (conflict) return conflict;
+    // A note/location-only edit does not occupy new time. A moved booking or
+    // changed therapist must pass a fresh THR availability check, excluding
+    // ONLY the same OTS id if its old mirror still exists in THR.
+    if (cand.therapist !== String(row.therapist) || cand.date !== String(row.date) || cand.time !== String(row.time)) {
+      var externalConflict = _otsExternalBusy(cand.therapist, cand.date, cand.time, row.id);
+      if (externalConflict) return externalConflict;
+    }
     Object.keys(f).forEach(function (k) { row[k] = f[k]; });
     return '';
   });
