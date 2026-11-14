@@ -7415,6 +7415,19 @@ function _otsCreate(payload) {
     if (String(known[pre].payloadHash) !== hash) return { ok: false, error: 'id_conflict' };
     return { ok: true, duplicate: true, session: _otsView(known[pre]), charge: _otsChargeDraft(known[pre]) };
   }
+  // Preserve the original service/client-validation precedence: an inactive
+  // or non-single catalog item is an invalid_service, not a slot conflict.
+  // The locked path repeats these exact checks on current source data.
+  var preClientSheet = _ss().getSheetByName('Clients'), preClientValid = false;
+  if (preClientSheet) _readAll(preClientSheet, CLIENTS_HEADERS).forEach(function (c) {
+    if (String(c.id) === clientId) preClientValid = true;
+  });
+  if (!preClientValid) return { ok: false, error: 'client_not_found' };
+  var preCatalog = _pkgActiveRowByKey(_otsCatalogRows(), catalogKey);
+  if (!preCatalog || !_otsIsSingle(preCatalog)) return { ok: false, error: 'invalid_service' };
+  var preQuote = _pkgComputeQuote(preCatalog, 0);
+  if (!preQuote.ok || !_pkgIsIntInRange(preQuote.grossAgorot, 1, PACKAGE_MAX_AGOROT))
+    return { ok: false, error: 'invalid_service' };
   // Reject a known overlapping OUT-owned session cheaply, before the remote
   // read. The same check runs again under lock after preflight, because another
   // OUT booking may be created while the cross-app request is in flight.
@@ -7519,11 +7532,15 @@ function _otsUpdate(payload) {
         !_otsHasOp(original, preOpId) &&
         payload.expectedRevision !== undefined &&
         _pkgInt(payload.expectedRevision) === (_pkgInt(original.revision) || 1)) {
-      var target = { therapist: f.therapist || String(original.therapist),
+      var target = { clientId: String(original.clientId),
+        therapist: f.therapist || String(original.therapist),
         date: f.date || String(original.date), time: f.time || String(original.time) };
       if (target.therapist !== String(original.therapist) ||
           target.date !== String(original.date) ||
           target.time !== String(original.time)) {
+        // This exact OUT conflict is checked again under lock after preflight.
+        var localMoveConflict = _otsConflict(preRows, target, original.id);
+        if (localMoveConflict) return { ok: false, error: localMoveConflict };
         var preflightError = _otsExternalBusy(target.therapist, target.date, target.time, original.id);
         if (preflightError) return { ok: false, error: preflightError };
       }
