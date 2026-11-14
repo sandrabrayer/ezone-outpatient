@@ -7315,11 +7315,26 @@ function _otsWriteRow(sh, rowNum, row) {
 }
 /* Another SCHEDULED session that would collide: the same patient at the same
  * date+time, or the same therapist at the same date+time. */
+/* OUT's own one-time sessions are authoritative immediately, while the
+ * THR diary may mirror them only after the next background feed. Check WHOLE
+ * reserved slots here so two requests at 10:00 and 10:30 cannot both pass just
+ * because they have different start times. The 60-minute protective window is
+ * the same conservative default as the THR appointment conflict engine. */
+var OTS_SLOT_DURATION_MIN = 60;
+function _otsClockMinutes(t) {
+  var p = String(t == null ? '' : t).split(':');
+  return p.length === 2 ? (+p[0] * 60 + +p[1]) : -1;
+}
 function _otsConflict(rows, cand, exceptId) {
+  var candStart = _otsClockMinutes(cand.time);
+  if (candStart < 0) return 'bad_time';
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     if (String(r.id) === String(exceptId || '') || String(r.status) !== 'scheduled') continue;
-    if (String(r.date) !== cand.date || String(r.time) !== cand.time) continue;
+    if (String(r.date) !== cand.date) continue;
+    var otherStart = _otsClockMinutes(r.time);
+    if (otherStart < 0) return 'calendar_unavailable'; // malformed retained row must not certify free
+    if (!(candStart < otherStart + OTS_SLOT_DURATION_MIN && otherStart < candStart + OTS_SLOT_DURATION_MIN)) continue;
     if (String(r.clientId) === cand.clientId) return 'duplicate_session';
     if (String(r.therapist) === cand.therapist) return 'therapist_busy';
   }
