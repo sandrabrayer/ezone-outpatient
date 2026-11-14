@@ -218,6 +218,28 @@ test('cross-app parity: valid one-time UUID accepts missing phone, uses OUT sour
   assert.equal(sb.rows('SessionLog').length, 1, 'retry/upsert does not create duplicate payout rows');
 });
 
+test('OUT source itself blocks overlapping one-time sessions before delayed THR mirroring', () => {
+  const { sb, create, post } = fixture();
+  assert.equal(create(1).ok, true); // patient A + therapist Hila at 10:00
+  const therapistCollision = create(2, { clientId: OTHER.id, time: '10:30' });
+  assert.equal(therapistCollision.error, 'therapist_busy',
+    '10:30 conflicts with 10:00 within the full protected appointment window');
+  const patientCollision = create(3, { therapist: 'דנה כהן', time: '10:45' });
+  assert.equal(patientCollision.error, 'duplicate_session',
+    'the same patient must not be scheduled with two therapists at overlapping times');
+  assert.equal(create(4, { clientId: OTHER.id, therapist: 'דנה כהן', time: '10:45' }).ok, true,
+    'different patient and therapist are not blocked merely by time');
+  assert.equal(create(5, { time: '11:00' }).ok, true, 'adjacent hour boundary remains available');
+  const moveCollision = post({ action: 'updateOneTimeSession', id: U(5), expectedRevision: 1,
+    opId: U(401), changes: { time: '10:50' } });
+  assert.equal(moveCollision.error, 'duplicate_session', 'a move cannot collide with another OUT-owned slot');
+  assert.equal(sb.rows('OneTimeSessions').find(x => x.id === U(5)).time, '11:00',
+    'refused move cannot partially modify the source');
+  assert.equal(sb.rows('OneTimeSessions').length, 3,
+    'only the distinct nonoverlapping booked rows are present');
+  assert.equal(sb.busy.calls.length, 3, 'internal conflicts are rejected before any external busy round-trip');
+});
+
 test('THR source regular/recurring collision: OUT one-time CREATE fails before writing even with free OTS-only calendar', () => {
   const { sb, create } = fixture();
   sb.busy.occupied = true;
