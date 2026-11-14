@@ -7415,6 +7415,13 @@ function _otsCreate(payload) {
     if (String(known[pre].payloadHash) !== hash) return { ok: false, error: 'id_conflict' };
     return { ok: true, duplicate: true, session: _otsView(known[pre]), charge: _otsChargeDraft(known[pre]) };
   }
+  // Reject a known overlapping OUT-owned session cheaply, before the remote
+  // read. The same check runs again under lock after preflight, because another
+  // OUT booking may be created while the cross-app request is in flight.
+  var preflightLocal = _otsConflict(known, {
+    clientId: clientId, therapist: f.therapist, date: f.date, time: f.time
+  }, '');
+  if (preflightLocal) return { ok: false, error: preflightLocal };
   // The THR/house source can be slow. NEVER hold the OUT ScriptLock while
   // doing a cross-app network request: this lock also serves finance writes.
   var preflightBusy = _otsExternalBusy(f.therapist, f.date, f.time, '');
