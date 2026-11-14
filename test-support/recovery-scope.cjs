@@ -3,7 +3,7 @@
 // Conditional CRM schemas allow the same tests to qualify pre/post-CRM builds.
 const assert = require('node:assert/strict');
 const base = ['Clients','Leads','לידים שהוסרו','Clients-removed','Payments',
-  'ClientCharges','Credits','FinancialOps','SessionLog','TherapistRates','Settings',
+  'ClientCharges','Credits','FinancialOps','SessionLog','OneTimeSessions','TherapistRates','Settings',
   'StopFlags','ExtraSessionRequests','מסלול המשך','התראות עצירת טיפול',
   'AuditLog','RepairPlan','PackageCatalog','PackageRequests'];
 function expectedSources(ctx, extra = []) {
