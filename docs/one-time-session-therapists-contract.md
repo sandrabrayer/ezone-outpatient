@@ -1,64 +1,100 @@
-# One-time sessions — therapists-app contract
+# One-time sessions — OUT / therapists contract
 
-Source: outpatient Apps Script (`/exec`, the existing deployment). Owner of the
-data: the outpatient app (`OneTimeSessions` sheet). See `CHANGELOG-one-time-session.md`.
+Source of booking, price and charge: outpatient Apps Script `OneTimeSessions`.
+Current paired candidate: OUT #181 + THR #146. Old THR #143/#145 are closed and must not be deployed.
+Development verification is not production authorization. See `one-time-session-release-verification.md`.
 
 ## 1. Read — price-free feed
 
 `GET /exec?action=getOneTimeSessionsFeed&secret=<ONE_TIME_SESSIONS_SECRET>`
 
-- Secret: Script Property `ONE_TIME_SESSIONS_SECRET` on the outpatient Apps Script,
-  **≥ 32 characters**, compared in constant time. Unset, short or wrong →
-  `{ ok:false, error:'unauthorized' }` (fail closed). The therapists side stores the
-  same value (Script Property / Railway variable — never in code or git).
-- The outpatient Node proxy refuses this action from a browser (403); call `/exec` directly.
-- Response: `{ ok:true, sessions:[ … ] }`, sorted by date + time, from 60 days ago onward.
-  Each item has **exactly** these keys (pinned by `test/one-time-session.test.js`):
+The same secret (at least 32 characters) must be present in OUT and THR **Apps Script** properties.
+It is compared in constant time; unset, short or wrong returns `{ok:false,error:'unauthorized'}`.
+Never include the value in source, logs or review comments. OUT's Node browser proxy rejects this action (403).
 
-| key | meaning |
+Response: `{ok:true,sessions:[...]}`, sorted by date/time, from 60 days ago onward.
+Each item contains only the following keys:
+
+| Key | Meaning |
 | --- | --- |
-| `id` | session UUID (stable) |
-| `patientName` | the client's current name (snapshot if the client is gone) |
-| `phone` | the client's current phone, canonical `0XXXXXXXXX` |
-| `therapist` | exact full name (same string as `TherapistRates` / the staffing roster) |
+| `id` | Stable session UUID |
+| `patientName` | Current client name; saved snapshot if client unavailable |
+| `phone` | Current stored client phone with existing recovery; snapshot fallback |
+| `therapist` | Exact full therapist name; no fuzzy/partial name matching |
 | `date` | `YYYY-MM-DD` |
-| `time` | `HH:MM` (24h) |
-| `location` | Hebrew house/branch label or `''` |
-| `status` | `scheduled` · `completed` · `no_show` · `therapist_cancelled` · `cancelled` |
-| `clinicalTreatmentType` | `פרטני EMDR` · `פרטני CBT` · `מעקב פסיכיאטרי` · `אינטייק` |
-| `catalogKey` | the catalog row key (informational) |
+| `time` | `HH:MM` |
+| `location` | Hebrew house/branch label or empty string |
+| `status` | `scheduled`, `completed`, `no_show`, `therapist_cancelled`, `cancelled` |
+| `clinicalTreatmentType` | Existing supported clinical treatment type |
+| `catalogKey` | Informational catalogue key |
 
-**No amount, price, VAT, charge id, payment state, note or hash ever crosses.**
-Match a session to a therapist by **exact** name; never by a partial or normalized name.
+No amount, VAT, charge ID, payment state, note or hash crosses this feed.
+THR mirrors the exact booking as Schedule ID `ots_<uuid>`; moves/cancellations update the same row.
+A terminal OUT source status does not forge a local therapist outcome, coordinator approval or pay record.
+Feed failure must be surfaced as unavailable, not silently treated as a valid empty feed.
 
-## 2. Write — mark the outcome
+## 2. Write — outcome
 
-`POST /exec` with the existing `recordSessionOutcome` action and secret:
+`POST /exec` through the existing signed `recordSessionOutcome` action:
 
 ```json
-{ "action": "recordSessionOutcome", "secret": "<SESSION_OUTCOME_SECRET>",
-  "oneTimeSessionId": "<id>", "therapist": "<exact name>", "outcome": "happened" }
+{"action":"recordSessionOutcome","secret":"<SESSION_OUTCOME_SECRET>","oneTimeSessionId":"<uuid>","therapist":"<exact name>","outcome":"happened"}
 ```
 
-- `outcome`: `happened` · `patient_no_show` · `therapist_cancelled`.
-- `therapist` must equal the session's therapist (`therapist_mismatch` otherwise).
-- `happened` / `patient_no_show` are refused before the session date (`session_in_future`).
-- A cancelled session takes no outcome (`session_cancelled`).
-- Idempotent: re-sending the same outcome writes the same single SessionLog row
-  (`sessionId` = `ots::<id>`); a different outcome corrects it in place.
-- The session row is authoritative for date, patient, clinical type and price —
-  `phone`, `date`, `clinicalTreatmentType`, `user`, amounts in the event are ignored.
-- Response: `{ ok:true, sessionId:'ots::<id>', status:'completed' }` — price-free.
-  Errors: `{ ok:false, error, reason }` with `not_found`, `unknown_outcome`,
-  `therapist_mismatch`, `session_in_future`, `session_cancelled`,
-  `unknown_therapist` (no usable rate in `TherapistRates` — nothing written), `busy`.
+- Allowed outcomes: `happened`, `patient_no_show`, `therapist_cancelled`.
+- THR forwards after coordinator approval. Exact UUID outcome forwarding does not require a phone;
+  ordinary treatment phone checks remain unchanged.
+- Exact therapist must match. Future happened/no-show and cancelled bookings are rejected.
+- The OUT booking supplies patient, date, clinical type and price; event phone/date/amounts are ignored.
+- Retries upsert one SessionLog row `ots::<uuid>`, not a second pay row. A corrected outcome updates it in place.
+- Normal TherapistRates apply; salaried pay is zero; previously forwarded payroll retains its pay.
+- One-time rows are outside package quota/credit accounting; `creditsOwed` is untouched.
+- Success is price-free: `{ok:true,sessionId:'ots::<uuid>',status:'completed'}`.
+  Errors include `not_found`, `unknown_outcome`, `therapist_mismatch`, `session_in_future`,
+  `session_cancelled`, `unknown_therapist`, `busy`.
 
-Pay: the normal `TherapistRates` rule (salaried «גלובלי» → 0). Not part of the
-package: no quota, no credit. A row already forwarded to payroll keeps its pay.
+## 3. Availability — patient-aware POST, required before create/move
 
-## 3. What the therapists app should show
+`POST https://ezone-therapists.up.railway.app/feeds/out-one-time-busy`
 
-The assigned therapist's schedule/dashboard: a «חד פעמי» chip with
-date · time · patient · service (Hebrew by clinical type) · location, and
-«בוצע» / «לא הגיע» / «בוטל ע״י המטפל/ת» actions for a `scheduled` session on or
-after its date. Feed unavailable → keep the last data, amber notice, zero writes.
+Header: `X-One-Time-Busy-Secret: <OUT_ONE_TIME_BUSY_SECRET>`.
+Use the dedicated same key in THR Railway and OUT Apps Script; never overwrite the existing
+Coordinators `THERAPIST_BUSY_SECRET`. This key is distinct from the one-time feed key above.
+
+```json
+{"therapist":"<exact name>","date":"YYYY-MM-DD","time":"HH:MM","patientPhone":"0XXXXXXXXX","excludeOneTimeId":"<optional uuid>"}
+```
+
+OUT resolves phone from the exact current Clients.id, never a browser-supplied phone. Move uses the
+stored session.clientId. The phone is only in the body, not the URL or response. THR requires its
+existing canonical 10-digit format. A 9-digit local landline that OUT accepts cannot pass THR's stricter
+calendar-key validator; this fails closed, not free. Do not fabricate a mobile number to bypass it.
+
+THR reads fresh Schedule/active recurring Assignments. Busy means overlap for the same therapist OR
+same canonical calendar phone. Date boundaries/durations/cancellations and exact OTS self-exclusion apply.
+Residential therapist overlap is additionally checked using its fresh existing feed.
+
+Only `{ok:true,busy:<boolean>,patientChecked:true}` is valid. Old GET remains therapist-only and
+never returns patientChecked. Missing key/invalid phone/failed source/malformed or old response blocks
+new bookings and moves. All external reads happen outside the OUT global finance lock; exact current
+phone/target/revision/local overlaps are revalidated under the lock before mutation. Exact replay is
+handled first, without another remote check. Cancellation/outcome/UUID-only syncing is not newly phone-gated.
+
+This is conservative conflict prevention, NOT identity linking or merging. Shared household phones can
+over-block. Missing legacy appointment phones cannot establish a same-patient match. Residential patient
+identity is not exposed, so residential same-patient overlap is not proven. The check is not a distributed
+reservation across two apps; simultaneous independent writes still require operational oversight.
+
+## 4. UI and staged release
+
+THR shows the single-session chip and assigned therapist's permitted outcomes; coordinator approval
+remains separate. OUT rejects malformed session/catalogue reads rather than showing false empty state.
+After an accepted mutation, failed readback clears actionable stale rows and warns not to repeat the write.
+Later successful read clears only the one-time load gap, preserving unrelated finance errors.
+
+After explicit release approval: provision dedicated keys securely; deploy/verify THR's patient-aware
+Node route BEFORE OUT's new booking path; release OUT Node plus its separate exact-commit Apps Script
+workflow; finish the paired THR Apps Script deployment and verify versions/cache. Verify the existing
+catalogue read-only, do not blindly import. Missing integration must remain unavailable throughout staging.
+Approved test-patient, clinical/payment-scoped UAT is still required. No source/financial data, secrets,
+merges or deployments were changed by this verification work.
