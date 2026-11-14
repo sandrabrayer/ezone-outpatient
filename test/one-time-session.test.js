@@ -207,6 +207,60 @@ test('cross-app parity: valid one-time UUID accepts missing phone, uses OUT sour
   assert.equal(sb.rows('SessionLog').length, 1, 'retry/upsert does not create duplicate payout rows');
 });
 
+test('THR source regular/recurring collision: OUT one-time CREATE fails before writing even with free OTS-only calendar', () => {
+  const { sb, create } = fixture();
+  sb.busy.occupied = true;
+  const result = create(1);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'therapist_busy_existing');
+  assert.equal(sb.rows('OneTimeSessions').length, 0, 'no booking is written');
+  assert.equal(sb.busy.calls.length, 1);
+  assert.equal(sb.busy.calls[0].method, 'get');
+  assert.equal(sb.busy.calls[0].headerPresent, true, 'the dedicated credential stays in the header');
+  assert.match(sb.busy.calls[0].url, /date=2026-11-11/);
+  assert.match(sb.busy.calls[0].url, /time=10%3A00/);
+  assert.ok(!sb.busy.calls[0].url.includes('0501234567'), 'no patient phone in busy query');
+  assert.ok(!sb.busy.calls[0].url.includes(CLIENT.name), 'no patient name in busy query');
+});
+
+test('unavailable THR calendar or absent busy key fail closed; never silently book an unchecked session', () => {
+  const { sb, create } = fixture();
+  sb.busy.available = false;
+  const result = create(1);
+  assert.equal(result.error, 'calendar_unavailable');
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
+  sb.busy.available = true;
+  delete sb.props.OUT_ONE_TIME_BUSY_SECRET;
+  const missing = create(2);
+  assert.equal(missing.error, 'calendar_unavailable');
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
+});
+
+test('moving an OTS session checks fresh THR occupancy and excludes only its OWN mirrored id', () => {
+  const { sb, post, create } = fixture();
+  const booked = create(1);
+  assert.equal(booked.ok, true);
+  assert.equal(sb.busy.calls.length, 1);
+  sb.busy.occupied = true;
+  const moved = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 1,
+    opId: U(101), changes: { date: '2026-11-12', time: '11:00' } });
+  assert.equal(moved.error, 'therapist_busy_existing', 'cannot move into a normal appointment');
+  assert.equal(sb.rows('OneTimeSessions')[0].date, '2026-11-11', 'failed move never writes');
+  assert.ok(sb.busy.calls[1].url.includes('excludeOneTimeId=' + U(1)), 'only self-id excluded');
+  assert.equal(sb.busy.calls[1].url.includes('patientName'), false);
+  sb.busy.occupied = false;
+  const ok = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 1,
+    opId: U(101), changes: { date: '2026-11-12', time: '11:00' } });
+  assert.equal(ok.ok, true);
+  assert.equal(sb.rows('OneTimeSessions')[0].date, '2026-11-12');
+  const calls = sb.busy.calls.length;
+  sb.busy.available = false;
+  const noteOnly = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 2,
+    opId: U(102), changes: { note: 'תיעוד שיחה' } });
+  assert.equal(noteOnly.ok, true, 'a note-only change does not book any new time');
+  assert.equal(sb.busy.calls.length, calls, 'no unnecessary remote calendar read for note-only changes');
+});
+
 test('feed: price-free allowlist, current client name/phone, fail-closed secret (unset or short)', () => {
   const { sb, create } = fixture();
   create(1, { catalogKey: 'psychiatric_diagnosis', therapist: 'ד"ר מיכאל שפרינץ' });
