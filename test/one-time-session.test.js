@@ -268,12 +268,14 @@ test('THR source regular/recurring collision: OUT one-time CREATE fails before w
   assert.equal(result.error, 'therapist_busy_existing');
   assert.equal(sb.rows('OneTimeSessions').length, 0, 'no booking is written');
   assert.equal(sb.busy.calls.length, 1);
-  assert.equal(sb.busy.calls[0].method, 'get');
+  assert.equal(sb.busy.calls[0].method, 'post');
+  assert.equal(sb.busy.calls[0].contentType, 'application/json');
   assert.equal(sb.busy.calls[0].headerPresent, true, 'the dedicated credential stays in the header');
-  assert.match(sb.busy.calls[0].url, /date=2026-11-11/);
-  assert.match(sb.busy.calls[0].url, /time=10%3A00/);
-  assert.ok(!sb.busy.calls[0].url.includes('0501234567'), 'no patient phone in busy query');
-  assert.ok(!sb.busy.calls[0].url.includes(CLIENT.name), 'no patient name in busy query');
+  assert.equal(sb.busy.calls[0].body.date, '2026-11-11');
+  assert.equal(sb.busy.calls[0].body.time, '10:00');
+  assert.equal(sb.busy.calls[0].body.patientPhone, '0501234567', 'source-owned phone is in the POST body');
+  assert.ok(!sb.busy.calls[0].url.includes('0501234567'), 'no patient phone in the URL');
+  assert.equal(JSON.stringify(sb.busy.calls[0].body).includes(CLIENT.name), false, 'no patient name sent');
 });
 
 test('unavailable THR calendar or absent busy key fail closed; never silently book an unchecked session', () => {
@@ -299,8 +301,8 @@ test('moving an OTS session checks fresh THR occupancy and excludes only its OWN
     opId: U(101), changes: { date: '2026-11-12', time: '11:00' } });
   assert.equal(moved.error, 'therapist_busy_existing', 'cannot move into a normal appointment');
   assert.equal(sb.rows('OneTimeSessions')[0].date, '2026-11-11', 'failed move never writes');
-  assert.ok(sb.busy.calls[1].url.includes('excludeOneTimeId=' + U(1)), 'only self-id excluded');
-  assert.equal(sb.busy.calls[1].url.includes('patientName'), false);
+  assert.equal(sb.busy.calls[1].body.excludeOneTimeId, U(1), 'only self-id excluded');
+  assert.equal(sb.busy.calls[1].body.patientPhone, '0501234567');
   sb.busy.occupied = false;
   const ok = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 1,
     opId: U(101), changes: { date: '2026-11-12', time: '11:00' } });
@@ -345,12 +347,43 @@ test('intake (אינטייק) pays the psychiatrist intake rate; a therapist wit
   assert.equal(sb.rows('OneTimeSessions')[1].status, 'scheduled');
 });
 
-test('KNOWN GAP (characterisation): the THR busy query is therapist-scoped only — it carries no patient identity', () => {
+test('same patient with a regular THR appointment under ANOTHER therapist is refused (patient-aware busy contract)', () => {
+  const { sb, post, create } = fixture();
+  sb.busy.phoneBusy.add('0501234567'); // transport fixture: THR reports the patient's phone busy
+  const r = create(1, { therapist: 'דנה כהן' });
+  assert.equal(r.error, 'therapist_busy_existing');
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
+  assert.equal(sb.busy.calls[0].body.patientPhone, '0501234567');
+  sb.busy.phoneBusy.clear();
+  assert.equal(create(1, { therapist: 'דנה כהן' }).ok, true);
+  sb.busy.phoneBusy.add('0501234567');
+  const moved = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 1, opId: U(501), changes: { time: '15:00' } });
+  assert.equal(moved.error, 'therapist_busy_existing');
+  assert.equal(sb.rows('OneTimeSessions')[0].time, '10:00');
+  assert.equal(sb.busy.calls[sb.busy.calls.length - 1].body.patientPhone, '0501234567', 'move uses the stored session client, not payload');
+});
+
+test('legacy / partial busy replies without patientChecked:true fail closed', () => {
   const { sb, create } = fixture();
-  assert.equal(create(1).ok, true);
-  const url = new URL(sb.busy.calls[0].url);
-  assert.deepEqual([...url.searchParams.keys()].sort(), ['date', 'therapist', 'time'],
-    'only therapist/date/time are sent, so a patient who already has a regular THR appointment with a DIFFERENT therapist cannot be detected by OUT');
-  assert.equal(sb.busy.calls[0].headerPresent, true);
-  // If a patient dimension is added to the busy contract, this test must be updated together with the THR route.
+  for (const reply of [{ ok: true, busy: false }, { ok: true, busy: false, patientChecked: false }, { ok: true, busy: 'no', patientChecked: true }, { ok: false, busy: false, patientChecked: true }]) {
+    sb.busy.reply = () => reply;
+    assert.equal(create(1).error, 'calendar_unavailable', JSON.stringify(reply));
+  }
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
+});
+
+test('missing or invalid source phone refuses booking without any network call; payload phone is ignored', () => {
+  const { sb, create } = fixture();
+  sb.sheets.Clients.grid.forEach((r, i) => { if (i && r[0] === OTHER.id) r[sb.ctx.CLIENTS_HEADERS.indexOf('phone')] = '12'; });
+  assert.equal(create(1, { clientId: OTHER.id, phone: '0501234567' }).error, 'patient_key_missing');
+  assert.equal(sb.busy.calls.length, 0);
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
+});
+
+test('source phone changed during the remote check is refused under the lock, nothing written', () => {
+  const { sb, create } = fixture();
+  const col = sb.ctx.CLIENTS_HEADERS.indexOf('phone');
+  sb.busy.reply = () => { sb.sheets.Clients.grid.forEach((r, i) => { if (i && r[0] === CLIENT.id) r[col] = '0521112222'; }); return { ok: true, busy: false, patientChecked: true }; };
+  assert.equal(create(1).error, 'source_changed');
+  assert.equal(sb.rows('OneTimeSessions').length, 0);
 });

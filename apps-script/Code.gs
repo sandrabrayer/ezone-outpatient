@@ -7367,22 +7367,34 @@ function _otsFields(s, needAll) {
  * malformed: an unchecked booking must not be created or moved. We do not
  * change the existing Coordinators busy feed/credential. */
 var OTS_THERAPIST_BUSY_URL = 'https://ezone-therapists.up.railway.app/feeds/out-one-time-busy';
-function _otsExternalBusy(therapist, date, time, excludeId) {
+/* Canonical patient key for the busy query: the phone stored on the EXACT
+ * Clients row (never browser input). '' when the client or phone is unusable. */
+function _otsPatientPhone(clientId) {
+  var sh = _ss().getSheetByName('Clients'), phone = '', found = false;
+  if (!sh) return { found: false, phone: '' };
+  _readAll(sh, CLIENTS_HEADERS).forEach(function (c) {
+    if (String(c.id) === String(clientId)) { found = true; phone = _recoverPhone(c.phone); }
+  });
+  return { found: found, phone: /^0\d{8,9}$/.test(phone) ? phone : '' };
+}
+/* POST (phone in the JSON body, never the URL). Success MUST be
+ * {ok:true, busy:<boolean>, patientChecked:true}: an old therapist-only reply
+ * (no patientChecked) is refused. Nothing sensitive is logged. */
+function _otsExternalBusy(therapist, date, time, excludeId, patientPhone) {
+  if (!/^0\d{8,9}$/.test(String(patientPhone || ''))) return 'patient_key_missing';
   var key = String(PropertiesService.getScriptProperties().getProperty('OUT_ONE_TIME_BUSY_SECRET') || '');
   if (key.length < 32) return 'calendar_unavailable';
   try {
-    var url = OTS_THERAPIST_BUSY_URL +
-      '?therapist=' + encodeURIComponent(String(therapist)) +
-      '&date=' + encodeURIComponent(String(date)) +
-      '&time=' + encodeURIComponent(String(time)) +
-      (excludeId ? '&excludeOneTimeId=' + encodeURIComponent(String(excludeId)) : '');
-    var resp = UrlFetchApp.fetch(url, {
-      method: 'get', headers: { 'X-One-Time-Busy-Secret': key },
+    var body = { therapist: String(therapist), date: String(date), time: String(time), patientPhone: String(patientPhone) };
+    if (excludeId) body.excludeOneTimeId = String(excludeId);
+    var resp = UrlFetchApp.fetch(OTS_THERAPIST_BUSY_URL, {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify(body),
+      headers: { 'X-One-Time-Busy-Secret': key },
       muteHttpExceptions: true, followRedirects: true
     });
     if (resp.getResponseCode() !== 200) return 'calendar_unavailable';
     var data = JSON.parse(resp.getContentText());
-    if (!data || data.ok !== true || typeof data.busy !== 'boolean') return 'calendar_unavailable';
+    if (!data || data.ok !== true || typeof data.busy !== 'boolean' || data.patientChecked !== true) return 'calendar_unavailable';
     return data.busy ? 'therapist_busy_existing' : '';
   } catch (_) {
     return 'calendar_unavailable';
@@ -7418,11 +7430,8 @@ function _otsCreate(payload) {
   // Preserve the original service/client-validation precedence: an inactive
   // or non-single catalog item is an invalid_service, not a slot conflict.
   // The locked path repeats these exact checks on current source data.
-  var preClientSheet = _ss().getSheetByName('Clients'), preClientValid = false;
-  if (preClientSheet) _readAll(preClientSheet, CLIENTS_HEADERS).forEach(function (c) {
-    if (String(c.id) === clientId) preClientValid = true;
-  });
-  if (!preClientValid) return { ok: false, error: 'client_not_found' };
+  var prePatient = _otsPatientPhone(clientId);
+  if (!prePatient.found) return { ok: false, error: 'client_not_found' };
   var preCatalog = _pkgActiveRowByKey(_otsCatalogRows(), catalogKey);
   if (!preCatalog || !_otsIsSingle(preCatalog)) return { ok: false, error: 'invalid_service' };
   var preQuote = _pkgComputeQuote(preCatalog, 0);
@@ -7437,7 +7446,7 @@ function _otsCreate(payload) {
   if (preflightLocal) return { ok: false, error: preflightLocal };
   // The THR/house source can be slow. NEVER hold the OUT ScriptLock while
   // doing a cross-app network request: this lock also serves finance writes.
-  var preflightBusy = _otsExternalBusy(f.therapist, f.date, f.time, '');
+  var preflightBusy = _otsExternalBusy(f.therapist, f.date, f.time, '', prePatient.phone);
   if (preflightBusy) return { ok: false, error: preflightBusy };
   var lock = _pkgLock(10000);
   if (!lock) return { ok: false, error: 'busy' };
@@ -7453,6 +7462,8 @@ function _otsCreate(payload) {
     var client = null;
     if (clientsSh) _readAll(clientsSh, CLIENTS_HEADERS).forEach(function (c) { if (String(c.id) === clientId) client = c; });
     if (!client) return { ok: false, error: 'client_not_found' };
+    // The patient key checked remotely must still be the source's key.
+    if (_recoverPhone(client.phone) !== prePatient.phone) return { ok: false, error: 'source_changed' };
     var cat = _pkgActiveRowByKey(_otsCatalogRows(), catalogKey);
     if (!cat || !_otsIsSingle(cat)) return { ok: false, error: 'invalid_service' };
     var q = _pkgComputeQuote(cat, 0);
@@ -7523,6 +7534,7 @@ function _otsUpdate(payload) {
   // Preflight a move without the global lock. The locked _otsMutate will
   // check expectedRevision, opId replay, status and OUT-local conflicts again.
   // Never preflight note/location-only edits, unauthorized writes or replays.
+  var checkedKey = '';
   var preId = String(payload && payload.id || '').trim();
   var preOpId = String(payload && payload.opId || '').trim();
   if (!_otsMoneyScopeOps(payload) && PACKAGE_UUID_RE.test(preId) && PACKAGE_UUID_RE.test(preOpId)) {
@@ -7541,8 +7553,10 @@ function _otsUpdate(payload) {
         // This exact OUT conflict is checked again under lock after preflight.
         var localMoveConflict = _otsConflict(preRows, target, original.id);
         if (localMoveConflict) return { ok: false, error: localMoveConflict };
-        var preflightError = _otsExternalBusy(target.therapist, target.date, target.time, original.id);
+        var movePatient = _otsPatientPhone(original.clientId);
+        var preflightError = _otsExternalBusy(target.therapist, target.date, target.time, original.id, movePatient.phone);
         if (preflightError) return { ok: false, error: preflightError };
+        checkedKey = [target.therapist, target.date, target.time, movePatient.phone].join('|');
       }
     }
   }
@@ -7551,6 +7565,12 @@ function _otsUpdate(payload) {
     var cand = { clientId: String(row.clientId), therapist: f.therapist || String(row.therapist), date: f.date || String(row.date), time: f.time || String(row.time) };
     var conflict = _otsConflict(rows, cand, row.id);
     if (conflict) return conflict;
+    // A move is only valid if exactly this target + the source's CURRENT
+    // patient phone were checked remotely before the lock.
+    if (cand.therapist !== String(row.therapist) || cand.date !== String(row.date) || cand.time !== String(row.time)) {
+      var lockedPhone = _otsPatientPhone(row.clientId).phone;
+      if (!checkedKey || checkedKey !== [cand.therapist, cand.date, cand.time, lockedPhone].join('|')) return 'source_changed';
+    }
     // Outpatient overlap and revision checks remain locked. Remote THR
     // availability was verified before acquiring the global lock.
     Object.keys(f).forEach(function (k) { row[k] = f[k]; });
