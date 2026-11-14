@@ -165,6 +165,23 @@
       if (md && !s(v.outcome)) rowsBy.continuity.push({ id: 'cont:' + s(v.key), kind: 'continuation_meeting', subjectKind: 'continuation', subjectId: s(v.key), name: s(v.name) || '—', sub: s(v.house), owner: '', action: md < today ? 'לעדכן תוצאת פגישת המשך' : 'פגישת המשך טיפול', why: (md < today ? 'הפגישה היתה ב-' : 'ב-') + fmtDate(md), when: md, time: '', state: md < today ? 'late' : (md === today ? 'today' : 'wait'), priority: md < today ? 'exception' : (md === today ? 'today' : 'wait'), open: 'continuation' });
     });
 
+    // one-time sessions (טיפול חד פעמי, CHANGELOG-one-time-session.md): the host hands in rows already
+    // classified by OneTimeSessions.myDayRows (session + kind). Money rows (unpaid / charge missing) are
+    // dropped for a no-money user. null = the source did not load (no rows, never a false «nothing»).
+    var oneTime = Array.isArray(i.oneTimeRows) ? i.oneTimeRows : null;
+    (oneTime || []).forEach(function (o) {
+      var x = o && o.session;
+      if (!x || !s(x.id) || (o.money && !money)) return;
+      var d = isoDay(x.date), tm = s(x.time), cid = s(x.clientId);
+      var base = { otsId: s(x.id), subjectKind: 'client', subjectId: cid, clientId: cid, name: nameOf['client:' + cid] || s(x.patientName) || '—',
+        sub: 'טיפול חד פעמי · ' + s(x.therapist), owner: '', open: 'client', when: d, time: tm, money: !!o.money };
+      if (o.kind === 'one_time_today') rowsBy.tasks.push(Object.assign(base, { id: 'ots:today:' + x.id, kind: o.kind, action: 'טיפול חד פעמי' + (tm ? ' ' + tm : '') + ' — ' + s(x.therapist), why: 'היום', state: 'today', priority: tm ? 'binding' : 'today' }));
+      else if (o.kind === 'one_time_unmarked') rowsBy.tasks.push(Object.assign(base, { id: 'ots:unmarked:' + x.id, kind: o.kind, action: 'לעדכן אם הטיפול החד פעמי התקיים', why: 'הטיפול היה ב-' + fmtDate(d) + (tm ? ' ' + tm : '') + ' — אין תוצאה', state: 'late', priority: 'exception' }));
+      else if (o.kind === 'one_time_therapist_cancelled') rowsBy.approvals.push(Object.assign(base, { id: 'ots:tcancel:' + x.id, kind: o.kind, action: 'המטפל/ת ביטל/ה — לתאם מועד חדש או לסגור', why: 'נקבע ל-' + fmtDate(d) + (tm ? ' ' + tm : ''), state: 'late', priority: 'exception' }));
+      else if (o.kind === 'one_time_unpaid') rowsBy.renewals.push(Object.assign(base, { id: 'ots:unpaid:' + x.id, kind: o.kind, action: 'לגבות לפני הטיפול החד פעמי', why: d === today ? 'הטיפול היום' : 'הטיפול ב-' + fmtDate(d) + (tm ? ' ' + tm : ''), state: d <= today ? 'today' : 'wait', priority: d <= today ? 'today' : 'wait' }));
+      else if (o.kind === 'one_time_charge_missing') rowsBy.approvals.push(Object.assign(base, { id: 'ots:nocharge:' + x.id, kind: o.kind, action: 'להשלים את החיוב של הטיפול החד פעמי', why: 'הטיפול נקבע אך החיוב לא נוצר', state: 'late', priority: 'exception' }));
+    });
+
     // package offers (price-free summaries): a SENT offer with a follow-up date is work when that date arrives
     var offers = Array.isArray(i.offers) ? i.offers : null;
     (offers || []).forEach(function (o) {
@@ -188,7 +205,7 @@
       rowsBy[k] = rowsBy[k].filter(function (r) {
         // a persisted task is distinct work by itself (three milestones of one patient are three rows);
         // derived rows collapse per subject + reason (coveredBy already drops a derived row a task owns)
-        var sig = r.kind === 'task' ? 'task:' + r.taskId : r.subjectKind + ':' + r.subjectId + ':' + r.kind;
+        var sig = r.kind === 'task' ? 'task:' + r.taskId : r.otsId ? r.id : r.subjectKind + ':' + r.subjectId + ':' + r.kind;
         if (seen[sig]) return false; seen[sig] = true; return true;
       });
       rowsBy[k].forEach(function (r) {
@@ -224,13 +241,13 @@
     // commitment (continuation offers, follow-ups, contacts, today's tasks) sits right below it.
     var sections = [
       { id: 'overdue_payments', label: 'תשלומים באיחור', rows: take(function (r) { return isOverduePayment(r); }) },
-      { id: 'dated', label: 'מעקבים ומשימות במועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || (r.kind === 'task' && r.state === 'today'); }) },
+      { id: 'dated', label: 'מעקבים ומשימות במועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || ((r.kind === 'task' || r.kind === 'one_time_today') && r.state === 'today'); }) },
       { id: 'calls', label: 'שיחות להיום', rows: take(function (r) { return isCall(r) && r.state === 'today'; }) },
       { id: 'intros', label: 'שיחות היכרות היום', rows: take(function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) },
       { id: 'undecided', label: 'היכרויות שעברו ללא החלטה', rows: take(function (r) { return r.kind === 'intro_passed'; }) },
       { id: 'first', label: 'פניות ללא קשר ראשון', rows: take(function (r) { return r.kind === 'lead_new' || r.kind === 'intro_unscheduled'; }) },
       { id: 'starts', label: 'תחילת טיפול והמשך טיפול', rows: take(function (r) { return r.kind === 'plan_to_activate' || r.kind === 'continuation_meeting' || r.kind === 'lead_waiting' || (r.kind === 'offer_follow_up' && (r.state === 'late' || r.state === 'today')); }) },
-      { id: 'approvals', label: 'אישורים וחריגים', rows: take(function (r) { return r.kind === 'stop_flag' || r.kind === 'extra_request'; }) }
+      { id: 'approvals', label: 'אישורים וחריגים', rows: take(function (r) { return r.kind === 'stop_flag' || r.kind === 'extra_request' || r.kind === 'one_time_therapist_cancelled' || r.kind === 'one_time_charge_missing'; }) }
     ];
     if (money) sections.push({ id: 'money', label: 'חידושים וגבייה', rows: take(function (r) { return !!r.money || r.kind === 'renewal_overdue' || r.kind === 'renewal_due'; }) });
     sections.push({ id: 'later', label: 'בהמשך השבוע', rows: take(function () { return true; }) });

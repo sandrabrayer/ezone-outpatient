@@ -418,6 +418,9 @@ app.get('/api/sheets', requireSession, async (req, res) => {
   // Package catalog / pricing actions have their own Vered-only route and the
   // manager feeds never go through the browser: refuse them here.
   if (catalogAdmin.isPackageAction(action)) return res.status(403).json({ ok: false, error: 'forbidden_action' });
+  // The one-time-session feed is the THERAPISTS app's cross-app read (its own secret,
+  // straight to /exec). A browser never reaches it through this proxy.
+  if (action === 'getOneTimeSessionsFeed') return res.status(403).json({ ok: false, error: 'forbidden_action' });
   // OP-CRM-3A: money reads are refused for an operational session before any upstream call.
   if (requestMoneyScope(req) === moneyScope.SCOPE_OPS && moneyScope.isMoneyAction('GET', action)) {
     return res.status(403).json({ ok: false, error: 'forbidden_money_action' });

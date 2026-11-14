@@ -476,10 +476,12 @@ test('SESSION_LOG_HEADERS: sessionId first (upsert key), phone present, append o
   assert.ok(H.indexOf('phone') !== -1);
   // payModel (salaried «גלובלי», 2026-11-10) was appended after forwardedToPayroll
   // (payout forwarding), which was appended after creditStatus, after recordedAt.
-  assert.equal(H[H.length - 1], 'payModel');
-  assert.equal(H[H.length - 2], 'forwardedToPayroll');
-  assert.equal(H[H.length - 3], 'creditStatus');
-  assert.equal(H[H.length - 4], 'recordedAt');
+  // oneTimeSessionId (טיפול חד פעמי, 2026-11-11) was appended after payModel.
+  assert.equal(H[H.length - 1], 'oneTimeSessionId');
+  assert.equal(H[H.length - 2], 'payModel');
+  assert.equal(H[H.length - 3], 'forwardedToPayroll');
+  assert.equal(H[H.length - 4], 'creditStatus');
+  assert.equal(H[H.length - 5], 'recordedAt');
   // every field the receiver writes has a column
   ['sessionId', 'phone', 'patientName', 'clientId', 'therapist', 'clinicalTreatmentType',
    'billingType', 'date', 'outcome', 'therapistPay', 'clientSessionValue',

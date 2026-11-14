@@ -34,12 +34,23 @@ function sheet(name, initial) {
 }
 
 function sandbox(leads = [], clients = []) {
-  const sheets = {}, props = { OUTPATIENT_PROXY_SECRET: 'fixture-proxy-key-with-at-least-32-characters' };
+  const sheets = {}, props = { OUTPATIENT_PROXY_SECRET: 'fixture-proxy-key-with-at-least-32-characters',
+    OUT_ONE_TIME_BUSY_SECRET: 'fixture-one-time-busy-key-with-at-least-32-characters' };
+  const busy = { available: true, occupied: false, phoneBusy: new Set(), reply: null, calls: [] };
   let held = false, uuid = 0;
   const lock = { tryLock: () => { held = true; return true; }, waitLock: () => { held = true; }, releaseLock: () => { held = false; } };
   const ctx = {
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getId: () => 'synthetic-source', getSheets: () => Object.values(sheets), getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = sheet(n)) }) },
     LockService: { getScriptLock: () => lock }, Logger: { log() {} },
+    UrlFetchApp: { fetch(url, options) {
+      if (String(url) !== 'https://ezone-therapists.up.railway.app/feeds/out-one-time-busy') throw new Error('unrecognized synthetic HTTP request');
+      const body = options.payload ? JSON.parse(options.payload) : null;
+      busy.calls.push({ url: String(url), method: options.method, contentType: options.contentType, body, headerPresent: !!(options.headers && options.headers['X-One-Time-Busy-Secret']), lockHeld: held });
+      if (!busy.available) throw new Error('synthetic busy source offline');
+      // Transport fixture only (NOT the real THR route): current contract reply.
+      const reply = busy.reply ? busy.reply(body) : { ok: true, busy: !!busy.occupied || (body && busy.phoneBusy.has(body.patientPhone)), patientChecked: true };
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+    } },
     Session: { getScriptTimeZone: () => 'Asia/Jerusalem' },
     Utilities: {
       formatDate: (d) => d.toISOString().slice(0, 10), getUuid: () => 'fixture-' + (++uuid),
@@ -62,7 +73,7 @@ function sandbox(leads = [], clients = []) {
   }
   function get(params) { return JSON.parse(ctx.doGet({ parameter: { ...params } }).getContent()); }
   function post(payload) { return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ proxySecret: props.OUTPATIENT_PROXY_SECRET, ...payload }) }, parameter: {} }).getContent()); }
-  return { ctx, sheets, props, seed, rows, post, get, lock, isLocked: () => held,
+  return { ctx, sheets, props, busy, seed, rows, post, get, lock, isLocked: () => held,
     save: (leads, clients = [], extra = {}) => post({ action: 'saveAll', user: 'fixture-user', leads, clients, ...extra }) };
 }
 

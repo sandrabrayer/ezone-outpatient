@@ -884,6 +884,59 @@
       </div>
     </div>
 
+    <!-- One-time session (טיפול חד פעמי, CHANGELOG-one-time-session.md): ONE scheduled session,
+         priced by the SOURCE from a single-session catalog row; its charge goes through the
+         same durable extra-charge protocol as «הוסף טיפול». No amount field: the browser never
+         sends a price. In edit mode only date / time / therapist / location / note change. -->
+    <div id="otsModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title" id="otsTitle">טיפול חד פעמי</div>
+        <div class="modal-sub" style="margin-bottom:8px;color:#9fcfcf;font-weight:600;">
+          <span id="otsClientName"></span>
+        </div>
+        <form id="otsForm" class="form-grid">
+          <label class="wide">שירות (מהקטלוג)
+            <select name="catalogKey" required><option value="">טוען את הקטלוג…</option></select>
+          </label>
+          <label>מטפל/ת
+            <select name="therapist" required><option value="">בחירת מטפל/ת…</option></select>
+          </label>
+          <label>מיקום
+            <select name="location"><option value="">—</option></select>
+          </label>
+          <label>תאריך<input name="date" type="date" required /></label>
+          <label>שעה<input name="time" type="time" step="300" required /></label>
+          <label class="wide">הערה<textarea name="note" rows="2" maxlength="300"></textarea></label>
+          <label class="wide addcharge-paid-row" id="otsPaidRow">
+            <input name="paid" type="checkbox" />
+            <span>שולם — סמן אם התשלום כבר נגבה</span>
+          </label>
+          <p class="wide ots-msg" id="otsMsg" role="status" aria-live="polite"></p>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="otsSubmit">שמירה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Cancel a one-time session: an in-app reason sheet (window.prompt does not show in an installed PWA). -->
+    <div id="otsCancelModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">ביטול טיפול חד פעמי</div>
+        <form id="otsCancelForm" class="form-grid">
+          <label class="wide">סיבת הביטול
+            <textarea name="reason" rows="2" minlength="2" maxlength="200" required placeholder="למשל: המטופל/ת ביקש/ה לבטל"></textarea>
+          </label>
+          <p class="wide ots-msg" id="otsCancelMsg" role="status" aria-live="polite"></p>
+          <div class="form-actions edit-only">
+            <button type="button" class="btn btn-ghost" data-close>חזרה</button>
+            <button type="submit" class="btn btn-primary" id="otsCancelSubmit">ביטול הטיפול</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Edit an existing extra charge (correct a wrong amount / type / date /
          description). Saves through the SAME charge row (stable chg id) — never
          creates a duplicate. Paid-toggle and delete stay on the card. -->
@@ -1136,6 +1189,7 @@
   <script src="continuation-logic.js?v=__BUILD__" defer></script>
   <script src="crm-activity.js?v=__BUILD__" defer></script>
   <script src="my-day.js?v=__BUILD__" defer></script>
+  <script src="one-time-sessions.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER
        sign-in, in this order (therapist-payout.js reads TherapistPay when it loads).

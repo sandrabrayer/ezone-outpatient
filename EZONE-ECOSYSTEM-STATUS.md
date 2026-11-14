@@ -259,6 +259,22 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Outpatient: one-time session «+ טיפול חד פעמי» (Nov 11, 2026 — PR open, not released)
+
+- ורד schedules ONE session per patient (package patient outside the package, or a
+  per-session payer) priced from an active single-session `PackageCatalog` row
+  (server price only). The charge goes through the existing durable extra-charge
+  protocol (id `ots-<session>`, due on the session day). New `OneTimeSessions` sheet
+  (append-only headers); SessionLog gains the appended `oneTimeSessionId` column —
+  such rows are outside the quota and the credit engine.
+- **Therapists contract** (`docs/one-time-session-therapists-contract.md`): read
+  `getOneTimeSessionsFeed` (`ONE_TIME_SESSIONS_SECRET`, fail-closed, price-free
+  allowlist); write the outcome with the existing `recordSessionOutcome` +
+  `oneTimeSessionId` (`SESSION_OUTCOME_SECRET`). The therapists-app side is a
+  separate PR in `ezone-therapists`.
+- New Script Property: `ONE_TIME_SESSIONS_SECRET` (outpatient Apps Script; same
+  value on the therapists side). SW v38.
+
 ## Outpatient: roster and personal PINs (PR133 merged October26)
 
 The existing deployed-branch commit b14db799 changes login/assignee names to

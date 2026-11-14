@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### One-time session — «+ טיפול חד פעמי» (2026-11-11)
+- ורד schedules ONE session for any patient (package patient outside the package, or a per-session payer): service from an active single-session catalog row (server price only), therapist, date, time, location. The charge is created through the existing durable extra-charge protocol (id `ots-<session>`, due on the session day, optional «שולם»). New `OneTimeSessions` sheet; actions `createOneTimeSession` / `updateOneTimeSession` / `cancelOneTimeSession` / `markOneTimeSession` (proxy, money scope) and `getOneTimeSessions` / `getOneTimeServices`.
+- Outcome (ורד or the therapists app via `recordSessionOutcome` + `oneTimeSessionId`) writes one SessionLog row `ots::<id>` with therapist pay; appended SessionLog column `oneTimeSessionId` keeps it out of the monthly quota and the credit engine. Price-free therapists feed `getOneTimeSessionsFeed` behind the new fail-closed `ONE_TIME_SESSIONS_SECRET`. Card strip, «היום שלי» rows, דנה sees no amounts. SW v37 → v38. See `CHANGELOG-one-time-session.md` and `docs/one-time-session-therapists-contract.md`.
+- Read hardening (browser only): `getOneTimeSessions` / `getOneTimeServices` count as successful only with `ok:true` and a real array — `{}`, HTML, invalid JSON or a non-array list is «unavailable» (load gap / «הקטלוג לא נטען: …אינו זמין»), never an empty list or a catalogue-import hint. After an accepted cancel / move / outcome, a failed readback marks the list unknown (rows and actions hidden, OTS-only load gap, toast «אין לבצע את הפעולה שוב»); the next successful read clears it. No POST is repeated.
+
 ### «טיפול משלים» priced ₪500 per session (2026-11-11)
 - `BILLING_PRICES['טיפול משלים']` null → **500** (incl. VAT) in `public/treatment-map.js` and the Code.gs mirror, so SessionLog `clientSessionValue` is ₪500 instead of a blank flag. Therapist pay unchanged (TherapistRates). Null allow-list test back to `[]`. See `CHANGELOG-complementary-clinical-type.md` → "Price".
 
