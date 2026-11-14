@@ -344,3 +344,13 @@ test('intake (אינטייק) pays the psychiatrist intake rate; a therapist wit
   assert.equal(sb.rows('SessionLog').length, 1);
   assert.equal(sb.rows('OneTimeSessions')[1].status, 'scheduled');
 });
+
+test('KNOWN GAP (characterisation): the THR busy query is therapist-scoped only — it carries no patient identity', () => {
+  const { sb, create } = fixture();
+  assert.equal(create(1).ok, true);
+  const url = new URL(sb.busy.calls[0].url);
+  assert.deepEqual([...url.searchParams.keys()].sort(), ['date', 'therapist', 'time'],
+    'only therapist/date/time are sent, so a patient who already has a regular THR appointment with a DIFFERENT therapist cannot be detected by OUT');
+  assert.equal(sb.busy.calls[0].headerPresent, true);
+  // If a patient dimension is added to the busy contract, this test must be updated together with the THR route.
+});
