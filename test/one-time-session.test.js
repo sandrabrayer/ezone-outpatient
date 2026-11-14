@@ -240,6 +240,26 @@ test('OUT source itself blocks overlapping one-time sessions before delayed THR 
   assert.equal(sb.busy.calls.length, 3, 'internal conflicts are rejected before any external busy round-trip');
 });
 
+test('THR network preflight never holds OUT finance lock, while exact replay survives a calendar outage', () => {
+  const { sb, create, post } = fixture();
+  const created = create(1);
+  assert.equal(created.ok, true);
+  assert.equal(sb.busy.calls.length, 1);
+  assert.equal(sb.busy.calls[0].lockHeld, false, 'new booking remote read must not lock finance writes');
+  sb.busy.available = false;
+  const replay = create(1);
+  assert.equal(replay.ok, true, 'same UUID/payload must be replayable even when therapist calendar is down');
+  assert.equal(replay.duplicate, true);
+  assert.equal(sb.busy.calls.length, 1, 'no redundant availability check on exact replay');
+  sb.busy.available = true;
+  const move = post({ action: 'updateOneTimeSession', id: U(1), expectedRevision: 1,
+    opId: U(401), changes: { time: '12:00' } });
+  assert.equal(move.ok, true);
+  assert.equal(sb.busy.calls.length, 2);
+  assert.equal(sb.busy.calls[1].lockHeld, false, 'move remote read must not hold ScriptLock');
+  assert.equal(sb.isLocked(), false, 'both remote reads and writes release the lock');
+});
+
 test('THR source regular/recurring collision: OUT one-time CREATE fails before writing even with free OTS-only calendar', () => {
   const { sb, create } = fixture();
   sb.busy.occupied = true;
