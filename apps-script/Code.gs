@@ -3671,8 +3671,24 @@ var SESSION_LOG_HEADERS = [
   // one-time session (טיפול חד פעמי, sessionId 'ots::<id>'). Such a row is
   // OUTSIDE the package: _happenedInMonth skips it, no credit effect. '' = a
   // regular package session.
-  'oneTimeSessionId'
+  'oneTimeSessionId',
+  // APPEND-ONLY (2026-11-15): the therapists app's server-owned revision of the APPROVED
+  // report this row records (ISO time of the report). recordSessionOutcome refuses a push
+  // whose revision is OLDER than the stored one (`stale_report_revision`) — two approved
+  // pushes of one session that cross in flight can no longer leave the older result.
+  // '' = recorded before this column / entered in Outpatient itself.
+  'reportRevision'
 ];
+
+/* The report revision as epoch ms, or null when absent. NaN = present but unreadable. */
+function _reportRevisionMs(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return v.getTime();
+  var s = String(v).trim();
+  if (!s) return null;
+  if (s.length > 40) return NaN;
+  return Date.parse(s);
+}
 
 var SESSION_STATUS_BY_OUTCOME = {
   happened:            'consumed',
@@ -3741,6 +3757,11 @@ function _recordSessionOutcome(payload) {
   } catch (err) {
     return { ok: false, reason: 'invalid_frequency' };
   }
+
+  // Optional report revision (therapists app). Present but unreadable → refused: an
+  // unordered push must never be written as if it were the newest.
+  var incomingRev = _reportRevisionMs(payload && payload.reportRevision);
+  if (incomingRev !== null && !isFinite(incomingRev)) return { ok: false, reason: 'invalid_report_revision' };
 
   var sessionStatus = SESSION_STATUS_BY_OUTCOME[outcome];
   var phone = _recoverPhone(payload && payload.phone);
@@ -3813,6 +3834,19 @@ function _recordSessionOutcome(payload) {
     for (var lr = 0; lr < logRows.length; lr++) {
       if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
     }
+    // ---- Report order (2026-11-15) -----------------------------------------
+    // Inside the lock and BEFORE any write: an approved push that carries an OLDER
+    // report revision than the row already holds arrived late — refuse it whole (no
+    // SessionLog, pay or credit change). Equal = the same report re-sent (idempotent).
+    // A push without a revision (older sender, or a correction made in Outpatient)
+    // is handled as before and keeps the stored revision.
+    var storedRev = oldRow ? _reportRevisionMs(oldRow.reportRevision) : null;
+    if (incomingRev !== null && storedRev !== null && isFinite(storedRev) && incomingRev < storedRev) {
+      return { ok: false, reason: 'stale_report_revision' };
+    }
+    rowObj.reportRevision = incomingRev !== null ? new Date(incomingRev).toISOString()
+      : (oldRow && oldRow.reportRevision != null ? oldRow.reportRevision : '');
+
     // Preserve an already-forwarded stamp across the upsert: a correction re-runs
     // pay/credit but must not silently un-forward a session payroll already received.
     var wasForwarded = !!(oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '');

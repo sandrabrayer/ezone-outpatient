@@ -52,8 +52,9 @@ test('schema + auth: append-only headers, proxy-only internal actions, the feed 
   const { sb } = fixture();
   assert.deepEqual(plain(sb.ctx.ONE_TIME_SESSION_HEADERS), ['id', 'clientId', 'patientName', 'phone', 'catalogKey', 'catalogRowId', 'catalogEpoch', 'clinicalTreatmentType', 'priceAgorot', 'therapist', 'date', 'time', 'location', 'note', 'status', 'statusReason', 'chargeId', 'sessionLogId', 'payloadHash', 'revision', 'opLog', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy']);
   const L = plain(sb.ctx.SESSION_LOG_HEADERS);
-  assert.equal(L[L.length - 1], 'oneTimeSessionId', 'appended at the very end');
-  assert.equal(L[L.length - 2], 'payModel', 'every earlier column keeps its position');
+  assert.equal(L[L.length - 1], 'reportRevision', 'appended 2026-11-15 (report order)');
+  assert.equal(L[L.length - 2], 'oneTimeSessionId', 'appended before it; position kept');
+  assert.equal(L[L.length - 3], 'payModel', 'every earlier column keeps its position');
   const P = plain(sb.ctx.SOURCE_POST_AUTH), G = plain(sb.ctx.SOURCE_GET_AUTH);
   for (const a of ['createOneTimeSession', 'updateOneTimeSession', 'cancelOneTimeSession', 'markOneTimeSession']) { assert.equal(P[a], 'OUTPATIENT_PROXY_SECRET', a); assert.equal(G[a], undefined, a + ' is never a GET'); }
   for (const a of ['getOneTimeSessions', 'getOneTimeServices']) assert.equal(G[a], 'OUTPATIENT_PROXY_SECRET', a);
