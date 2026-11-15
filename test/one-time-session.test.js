@@ -387,3 +387,43 @@ test('source phone changed during the remote check is refused under the lock, no
   assert.equal(create(1).error, 'source_changed');
   assert.equal(sb.rows('OneTimeSessions').length, 0);
 });
+
+/* Stale cross-app approval vs a newer OUT result (issue #184). Full Code.gs sandbox;
+ * the "THR" side is a synthetic recordSessionOutcome payload, NOT a paired HTTP test. */
+const snapAll = (sb) => JSON.stringify(Object.keys(sb.sheets).sort().map((n) => [n, sb.sheets[n].grid]));
+
+test('stale therapists approval cannot overwrite a different OUT result (A: no_show then stale happened)', () => {
+  const { sb, raw, post, create } = fixture();
+  create(1);
+  assert.equal(post({ action: 'markOneTimeSession', id: U(1), outcome: 'patient_no_show', expectedRevision: 1, opId: U(400) }).ok, true);
+  const before = snapAll(sb);
+  const r = raw({ action: 'recordSessionOutcome', secret: OUTCOME_SECRET, oneTimeSessionId: U(1), therapist: 'הילה תבור', outcome: 'happened' });
+  assert.deepEqual(plain(r), { ok: false, error: 'source_outcome_conflict', reason: 'source_outcome_conflict' });
+  assert.equal(snapAll(sb), before, 'zero changes to every sheet (log, money, audit, revision)');
+  assert.equal(sb.rows('OneTimeSessions')[0].status, 'no_show');
+  assert.equal(sb.rows('SessionLog')[0].outcome, 'patient_no_show');
+});
+
+test('lost-response retry cannot overwrite an OUT correction; same-outcome replay, correction and frozen pay still work (B)', () => {
+  const { sb, raw, post, create } = fixture();
+  create(1);
+  const send = (o, extra) => raw(Object.assign({ action: 'recordSessionOutcome', secret: OUTCOME_SECRET, oneTimeSessionId: U(1), therapist: 'הילה תבור', outcome: o }, extra));
+  const credits = sb.rows('Clients')[0].creditsOwed;
+  assert.equal(send('happened').ok, true);                    // scheduled initial event, no phone
+  assert.equal(send('happened').ok, true);                    // same-outcome replay
+  assert.equal(sb.rows('SessionLog').length, 1);
+  const log = sb.sheets.SessionLog, H = log.grid[0];
+  log.grid[1][H.indexOf('forwardedToPayroll')] = '2026-11';   // pay already forwarded
+  const c = post({ action: 'markOneTimeSession', id: U(1), outcome: 'therapist_cancelled', expectedRevision: Number(sb.rows('OneTimeSessions')[0].revision), opId: U(401) });
+  assert.equal(c.ok, true, 'authorized OUT correction path unchanged');
+  const before = snapAll(sb);
+  const r = send('happened');                                 // retry of the unchanged stale approval
+  assert.equal(r.error, 'source_outcome_conflict');
+  assert.equal(snapAll(sb), before, 'nothing changed by the refused retry');
+  const row = sb.rows('SessionLog');
+  assert.equal(row.length, 1); assert.equal(row[0].outcome, 'therapist_cancelled');
+  assert.equal(row[0].therapistPay, 300, 'frozen forwarded pay kept'); assert.equal(row[0].forwardedToPayroll, '2026-11');
+  assert.equal(sb.rows('Clients')[0].creditsOwed, credits, 'credits untouched');
+  assert.equal(send('therapist_cancelled').ok, true, 'same-outcome replay of the corrected result still succeeds');
+  assert.equal(send('happened', { secret: 'wrong' }).error, 'unauthorized', 'auth unaffected');
+});

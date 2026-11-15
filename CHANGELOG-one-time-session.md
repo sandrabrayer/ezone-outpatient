@@ -69,3 +69,10 @@ therapists app (therapist + date/time, the therapist marks it, payout via Sessio
 4. Make sure the catalog is imported («תמחור חבילות → ייבוא ראשוני») — without single-session rows the modal says so.
 
 Rollback: revert the merge and redeploy the same way. The `OneTimeSessions` sheet and the `oneTimeSessionId` column stay (append-only); charges created meanwhile are ordinary one-off charges. After a rollback the old `_happenedInMonth` would count already-recorded one-time sessions toward the monthly quota again — check SessionLog rows with an `ots::` id if a rollback happens.
+
+## Stale approval guard (issue #184, 2026-11-15)
+
+Once a one-time result has reached OUT, a DIFFERENT result arriving from a stale cross-app approval
+(`recordSessionOutcome`) is refused with `source_outcome_conflict` — before any write. Deliberate
+corrections remain through the existing revision-checked `markOneTimeSession`, not automatic retry.
+Same-outcome replays succeed. Package sessions are not affected. THR classifies the reply separately.

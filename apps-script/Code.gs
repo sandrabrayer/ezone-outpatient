@@ -7616,6 +7616,10 @@ function _otsRecordOutcome(payload, source) {
     if (source === 'therapists') {
       // the therapist named in the event must be the one the session is booked with
       if (String(payload.therapist == null ? '' : payload.therapist).trim() !== String(row.therapist)) return { ok: false, error: 'therapist_mismatch', reason: 'therapist_mismatch' };
+      // A stale cross-app approval must never overwrite a DIFFERENT result that already
+      // reached OUT (operator correction or earlier event). Same-outcome replays pass.
+      var curSt = String(row.status);
+      if ((curSt === 'completed' || curSt === 'no_show' || curSt === 'therapist_cancelled') && curSt !== ONE_TIME_OUTCOME_STATUS[outcome]) return { ok: false, error: 'source_outcome_conflict', reason: 'source_outcome_conflict' };
     } else {
       var opId = String(payload.opId || '').trim();
       if (!PACKAGE_UUID_RE.test(opId)) return { ok: false, error: 'bad_op_id' };
