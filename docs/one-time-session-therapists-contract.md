@@ -98,3 +98,11 @@ workflow; finish the paired THR Apps Script deployment and verify versions/cache
 catalogue read-only, do not blindly import. Missing integration must remain unavailable throughout staging.
 Approved test-patient, clinical/payment-scoped UAT is still required. No source/financial data, secrets,
 merges or deployments were changed by this verification work.
+
+## 5. Conflicting outcome (`source_outcome_conflict`)
+
+If the session already holds a terminal result (`completed` / `no_show` / `therapist_cancelled`) that
+differs from the incoming `outcome`, `recordSessionOutcome` answers
+`{ok:false,error:'source_outcome_conflict',reason:'source_outcome_conflict'}` and writes nothing.
+Identical replays still succeed. Corrections are made only via OUT's revision-checked operation;
+a new coordinator-correction contract would need an explicit versioned design.
