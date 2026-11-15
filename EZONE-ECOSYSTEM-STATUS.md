@@ -618,6 +618,9 @@ Both coordinators properties are set and verified (roster line shows «מנוה�
 - Pipeline: therapists app marks a session → posts `recordSessionOutcome`
   (secret `SESSION_OUTCOME_SECRET`, set on BOTH Apps Scripts, fail-closed) →
   outpatient writes a `SessionLog` row → payout tab reads `getSessionLog`.
+- Report order (2026-11-15, pending release): the push carries `reportRevision`; an OLDER
+  revision than the row's stored one is refused (`stale_report_revision`). Appended SessionLog
+  column `reportRevision`. See `CHANGELOG-report-revision.md`.
 - **Pay rates live in the `TherapistRates` sheet** (name / flatRate /
   intakeRate / followupRate), auto-seeded, cached 120s (edits apply ≤2 min).
   Names must EXACTLY match the therapists app's full names (e.g.

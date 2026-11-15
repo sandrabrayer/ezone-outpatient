@@ -650,7 +650,7 @@ test('E: cross-app receivers (deactivateClient, setClinicalType, recordSessionOu
   assert.match(GS, /_recordSessionOutcome\(Object\.assign\(\{\}, payload, \{ user: '' \}\)\)/);
   assert.match(GS, /_writeCreditsOwed\(clientsSh, clientId, balance, _requestUser\(payload\)\)/);
   // the internal correctSessionOutcome path (proxy-injected user) still passes payload through
-  assert.match(GS, /if \(action === 'correctSessionOutcome'\) \{[\s\S]*?return _json\(_recordSessionOutcome\(payload\)\);/);
+  assert.match(GS, /if \(action === 'correctSessionOutcome'\) \{[\s\S]*?return _json\(_recordSessionOutcome\(payload, 'outpatient'\)\);/);
 });
 
 test('E: mergeClients stamps the survivor (dups dropped, others untouched); restoreRemovedClient stamps the restored row', () => {

@@ -852,7 +852,9 @@ function _readAll(sh, headers) {
     var obj = {};
     for (var c = 0; c < headers.length; c++) {
       var v = row[c];
-      if (v instanceof Date) {
+      if (headers[c] === 'reportRevision' && Object.prototype.toString.call(v) === '[object Date]') {
+        v = _reportRevisionCell(v);
+      } else if (v instanceof Date) {
         v = Utilities.formatDate(v, Session.getScriptTimeZone() || 'Asia/Jerusalem', 'yyyy-MM-dd');
       } else if (PHONE_COLUMNS[headers[c]]) {
         v = _recoverPhone(v);   // restore leading zero dropped by Sheets coercion
@@ -882,7 +884,7 @@ function _writeAll(sh, headers, rows) {
   // and ISO timestamps survive (Sheets would otherwise coerce a numeric-looking
   // phone to a number and an ISO string to a Date).
   for (var c = 0; c < headers.length; c++) {
-    if (_isTextForcedColumn(headers[c], headers)) {
+    if (_isTextForcedColumn(headers[c], headers) || (headers === SESSION_LOG_HEADERS && headers[c] === 'reportRevision')) {
       sh.getRange(2, c + 1, values.length, 1).setNumberFormat('@');
     }
   }
@@ -3671,8 +3673,88 @@ var SESSION_LOG_HEADERS = [
   // one-time session (טיפול חד פעמי, sessionId 'ots::<id>'). Such a row is
   // OUTSIDE the package: _happenedInMonth skips it, no credit effect. '' = a
   // regular package session.
-  'oneTimeSessionId'
+  'oneTimeSessionId',
+  // APPEND-ONLY (2026-11-15): the therapists app's server-owned revision of the APPROVED
+  // report this row records (ISO time of the report). recordSessionOutcome refuses a push
+  // whose revision is OLDER than the stored one (`stale_report_revision`) — two approved
+  // pushes of one session that cross in flight can no longer leave the older result.
+  // '' = recorded before this column / entered in Outpatient itself.
+  'reportRevision'
 ];
+
+/* Exact report instant: null = genuinely absent; NaN = present but invalid.
+ * Calendar days, local times, numbers and objects are never ordering tokens. */
+function _reportRevisionMs(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    try { return Date.prototype.getTime.call(v); } catch (_) { return NaN; }
+  }
+  if (typeof v !== 'string' || v.length > 80) return NaN;
+  var text = v.trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(text);
+  if (!m) return NaN;
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  var hh = Number(m[4]), mm = Number(m[5]), ss = Number(m[6]);
+  var frac = Number(((m[7] || '') + '000').slice(0, 3));
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || hh > 23 || mm > 59 || ss > 59) return NaN;
+  // Reject normalized impossible dates (e.g. February 30), without year 00–99 coercion.
+  var wall = new Date(0);
+  wall.setUTCFullYear(y, mo - 1, d); wall.setUTCHours(hh, mm, ss, frac);
+  if (wall.getUTCFullYear() !== y || wall.getUTCMonth() !== mo - 1 || wall.getUTCDate() !== d) return NaN;
+  if (m[8] !== 'Z' && (Number(m[8].slice(1, 3)) > 23 || Number(m[8].slice(4)) > 59)) return NaN;
+  var parsed = Date.parse(text);
+  return typeof parsed === 'number' && isFinite(parsed) ? parsed : NaN;
+}
+
+/* Invoked only for the reportRevision column, not appointment/payment dates.
+ * An invalid stored Date remains invalid evidence; never turn it into a blank legacy revision. */
+function _reportRevisionCell(v) {
+  if (Object.prototype.toString.call(v) !== '[object Date]') return v;
+  var ms = _reportRevisionMs(v);
+  return typeof ms === 'number' && isFinite(ms) ? new Date(ms).toISOString() : '!invalid_report_revision';
+}
+
+/* Source-side ordering, called under the existing ScriptLock BEFORE credit/pay writes.
+ * `source` is a server call argument, never a JSON flag. Only the proxy-authenticated
+ * correctSessionOutcome dispatch passes the literal 'outpatient'. */
+function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) {
+  if (source === 'outpatient' || !oldRow) return { ok: true };
+  var stored = _reportRevisionMs(oldRow.reportRevision);
+  if (stored !== null && !isFinite(stored)) return { ok: false, reason: 'invalid_report_revision' };
+  if (stored === null) return { ok: true }; // legacy row: first versioned event is allowed
+  if (incomingRev === null) return { ok: false, reason: 'invalid_report_revision' };
+  if (incomingRev < stored) return { ok: false, reason: 'stale_report_revision' };
+  if (incomingRev > stored) return { ok: true };
+  // Equal revision is a replay only when the stored result/identity agree.
+  // Name is a display field; current pay rates/other sessions must not reprice a retry.
+  var keys = ['sessionId', 'phone', 'clientId', 'therapist', 'clinicalTreatmentType', 'billingType', 'date', 'outcome', 'sessionStatus'];
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var a = String(oldRow[key] == null ? '' : oldRow[key]).trim();
+    var b = String(incomingRow[key] == null ? '' : incomingRow[key]).trim();
+    if (key === 'phone') { a = _recoverPhone(a); b = _recoverPhone(b); }
+    if (a !== b) return { ok: false, reason: 'source_outcome_conflict' };
+  }
+  // The current Therapists push sends no frequency. A frequency-bearing day-centre
+  // replay cannot be proven from this schema: it stores no original event frequency.
+  // Refuse rather than silently accept a potentially different financial request.
+  var p = payload || {};
+  var freq = p.freqPerWeek != null && p.freqPerWeek !== '' ? p.freqPerWeek : p.frequencyPerWeek;
+  if (_isDayCenterBilling(incomingRow.billingType) && freq != null && freq !== '') {
+    return { ok: false, reason: 'source_outcome_conflict' };
+  }
+  var pay = Number(oldRow.therapistPay);
+  var value = oldRow.clientSessionValue === '' || oldRow.clientSessionValue == null ? null : Number(oldRow.clientSessionValue);
+  if (oldRow.therapistPay === '' || oldRow.therapistPay == null || !isFinite(pay) || (value !== null && !isFinite(value))) {
+    return { ok: false, reason: 'invalid_report_revision' };
+  }
+  return { ok: true, replay: {
+    ok: true, sessionId: String(oldRow.sessionId), therapistPay: pay,
+    clientSessionValue: value, sessionStatus: String(oldRow.sessionStatus),
+    creditStatus: String(oldRow.creditStatus == null ? '' : oldRow.creditStatus),
+    upserted: true, replayed: true, reportRevision: new Date(stored).toISOString()
+  } };
+}
 
 var SESSION_STATUS_BY_OUTCOME = {
   happened:            'consumed',
@@ -3707,7 +3789,7 @@ function _computeSessionValue(billingType, freqPerWeek) {
   return _billingPrice(billingType, freqPerWeek);
 }
 
-function _recordSessionOutcome(payload) {
+function _recordSessionOutcome(payload, source) {
   var sessionId = String((payload && payload.sessionId) || '').trim();
   if (!sessionId) return { ok: false, reason: 'missing_session_id' };
   // 'ots::' rows belong to one-time sessions (_otsRecordOutcome) — never through the package path.
@@ -3741,6 +3823,11 @@ function _recordSessionOutcome(payload) {
   } catch (err) {
     return { ok: false, reason: 'invalid_frequency' };
   }
+
+  // Optional report revision (therapists app). Present but unreadable → refused: an
+  // unordered push must never be written as if it were the newest.
+  var incomingRev = _reportRevisionMs(source === 'outpatient' ? null : payload && payload.reportRevision);
+  if (incomingRev !== null && !isFinite(incomingRev)) return { ok: false, reason: 'invalid_report_revision' };
 
   var sessionStatus = SESSION_STATUS_BY_OUTCOME[outcome];
   var phone = _recoverPhone(payload && payload.phone);
@@ -3813,6 +3900,18 @@ function _recordSessionOutcome(payload) {
     for (var lr = 0; lr < logRows.length; lr++) {
       if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
     }
+    // ---- Report order (2026-11-15) -----------------------------------------
+    // Inside the lock and BEFORE any write: an approved push that carries an OLDER
+    // report revision than the row already holds arrived late — refuse it whole (no
+    // SessionLog, pay or credit change). Equal = the same report re-sent (idempotent).
+    // A push without a revision (older sender, or a correction made in Outpatient)
+    // is handled as before and keeps the stored revision.
+    var order = _sessionReportOrder(oldRow, rowObj, incomingRev, source, payload);
+    if (!order.ok) return order;
+    if (order.replay) return order.replay; // exact recorded replay: no reprice, credit write or log upsert
+    rowObj.reportRevision = incomingRev !== null ? new Date(incomingRev).toISOString()
+      : (oldRow && oldRow.reportRevision != null ? oldRow.reportRevision : '');
+
     // Preserve an already-forwarded stamp across the upsert: a correction re-runs
     // pay/credit but must not silently un-forward a session payroll already received.
     var wasForwarded = !!(oldRow && String(oldRow.forwardedToPayroll || '').trim() !== '');
@@ -3900,13 +3999,19 @@ function _recordSessionOutcome(payload) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var r = 0; r < ids.length; r++) {
         if (String(ids[r][0]) === sessionId) {
+          sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
           sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
           upserted = true;
           break;
         }
       }
     }
-    if (!upserted) sh.appendRow(rowArr);
+    if (!upserted) {
+      var nextRow = sh.getLastRow() + 1;
+      if (typeof sh.getMaxRows === 'function' && nextRow > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), nextRow - sh.getMaxRows());
+      sh.getRange(nextRow, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+      sh.appendRow(rowArr);
+    }
 
     var result = {
       ok: true,
@@ -8062,7 +8167,7 @@ function doPost(e) {
       // prior effect reversed (upsert by sessionId) — there is no raw amount
       // override. A new sessionId appends a fresh row; an existing one corrects in
       // place. forwardedToPayroll is preserved across the upsert.
-      return _json(_recordSessionOutcome(payload));
+      return _json(_recordSessionOutcome(payload, 'outpatient'));
     }
     if (action === 'markForwarded') {
       return _json(_markForwarded(payload));

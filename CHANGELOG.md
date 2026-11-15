@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Candidate: harden approved-report order before any receiver release
+- Refuse external downgrade and equal-revision conflicts; exact persisted replays do not reprice or change credits. Preserve full SessionLog.reportRevision precision and text on writes. Internal proxy-authenticated corrections remain a separate literal call path. No new column. See CHANGELOG-report-order-hardening.md for compatibility limits and required paired acceptance.
+
+### Session outcome: an older approved report can no longer overwrite a newer one (2026-11-15)
+- `recordSessionOutcome` (package sessions): the therapists app now sends `reportRevision` (ISO time of the approved report, owned by its server). Inside the existing lock and before any write, a push whose revision is OLDER than the row's stored one is refused with `stale_report_revision` — no SessionLog, pay or credit change. Equal revision = the same report re-sent (idempotent). A push without a revision (older sender, or a correction made in Outpatient) behaves as before and keeps the stored revision; an unreadable revision is refused (`invalid_report_revision`). New appended SessionLog column `reportRevision` (append-only; existing rows read ''). One-time sessions are unchanged (their own `source_outcome_conflict` rule). No UI change, no SW bump. See `CHANGELOG-report-revision.md`.
+
 ### One-time outcome: stale cross-app approval can no longer overwrite a different OUT result (2026-11-15, issue #184)
 - `_otsRecordOutcome` (therapists receiver only), inside its existing lock: if the session already holds a terminal result (completed / no_show / therapist_cancelled) that differs from the incoming outcome, it answers `source_outcome_conflict` and writes nothing (no SessionLog, pay, audit, revision). Same-outcome replays and first results still succeed; ורד's revision-checked `markOneTimeSession` correction path is unchanged. Not applied to package sessions. Selected-source testing only, not deployed UAT. See `CHANGELOG-one-time-session.md`.
 
