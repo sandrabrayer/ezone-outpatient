@@ -1,5 +1,7 @@
 # Session outcome — report order (`reportRevision`), 2026-11-15
 
+> Candidate hardening supersedes the unrestricted no-revision/equal-revision compatibility statements below. A versioned row rejects an unversioned external event; equal revisions require matching persisted result/identity. Read CHANGELOG-report-order-hardening.md. This remains unreleased.
+
 ## Problem
 `_recordSessionOutcome` upserts SessionLog by `sessionId`; the last write wins. The therapists
 app pushes an approved outcome outside its lock. If report A is approved, then corrected to B

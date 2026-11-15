@@ -65,14 +65,16 @@ test('the same report re-sent (equal revision) is idempotent', () => {
   assert.equal(f.row()[0].therapistPay, pay);
 });
 
-test('no revision (older sender / a correction made here) behaves as before and keeps the stored revision', () => {
+test('legacy rows accept a first revision; an unversioned external report cannot then downgrade it', () => {
   const f = fixture();
-  assert.equal(f.send({}).ok, true, 'a row without a revision is recorded');
+  assert.equal(f.send({}).ok, true, 'a genuinely legacy row is still accepted');
   assert.equal(f.row()[0].reportRevision, '');
-  assert.equal(f.send({ reportRevision: A }).ok, true, 'a first revision on a legacy row is accepted');
-  assert.equal(f.send({ outcome: 'patient_no_show' }).ok, true, 'no revision → written as before');
-  assert.equal(f.row()[0].outcome, 'patient_no_show');
-  assert.equal(f.row()[0].reportRevision, A, 'the stored revision is kept');
+  assert.equal(f.send({ reportRevision: A }).ok, true, 'first revision upgrades the row');
+  const before = JSON.stringify(f.row()), credits = f.credits();
+  assert.equal(f.send({ outcome: 'patient_no_show' }).reason, 'invalid_report_revision');
+  assert.equal(JSON.stringify(f.row()), before);
+  assert.equal(f.credits(), credits);
+  assert.equal(f.row()[0].reportRevision, A);
   assert.equal(f.send({ outcome: 'happened', reportRevision: '2026-11-10T09:00:00.000Z' }).reason, 'stale_report_revision');
 });
 

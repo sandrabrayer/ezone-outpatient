@@ -29,7 +29,7 @@ test('source: creditsOwed is a CLIENTS_HEADERS column (credit engine persists)',
 
 // --- B. single-cell credit write ---
 test('source: credit balance uses _writeCreditsOwed, not a whole-sheet rewrite', () => {
-  const m = SRC.match(/function _recordSessionOutcome\(payload\)[\s\S]*?\n}\n/);
+  const m = SRC.match(/function _recordSessionOutcome\(payload, source\)[\s\S]*?\n}\n/);
   assert.ok(m, '_recordSessionOutcome not found');
   const fn = m[0];
   assert.match(fn, /_writeCreditsOwed\(clientsSh, clientId, balance, _requestUser\(payload\)\)/);
