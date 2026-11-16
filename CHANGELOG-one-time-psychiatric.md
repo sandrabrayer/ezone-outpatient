@@ -138,6 +138,10 @@ money path beside the audited one. The per-session patient (2026-11-04) is the e
 - `test/package-catalog.test.js` — the add-only import (re-priced and deactivated rows untouched,
   one new epoch, idempotent, still assertion-gated); four distinct psychiatric keys and prices.
 
+CI: `test/one-time-lead-browser.test.js` is added to the required browser job (`lead-save-browser` in
+`.github/workflows/test.yml`), so the lead flow runs in a real browser on every PR (the general `test` job
+skips browser tests when Playwright is absent).
+
 ## Release
 
 1. Merge after Sandra's approval; `/api/version` = merge SHA; `/healthz`.
