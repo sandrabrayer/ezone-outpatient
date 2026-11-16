@@ -16,6 +16,14 @@ the therapists app (which stores the same value). Unset → the feed answers
 `unauthorized`; scheduling, charging and ורד's marking work without it.
 No Railway variable is added. See `CHANGELOG-one-time-session.md`.
 
+### One-time psychiatric services + lead booking (2026-11-16)
+
+No new secret, Script Property, Railway variable, sheet or column. After the
+Apps Script phase, ורד opens «תמחור חבילות» → the catalog and clicks
+**«הוספת השירותים החדשים לקטלוג»** once (adds `psychiatric_followup` and
+`psychiatric_intake`; add-only, idempotent). Until then the one-time modal offers
+the services already in the catalog. See `CHANGELOG-one-time-psychiatric.md`.
+
 ## Source authentication — configuration prerequisites
 
 OP-01 was released in PR #115 on 2026-10-17 (Node `76de4cc5`, Apps Script @94).

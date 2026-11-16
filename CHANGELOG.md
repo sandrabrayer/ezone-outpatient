@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### One-time psychiatric services + one-time booking for a lead (2026-11-16)
+- Catalog: two new single-session rows APPENDED to the seed — `psychiatric_followup` (מעקב פסיכיאטרי, 1,100 ₪) and `psychiatric_intake` (אינטייק פסיכיאטרי, 2,300 ₪) — beside the PDF's ייעוץ (900 ₪) and אבחון (2,500 ₪). Owner decision: four different services. Mapped to the clinical types «מעקב פסיכיאטרי» / «אינטייק», so the psychiatrist's follow-up / intake rate applies (fail closed without one). `adminSeedPackageCatalog` is now add-only on a seeded catalog (keys with no row at all, one new epoch, nothing existing touched); `adminGetPackageCatalog` reports `missingSeedKeys` and «תמחור חבילות» shows «הוספת השירותים החדשים לקטלוג». Billing constants unchanged.
+- One-time modal: the service label is decided by the catalog key (two services share a clinical type), so the four psychiatric services show under their own names.
+- «+ טיפול חד פעמי» on a lead card (full money scope only): on «שמירה» the lead is saved as a per-session patient (no package, no renewal cycle, no payment row, lead history kept) and the session + charge are created through the unchanged path. Nothing is written before «שמירה»; an unusable phone or an existing patient with the same phone stops before any write; a booking refused after the conversion is retried without a second patient. No new source action, sheet, column, secret or variable. SW cache v38 → v39. See `CHANGELOG-one-time-psychiatric.md`.
+
 ### Candidate: harden approved-report order before any receiver release
 - Refuse external downgrade and equal-revision conflicts; exact persisted replays do not reprice or change credits. Preserve full SessionLog.reportRevision precision and text on writes. Internal proxy-authenticated corrections remain a separate literal call path. No new column. See CHANGELOG-report-order-hardening.md for compatibility limits and required paired acceptance.
 
