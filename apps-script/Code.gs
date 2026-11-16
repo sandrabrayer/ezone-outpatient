@@ -6098,7 +6098,8 @@ var PACKAGE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 /* Initial catalog = the supplied PDF "קטלוג שירותים איזון 2026" (version 2.0,
  * May 2026; every price includes VAT, p9). One row per option key; page
- * references are PDF page numbers. */
+ * references are PDF page numbers. Rows added later by an owner decision are
+ * APPENDED at the end and say so in their sourceRef. */
 var PACKAGE_CATALOG_SEED = [
   { key: 'day_track_basic', family: 'day_track', tier: 'basic', unit: 'per_month', sessions: 0, sessionMinutes: 0, allowedMonths: '1', monthlyPriceAgorot: 1500000, sourceRef: 'PDF p3: מסלול בסיסי, 3 days/week, 15,000 ₪ per month' },
   { key: 'day_track_extended', family: 'day_track', tier: 'extended', unit: 'per_month', sessions: 0, sessionMinutes: 0, allowedMonths: '1', monthlyPriceAgorot: 1800000, sourceRef: 'PDF p3: מסלול מורחב, 5 days/week, 18,000 ₪ per month' },
@@ -6114,7 +6115,14 @@ var PACKAGE_CATALOG_SEED = [
   { key: 'continuation_monthly', family: 'continuation', tier: 'monthly', unit: 'per_month', sessions: 4, sessionMinutes: 50, allowedMonths: '1', monthlyPriceAgorot: 200000, sourceRef: 'PDF p7: טיפולי המשך, 4 sessions per month, 2,000 ₪ per month, month-to-month' },
   { key: 'psychiatric_consult', family: 'psychiatric', tier: 'consult', unit: 'per_session_pack', sessions: 1, sessionMinutes: 0, pricePerSessionAgorot: 90000, sourceRef: 'PDF p7: ייעוץ פסיכיאטרי 900 ₪ per meeting (distinct from the 1,100 ₪ מעקב פסיכיאטרי billing price)' },
   { key: 'psychiatric_diagnosis', family: 'psychiatric', tier: 'diagnosis', unit: 'flat', sessions: 1, sessionMinutes: 0, priceTotalAgorot: 250000, sourceRef: 'PDF p7: אבחון פסיכיאטרי, one-time 2,500 ₪ incl. written report (distinct from the 2,300 ₪ אינטייק billing price)' },
-  { key: 'solo_housing', family: 'solo_housing', tier: 'range', unit: 'per_month_range', sessions: 0, sessionMinutes: 0, allowedMonths: '3', priceMinAgorot: 800000, priceMaxAgorot: 1000000, sourceRef: 'PDF p8: Solo, 8,000–10,000 ₪ per month, 3 months (extension by clinical judgment). Vered must select the monthly price' }
+  { key: 'solo_housing', family: 'solo_housing', tier: 'range', unit: 'per_month_range', sessions: 0, sessionMinutes: 0, allowedMonths: '3', priceMinAgorot: 800000, priceMaxAgorot: 1000000, sourceRef: 'PDF p8: Solo, 8,000–10,000 ₪ per month, 3 months (extension by clinical judgment). Vered must select the monthly price' },
+  /* 2026-11-16 (APPENDED — never insert above: sortOrder is the array position).
+   * NOT in the PDF: Sandra confirmed that מעקב פסיכיאטרי (1,100 ₪) and אינטייק
+   * (2,300 ₪) are services of their own, distinct from the PDF's ייעוץ (900 ₪)
+   * and אבחון (2,500 ₪), and wants all four bookable as a one-time session. The
+   * amounts equal the existing billing prices; ורד can change them like any row. */
+  { key: 'psychiatric_followup', family: 'psychiatric', tier: 'followup', unit: 'per_session_pack', sessions: 1, sessionMinutes: 0, pricePerSessionAgorot: 110000, sourceRef: 'Owner decision 2026-11-16: מעקב פסיכיאטרי 1,100 ₪ per meeting (the billing price; not in the PDF)' },
+  { key: 'psychiatric_intake', family: 'psychiatric', tier: 'intake', unit: 'flat', sessions: 1, sessionMinutes: 0, priceTotalAgorot: 230000, sourceRef: 'Owner decision 2026-11-16: אינטייק פסיכיאטרי, one-time 2,300 ₪ (the billing price; not in the PDF)' }
 ];
 
 /* ---------- small pure helpers (mirrored by test/package-catalog.test.js) ---------- */
@@ -6508,22 +6516,43 @@ function _pkgAdminCatalogItem(r) {
 function _pkgAdminGetCatalog() {
   try {
     var rows = _readAll(_pkgCatalogSheet(), PACKAGE_CATALOG_HEADERS);
-    return { ok: true, catalogEpoch: _pkgMaxEpoch(rows), items: rows.map(_pkgAdminCatalogItem) };
+    return { ok: true, catalogEpoch: _pkgMaxEpoch(rows), items: rows.map(_pkgAdminCatalogItem),
+      missingSeedKeys: rows.length ? _pkgMissingSeedKeys(rows) : [] };
   } catch (err) { return { ok: false, error: 'package_error' }; }
 }
 
-/* One-time initial import. Idempotent: refuses when ANY catalog row exists. */
+/* Seed keys that have NO catalog row at all (any version, active or not). A key
+ * ורד deactivated or re-priced is therefore never re-added or overwritten. */
+function _pkgMissingSeedKeys(rows) {
+  var have = {};
+  rows.forEach(function (r) { have[String(r.key)] = true; });
+  var out = [];
+  PACKAGE_CATALOG_SEED.forEach(function (s) { if (!_hasOwn(have, s.key)) out.push(s.key); });
+  return out;
+}
+
+/* Catalog import. Idempotent and ADD-ONLY:
+ *   - empty catalog → every seed row (epoch 1), as before;
+ *   - a seeded catalog → only the seed keys that have no row yet (services added
+ *     to the seed after the first import), under ONE new epoch so a browser
+ *     holding the older catalog is told it is stale. Existing rows, prices and
+ *     versions are never touched;
+ *   - nothing missing → 'already_seeded' (unchanged answer). */
 function _pkgAdminSeed(payload) {
   try {
     var lock = _pkgLock(10000);
     if (!lock) return { ok: false, error: 'busy' };
     try {
       var sh = _pkgCatalogSheet();
-      if (_readAll(sh, PACKAGE_CATALOG_HEADERS).length) return { ok: false, error: 'already_seeded' };
-      var now = _pkgNow(), by = _requestUser(payload) || 'catalog-admin';
+      var rows = _readAll(sh, PACKAGE_CATALOG_HEADERS);
+      var missing = rows.length ? _pkgMissingSeedKeys(rows) : null;
+      if (missing && !missing.length) return { ok: false, error: 'already_seeded' };
+      var epoch = rows.length ? _pkgMaxEpoch(rows) + 1 : 1;
+      var now = _pkgNow(), by = _requestUser(payload) || 'catalog-admin', added = [];
       PACKAGE_CATALOG_SEED.forEach(function (s, i) {
+        if (missing && missing.indexOf(s.key) < 0) return;
         var rec = {
-          id: s.key + '@v1', key: s.key, version: 1, epoch: 1, family: s.family, tier: s.tier, unit: s.unit,
+          id: s.key + '@v1', key: s.key, version: 1, epoch: epoch, family: s.family, tier: s.tier, unit: s.unit,
           sessions: s.sessions || 0, sessionMinutes: s.sessionMinutes || 0, allowedMonths: s.allowedMonths || '',
           pricePerSessionAgorot: s.pricePerSessionAgorot || '', priceTotalAgorot: s.priceTotalAgorot || '',
           monthlyPriceAgorot: s.monthlyPriceAgorot || '', priceMinAgorot: s.priceMinAgorot || '',
@@ -6531,8 +6560,9 @@ function _pkgAdminSeed(payload) {
           active: 1, sortOrder: (i + 1) * 10, sourceRef: s.sourceRef, validFromIso: now, createdAtIso: now, createdBy: by
         };
         sh.appendRow(_pkgRowToCells(PACKAGE_CATALOG_HEADERS, rec));
+        added.push(s.key);
       });
-      return { ok: true, seeded: PACKAGE_CATALOG_SEED.length };
+      return { ok: true, seeded: added.length, added: added };
     } finally { _pkgUnlock(lock); }
   } catch (err) { return { ok: false, error: 'package_error' }; }
 }
@@ -7302,7 +7332,12 @@ var ONE_TIME_OUTCOME_STATUS = { happened: 'completed', patient_no_show: 'no_show
 /* Catalog → clinical treatment type (what the therapist delivers; decides the
  * therapist pay rule). By key first, then by family. A single-session catalog
  * row with no mapping is NOT offered (fail closed — never a guessed pay type). */
-var ONE_TIME_CLINICAL_BY_KEY = { psychiatric_consult: 'מעקב פסיכיאטרי', psychiatric_diagnosis: 'אינטייק' };
+var ONE_TIME_CLINICAL_BY_KEY = {
+  psychiatric_consult: 'מעקב פסיכיאטרי', psychiatric_diagnosis: 'אינטייק',
+  // 2026-11-16: the two billing-priced psychiatric services (same pay rules: a
+  // follow-up pays followupRate, an intake pays intakeRate).
+  psychiatric_followup: 'מעקב פסיכיאטרי', psychiatric_intake: 'אינטייק'
+};
 var ONE_TIME_CLINICAL_BY_FAMILY = { emdr: 'פרטני EMDR', cbt: 'פרטני CBT' };
 /* The charge's treatmentType must be one the frozen v1 extra-charge contract
  * accepts (_extraIntentV1Error); anything else is written blank. */

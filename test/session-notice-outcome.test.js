@@ -362,7 +362,7 @@ test('wiring: the module is loaded before app.js; the correction form offers all
   assert.ok(html.includes('id="clientSessionsModal"'));
   const sw = fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8');
   const v = Number((sw.match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]);
-  assert.ok(v >= 39, 'SW cache >= v39 (got ' + v + ')');
+  assert.ok(v >= 40, 'SW cache >= v40 (got ' + v + ')');
   // no price / pay constant in the new public module (it must stay an ordinary static file)
   const src = fs.readFileSync(path.join(PUB, 'session-outcome.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // code only (comments carry dates)

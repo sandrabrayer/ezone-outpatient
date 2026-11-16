@@ -15,7 +15,7 @@ both managed in OUT. The closed outcome set is now FOUR tokens on both sides:
   token; one `CREDIT_GRANTING_OUTCOMES` set drives pay 0, the credit grant and the correction
   reversal. No sheet column. One-time sessions refuse it (`one_time_outcome_rejected`).
   UI: «התקיים / לא התקיים» + reason + «חשבון המטופל/ת» in «תשלומי מטפלים»; patient card
-  «📋 מפגשים שדווחו»; display vocabulary in `public/session-outcome.js`. SW v39.
+  «📋 מפגשים שדווחו»; display vocabulary in `public/session-outcome.js`. SW v40.
 - **Therapists** (`CHANGELOG-session-report-held-notice.md` in that repo): two-step report
   («התקיים» / «לא התקיים» + REQUIRED reason, each showing its consequence), one result chip
   everywhere, same approval gate (nothing reaches OUT before «אישור לתשלום»). SW v90.
@@ -286,6 +286,25 @@ workflow, logic, missing information/features, privacy, integrity/recovery,
 backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
+
+## Outpatient: one-time PSYCHIATRIC services + one-time booking for a lead (Nov 16, 2026 — draft PR, not released)
+
+- Four psychiatric one-time services, each its own `PackageCatalog` key: `psychiatric_consult`
+  (ייעוץ, 900 ₪), `psychiatric_followup` (מעקב, 1,100 ₪ — NEW row), `psychiatric_diagnosis`
+  (אבחון, 2,500 ₪), `psychiatric_intake` (אינטייק, 2,300 ₪ — NEW row). Owner decision: four
+  different services. Clinical type (decides the pay): consult/followup → «מעקב פסיכיאטרי»,
+  diagnosis/intake → «אינטייק». The billing price constants are untouched.
+- The catalog import is now ADD-ONLY on a seeded catalog (only keys with no row at all, one new
+  epoch); ורד clicks «הוספת השירותים החדשים לקטלוג» once after the Apps Script deploy.
+- «+ טיפול חד פעמי» on a LEAD card: on save the lead becomes a patient with
+  `billingMode: 'per_session'` (no package, no renewal cycle, no payment row, `fromLead` kept),
+  then the session is booked through the unchanged `createOneTimeSession` path. No new source
+  action, sheet, column, secret or variable.
+- **Therapists app follow-up (separate repo):** add Hebrew labels for the tiers `followup` /
+  `intake`; nothing else changes in either contract (the feed keys and the outcome call are the
+  same). Known and unchanged: `getTreatmentPlans` still projects a `renewalDate` for a
+  per-session patient (start + 1 month) — relevant now that a one-time lead becomes one.
+- Details: `CHANGELOG-one-time-psychiatric.md`.
 
 ## Outpatient: one-time session «+ טיפול חד פעמי» (Nov 11, 2026 — PR open, not released)
 

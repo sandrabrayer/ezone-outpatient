@@ -24,9 +24,19 @@
     cancelled: 'בוטל'
   };
   var OUTCOME_HE = { happened: 'התקיים', patient_no_show: 'לא הגיע/ה', therapist_cancelled: 'המטפל/ת ביטל/ה' };
-  /* Service labels by the CLINICAL type the source mapped the single-session
-   * catalog row to (no catalog key or price is shipped to the browser).
-   * Unknown types show as the clinical type itself. */
+  /* Service labels. The CATALOG KEY decides first (2026-11-16): two catalog
+   * services can share one clinical type — ייעוץ פסיכיאטרי and מעקב פסיכיאטרי
+   * are both the clinical «מעקב פסיכיאטרי», אבחון and אינטייק both «אינטייק» —
+   * so the clinical type alone cannot name them. A key without a label falls
+   * back to the clinical-type label, then to the clinical type itself. */
+  var SERVICE_BY_KEY_HE = {
+    emdr_single: 'EMDR — טיפול בודד',
+    cbt_single: 'CBT — טיפול בודד',
+    psychiatric_consult: 'ייעוץ פסיכיאטרי',
+    psychiatric_followup: 'מעקב פסיכיאטרי',
+    psychiatric_diagnosis: 'אבחון פסיכיאטרי',
+    psychiatric_intake: 'אינטייק פסיכיאטרי'
+  };
   var SERVICE_HE = {
     'פרטני EMDR': 'EMDR — טיפול בודד',
     'פרטני CBT': 'CBT — טיפול בודד',
@@ -78,7 +88,8 @@
     return d.toISOString().slice(0, 10);
   }
   function statusLabel(st) { return STATUS_HE[s(st)] || s(st) || '—'; }
-  function serviceLabel(key, clinical) { return SERVICE_HE[s(clinical)] || s(clinical) || s(key) || '—'; }
+  function own(map, k) { return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : ''; }
+  function serviceLabel(key, clinical) { return own(SERVICE_BY_KEY_HE, s(key)) || own(SERVICE_HE, s(clinical)) || s(clinical) || s(key) || '—'; }
   function errorText(code) {
     var c = s(code);
     if (c.indexOf('unauthorized') >= 0) return 'אין הרשאה — התחברו מחדש';
@@ -170,7 +181,7 @@
   }
 
   return {
-    STATUS_HE: STATUS_HE, OUTCOME_HE: OUTCOME_HE, SERVICE_HE: SERVICE_HE, ERROR_HE: ERROR_HE,
+    STATUS_HE: STATUS_HE, OUTCOME_HE: OUTCOME_HE, SERVICE_HE: SERVICE_HE, SERVICE_BY_KEY_HE: SERVICE_BY_KEY_HE, ERROR_HE: ERROR_HE,
     CHARGE_TREATMENT_TYPES: CHARGE_TREATMENT_TYPES, CLINICAL_TO_CHARGE: CLINICAL_TO_CHARGE,
     statusLabel: statusLabel, serviceLabel: serviceLabel, errorText: errorText, newId: newId,
     forClient: forClient, chargeState: chargeState, chargeLabel: chargeLabel, actionsFor: actionsFor,

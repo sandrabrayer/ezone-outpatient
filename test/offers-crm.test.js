@@ -80,7 +80,7 @@ const lastReq = async () => (await rpc('list')).json.items[0];
 test('setup: Vered seeds the catalog; the manager side still works unchanged', async () => {
   await ready();
   assert.equal((await rpc('seed')).json.ok, true);
-  assert.equal((await rpc('catalog')).json.items.length, 15);
+  assert.equal((await rpc('catalog')).json.items.length, 17);
   upstream = [];
 });
 

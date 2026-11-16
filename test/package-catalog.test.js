@@ -68,7 +68,12 @@ test('calc: the 900/1,100 and 2,500/2,300 pairs stay DISTINCT keys; no key equat
   const sb = seeded();
   const keys = admin(sb, 'adminGetPackageCatalog').items.map((i) => i.key);
   for (const k of ['psychiatric_consult', 'psychiatric_diagnosis']) assert.ok(keys.includes(k));
-  assert.ok(!keys.some((k) => /follow|intake/.test(k)), 'no catalog key silently aliases the billing follow-up/intake services');
+  // 2026-11-16 (owner decision): the billing-priced follow-up / intake are catalog services of THEIR OWN —
+  // four distinct keys at four distinct prices; neither PDF key was re-priced or aliased to them.
+  for (const k of ['psychiatric_followup', 'psychiatric_intake']) assert.ok(keys.includes(k));
+  const gross = (k) => quote(sb, k).quote.grossAgorot;
+  assert.deepEqual(['psychiatric_consult', 'psychiatric_followup', 'psychiatric_diagnosis', 'psychiatric_intake'].map(gross), [90000, 110000, 250000, 230000]);
+  assert.equal(keys.filter((k) => /^psychiatric_/.test(k)).length, 4, 'exactly four psychiatric keys');
 });
 
 test('calc: a price RANGE needs Vered\'s selection — never min or midpoint — and is range-checked', () => {
@@ -139,18 +144,67 @@ test('headers: both package sheets are append-only (guard pins the exact current
 
 test('seed: every PDF family is imported once, idempotently, each row with a PDF page reference', () => {
   const sb = env();
-  assert.equal(admin(sb, 'adminSeedPackageCatalog').seeded, 15);
+  assert.equal(admin(sb, 'adminSeedPackageCatalog').seeded, 17);
   assert.equal(admin(sb, 'adminSeedPackageCatalog').error, 'already_seeded');
   const rows = sb.rows('PackageCatalog');
-  assert.equal(rows.length, 15);
+  assert.equal(rows.length, 17);
   const fam = new Set(rows.map((r) => r.family));
   for (const f of ['day_track', 'emdr', 'cbt', 'emdr_cbt', 'continuation', 'psychiatric', 'solo_housing']) assert.ok(fam.has(f), f);
   for (const r of rows) {
-    assert.match(String(r.sourceRef), /^PDF p\d+/, r.key + ' needs a page reference');
+    // every row says where its price comes from: a PDF page, or a dated owner decision (rows added after the PDF)
+    assert.match(String(r.sourceRef), /^(PDF p\d+|Owner decision \d{4}-\d{2}-\d{2}:)/, r.key + ' needs a source reference');
     assert.equal(r.vatBasis, 'inclusive');
     assert.equal(Number(r.vatRateBp), 1800);
   }
-  assert.equal(new Set(rows.map((r) => r.key)).size, 15);
+  assert.equal(new Set(rows.map((r) => r.key)).size, 17);
+  assert.deepEqual(rows.filter((r) => !/^PDF p\d+/.test(String(r.sourceRef))).map((r) => r.key), ['psychiatric_followup', 'psychiatric_intake'], 'only the two owner-decision rows are not from the PDF');
+  // APPENDED at the end: every PDF key keeps the sortOrder it had before the two rows existed
+  assert.deepEqual(rows.map((r) => Number(r.sortOrder)), rows.map((_, i) => (i + 1) * 10));
+  assert.equal(rows[14].key, 'solo_housing');
+});
+
+test('seed is ADD-ONLY on an already-imported catalog: only keys with no row are added, under one new epoch', () => {
+  const sb = env();
+  // a catalog imported BEFORE the two services existed (the live state on 2026-11-16)
+  const later = sb.ctx.PACKAGE_CATALOG_SEED.splice(15);
+  assert.deepEqual(Array.from(later, (x) => x.key), ['psychiatric_followup', 'psychiatric_intake']);
+  assert.equal(admin(sb, 'adminSeedPackageCatalog').seeded, 15);
+  assert.deepEqual(JSON.parse(JSON.stringify(admin(sb, 'adminGetPackageCatalog').missingSeedKeys)), [], 'nothing missing against the old seed');
+  // ורד re-prices one existing row and deactivates another before the new code arrives
+  const cat = () => admin(sb, 'adminGetPackageCatalog');
+  const item = (key) => cat().items.filter((i) => i.key === key && i.active)[0];
+  const fields = (i, over) => ({ family: i.family, tier: i.tier, unit: i.unit, sessions: i.sessions, sessionMinutes: i.sessionMinutes, allowedMonths: i.allowedMonths,
+    vatRateBp: i.vatRateBp, sourceRef: i.sourceRef, sortOrder: i.sortOrder, pricePerSessionAgorot: i.pricePerSessionAgorot, priceTotalAgorot: i.priceTotalAgorot,
+    monthlyPriceAgorot: i.monthlyPriceAgorot, priceMinAgorot: i.priceMinAgorot, priceMaxAgorot: i.priceMaxAgorot, active: true, ...over });
+  const consult = item('psychiatric_consult');
+  assert.equal(admin(sb, 'adminSavePackageCatalogRow', { key: 'psychiatric_consult', expectedVersion: consult.version, fields: fields(consult, { pricePerSessionAgorot: 95000 }) }).ok, true);
+  const cbt = item('cbt_single');
+  assert.equal(admin(sb, 'adminSavePackageCatalogRow', { key: 'cbt_single', expectedVersion: cbt.version, fields: fields(cbt, { active: false }) }).ok, true);
+  const before = sb.rows('PackageCatalog');
+  const epochBefore = cat().catalogEpoch;
+  // the new code: the two keys are in the seed again
+  sb.ctx.PACKAGE_CATALOG_SEED.push(...later);
+  assert.deepEqual(JSON.parse(JSON.stringify(cat().missingSeedKeys)), ['psychiatric_followup', 'psychiatric_intake']);
+  const r = admin(sb, 'adminSeedPackageCatalog');
+  assert.equal(r.ok, true); assert.equal(r.seeded, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(r.added)), ['psychiatric_followup', 'psychiatric_intake']);
+  const after = sb.rows('PackageCatalog');
+  assert.equal(after.length, before.length + 2);
+  assert.deepEqual(after.slice(0, before.length), before, 'no existing row, price, version or active flag is touched');
+  const added = after.slice(before.length);
+  assert.deepEqual(added.map((x) => [x.id, Number(x.version), Number(x.epoch), Number(x.sortOrder), Number(x.active)]),
+    [['psychiatric_followup@v1', 1, epochBefore + 1, 160, 1], ['psychiatric_intake@v1', 1, epochBefore + 1, 170, 1]]);
+  assert.equal(cat().catalogEpoch, epochBefore + 1, 'a browser holding the older catalog is stale');
+  assert.equal(quote(sb, 'psychiatric_consult').quote.grossAgorot, 95000, 'the re-priced row keeps ורד\'s price');
+  assert.equal(quote(sb, 'cbt_single').error, 'invalid_package', 'a deactivated key is not re-added or re-activated');
+  // idempotent: a second click adds nothing
+  assert.equal(admin(sb, 'adminSeedPackageCatalog').error, 'already_seeded');
+  assert.deepEqual(JSON.parse(JSON.stringify(cat().missingSeedKeys)), []);
+  assert.equal(sb.rows('PackageCatalog').length, after.length);
+  // still an admin action: no assertion → refused, nothing written
+  sb.ctx.PACKAGE_CATALOG_SEED.push({ key: 'zz_probe', family: 'psychiatric', tier: 'followup', unit: 'flat', sessions: 1, priceTotalAgorot: 100, sourceRef: 'probe' });
+  assert.equal(sb.post({ action: 'adminSeedPackageCatalog', user: 'ורד' }).ok, false);
+  assert.equal(sb.rows('PackageCatalog').length, after.length);
 });
 
 test('backup: both package sheets are captured and an absent one is recorded, not created', () => {

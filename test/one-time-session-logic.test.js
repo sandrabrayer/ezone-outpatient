@@ -20,6 +20,14 @@ test('labels: Hebrew at render time, stable keys, unknown falls back', () => {
   assert.equal(OTS.statusLabel('therapist_cancelled'), 'בוטל ע״י המטפל/ת');
   assert.equal(OTS.serviceLabel('k', 'פרטני EMDR'), 'EMDR — טיפול בודד');
   assert.equal(OTS.serviceLabel('k', 'אינטייק'), 'אבחון פסיכיאטרי');
+  // the catalog key decides first: two services share one clinical type (2026-11-16)
+  assert.equal(OTS.serviceLabel('psychiatric_consult', 'מעקב פסיכיאטרי'), 'ייעוץ פסיכיאטרי');
+  assert.equal(OTS.serviceLabel('psychiatric_followup', 'מעקב פסיכיאטרי'), 'מעקב פסיכיאטרי');
+  assert.equal(OTS.serviceLabel('psychiatric_diagnosis', 'אינטייק'), 'אבחון פסיכיאטרי');
+  assert.equal(OTS.serviceLabel('psychiatric_intake', 'אינטייק'), 'אינטייק פסיכיאטרי');
+  assert.equal(OTS.serviceLabel('emdr_single', 'פרטני EMDR'), 'EMDR — טיפול בודד');
+  assert.equal(OTS.serviceLabel('constructor', 'פרטני CBT'), 'CBT — טיפול בודד', 'an inherited property is never a label');
+  assert.equal(OTS.serviceLabel('k', 'toString'), 'toString');
   assert.equal(OTS.serviceLabel('k', 'טיפול משפחתי'), 'טיפול משפחתי', 'unknown type shows as itself');
   assert.equal(OTS.errorText('therapist_busy'), 'המטפל/ת כבר משובץ/ת לטיפול חד פעמי באותו מועד');
   assert.equal(OTS.errorText('weird'), 'weird');
@@ -99,8 +107,8 @@ test('wiring: script tag cache-busted before app.js, SW bumped, modal has no amo
   assert.ok(html.indexOf('one-time-sessions.js') < html.indexOf('<script src="app.js'), 'loads before app.js');
   const modal = html.slice(html.indexOf('id="otsModal"'), html.indexOf('id="otsCancelModal"'));
   assert.equal(/name="amount"|name="price"/.test(modal), false, 'no price input');
-  // floor guard (monotonic bumps): v38 shipped this module; later releases only go up.
-  assert.ok(Number((fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8').match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]) >= 38);
+  // floor guard (monotonic bumps): v39 shipped the psychiatric services; later releases only go up.
+  assert.ok(Number((fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8').match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]) >= 39);
   for (const a of ['createOneTimeSession', 'updateOneTimeSession', 'cancelOneTimeSession', 'markOneTimeSession']) assert.ok(moneyScope.isMoneyAction('POST', a), a);
   assert.ok(moneyScope.isMoneyAction('GET', 'getOneTimeServices'));
   assert.equal(moneyScope.isMoneyAction('GET', 'getOneTimeSessions'), false, 'the schedule itself is operational (amount is stripped)');

@@ -101,11 +101,15 @@
 //   my-day.js and style.css changed (CHANGELOG-one-time-session.md). Bumped from the deploy-branch value v37
 //   (d62fe41); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it serves v37
 //   before release.
-// v39 (2026-11-16, «התקיים / לא התקיים»): new public/session-outcome.js + its script tag; index.html (the
+// v39 (2026-11-16, one-time psychiatric services + lead booking): index.html, app.js, one-time-sessions.js,
+//   package-pricing.js and style.css changed (CHANGELOG-one-time-psychiatric.md). Bumped from the deploy-branch
+//   value v38 (a09670d); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it
+//   serves v38 before release.
+// v40 (2026-11-16, «התקיים / לא התקיים»): new public/session-outcome.js + its script tag; index.html (the
 //   «מפגשים שדווחו» modal, a fourth correction option), app.js, therapist-payout.js and style.css changed
-//   (CHANGELOG-session-notice-outcome.md). Bumped from the deploy-branch value v38 (a09670d); the LIVE
-//   /sw.js was NOT reachable from this sandbox (proxy 403 on egress) — re-check it serves v38 before release.
-var CACHE = 'ezone-outpatient-v39';
+//   (CHANGELOG-session-notice-outcome.md). Re-bumped v39 → v40 after #187 took v39 (deploy branch 8d42fe4); the LIVE
+//   /sw.js was NOT reachable from this sandbox (proxy 403 on egress) — re-check it serves v39 before release.
+var CACHE = 'ezone-outpatient-v40';
 var SHELL = [
   './',
   './index.html',

@@ -1593,6 +1593,7 @@ input.is-busy {
 .ots-charge-unpaid, .ots-charge-missing { color: var(--red); font-weight: 700; }
 .ots-charge-paid { color: var(--green-2); font-weight: 700; }
 .ots-msg { margin: 0; min-height: 1.2em; color: var(--red); font-size: 13px; }
+.ots-lead-note { margin: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--blue-soft); color: var(--blue-deep); font-size: 13px; overflow-wrap: anywhere; }
 
 /* ===== Reported sessions: «התקיים / לא התקיים» + account effect (2026-11-16) =====
    Used by the payout detail table (dark card) and the patient's «מפגשים שדווחו»

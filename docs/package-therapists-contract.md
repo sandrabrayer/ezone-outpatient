@@ -124,7 +124,9 @@ family: `day_track`→מסלול יום · `emdr`→EMDR · `cbt`→CBT · `emdr
 `continuation`→טיפולי המשך · `psychiatric`→פסיכיאטריה · `solo_housing`→Solo — דיור.
 tier: `basic`→בסיסי · `extended`→מורחב · `core`→Core · `standard`→Standard ·
 `complex`→Complex · `single`→טיפול בודד · `combined`→משולב · `monthly`→חודשי ·
-`consult`→ייעוץ · `diagnosis`→אבחון · `range`→טווח מחיר.
+`consult`→ייעוץ · `diagnosis`→אבחון · `range`→טווח מחיר ·
+`followup`→מעקב · `intake`→אינטייק (2026-11-16: two more `psychiatric` rows; a consumer that
+has no label for a tier shows the key — add the two labels on the therapists side).
 status: `pending`→ממתין לתמחור · `priced`→תומחר. All UI RTL.
 
 ## 6. `amountOwed` and other price paths in the therapists app — resolved by shipped prerequisites
