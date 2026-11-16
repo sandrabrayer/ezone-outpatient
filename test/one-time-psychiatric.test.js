@@ -150,3 +150,33 @@ test('D: a lead booking — the lead becomes a per-session patient (no package, 
   // a lead that was NOT converted is not bookable: the source only knows patients
   assert.equal(create(2, { clientId: LEAD.id, time: '12:00' }).error, 'client_not_found');
 });
+
+test('E: wiring — the lead button is a money action gated like the card button; the modal explains the conversion; nothing lead-specific reaches the source', () => {
+  const PUB = path.join(__dirname, '..', 'public');
+  const app = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(PUB, 'index.html'), 'utf8');
+  const btn = app.slice(app.indexOf("otsLead.className = 'btn btn-ghost lead-ots-btn'") - 200, app.indexOf("otsLead.className = 'btn btn-ghost lead-ots-btn'") + 500);
+  assert.match(btn, /if \(!isOpsScope\(\) && window\.OneTimeSessions\)/, 'hidden for an operational session');
+  assert.match(btn, /openOtsModal\(null, null, l\)/);
+  const modal = html.slice(html.indexOf('id="otsModal"'), html.indexOf('id="otsCancelModal"'));
+  assert.match(modal, /id="otsLeadNote" hidden>[^<]*תשלום לפי טיפול[^<]*ללא חבילה וללא מחזור חיוב/);
+  assert.equal(/name="amount"|name="price"/.test(modal), false, 'still no price input');
+  // the conversion row: per-session, no package fields, lead history kept
+  const fn = app.slice(app.indexOf('function otsLeadClient('), app.indexOf('async function otsConvertLead('));
+  assert.match(fn, /billingMode: 'per_session'/);
+  assert.match(fn, /fromLead: lead\.id/);
+  assert.match(fn, /billingDay: '', paymentStatus: '', paymentDate: '', nextBillingDate: ''/);
+  assert.match(fn, /pricePerSession: 0/);
+  const conv = app.slice(app.indexOf('async function otsConvertLead('), app.indexOf('var otsCancelTarget'));
+  assert.match(conv, /findClientByPhone\(live\.phone, null\)/, 'never a duplicate patient');
+  assert.match(conv, /persistClientChange\(client\)/, 'the confirmed-save path (requireIds)');
+  assert.match(conv, /state\.leads\.splice\(leadIdx, 0, live\)/, 'a failed save puts the lead back');
+  // the create request is unchanged: the source never receives a lead id or an amount
+  const submit = app.slice(app.indexOf('async function submitOts('), app.indexOf('function otsUserError('));
+  assert.match(submit, /apiPostAction\('createOneTimeSession', \{ session: Object\.assign\(\{ id: ctx\.draftId, clientId: ctx\.clientId, catalogKey: catalogKey \}, fields\) \}\)/);
+  assert.equal(/leadId|amount/.test(submit.slice(submit.indexOf("apiPostAction('createOneTimeSession'"), submit.indexOf("apiPostAction('createOneTimeSession'") + 160)), false);
+  // tier labels for the two new catalog rows in «תמחור חבילות»
+  const pp = fs.readFileSync(path.join(PUB, 'package-pricing.js'), 'utf8');
+  assert.match(pp, /followup: 'מעקב', intake: 'אינטייק'/);
+  assert.match(pp, /data-pkg-add-missing/);
+});
