@@ -99,7 +99,8 @@ test('wiring: script tag cache-busted before app.js, SW bumped, modal has no amo
   assert.ok(html.indexOf('one-time-sessions.js') < html.indexOf('<script src="app.js'), 'loads before app.js');
   const modal = html.slice(html.indexOf('id="otsModal"'), html.indexOf('id="otsCancelModal"'));
   assert.equal(/name="amount"|name="price"/.test(modal), false, 'no price input');
-  assert.match(fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8'), /var CACHE = 'ezone-outpatient-v38';/);
+  // floor guard (monotonic bumps): v38 shipped this module; later releases only go up.
+  assert.ok(Number((fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8').match(/var CACHE = 'ezone-outpatient-v(\d+)';/) || [])[1]) >= 38);
   for (const a of ['createOneTimeSession', 'updateOneTimeSession', 'cancelOneTimeSession', 'markOneTimeSession']) assert.ok(moneyScope.isMoneyAction('POST', a), a);
   assert.ok(moneyScope.isMoneyAction('GET', 'getOneTimeServices'));
   assert.equal(moneyScope.isMoneyAction('GET', 'getOneTimeSessions'), false, 'the schedule itself is operational (amount is stripped)');

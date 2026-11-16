@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Session report: «התקיים / לא התקיים» with the 24-hour rule (2026-11-16)
+- New closed outcome `patient_cancelled_notice` — the patient cancelled with 24 hours' notice or more: the session is **not charged, +1 session credit, therapist pay 0** (same accounting as `therapist_cancelled`). `patient_no_show` now explicitly covers no notice / less than 24 hours: charged, no credit, therapist paid (unchanged money). One `CREDIT_GRANTING_OUTCOMES` set drives the pay rule, the credit grant and the correction reversal. One-time sessions (outside the package) refuse the new outcome (`one_time_outcome_rejected`). No sheet column added.
+- «תשלומי מטפלים»: every session row shows a green «התקיים» / red «לא התקיים» chip with the reason and a new «חשבון המטופל/ת» column (מחויב / נוצר קרדיט / מומש קרדיט / לבדיקה); new per-therapist counter «בוטלו ע״י מטופל (24 שעות+)». The correction form offers all four outcomes, each naming its consequence.
+- Patient card: «📋 מפגשים שדווחו» — every reported session of that patient (took place / did not, why, account effect, therapist paid or not), matched by the server-resolved `clientId`; full money scope only.
+- New `public/session-outcome.js` (display vocabulary, no price / pay constant). SW cache v39. See CHANGELOG-session-notice-outcome.md.
+
 ### Candidate: harden approved-report order before any receiver release
 - Refuse external downgrade and equal-revision conflicts; exact persisted replays do not reprice or change credits. Preserve full SessionLog.reportRevision precision and text on writes. Internal proxy-authenticated corrections remain a separate literal call path. No new column. See CHANGELOG-report-order-hardening.md for compatibility limits and required paired acceptance.
 
