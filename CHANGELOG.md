@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### CI: browser job pinned to ubuntu-24.04 (2026-11-16)
+- `.github/workflows/test.yml` → `lead-save-browser` runs on `ubuntu-24.04` instead of `ubuntu-latest`. GitHub moved `ubuntu-latest` to Ubuntu 26.04 and the pinned Playwright 1.51.1 has no browser build for it, so the job failed at «Install isolated browser tooling» before running a single test (first seen on PR #187; the same job passed on the deploy branch the day before). No test or application change. Unpin together with a Playwright upgrade.
+
 ### One-time psychiatric services + one-time booking for a lead (2026-11-16)
 - Catalog: two new single-session rows APPENDED to the seed — `psychiatric_followup` (מעקב פסיכיאטרי, 1,100 ₪) and `psychiatric_intake` (אינטייק פסיכיאטרי, 2,300 ₪) — beside the PDF's ייעוץ (900 ₪) and אבחון (2,500 ₪). Owner decision: four different services. Mapped to the clinical types «מעקב פסיכיאטרי» / «אינטייק», so the psychiatrist's follow-up / intake rate applies (fail closed without one). `adminSeedPackageCatalog` is now add-only on a seeded catalog (keys with no row at all, one new epoch, nothing existing touched); `adminGetPackageCatalog` reports `missingSeedKeys` and «תמחור חבילות» shows «הוספת השירותים החדשים לקטלוג». Billing constants unchanged.
 - One-time modal: the service label is decided by the catalog key (two services share a clinical type), so the four psychiatric services show under their own names.

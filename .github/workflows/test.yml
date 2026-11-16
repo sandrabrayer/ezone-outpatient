@@ -40,7 +40,10 @@ jobs:
         run: npm test
 
   lead-save-browser:
-    runs-on: ubuntu-latest
+    # Pinned (2026-11-16): `ubuntu-latest` moved to Ubuntu 26.04, for which the
+    # pinned Playwright 1.51.1 has no chromium-headless-shell build — the browser
+    # install failed before any test ran. Move this together with the Playwright pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
