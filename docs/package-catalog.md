@@ -122,6 +122,8 @@ none of it was added to scope or to any billing path.
 | `psychiatric_consult` | 7 | ייעוץ פסיכיאטרי — card labelled **«מעקב חודשי»** (one meeting a month, 30–45 min), **900 ₪ per meeting**; external referrals and graduates; no commitment | 90,000; `sessionMinutes 0` | ✓ |
 | `psychiatric_diagnosis` | 7 | אבחון פסיכיאטרי — one-time, 60–90 min, incl. written report (delivered within 7 working days); **2,500 ₪** | 250,000 flat | ✓ |
 | `solo_housing` | 8 | Solo — 3 months, extension "by clinical judgment"; **8,000–10,000 ₪ per month** incl. support | min 800,000 / max 1,000,000, `3`; Vered selects | ✓ |
+| `psychiatric_followup` | — (not in the PDF) | מעקב פסיכיאטרי — **1,100 ₪ per meeting**; owner decision 2026-11-16 (the existing billing price) | 110,000; `sessionMinutes 0` | owner |
+| `psychiatric_intake` | — (not in the PDF) | אינטייק פסיכיאטרי — one-time, **2,300 ₪**; owner decision 2026-11-16 (the existing billing price) | 230,000 flat | owner |
 
 Page 9 («הערות חשובות») states: **all prices include VAT**; **prices are valid at the date of issue**; EMDR and CBT are also
 offered as an embedded protocol inside the day track per the leading therapist's clinical judgment; every patient has a
@@ -131,6 +133,15 @@ profile and treatment track** (the houses are not part of this catalog).
 `psychiatric_consult` (900) ≠ billing «מעקב פסיכיאטרי» (1,100) and
 `psychiatric_diagnosis` (2,500) ≠ billing «אינטייק» (2,300): the PDF does not equate
 them, so they are separate keys and the existing billing constants are untouched.
+
+**2026-11-16 — resolved by the owner:** they are four different services. The two
+billing-priced ones are now catalog rows of their own (`psychiatric_followup`,
+`psychiatric_intake`), APPENDED at the end of the seed so no existing `sortOrder`
+moves. Neither PDF row was re-priced or aliased, and the billing constants
+(`public/treatment-map.js`, `BILLING_PRICES`) are still untouched. On a catalog that
+was imported earlier, «תמחור חבילות» shows «הוספת השירותים החדשים לקטלוג»: the
+import is add-only (keys with no row at all, one new epoch) — a row ורד re-priced or
+deactivated is never touched or re-added.
 
 ## Unresolved business questions (owner decisions — nothing here was invented or added to scope)
 
@@ -156,9 +167,8 @@ Still open:
 5. **EMDR Complex** frequency (weekly vs biweekly, p5) and the **combined bundle** composition (6 CBT + 6 EMDR, p6) are
    not modelled.
 6. ~~Solo extension~~ — resolved: same price (the 3-month commitment is still the catalog default).
-7. **Psychiatric services:** the PDF labels the 900 ₪ consult «מעקב חודשי», while billing has «מעקב פסיכיאטרי»
-   at 1,100 ₪; and the 2,500 ₪ diagnosis vs billing «אינטייק» at 2,300 ₪. They are kept as distinct keys
-   (see below) — confirm whether they are different services or the same service at two prices.
+7. ~~Psychiatric services~~ — resolved 2026-11-16: four different services (ייעוץ 900 / מעקב 1,100 / אבחון 2,500 /
+   אינטייק 2,300), each its own catalog key (see above).
 8. **Eligibility** printed in the PDF («מתאים ל…», and «לבוגרי הבתים המאזנים בלבד» for טיפולי המשך) is **not enforced** by the catalog.
 9. ~~Owner of continuation/stop~~ — resolved: Vered; Oren/Shahar are informed or initiate and update her.
 10. Whether a *priced* request should later trigger a charge — deliberately **out of scope**.

@@ -24,7 +24,7 @@
 
   // ---- Hebrew labels for stable keys (render-time only) ---------------------
   var FAMILY = { day_track: 'מסלול יום', emdr: 'EMDR', cbt: 'CBT', emdr_cbt: 'EMDR + CBT', continuation: 'טיפולי המשך', psychiatric: 'פסיכיאטריה', solo_housing: 'Solo — דיור' };
-  var TIER = { basic: 'בסיסי', extended: 'מורחב', core: 'Core', standard: 'Standard', complex: 'Complex', single: 'טיפול בודד', combined: 'משולב', monthly: 'חודשי', consult: 'ייעוץ', diagnosis: 'אבחון', range: 'טווח מחיר' };
+  var TIER = { basic: 'בסיסי', extended: 'מורחב', core: 'Core', standard: 'Standard', complex: 'Complex', single: 'טיפול בודד', combined: 'משולב', monthly: 'חודשי', consult: 'ייעוץ', diagnosis: 'אבחון', followup: 'מעקב', intake: 'אינטייק', range: 'טווח מחיר' };
   var UNIT = { per_session_pack: 'חבילת טיפולים', flat: 'מחיר כולל קבוע', per_month: 'מחיר חודשי', per_month_range: 'טווח חודשי (בחירה)' };
   var STATUS = { pending: 'ממתין לתמחור', priced: 'תומחר (לא שולם)' };
   // Offer CRM statuses (stable keys; pending ≙ draft and priced ≙ ready_to_send are mapped by the server at read time)
@@ -908,7 +908,22 @@
       });
     } })]);
     var active = cat.items.filter(function (i) { return i.active; });
-    return h('div', { class: 'pkg-list' }, active.map(catalogRow));
+    // Services added to the source's seed after the first import (2026-11-16: מעקב פסיכיאטרי, אינטייק).
+    // The source adds ONLY keys that have no row at all — nothing existing is re-priced or re-activated.
+    var missing = Array.isArray(cat.missingSeedKeys) ? cat.missingSeedKeys : [];
+    var addBox = missing.length ? h('div', { class: 'card pkg-missing' }, [
+      h('p', { text: 'יש ' + missing.length + ' שירותים חדשים שעדיין אינם בקטלוג. ההוספה אינה משנה שורות או מחירים קיימים.' }),
+      h('button', { type: 'button', class: 'btn btn-primary', 'data-pkg-add-missing': '1', text: 'הוספת השירותים החדשים לקטלוג', onclick: function (e) {
+        return busy(e.currentTarget, async function () {
+          var res = await rpc('seed').catch(function (err) { return { ok: false, error: err.message }; });
+          if (res.ok) { say('נוספו ' + (res.seeded || 0) + ' שירותים לקטלוג'); S.error = ''; await loadAll(); }
+          else if (res.error === 'already_seeded') { S.error = ''; await loadAll(); }
+          else { S.error = errorText(res.error); }
+          draw();
+        });
+      } })
+    ]) : null;
+    return h('div', { class: 'pkg-list' }, (addBox ? [addBox] : []).concat(active.map(catalogRow)));
   }
 
   function priceText(i) {

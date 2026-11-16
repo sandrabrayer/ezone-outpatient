@@ -26,7 +26,7 @@ Each item contains only the following keys:
 | `location` | Hebrew house/branch label or empty string |
 | `status` | `scheduled`, `completed`, `no_show`, `therapist_cancelled`, `cancelled` |
 | `clinicalTreatmentType` | Existing supported clinical treatment type |
-| `catalogKey` | Informational catalogue key |
+| `catalogKey` | Informational catalogue key. Psychiatric keys (2026-11-16): `psychiatric_consult`, `psychiatric_followup` (both clinical «מעקב פסיכיאטרי»), `psychiatric_diagnosis`, `psychiatric_intake` (both clinical «אינטייק») — the clinical type, not the key, decides the pay |
 
 No amount, VAT, charge ID, payment state, note or hash crosses this feed.
 THR mirrors the exact booking as Schedule ID `ots_<uuid>`; moves/cancellations update the same row.

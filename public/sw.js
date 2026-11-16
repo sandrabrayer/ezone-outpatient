@@ -101,7 +101,11 @@
 //   my-day.js and style.css changed (CHANGELOG-one-time-session.md). Bumped from the deploy-branch value v37
 //   (d62fe41); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it serves v37
 //   before release.
-var CACHE = 'ezone-outpatient-v38';
+// v39 (2026-11-16, one-time psychiatric services + lead booking): index.html, app.js, one-time-sessions.js,
+//   package-pricing.js and style.css changed (CHANGELOG-one-time-psychiatric.md). Bumped from the deploy-branch
+//   value v38 (a09670d); the LIVE /sw.js was NOT reachable from this sandbox (egress blocked) — re-check it
+//   serves v38 before release.
+var CACHE = 'ezone-outpatient-v39';
 var SHELL = [
   './',
   './index.html',
