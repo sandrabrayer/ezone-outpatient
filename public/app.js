@@ -4800,11 +4800,36 @@
   // Per-therapist monthly payout summary computed client-side from SessionLog
   // rows via the shared pure module (window.TherapistPayout). Display only — no
   // corrections, no export, no forward-marking (those are steps 2–4).
-  var OUTCOME_LABELS = {
+  // 2026-11-16: wording comes from public/session-outcome.js (one vocabulary for the payout
+  // table, the correction form and the patient's «מפגשים שדווחו» list). The literal map is the
+  // fallback for a stripped bundle only.
+  var OUTCOME_LABELS = (window.SessionOutcome && window.SessionOutcome.LABELS) || {
     happened: 'התקיים',
-    patient_no_show: 'מטופל לא הגיע',
-    therapist_cancelled: 'בוטל ע״י מטפל'
+    patient_cancelled_notice: 'המטופל/ת ביטל/ה — הודעה של 24 שעות ומעלה',
+    patient_no_show: 'המטופל/ת לא הגיע/ה / ביטל/ה בפחות מ־24 שעות',
+    therapist_cancelled: 'המטפל/ת ביטל/ה'
   };
+  // «התקיים» / «לא התקיים» chip + the reason. Text only (escaped); class names are fixed literals.
+  function sessionHeldChipHtml(outcome) {
+    var SO = window.SessionOutcome;
+    var held = SO ? SO.held(outcome) : (outcome === 'happened' ? true : (OUTCOME_LABELS[outcome] ? false : null));
+    if (held === null) return '<span class="chip">' + escapeHtml(outcome || '—') + '</span>';
+    return '<span class="chip session-held ' + (held ? 'session-held-yes' : 'session-held-no') + '">' +
+      (held ? '✅ התקיים' : '❌ לא התקיים') + '</span>';
+  }
+  function sessionOutcomeCellHtml(outcome) {
+    var label = OUTCOME_LABELS[outcome] || '';
+    var held = window.SessionOutcome ? window.SessionOutcome.held(outcome) : null;
+    // «התקיים» needs no second line; a «לא התקיים» row always names the reason.
+    return sessionHeldChipHtml(outcome) +
+      (label && held === false ? '<div class="session-reason">' + escapeHtml(label) + '</div>' : '');
+  }
+  function sessionPatientEffectHtml(row) {
+    var SO = window.SessionOutcome;
+    if (!SO) return '—';
+    var e = SO.patientEffect(row);
+    return '<span class="session-effect session-effect-' + escapeHtml(e.kind) + '">' + escapeHtml(e.text) + '</span>';
+  }
 
   function currentMonthStr() {
     var d = new Date();
@@ -4877,6 +4902,7 @@
         payoutStat('לפני מע״מ', money(t.preVatTotal)) +
         payoutStat('כולל מע״מ', money(t.vatTotal)) +
         payoutStat('בוטלו ע״י מטפל', t.excludedCancelledCount) +
+        payoutStat('בוטלו ע״י מטופל (24 שעות+)', t.patientNoticeCount || 0) +
         (opts.isDiff ? payoutStat('חודשים', (t.months || []).join(', ') || '—') : '') +
       '</div>';
 
@@ -4885,6 +4911,8 @@
       var canEdit = state.role === 'editor';
       var monthCol = opts.isDiff;
       var rows = t.sessions.map(function (s) {
+        // An unpaid row's plain cells are dimmed; its «לא התקיים» chip, the reason and the
+        // patient-account effect stay at full strength (they are the point of the row).
         var dimmed = s.paid ? '' : 'opacity:0.55;';
         // Stash the session payload on the correct button so the handler can
         // re-send the identity fields (server recomputes pay + reverses credit).
@@ -4896,13 +4924,14 @@
                 outcome: s.outcome, patientName: s.patient, phone: s.phone
               })) + '\' style="padding:2px 10px;font-size:0.8rem;">תקן</button>'
           : '';
-        return '<tr style="' + dimmed + '">' +
-          (monthCol ? '<td style="padding:6px 10px;">' + escapeHtml(s.month || '—') + '</td>' : '') +
-          '<td style="padding:6px 10px;">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
-          '<td style="padding:6px 10px;">' + escapeHtml(s.patient || '—') + '</td>' +
-          '<td style="padding:6px 10px;">' + escapeHtml(s.type || '—') + '</td>' +
-          '<td style="padding:6px 10px;">' + escapeHtml(OUTCOME_LABELS[s.outcome] || s.outcome || '—') + '</td>' +
-          '<td style="padding:6px 10px;text-align:left;">' + money(s.pay) + '</td>' +
+        return '<tr>' +
+          (monthCol ? '<td style="padding:6px 10px;' + dimmed + '">' + escapeHtml(s.month || '—') + '</td>' : '') +
+          '<td style="padding:6px 10px;' + dimmed + '">' + (s.date ? displayDate(s.date) : '—') + '</td>' +
+          '<td style="padding:6px 10px;' + dimmed + '">' + escapeHtml(s.patient || '—') + '</td>' +
+          '<td style="padding:6px 10px;' + dimmed + '">' + escapeHtml(s.type || '—') + '</td>' +
+          '<td style="padding:6px 10px;">' + sessionOutcomeCellHtml(s.outcome) + '</td>' +
+          '<td style="padding:6px 10px;">' + sessionPatientEffectHtml(s) + '</td>' +
+          '<td style="padding:6px 10px;text-align:left;' + dimmed + '">' + money(s.pay) + '</td>' +
           (canEdit ? '<td style="padding:6px 10px;text-align:left;">' + correctBtn + '</td>' : '') +
         '</tr>';
       }).join('');
@@ -4914,8 +4943,9 @@
               '<th style="padding:6px 10px;font-weight:600;">תאריך</th>' +
               '<th style="padding:6px 10px;font-weight:600;">מטופל</th>' +
               '<th style="padding:6px 10px;font-weight:600;">סוג טיפול</th>' +
-              '<th style="padding:6px 10px;font-weight:600;">תוצאה</th>' +
-              '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">התקיים?</th>' +
+              '<th style="padding:6px 10px;font-weight:600;">חשבון המטופל/ת</th>' +
+              '<th style="padding:6px 10px;font-weight:600;text-align:left;">תשלום למטפל/ת</th>' +
               (state.role === 'editor' ? '<th style="padding:6px 10px;font-weight:600;text-align:left;">תיקון</th>' : '') +
             '</tr></thead><tbody>' + rows + '</tbody>' +
           '</table>' +
@@ -5001,6 +5031,75 @@
     state.sessionLog = null;
     state.sessionLogLoading = false;
     ensureSessionLogLoaded();
+  }
+
+  // ---- «מפגשים שדווחו» — one patient's reported sessions (read-only, 2026-11-16) ----
+  // The same SessionLog rows the payout tab reads, filtered by the SERVER-resolved clientId
+  // (never by name). Shows took place / did not, the reason, and the account effect — no pay
+  // amount. Always re-read from the source when opened (a session may have just been approved).
+  var clientSessionsFor = null;   // the client whose list is open
+  function renderClientSessions() {
+    var body = $('#clientSessionsBody'), sub = $('#clientSessionsSub');
+    var c = clientSessionsFor, SO = window.SessionOutcome;
+    if (!body || !c || !SO) return;
+    if (state.sessionLog === null) { body.innerHTML = '<p class="client-sessions-note">טוען מפגשים…</p>'; return; }
+    if (state.sessionLogError) {
+      body.innerHTML = '<p class="client-sessions-note client-sessions-err">שגיאה בטעינת המפגשים: ' + escapeHtml(state.sessionLogError) + '</p>';
+      return;
+    }
+    var rows = SO.forClient(state.sessionLog, c.id);
+    var sum = SO.summarize(rows);
+    if (sub) {
+      sub.textContent = 'התקיימו: ' + sum.held + ' · לא התקיימו: ' + sum.notHeld +
+        ' · קרדיטים שנוצרו: ' + sum.credits + ' · יתרת קרדיט מפגשים: ' + (toNum(c.creditsOwed) || 0) +
+        (sum.review ? ' · לבדיקה: ' + sum.review : '');
+    }
+    if (!rows.length) {
+      body.innerHTML = '<p class="client-sessions-note">עדיין לא דווחו מפגשים למטופל/ת.</p>';
+      return;
+    }
+    body.innerHTML = '<div class="client-sessions-scroll"><table class="client-sessions-table">' +
+      '<thead><tr><th>תאריך</th><th>מטפל/ת</th><th>סוג טיפול</th><th>התקיים?</th><th>חשבון המטופל/ת</th><th>תשלום למטפל/ת</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var th = SO.therapistEffect(r);
+        // data-label: on a phone each session is a stacked block with its labels (style.css).
+        return '<tr>' +
+          '<td data-label="תאריך">' + (r.date ? escapeHtml(displayDate(r.date)) : '—') + '</td>' +
+          '<td data-label="מטפל/ת">' + escapeHtml(r.therapist || '—') + '</td>' +
+          '<td data-label="סוג טיפול">' + escapeHtml(r.clinicalTreatmentType || '—') + '</td>' +
+          '<td data-label="התקיים?">' + sessionOutcomeCellHtml(String(r.outcome == null ? '' : r.outcome)) + '</td>' +
+          '<td data-label="חשבון המטופל/ת">' + sessionPatientEffectHtml(r) + '</td>' +
+          '<td data-label="תשלום למטפל/ת">' + escapeHtml(th.text) + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  function openClientSessionsModal(client) {
+    var m = $('#clientSessionsModal');
+    if (!m || !client || isOpsScope()) return;
+    clientSessionsFor = client;
+    var title = $('#clientSessionsTitle');
+    if (title) title.textContent = 'מפגשים שדווחו — ' + (client.name || '');
+    var sub = $('#clientSessionsSub'); if (sub) sub.textContent = '';
+    m.hidden = false;
+    // Fresh read every time it opens; the payout tab shares the same rows.
+    state.sessionLog = null; state.sessionLogLoading = true; state.sessionLogError = '';
+    renderClientSessions();
+    apiGetSessionLog().then(function (data) {
+      state.sessionLog = Array.isArray(data.sessionLog) ? data.sessionLog : [];
+      state.sessionLogError = '';
+    }).catch(function (e) {
+      state.sessionLog = [];
+      state.sessionLogError = e.message || String(e);
+    }).then(function () {
+      state.sessionLogLoading = false;
+      renderClientSessions();
+      if (state.view === 'payouts') renderPayouts();
+    });
+  }
+  function closeClientSessionsModal() {
+    var m = $('#clientSessionsModal');
+    if (m) m.hidden = true;
+    clientSessionsFor = null;
   }
 
   // ===== Continuation track (מסלול המשך) ====================================
@@ -5608,6 +5707,16 @@
     wrap.hidden = !isDay;
   }
 
+  // Make sure `value` is selectable (textContent / value only — never markup).
+  function sessionSelectEnsure(sel, value) {
+    var v = String(value == null ? '' : value);
+    if (!sel || !v) return;
+    for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === v) return; }
+    var o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  }
+
   // sessionId === null -> add a missing session (server appends a new row).
   // sessionId set       -> correct an existing one (server upserts, recomputes).
   function openSessionModal(prefill) {
@@ -5622,6 +5731,11 @@
     $('#sessionModalSub').textContent = isCorrect
       ? 'התיקון מריץ מחדש את חישוב התשלום והקרדיט'
       : 'יירשם כסשן חדש; תשלום וקרדיט יחושבו לפי הכללים';
+    // A correction keeps the session's OWN recorded therapist / type even when the name is not in
+    // the built-in list (the list predates the TherapistRates roster): without this the select
+    // stayed empty and «תקן» could not be saved for such a row. The server still validates both.
+    sessionSelectEnsure(form.therapist, prefill.therapist);
+    sessionSelectEnsure(form.clinicalTreatmentType, prefill.clinicalTreatmentType);
     if (prefill.therapist) form.therapist.value = prefill.therapist;
     if (prefill.clinicalTreatmentType) form.clinicalTreatmentType.value = prefill.clinicalTreatmentType;
     form.date.value = fmtDate(prefill.date) || today();
@@ -6212,7 +6326,13 @@
     // sessions bank a credit; a session beyond the monthly quota spends one.
     var credits = toNum(c.creditsOwed) || 0;
     var creditRow = '<div class="cc-line"><span class="cc-k">קרדיט מפגשים</span>' +
-      '<span class="cc-v' + (credits > 0 ? ' credit-pos' : '') + '">' + credits + '</span></div>';
+      '<span class="cc-v' + (credits > 0 ? ' credit-pos' : '') + '">' + credits + '</span></div>' +
+      // 2026-11-16: every reported session of this patient — took place / did not, why, and what
+      // it did to the account. SessionLog is a money read, so an operational session has no button.
+      (!isOpsScope() && window.SessionOutcome
+        ? '<div class="cc-line"><button type="button" class="chip chip-btn cc-sessions-btn" data-action="client-sessions" ' +
+            'title="כל מפגש שדווח: התקיים / לא התקיים, הסיבה, וההשפעה על חשבון המטופל/ת">📋 מפגשים שדווחו</button></div>'
+        : '');
 
     // Treatment-type rows (name + frequency). Weekly unit here is corrected to a
     // per-type unit (psychiatric = monthly) in the dedicated unit-fix commit.
@@ -6465,6 +6585,9 @@
       otsPanelHtml(c) +
       crmBlockHtml('client', c) +
       '<div class="client-actions edit-only"></div>';
+
+    var sessionsBtn = $('[data-action="client-sessions"]', card);
+    if (sessionsBtn) sessionsBtn.addEventListener('click', function () { openClientSessionsModal(c); });
 
     if (state.role === 'editor') {
       var actions = $('.client-actions', card);
@@ -8557,7 +8680,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal(); closeOtsModal(); closeOtsCancelModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal(); closeOtsModal(); closeOtsCancelModal(); closeClientSessionsModal();
       });
     });
 

@@ -42,6 +42,11 @@ Feed failure must be surfaced as unavailable, not silently treated as a valid em
 ```
 
 - Allowed outcomes: `happened`, `patient_no_show`, `therapist_cancelled`.
+- `patient_cancelled_notice` (2026-11-16, the package credit for a patient's 24-hour notice) is
+  **refused** for a one-time session: `{ ok:false, reason:'one_time_outcome_rejected' }`, nothing is
+  written. A one-time session is outside the package — there is no credit to grant; a patient's
+  advance cancellation is ורד's «ביטול» in OUT. THR never offers or stores that outcome on an
+  `ots_` row.
 - THR forwards after coordinator approval. Exact UUID outcome forwarding does not require a phone;
   ordinary treatment phone checks remain unchanged.
 - Exact therapist must match. Future happened/no-show and cancelled bookings are rejected.

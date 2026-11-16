@@ -1044,6 +1044,23 @@
       </div>
     </div>
 
+    <!-- «מפגשים שדווחו» — one patient's reported sessions (read-only): took place / did not,
+         the reason, and the effect on the patient's account. Filled by app.js. -->
+    <div id="clientSessionsModal" class="modal" hidden>
+      <div class="modal-card modal-card-wide">
+        <div class="modal-title" id="clientSessionsTitle">מפגשים שדווחו</div>
+        <div class="modal-sub" id="clientSessionsSub" style="margin-bottom:8px;"></div>
+        <p class="client-sessions-rule">
+          התקיים — מחויב, המטפל/ת משולם/ת · המטופל/ת ביטל/ה בהודעה של 24 שעות ומעלה — קרדיט, ללא תשלום למטפל/ת ·
+          לא הגיע/ה או ביטל/ה בפחות מ־24 שעות — מחויב, המטפל/ת משולם/ת · המטפל/ת ביטל/ה — קרדיט, ללא תשלום למטפל/ת
+        </p>
+        <div id="clientSessionsBody"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-close>סגירה</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Session correct / add-missing modal (payout screen) -->
     <div id="sessionModal" class="modal" hidden>
       <div class="modal-card">
@@ -1060,8 +1077,9 @@
           <label>תוצאה
             <select name="outcome" required>
               <option value="happened">התקיים</option>
-              <option value="patient_no_show">מטופל לא הגיע</option>
-              <option value="therapist_cancelled">בוטל ע״י מטפל</option>
+              <option value="patient_cancelled_notice">לא התקיים — המטופל/ת ביטל/ה, הודעה של 24 שעות ומעלה (קרדיט, ללא תשלום למטפל/ת)</option>
+              <option value="patient_no_show">לא התקיים — המטופל/ת לא הגיע/ה / ביטל/ה בפחות מ־24 שעות (מחויב, המטפל/ת משולם/ת)</option>
+              <option value="therapist_cancelled">לא התקיים — המטפל/ת ביטל/ה (קרדיט, ללא תשלום למטפל/ת)</option>
             </select>
           </label>
           <label>שם מטופל<input name="patientName" type="text" placeholder="לא חובה" /></label>
@@ -1191,6 +1209,7 @@
   <script src="crm-activity.js?v=__BUILD__" defer></script>
   <script src="my-day.js?v=__BUILD__" defer></script>
   <script src="one-time-sessions.js?v=__BUILD__" defer></script>
+  <script src="session-outcome.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER
        sign-in, in this order (therapist-payout.js reads TherapistPay when it loads).

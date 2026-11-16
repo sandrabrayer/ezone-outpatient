@@ -1,3 +1,31 @@
+# Outpatient + Therapists — «התקיים / לא התקיים» with the 24-hour rule, 2026-11-16
+
+Sandra, 16/11: the therapist's report must make clear whether the session took place,
+and if not why — because that decides the patient's account and the therapist's pay,
+both managed in OUT. The closed outcome set is now FOUR tokens on both sides:
+
+| outcome | took place | patient (OUT) | therapist pay |
+|---|---|---|---|
+| `happened` | yes | charged | paid |
+| `patient_cancelled_notice` — 24 hours' notice or more (NEW) | no | not charged, **+1 credit** | 0 |
+| `patient_no_show` — no notice / less than 24 hours | no | charged, no credit | paid |
+| `therapist_cancelled` | no | not charged, **+1 credit** | 0 |
+
+- **OUT** (`CHANGELOG-session-notice-outcome.md`): `_recordSessionOutcome` accepts the new
+  token; one `CREDIT_GRANTING_OUTCOMES` set drives pay 0, the credit grant and the correction
+  reversal. No sheet column. One-time sessions refuse it (`one_time_outcome_rejected`).
+  UI: «התקיים / לא התקיים» + reason + «חשבון המטופל/ת» in «תשלומי מטפלים»; patient card
+  «📋 מפגשים שדווחו»; display vocabulary in `public/session-outcome.js`. SW v40.
+- **Therapists** (`CHANGELOG-session-report-held-notice.md` in that repo): two-step report
+  («התקיים» / «לא התקיים» + REQUIRED reason, each showing its consequence), one result chip
+  everywhere, same approval gate (nothing reaches OUT before «אישור לתשלום»). SW v90.
+- **Release order: OUT first** (Node, then the Apps Script deploy), then Therapists. If
+  Therapists is released first, an approved notice report is answered `unknown_outcome` by the
+  old OUT — nothing is written and the therapists outbox keeps retrying until OUT is released.
+- **Not changed (open business questions, see the changelog):** a pre-emptive «ביטול» of a
+  booking in the therapists app still creates no credit (only the REPORT does); a no-show is
+  still not counted in the monthly «נוצלו X מתוך Y» counter.
+
 # Outpatient — salaried («גלובלי») therapists, 2026-11-10
 
 `גלובלי` in `TherapistRates.flatRate` = salaried: sessions reported by the

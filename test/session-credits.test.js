@@ -335,7 +335,10 @@ test('wiring guard: Code.gs has the credit engine pieces', () => {
   assert.ok(/function _monthKey\(/.test(GS), '_monthKey missing');
   // reversal-on-upsert
   assert.ok(/creditStatus\) === 'covered'\)\s*balance \+= 1/.test(GS), 'covered-reversal missing');
-  assert.ok(/=== 'therapist_cancelled'\)\s*balance -= 1/.test(GS), 'cancel-reversal missing');
+  // 2026-11-16: the reversal follows the ONE credit-granting set (therapist_cancelled +
+  // patient_cancelled_notice) instead of a single literal.
+  assert.ok(/_outcomeGrantsCredit\(oldRow\.outcome\)\)\s*balance -= 1/.test(GS), 'cancel-reversal missing');
+  assert.ok(/var CREDIT_GRANTING_OUTCOMES = \{ therapist_cancelled: true, patient_cancelled_notice: true \};/.test(GS), 'credit-granting set missing');
   // draw
   assert.ok(/rowObj\.creditStatus = 'covered'/.test(GS), 'covered draw missing');
   // _saveAll preserves the balance by id

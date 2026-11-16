@@ -417,10 +417,17 @@ checkout ever drifts back.
   with the same id overwrites the row and recomputes pay — never a duplicate,
   never stale pay). **Fail-closed:** `SESSION_OUTCOME_SECRET` (Apps Script Script
   Property) must exist and match. `outcome ∈ happened | therapist_cancelled |
-  patient_no_show` (any other rejects). Pay: `happened`/`patient_no_show` →
-  therapist showed up, **paid**; `therapist_cancelled` → **0**; `קבוצה` (group)
+  patient_no_show | patient_cancelled_notice` (any other rejects). Pay:
+  `happened`/`patient_no_show` → therapist showed up, **paid**;
+  `therapist_cancelled` / `patient_cancelled_notice` → **0**; `קבוצה` (group)
   → **0** pay and **0** value. `sessionStatus`: `consumed` / `credited` /
-  `forfeited`. `ליווי יומי בקהילה` with no frequency in the event stores
+  `forfeited`. **The 24-hour rule (2026-11-16):** the patient cancelled with 24
+  hours' notice or more → `patient_cancelled_notice` (not charged, **+1 credit**,
+  no pay); no notice / less than 24 hours → `patient_no_show` (charged, no
+  credit, therapist paid); the therapist cancelled → `therapist_cancelled`
+  (**+1 credit**, no pay). Which one happened is the therapist's report,
+  approved by the coordinator in the therapists app — never inferred from
+  timestamps here. See `CHANGELOG-session-notice-outcome.md`. `ליווי יומי בקהילה` with no frequency in the event stores
   `clientSessionValue` **null** (flagged, never guessed). An unknown clinical type
   or unknown outcome **writes nothing**; the log is keyed by session so it always
   writes regardless of client match (`matchStatus` = matched/no_match/multi_match).
@@ -519,7 +526,10 @@ checkout ever drifts back.
   `monthlyPayoutSummary(sessionLogRows, 'YYYY-MM')` groups `SessionLog` rows per
   therapist, sums the pay for paying outcomes (`happened` + `patient_no_show`)
   into a pre-VAT total, derives the +VAT total via `withVat`, and reports the
-  excluded `therapist_cancelled` count plus a per-session breakdown. It is
+  excluded `therapist_cancelled` count, the `patient_cancelled_notice` count
+  (`patientNoticeCount` — advance cancellation by the patient, pay 0) plus a
+  per-session breakdown (shown with «התקיים / לא התקיים», the reason and the
+  patient-account effect from `public/session-outcome.js`). It is
   **forwarding-aware**: rows stamped `forwardedToPayroll` are excluded forever,
   and a session logged late for an already-forwarded month surfaces under
   `differences` (**הפרשים**). It feeds the **תשלומי מטפלים** tab (via the open

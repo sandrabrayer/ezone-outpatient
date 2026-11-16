@@ -1594,3 +1594,32 @@ input.is-busy {
 .ots-charge-paid { color: var(--green-2); font-weight: 700; }
 .ots-msg { margin: 0; min-height: 1.2em; color: var(--red); font-size: 13px; }
 .ots-lead-note { margin: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--blue-soft); color: var(--blue-deep); font-size: 13px; overflow-wrap: anywhere; }
+
+/* ===== Reported sessions: «התקיים / לא התקיים» + account effect (2026-11-16) =====
+   Used by the payout detail table (dark card) and the patient's «מפגשים שדווחו»
+   list (light modal): every colour carries its own background, so both read. */
+.session-held { font-weight: 700; white-space: nowrap; }
+.session-held-yes { background: #d4edda; color: #155724; border-color: #9fd3ad; }
+.session-held-no { background: #f8d7da; color: #721c24; border-color: #e6a5ab; }
+.session-reason { margin-top: 3px; font-size: 12px; overflow-wrap: anywhere; }
+.session-effect { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #eef1f4; color: #26323d; }
+.session-effect-credit { background: #d4edda; color: #155724; }
+.session-effect-credit_used { background: #e3ecff; color: #1d3f8f; }
+.session-effect-review { background: #fff3cd; color: #664d03; border: 1px solid #e8cb75; }
+.modal-card-wide { width: min(880px, 100%); }
+.client-sessions-rule { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.6; }
+.client-sessions-scroll { overflow-x: auto; }
+.client-sessions-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.client-sessions-table th, .client-sessions-table td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--border); vertical-align: top; }
+.client-sessions-table th { color: var(--text-soft); font-weight: 600; white-space: nowrap; }
+.client-sessions-note { color: var(--muted); padding: 12px 0; margin: 0; }
+.client-sessions-err { color: var(--red); }
+.cc-sessions-btn { font: inherit; font-size: 12px; }
+@media (max-width: 640px) {
+  /* a phone: one stacked block per session, every value under its label — nothing to scroll sideways */
+  .client-sessions-table thead { display: none; }
+  .client-sessions-table, .client-sessions-table tbody, .client-sessions-table tr, .client-sessions-table td { display: block; width: 100%; }
+  .client-sessions-table tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .client-sessions-table td { border-bottom: 0; padding: 3px 0; }
+  .client-sessions-table td::before { content: attr(data-label) ": "; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+}
