@@ -1485,7 +1485,8 @@ function _billingPrice(billingType, freqPerWeek) {
  * in full each month. A `happened` session beyond that month's quota auto-draws a
  * credit when one is available (the session is then free to the patient —
  * clientSessionValue 0 — but the therapist is still paid normally). A
- * therapist_cancelled session grants +1 credit. Credits carry forward across
+ * therapist_cancelled session grants +1 credit, and so does patient_cancelled_notice
+ * (the patient cancelled with 24 hours' notice or more). Credits carry forward across
  * months; the delivered (happened) count is implicitly per-month (we recount the
  * current month each time). creditsOwed lives on the Clients row, server-managed.
  */
@@ -3621,7 +3622,7 @@ function _setClinicalType(payload) {
  * never a duplicate, never stale pay).
  *
  * Clients is modified ONLY for the credit balance (creditsOwed) when a single
- * client matches: therapist_cancelled grants +1; a happened session beyond the
+ * client matches: therapist_cancelled / patient_cancelled_notice grant +1; a happened session beyond the
  * patient's monthly quota (weekly frequency × 4) auto-draws a credit when one is
  * available, zeroing that session's clientSessionValue (therapist pay unchanged).
  * Because creditsOwed is a stateful running total, an upsert first REVERSES the
@@ -3629,13 +3630,21 @@ function _setClinicalType(payload) {
  * undoes the old draw/grant. No plan frequency or no session date -> NO draw, the
  * row is flagged (creditStatus). See the credit engine below + _planWeeklyFrequency.
  *
- *   outcome:        happened | therapist_cancelled | patient_no_show (any other
- *                   value rejects, writes nothing)
+ *   outcome:        happened | therapist_cancelled | patient_no_show |
+ *                   patient_cancelled_notice (any other value rejects, writes nothing)
  *   sessionStatus:  happened->consumed, therapist_cancelled->credited,
- *                   patient_no_show->forfeited
+ *                   patient_no_show->forfeited, patient_cancelled_notice->credited
  *   therapistPay:   happened / patient_no_show -> _therapistPay (therapist showed
- *                   up, so a no-show still pays); therapist_cancelled -> 0 (never
- *                   delivered); group (קבוצה) -> 0
+ *                   up, so a no-show still pays); therapist_cancelled /
+ *                   patient_cancelled_notice -> 0 (never delivered); group (קבוצה) -> 0
+ *
+ *   THE 24-HOUR RULE (Sandra, 2026-11-16): the patient cancelled with 24 hours'
+ *   notice or more -> patient_cancelled_notice: not charged, +1 credit, therapist
+ *   not paid. No notice / less than 24 hours -> patient_no_show: charged (no
+ *   credit), therapist paid. The therapist cancelled -> therapist_cancelled: +1
+ *   credit, therapist not paid. WHICH of these happened is the therapist's report,
+ *   confirmed by the coordinator in the therapists app; this receiver never infers
+ *   it from timestamps.
  *   clientSessionValue: _billingPrice(billingType, freq). קבוצה -> 0 (decided
  *                   free). ליווי with NO freq in the event -> null (blank cell —
  *                   flagged, never guessed; distinct from a real 0).
@@ -3652,7 +3661,7 @@ var SESSION_LOG_HEADERS = [
   'matchStatus', 'recordedAt',
   // APPEND-ONLY (session accounting + credits): how the credit engine treated
   // this row. '' = N/A (no-show / unmatched non-credit); 'credit_added' =
-  // therapist_cancelled gave +1; 'within_quota' = happened inside the monthly
+  // therapist_cancelled / patient_cancelled_notice gave +1; 'within_quota' = happened inside the monthly
   // quota (normal value); 'covered' = happened beyond quota, a credit was drawn
   // (clientSessionValue forced to 0); 'beyond_no_credit' = beyond quota but no
   // credit available (normal value); 'quota_unknown' = quota undeterminable
@@ -3759,8 +3768,21 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
 var SESSION_STATUS_BY_OUTCOME = {
   happened:            'consumed',
   therapist_cancelled: 'credited',
-  patient_no_show:     'forfeited'
+  patient_no_show:     'forfeited',
+  // 2026-11-16: the patient called the session off with 24 hours' notice or more.
+  // The session did not take place and is NOT charged: the patient keeps it (+1
+  // credit) and the therapist is not paid. Less than 24 hours' notice / no notice
+  // is patient_no_show (charged, no credit, therapist paid).
+  patient_cancelled_notice: 'credited'
 };
+
+/* Outcomes where the session did NOT take place and the patient keeps it:
+ * +1 credit, therapist pay 0. One rule for the pay table, the credit grant and
+ * the credit reversal — they can never disagree about which outcomes these are. */
+var CREDIT_GRANTING_OUTCOMES = { therapist_cancelled: true, patient_cancelled_notice: true };
+function _outcomeGrantsCredit(outcome) {
+  return _hasOwn(CREDIT_GRANTING_OUTCOMES, String(outcome == null ? '' : outcome));
+}
 
 function _sessionOutcomeAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('SESSION_OUTCOME_SECRET');
@@ -3769,11 +3791,12 @@ function _sessionOutcomeAuthOk(params) {
   return got !== '' && got === expected;
 }
 
-/* Pay rule by outcome. therapist_cancelled and group never call _therapistPay,
- * so they log fine even for an unknown therapist; only a PAID non-group outcome
+/* Pay rule by outcome. A credit-granting outcome (therapist_cancelled /
+ * patient_cancelled_notice) and group never call _therapistPay, so they log fine
+ * even for an unknown therapist; only a PAID non-group outcome
  * (happened / patient_no_show) looks up the therapist and may throw. */
 function _computeSessionPay(outcome, therapist, clinicalTreatmentType, billingType) {
-  if (outcome === 'therapist_cancelled') return 0; // never delivered -> never paid
+  if (_outcomeGrantsCredit(outcome)) return 0;     // never delivered -> never paid
   if (billingType === GROUP_BILLING) return 0;      // group -> 0 pay
   return _therapistPay(therapist, clinicalTreatmentType); // showed up -> paid
 }
@@ -3941,12 +3964,12 @@ function _recordSessionOutcome(payload, source) {
       var balance = origCredits;
       // 1) reverse the old row's effect on this client's balance
       if (oldRow) {
-        if (oldRow.outcome === 'therapist_cancelled') balance -= 1;       // undo the +1
+        if (_outcomeGrantsCredit(oldRow.outcome)) balance -= 1;           // undo the +1
         if (String(oldRow.creditStatus) === 'covered')  balance += 1;       // undo the draw (give it back)
       }
       if (balance < 0) balance = 0;
       // 2) apply the new outcome's effect
-      if (outcome === 'therapist_cancelled') {
+      if (_outcomeGrantsCredit(outcome)) {
         balance += 1;
         rowObj.creditStatus = 'credit_added';
       } else if (outcome === 'happened') {
@@ -3982,7 +4005,7 @@ function _recordSessionOutcome(payload, source) {
         _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
       }
       rowObj.creditsOwed = balance;
-    } else if (outcome === 'happened' || outcome === 'therapist_cancelled') {
+    } else if (outcome === 'happened' || _outcomeGrantsCredit(outcome)) {
       // No single client to credit/debit — flag, change no balance.
       rowObj.creditStatus = 'no_client';
     }
@@ -7706,6 +7729,9 @@ function _otsRecordOutcome(payload, source) {
   var id = String(payload && (source === 'therapists' ? payload.oneTimeSessionId : payload.id) || '').trim();
   if (!PACKAGE_UUID_RE.test(id)) return { ok: false, error: 'bad_id', reason: 'bad_id' };
   var outcome = String(payload && payload.outcome || '').trim();
+  // A one-time session is outside the package: there is no credit to grant. A patient's
+  // advance cancellation of one is ורד's «ביטול» here (reason + charge review), never an outcome.
+  if (outcome === 'patient_cancelled_notice') return { ok: false, error: 'one_time_outcome_rejected', reason: 'one_time_outcome_rejected' };
   if (!_hasOwn(ONE_TIME_OUTCOME_STATUS, outcome)) return { ok: false, error: 'unknown_outcome', reason: 'unknown_outcome' };
   if (source !== 'therapists' && _otsMoneyScopeOps(payload)) return { ok: false, error: 'forbidden_money_action' };
   var user = source === 'therapists' ? '' : _requestUser(payload);

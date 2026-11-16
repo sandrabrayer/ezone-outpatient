@@ -12,7 +12,9 @@
  * PAY RULE (mirrors the pay side): only outcomes that PAY are summed —
  *   `happened` and `patient_no_show` (the therapist showed up, so a no-show still
  *   pays). `therapist_cancelled` is EXCLUDED from the total, but its count is
- *   surfaced (pay 0) for trust/visibility.
+ *   surfaced (pay 0) for trust/visibility. So is `patient_cancelled_notice`
+ *   (2026-11-16: the patient cancelled with 24 hours' notice or more — no session,
+ *   no pay), counted separately as `patientNoticeCount`.
  *
  * Pre-VAT totals come straight from each row's stored `therapistPay` (already
  * pre-VAT, and already 0 for therapist_cancelled / group). The +VAT (gross) total
@@ -39,9 +41,11 @@
 })(typeof self !== 'undefined' ? self : this, function (TherapistPay) {
   'use strict';
 
-  // Outcomes that pay (therapist showed up). therapist_cancelled is excluded.
+  // Outcomes that pay (therapist showed up). therapist_cancelled is excluded,
+  // and so is patient_cancelled_notice (advance cancellation by the patient).
   var PAID_OUTCOMES = { happened: true, patient_no_show: true };
   var EXCLUDED_OUTCOME = 'therapist_cancelled';
+  var PATIENT_NOTICE_OUTCOME = 'patient_cancelled_notice';
 
   function str(v) { return String(v == null ? '' : v).trim(); }
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
@@ -93,7 +97,7 @@
       if (!byTherapist[name]) {
         byTherapist[name] = {
           therapist: name, paidCount: 0, sessionCount: 0,
-          excludedCancelledCount: 0, preVatTotal: 0, sessions: [], months: []
+          excludedCancelledCount: 0, patientNoticeCount: 0, preVatTotal: 0, sessions: [], months: []
         };
         order.push(name);
       }
@@ -106,6 +110,7 @@
       t.sessionCount++;
       if (isPaid) { t.paidCount++; t.preVatTotal += pay; }
       else if (outcome === EXCLUDED_OUTCOME) { t.excludedCancelledCount++; }
+      else if (outcome === PATIENT_NOTICE_OUTCOME) { t.patientNoticeCount++; }
       if (rowMonth && t.months.indexOf(rowMonth) === -1) t.months.push(rowMonth);
 
       t.sessions.push({
@@ -116,6 +121,9 @@
         patient: str(row.patientName),
         type: str(row.clinicalTreatmentType),
         outcome: outcome,
+        // carried for the «התקיים / לא התקיים» + patient-account wording (display only)
+        creditStatus: str(row.creditStatus),
+        oneTimeSessionId: str(row.oneTimeSessionId),
         pay: isPaid ? pay : 0,          // non-paying outcomes show 0 for visibility
         paid: isPaid
       });
@@ -124,7 +132,7 @@
     order.sort(function (a, b) { return a.localeCompare(b, 'he'); });
     var result = {
       therapists: [],
-      totals: { paidCount: 0, excludedCancelledCount: 0, preVatTotal: 0, vatTotal: 0 }
+      totals: { paidCount: 0, excludedCancelledCount: 0, patientNoticeCount: 0, preVatTotal: 0, vatTotal: 0 }
     };
     for (var k = 0; k < order.length; k++) {
       var th = byTherapist[order[k]];
@@ -137,6 +145,7 @@
       result.therapists.push(th);
       result.totals.paidCount += th.paidCount;
       result.totals.excludedCancelledCount += th.excludedCancelledCount;
+      result.totals.patientNoticeCount += th.patientNoticeCount;
       result.totals.preVatTotal += th.preVatTotal;
     }
     result.totals.preVatTotal = round2(result.totals.preVatTotal);
@@ -148,11 +157,12 @@
    * monthlyPayoutSummary(rows, month) -> {
    *   month,                              // the resolved 'YYYY-MM'
    *   therapists: [{
-   *     therapist, paidCount, sessionCount, excludedCancelledCount,
+   *     therapist, paidCount, sessionCount, excludedCancelledCount, patientNoticeCount,
    *     preVatTotal, vatTotal, months,
-   *     sessions: [{ sessionId, date, month, phone, patient, type, outcome, pay, paid }]
+   *     sessions: [{ sessionId, date, month, phone, patient, type, outcome,
+   *                  creditStatus, oneTimeSessionId, pay, paid }]
    *   }],
-   *   totals: { paidCount, excludedCancelledCount, preVatTotal, vatTotal },
+   *   totals: { paidCount, excludedCancelledCount, patientNoticeCount, preVatTotal, vatTotal },
    *   differences: { therapists: [ …same shape… ], totals: {…} }  // הפרשים
    * }
    *
@@ -168,12 +178,12 @@
    */
   function monthlyPayoutSummary(rows, month) {
     var target = monthOf(month);
-    var empty = { therapists: [], totals: { paidCount: 0, excludedCancelledCount: 0, preVatTotal: 0, vatTotal: 0 } };
+    var empty = { therapists: [], totals: { paidCount: 0, excludedCancelledCount: 0, patientNoticeCount: 0, preVatTotal: 0, vatTotal: 0 } };
     var out = {
       month: target,
       therapists: empty.therapists,
       totals: empty.totals,
-      differences: { therapists: [], totals: { paidCount: 0, excludedCancelledCount: 0, preVatTotal: 0, vatTotal: 0 } }
+      differences: { therapists: [], totals: { paidCount: 0, excludedCancelledCount: 0, patientNoticeCount: 0, preVatTotal: 0, vatTotal: 0 } }
     };
     if (!Array.isArray(rows) || !target) return out;
 
@@ -219,6 +229,7 @@
   return {
     PAID_OUTCOMES: PAID_OUTCOMES,
     EXCLUDED_OUTCOME: EXCLUDED_OUTCOME,
+    PATIENT_NOTICE_OUTCOME: PATIENT_NOTICE_OUTCOME,
     monthOf: monthOf,
     isForwarded: isForwarded,
     isGlobalPay: isGlobalPay,
