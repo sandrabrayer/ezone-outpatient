@@ -72,7 +72,8 @@ test('services: only active single-session catalog rows, server-priced, mapped t
   assert.equal(s.ok, true);
   assert.deepEqual(s.services.map((x) => [x.key, x.clinicalTreatmentType, x.amount]).sort(), [
     ['cbt_single', 'פרטני CBT', 500], ['emdr_single', 'פרטני EMDR', 850],
-    ['psychiatric_consult', 'מעקב פסיכיאטרי', 900], ['psychiatric_diagnosis', 'אינטייק', 2500]
+    ['psychiatric_consult', 'מעקב פסיכיאטרי', 900], ['psychiatric_diagnosis', 'אינטייק', 2500],
+    ['psychiatric_followup', 'מעקב פסיכיאטרי', 1100], ['psychiatric_intake', 'אינטייק', 2300]
   ]);
 });
 

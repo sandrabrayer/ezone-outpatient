@@ -6105,6 +6105,18 @@
         convert.onclick = function () { openActivateModal(l); };
         actions.appendChild(convert);
       }
+      // טיפול חד פעמי לליד (2026-11-16, CHANGELOG-one-time-psychiatric.md): a person who is
+      // not a patient yet books ONE session (e.g. ייעוץ פסיכיאטרי). Saving moves the lead to
+      // the patients list as «תשלום לפי טיפול» (no package, no renewal cycle) and then books
+      // the session through the SAME audited path the patient card uses. A money action.
+      if (!isOpsScope() && window.OneTimeSessions) {
+        var otsLead = document.createElement('button');
+        otsLead.className = 'btn btn-ghost lead-ots-btn';
+        otsLead.textContent = '+ טיפול חד פעמי';
+        otsLead.title = 'קביעת טיפול בודד למי שאינו/ה מטופל/ת — הליד עובר למטופלים כ«תשלום לפי טיפול»';
+        otsLead.onclick = function () { busyRun(otsLead, function () { return openOtsModal(null, null, l); }); };
+        actions.appendChild(otsLead);
+      }
       var edit = document.createElement('button');
       edit.className = 'btn btn-ghost';
       edit.textContent = 'עריכה';
@@ -7372,15 +7384,24 @@
     return window.OneTimeSessions.errorText(m);
   }
 
-  var otsCtx = null;   // { clientId, session (edit) | null, draftId (create) }
-  async function openOtsModal(client, session) {
+  // { clientId, session (edit) | null, draftId (create), lead (booking for a lead, until it is converted) }
+  var otsCtx = null;
+  /* `lead` (create only, no client yet): the modal books for a LEAD. Nothing is written
+   * when it opens — the lead becomes a per-session patient only on «שמירה» (otsConvertLead). */
+  async function openOtsModal(client, session, lead) {
     var form = $('#otsForm');
     if (!form || !window.OneTimeSessions) return;
+    var forLead = !client && !!lead;
+    if (!client && !forLead) return;
+    var subject = client || lead;
     form.reset();
-    otsCtx = { clientId: client.id, session: session || null, draftId: session ? null : window.OneTimeSessions.newId() };
+    otsCtx = { clientId: client ? client.id : '', lead: forLead ? lead : null, convertedFromLead: false,
+      session: session || null, draftId: session ? null : window.OneTimeSessions.newId() };
     var token = otsCtx;
-    $('#otsTitle').textContent = session ? 'שינוי מועד — טיפול חד פעמי' : 'טיפול חד פעמי';
-    $('#otsClientName').textContent = client.name || '';
+    $('#otsTitle').textContent = session ? 'שינוי מועד — טיפול חד פעמי' : (forLead ? 'טיפול חד פעמי — ליד' : 'טיפול חד פעמי');
+    $('#otsClientName').textContent = subject.name || '';
+    var leadNote = $('#otsLeadNote');
+    if (leadNote) leadNote.hidden = !forLead;
     $('#otsMsg').textContent = '';
     var loc = form.location;
     loc.innerHTML = '<option value="">—</option>' + LOCATIONS.map(function (l) { return '<option value="' + escapeHtml(l) + '">' + escapeHtml(l) + '</option>'; }).join('');
@@ -7395,7 +7416,7 @@
       form.location.value = session.location || ''; form.note.value = session.note || '';
     } else {
       form.date.value = today();
-      if (LOCATIONS.indexOf(client.location) >= 0) form.location.value = client.location;
+      if (LOCATIONS.indexOf(subject.location) >= 0) form.location.value = subject.location;
       form.catalogKey.innerHTML = '<option value="">טוען את הקטלוג…</option>';
     }
     $('#otsSubmit').disabled = !session;
@@ -7442,6 +7463,21 @@
     }
     var catalogKey = String(fd.get('catalogKey') || '');
     if (!catalogKey) { $('#otsMsg').textContent = 'יש לבחור שירות מהקטלוג.'; return; }
+    // Booking for a LEAD: first move the lead to the patients list as a per-session
+    // payer (one confirmed save), then book exactly like any patient. Once converted the
+    // context is an ordinary client context, so a retry never converts twice.
+    if (ctx.lead && !ctx.clientId) {
+      var converted;
+      try { converted = await otsConvertLead(ctx.lead, fields); }
+      catch (convErr) {
+        $('#otsMsg').textContent = convErr && convErr.otsUser ? convErr.message : 'הליד לא הועבר למטופלים — דבר לא נקבע: ' + ((convErr && convErr.message) || 'שגיאה');
+        return;
+      }
+      ctx.clientId = converted.id; ctx.lead = null; ctx.convertedFromLead = true;
+      var leadNote = $('#otsLeadNote');
+      if (leadNote) leadNote.hidden = true;
+      $('#otsTitle').textContent = 'טיפול חד פעמי';
+    }
     var created;
     try {
       // An open extra-charge operation for this patient blocks a new charge — check
@@ -7459,8 +7495,59 @@
       await loadAll();
     } catch (e) {
       // nothing scheduled (or the same id is safely replayable): the form stays as typed
-      $('#otsMsg').textContent = otsErrorText(e);
+      $('#otsMsg').textContent = ctx.convertedFromLead
+        ? 'הליד עבר למטופלים כ«תשלום לפי טיפול», אך הטיפול עדיין לא נקבע: ' + otsErrorText(e) + ' אפשר לתקן ולשמור שוב, או לסגור ולקבוע מכרטיס המטופל/ת.'
+        : otsErrorText(e);
     }
+  }
+
+  /* A lead books a one-time session (2026-11-16). The lead becomes a patient with
+   * billingMode 'per_session': no package, no monthly amount, no billing day, no
+   * payment row and no nextBillingDate — so there is no renewal cycle and the person
+   * is never «in debt» between sessions (the existing per-session rules). The lead's
+   * history follows through fromLead, exactly like «הפוך למטופל פעיל». The session
+   * and its charge are NOT created here.
+   * Throws {otsUser:true} for a reason the user can fix; a failed save is rolled back. */
+  function otsUserError(text) { var e = new Error(text); e.otsUser = true; return e; }
+  function otsLeadClient(lead, fields) {
+    var location = LOCATIONS.indexOf(fields.location) >= 0 ? fields.location : (LOCATIONS.indexOf(lead.location) >= 0 ? lead.location : '');
+    return {
+      id: uid(), name: lead.name, phone: recoverPhone(lead.phone),
+      serviceType: '', location: location,
+      sessionsPerWeek: {}, sessionsUnit: {}, pricePerSession: 0,
+      startDate: today(), status: 'פעיל', exitDate: '', fromLead: lead.id,
+      source: 'lead', notes: 'נפתח/ה מליד לצורך טיפול חד פעמי', billingType: 'monthly',
+      billingDay: '', paymentStatus: '', paymentDate: '', nextBillingDate: '',
+      house_of_origin: lead.house_of_origin || '',
+      assignedTo: lead.assignedTo || '',
+      preferredHouse: preferredHouseOrBlank(lead.preferredHouse),
+      billingMode: 'per_session',
+      complementaryType: '', privateTherapists: []
+    };
+  }
+  async function otsConvertLead(lead, fields) {
+    var live = state.leads.find(function (x) { return x.id === lead.id; });
+    if (!live) throw otsUserError('הליד כבר אינו ברשימת הלידים — רעננו את המסך.');
+    var phone = recoverPhone(live.phone);
+    // the source checks the therapists diary by the patient's phone and refuses a booking without it
+    if (!isValidPayerPhone(phone)) throw otsUserError('בליד אין טלפון תקין — עדכנו את הטלפון ב«עריכה» ונסו שוב.');
+    var dup = findClientByPhone(live.phone, null);
+    if (dup) throw otsUserError('מטופל/ת עם מספר טלפון זה כבר קיים/ת: «' + (dup.name || 'ללא שם') + '». קבעו את הטיפול מכרטיס המטופל/ת.');
+    var client = otsLeadClient(live, fields);
+    if (!client.location) throw otsUserError('יש לבחור מיקום (סניף) — הוא נשמר בכרטיס המטופל/ת.');
+    var leadIdx = state.leads.findIndex(function (x) { return x.id === live.id; });
+    state.clients.push(client);
+    state.leads = state.leads.filter(function (x) { return x.id !== live.id; });
+    try {
+      await persistClientChange(client);
+    } catch (err) {
+      state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
+      if (leadIdx >= 0 && !state.leads.some(function (x) { return x.id === live.id; })) state.leads.splice(leadIdx, 0, live);
+      render();
+      throw err;
+    }
+    render();
+    return client;
   }
 
   var otsCancelTarget = null;
