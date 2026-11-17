@@ -1321,6 +1321,45 @@ function _therapistPay(therapistName, treatmentType) {
   throw new Error('Unknown therapist: "' + name + '" — add a row to the TherapistRates sheet');
 }
 
+/* ===== Therapist name aliases (2026-11-17) =====
+ * The therapists app sends the therapist's name as its own roster spells it (synced
+ * from staffing). Pay rates are looked up by the EXACT TherapistRates name, so a
+ * roster misspelling made every session of that therapist `unknown_therapist`:
+ * nothing recorded, the patient's monthly counter not moved, no pay. First case:
+ * the roster spells ד"ר מיכאל שפרינץ without the ר (ד" מיכאל שפרינץ).
+ *
+ * This is an EXPLICIT list — never a fuzzy match, and no mapping is ever invented:
+ *   • an exact TherapistRates name always wins (the alias is not even consulted);
+ *   • a listed misspelling resolves to the ONE TherapistRates row whose name has the
+ *     listed target key; no such row, or more than one → the name is left as sent
+ *     and the caller fails closed exactly as before;
+ *   • keys ignore only quote-like characters and repeated spaces (ד"ר / ד״ר / ד”ר are
+ *     the same typed name), never letters.
+ * Renaming a therapist across staffing + therapists is a separate, coordinated
+ * migration (assignments, sessions and the personal login code are keyed by name);
+ * an entry here is removed once that has been done. */
+var THERAPIST_NAME_ALIASES = {
+  'ד מיכאל שפרינץ': 'דר מיכאל שפרינץ'   // roster: ד" מיכאל שפרינץ → rates: ד"ר מיכאל שפרינץ
+};
+function _therapistAliasKey(name) {
+  return String(name == null ? '' : name)
+    .replace(/["'`\u05F4\u05F3\u201C\u201D\u2018\u2019]/g, '')
+    .replace(/\s+/g, ' ').trim();
+}
+function _canonicalTherapistName(name) {
+  var n = String(name == null ? '' : name).trim();
+  if (!n) return n;
+  var rates = null;
+  try { rates = _loadTherapistRates(); } catch (_) { rates = null; }
+  if (!rates || _hasOwn(rates, n)) return n;            // exact name wins; no roster → unchanged
+  var key = _therapistAliasKey(n);
+  if (!_hasOwn(THERAPIST_NAME_ALIASES, key)) return n;
+  var target = THERAPIST_NAME_ALIASES[key];
+  var hits = [];
+  for (var rn in rates) { if (_hasOwn(rates, rn) && _therapistAliasKey(rn) === target) hits.push(rn); }
+  return hits.length === 1 ? hits[0] : n;               // none / ambiguous → fail closed downstream
+}
+
 // Persist one client's creditsOwed without rewriting the whole Clients sheet.
 // Locates the row by scanning the id column (like the SessionLog upsert).
 // Fail-soft: no-hit (client deleted mid-flight) changes nothing.
@@ -3828,7 +3867,9 @@ function _recordSessionOutcome(payload, source) {
     return { ok: false, reason: 'unknown_type' };
   }
   var billingType = _clinicalToBilling(clinical);
-  var therapist = String((payload && payload.therapist) || '').trim();
+  // A listed roster misspelling resolves to its TherapistRates name (explicit list only —
+  // THERAPIST_NAME_ALIASES); the row is priced and stored under that one name.
+  var therapist = _canonicalTherapistName(String((payload && payload.therapist) || '').trim());
 
   // Frequency only matters for ליווי; absent everywhere else. Accept either key.
   var freq;
