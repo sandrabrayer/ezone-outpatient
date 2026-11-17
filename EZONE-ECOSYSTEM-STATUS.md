@@ -1,3 +1,17 @@
+# Outpatient — therapist name alias for ד"ר מיכאל שפרינץ, 2026-11-17
+
+The therapists roster (from staffing) spells him `ד" מיכאל שפרינץ`; `TherapistRates` has
+`ד"ר מיכאל שפרינץ`. Every approved session of his was refused `unknown_therapist` (nothing
+recorded, «נוצלו X מתוך Y» not moved). `recordSessionOutcome` now resolves that ONE listed
+misspelling (`THERAPIST_NAME_ALIASES`) to the single matching `TherapistRates` row; exact names
+always win; anything else fails closed as before. `CHANGELOG-therapist-name-alias.md`.
+
+**Open:** the spelling itself is still wrong in staffing / the therapists roster. A rename is a
+coordinated migration (new-vs-deactivated roster name, assignments + sessions, and the personal
+login code are all keyed by the name) — plan it separately, then delete the alias entry.
+**General gap:** nothing warns when an active roster therapist has no usable `TherapistRates`
+row until an approved session is refused.
+
 # Outpatient + Therapists — «התקיים / לא התקיים» with the 24-hour rule, 2026-11-16
 
 Sandra, 16/11: the therapist's report must make clear whether the session took place,
