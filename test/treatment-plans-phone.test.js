@@ -410,9 +410,9 @@ test('E: CLIENTS_HEADERS has no phoneIssue column — it is derived, never store
   assert.ok(m);
   assert.doesNotMatch(m[1], /phoneIssue/);
   const { ctx } = sandbox([]);
-  // 41 = the 36 frozen columns + plannedExitDate + preferredHouse + billingMode
-  // + complementaryType + privateTherapists (later, separate appends).
-  assert.equal(ctx.CLIENTS_HEADERS.length, 41, 'the 36 frozen columns + 5 later appends');
+  // 42 = the 36 frozen columns + plannedExitDate + preferredHouse + billingMode
+  // + complementaryType + privateTherapists + patientTypeOverride (later, separate appends).
+  assert.equal(ctx.CLIENTS_HEADERS.length, 42, 'the 36 frozen columns + 6 later appends');
   assert.ok(!ctx.CLIENTS_HEADERS.includes('phoneIssue'));
 });
 

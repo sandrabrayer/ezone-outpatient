@@ -301,6 +301,19 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Outpatient: «מטופלים» split by patient type (Nov 18, 2026 — draft PR, not released)
+
+- Four tabs with counts: «הכול» / «קהילה יומית» / «טיפולים פרטניים» / «פסיכיאטר». Rules in
+  `public/patient-type.js` (pure): override → day-center plan → psychiatric-only plan →
+  other plan → no plan + all one-time sessions psychiatric (by `clinicalTreatmentType`) →
+  individual. A day-community patient with a psychiatric session stays in «קהילה יומית».
+- New Clients column `patientTypeOverride` APPENDED at position 42 (+ Clients-removed mirror);
+  `PATIENT_TYPES` = `day_community` / `individual` / `psychiatric`, blank = automatic; validated in
+  `_saveAll` like `complementaryType`. Not a money key. **Not projected** by `getTreatmentPlans`
+  or any feed — the therapists app and the dashboard are unaffected.
+- Display only: billing, renewal, debt, payouts unchanged. SW v41. Apps Script deploy needed
+  (new column + validator). Details: `CHANGELOG-patient-type-tabs.md`.
+
 ## Outpatient: one-time PSYCHIATRIC services + one-time booking for a lead (Nov 16, 2026 — draft PR, not released)
 
 - Four psychiatric one-time services, each its own `PackageCatalog` key: `psychiatric_consult`

@@ -74,8 +74,9 @@ test('F: the chip sits in the card header meta row, next to the phone', () => {
   assert.ok(start !== -1 && end > start, 'clientCard found');
   const card = APP.slice(start, end);
   assert.match(card, /var phoneIssueChip = phoneIssueChipHtml\(c\);/);
-  assert.match(card, /'<div class="client-meta">' \+ phoneChip \+ phoneIssueChip \+ locationChip \+ assignedChip \+ '<\/div>'/);
-  assert.match(card, /\(phoneChip \|\| phoneIssueChip \|\| locationChip \|\| assignedChip\)/);
+  // 2026-11-18: the patient-type chip leads the same row (CHANGELOG-patient-type-tabs.md).
+  assert.match(card, /'<div class="client-meta">' \+ patientTypeChip \+ phoneChip \+ phoneIssueChip \+ locationChip \+ assignedChip \+ '<\/div>'/);
+  assert.match(card, /\(patientTypeChip \|\| phoneChip \|\| phoneIssueChip \|\| locationChip \|\| assignedChip\)/);
 });
 
 test('F: style — amber, from the existing palette', () => {

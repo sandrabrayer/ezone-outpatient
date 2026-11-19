@@ -37,12 +37,12 @@ const base = (over) => Object.assign({
 test('A: billingMode is the ONE new column, appended LAST on Clients (position 39) and on the tombstone', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS), R = plain(ctx.CLIENTS_REMOVED_HEADERS);
-  assert.equal(H.length, 41); // complementaryType + privateTherapists appended 2026-11-09
+  assert.equal(H.length, 42); // complementaryType + privateTherapists appended 2026-11-09, patientTypeOverride 2026-11-18
   assert.equal(H[38], 'billingMode');
   assert.equal(H.indexOf('billingMode'), H.lastIndexOf('billingMode'), 'exactly once');
-  assert.deepEqual(H.slice(-5), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
+  assert.deepEqual(H.slice(-6), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists', 'patientTypeOverride']);
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
-  assert.deepEqual(R.slice(-3), ['billingMode', 'complementaryType', 'privateTherapists']);
+  assert.deepEqual(R.slice(-4), ['billingMode', 'complementaryType', 'privateTherapists', 'patientTypeOverride']);
   assert.deepEqual(plain(ctx.BILLING_MODES), ['package', 'per_session']);
   // Leads carry no billing mode
   assert.ok(!plain(ctx.LEADS_HEADERS).includes('billingMode'));

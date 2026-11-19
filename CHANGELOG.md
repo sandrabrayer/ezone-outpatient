@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «מטופלים» split by patient type — קהילה יומית / טיפולים פרטניים / פסיכיאטר (2026-11-18)
+- The patients list now opens with four tabs, each with a count of ACTIVE patients: «הכול», «קהילה יומית» (a plan with ליווי יומי בקהילה / legacy מרכז יום), «טיפולים פרטניים» (every other package or ongoing therapy), «פסיכיאטר» (a plan of psychiatric treatments only, or a patient with no plan whose one-time sessions are all psychiatric — e.g. a lead booked for an intake). A day-community patient who also sees the psychiatrist stays in «קהילה יומית» only. The service filter row stays, limited to the treatment types that occur in the open tab. Under «הכול» each card shows its type.
+- Manual override: עריכה → תוכנית טיפול → «סוג מטופל» (אוטומטי / קהילה יומית / טיפולים פרטניים / פסיכיאטר); the card shows «ידני». New Clients column `patientTypeOverride` APPENDED at the end (position 42, + the Clients-removed mirror), validated server-side (`PATIENT_TYPES` or blank = automatic); a payload without the key keeps the sheet value. Not a money key; not projected to any consumer.
+- New `public/patient-type.js` (pure rules, UMD, no catalog key or price). Display only: no billing, renewal, debt, payout or feed logic changed. SW cache v40 → v41. See CHANGELOG-patient-type-tabs.md.
+
 ### Therapist name alias — ד"ר מיכאל שפרינץ's sessions were refused (2026-11-17)
 - The therapists roster spells him `ד" מיכאל שפרינץ` (no ר); `TherapistRates` has `ד"ר מיכאל שפרינץ`. Rates are looked up by the exact name, so every approved session of his answered `unknown_therapist` — nothing recorded, the patient's «נוצלו X מתוך Y» not moved, no pay. `recordSessionOutcome` now resolves a LISTED misspelling (`THERAPIST_NAME_ALIASES`, one entry) to the single `TherapistRates` row with the listed name; an exact rates name always wins; no row / two rows → refused as before. Keys ignore quote characters and repeated spaces only, never letters. No sheet, no frontend, no rate changed. See CHANGELOG-therapist-name-alias.md.
 

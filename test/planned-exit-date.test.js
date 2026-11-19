@@ -48,10 +48,10 @@ test('A: plannedExitDate is appended after the stamps on Clients and on the tomb
   const R = plain(ctx.CLIENTS_REMOVED_HEADERS);
   // preferredHouse (position 38) and billingMode (position 39) were appended
   // after it later — see test/preferred-house.test.js, test/billing-mode.test.js.
-  assert.equal(H.length, 41); // complementaryType + privateTherapists appended 2026-11-09
+  assert.equal(H.length, 42); // complementaryType + privateTherapists appended 2026-11-09, patientTypeOverride 2026-11-18
   assert.equal(H[36], 'plannedExitDate');
-  assert.deepEqual(H.slice(-7), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
-  assert.deepEqual(R.slice(-5), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
+  assert.deepEqual(H.slice(-8), ['updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists', 'patientTypeOverride']);
+  assert.deepEqual(R.slice(-6), ['plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists', 'patientTypeOverride']);
   assert.equal(H.indexOf('exitDate'), 8, 'existing exitDate column untouched');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
 });

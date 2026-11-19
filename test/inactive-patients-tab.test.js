@@ -102,8 +102,10 @@ test('app.js: render() dispatches the inactive view and the search input is wire
 });
 
 test('app.js: renderClients excludes both inactive statuses', () => {
-  const src = fnSource('renderClients');
-  assert.match(src, /c\.status === 'סיים טיפול' \|\| c\.status === 'לא פעיל'/);
+  // 2026-11-18 (patient-type tabs): the filter moved into isListedClient, which
+  // renderClients applies before the type tabs count or list anyone.
+  assert.match(fnSource('isListedClient'), /c\.status === 'סיים טיפול' \|\| c\.status === 'לא פעיל'/);
+  assert.match(fnSource('renderClients'), /state\.clients\.filter\(isListedClient\)/);
 });
 
 test('app.js: clientsDueOn excludes both inactive statuses', () => {

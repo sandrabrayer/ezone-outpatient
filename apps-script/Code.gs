@@ -179,7 +179,18 @@ var CLIENTS_HEADERS = [
   //     non-empty, distinct, ≤2, ≤80 chars each → normalized JSON, else blank);
   //     a payload WITHOUT the key keeps the sheet value. getTreatmentPlans
   //     projects it (as an array) for the therapists app. Old rows blank.
-  'privateTherapists'
+  'privateTherapists',
+  //   patientTypeOverride (סוג מטופל, 2026-11-18): APPEND-ONLY, physically
+  //     unwritten on the live sheet so it lands at the very END (position 42)
+  //     with no migration. Vered's manual choice of the «מטופלים» tab the
+  //     patient is listed in — one of PATIENT_TYPES (stable English keys;
+  //     Hebrew labels are render-time only) or blank = automatic (derived in
+  //     the browser by public/patient-type.js from the plan and the one-time
+  //     sessions). Display-only: no billing, renewal, payout or feed reads it.
+  //     Carried in the saveAll payload like complementaryType: a payload
+  //     WITHOUT the key keeps the sheet value; a sent value is validated
+  //     (_patientTypeOrBlank). Old rows blank. Not projected to any consumer.
+  'patientTypeOverride'
 ];
 /* Stable billing-mode keys (Hebrew labels are render-time only in the UI). */
 var BILLING_MODES = ['package', 'per_session'];
@@ -213,6 +224,14 @@ function _privateTherapistsOrBlank(v) {
   if (!names.length || names.length > 2) return '';
   if (names.length === 2 && names[0] === names[1]) return '';
   return JSON.stringify(names);
+}
+/* Stable patient-type keys for the «מטופלים» tab split (Hebrew at render time
+ * only). Mirrors TYPES in public/patient-type.js (parity-tested). */
+var PATIENT_TYPES = ['day_community', 'individual', 'psychiatric'];
+/* Validate a patientTypeOverride at a write boundary: one of PATIENT_TYPES or '' (automatic). Never coerced. */
+function _patientTypeOrBlank(v) {
+  var s = String(v == null ? '' : v).trim();
+  return PATIENT_TYPES.indexOf(s) >= 0 ? s : '';
 }
 /* Validate a billingMode at a write boundary: one of BILLING_MODES, or '' (legacy = package). Never coerced. */
 function _billingModeOrBlank(v) {
@@ -289,7 +308,9 @@ var CLIENTS_REMOVED_HEADERS = [
   // APPEND-ONLY mirrors of the Clients plan metadata (complementaryType,
   // privateTherapists), same reason — a tombstoned row keeps them and
   // restoreRemovedClient copies them back.
-  'complementaryType', 'privateTherapists'
+  'complementaryType', 'privateTherapists',
+  // APPEND-ONLY mirror of the Clients patient-type override (patientTypeOverride), same reason.
+  'patientTypeOverride'
 ];
 
 /* Settings sheet: one row per setting, key/value style.
@@ -1759,6 +1780,12 @@ function _saveAll(payload) {
       clients[i].privateTherapists = (clients[i] && _hasOwn(clients[i], 'privateTherapists'))
         ? _privateTherapistsOrBlank(clients[i].privateTherapists)
         : (existingRow ? _privateTherapistsOrBlank(existingRow.privateTherapists) : '');
+      // patientTypeOverride (2026-11-18): same rule — a payload WITHOUT the key
+      // (pre-column tab) carries the sheet's value; a sent value is validated
+      // and anything but a PATIENT_TYPES key is stored blank (= automatic).
+      clients[i].patientTypeOverride = (clients[i] && _hasOwn(clients[i], 'patientTypeOverride'))
+        ? _patientTypeOrBlank(clients[i].patientTypeOverride)
+        : (existingRow ? _patientTypeOrBlank(existingRow.patientTypeOverride) : '');
       // OP-CRM-3A: an operational session (moneyScope 'ops', decided by the Node
       // proxy from the signed cookie — never by the browser) never saw the money
       // fields, so its snapshot cannot change them: existing rows keep the
