@@ -4186,6 +4186,184 @@ function _markForwarded(payload) {
   }
 }
 
+/* ===== Payroll report to מורן by email (2026-11-19, CHANGELOG-payroll-email.md) =====
+ *
+ * Inbound, SERVER-TO-SERVER from the therapists Apps Script (אורן presses
+ * «שליחה למורן» there; the coordinator role is enforced on that side):
+ *   { action:'sendPayrollReport', secret, month:'YYYY-MM', actorName }
+ *
+ * FAIL-CLOSED on a DEDICATED secret 'PAYROLL_SEND_SECRET' (SOURCE_POST_AUTH, ≥32
+ * chars, constant-time) — its OWN secret, never the proxy key: the browser proxy
+ * can never trigger an email. The recipient is the Script Property
+ * PAYROLL_REPORT_EMAIL (never in code, never from the caller); unset → refused.
+ *
+ * Under the script lock: read SessionLog → the SAME summary and CSV as the
+ * outpatient «ייצוא לאקסל» (mirror of public/therapist-payout.js +
+ * public/payout-export.js; parity-tested) → MailApp with the CSV attached →
+ * stamp `forwardedToPayroll` (each row's OWN session month, like _markForwarded)
+ * on exactly the rows in the report. So a second press sends only what arrived
+ * since (late rows = הפרשים) and an empty report is refused (nothing_to_send):
+ * a double click can never email the same sessions twice. The mail is sent
+ * BEFORE the stamp: a failed send stamps nothing.
+ *
+ * The reply carries COUNTS ONLY — no amount, no patient, no address — because it
+ * is shown to the coordinator, who must never see pay. */
+var PAYROLL_PAID_OUTCOMES = { happened: true, patient_no_show: true };
+var PAYROLL_VAT_RATE = 0.18; // mirror of TherapistPay.DEFAULT_VAT_RATE (parity-tested)
+var PAYROLL_HEADER = ['מטפל', 'סשנים משולמים', 'לפני מע״מ', 'מע״מ', 'כולל מע״מ'];
+var PAYROLL_DIFF_HEADER = ['מטפל', 'חודש', 'סשנים משולמים', 'לפני מע״מ', 'מע״מ', 'כולל מע״מ'];
+
+function _payrollRound2(n) { return Math.round(n * 100) / 100; }
+function _payrollNum(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+function _payrollStr(v) { return String(v == null ? '' : v).trim(); }
+
+/* Mirror of TherapistPayout.groupSummary (totals only — the email needs no rows). */
+function _payrollGroup(subset) {
+  var by = {}, order = [];
+  for (var i = 0; i < subset.length; i++) {
+    var row = subset[i] || {};
+    var name = _payrollStr(row.therapist);
+    if (!by[name]) { by[name] = { therapist: name, paidCount: 0, preVatTotal: 0, months: [] }; order.push(name); }
+    var t = by[name];
+    if (PAYROLL_PAID_OUTCOMES[_payrollStr(row.outcome)] === true) { t.paidCount++; t.preVatTotal += _payrollNum(row.therapistPay); }
+    var m = _payoutMonthOf(row.date);
+    if (m && t.months.indexOf(m) === -1) t.months.push(m);
+  }
+  order.sort(function (a, b) { return a.localeCompare(b, 'he'); });
+  var out = { therapists: [], totals: { paidCount: 0, preVatTotal: 0, vatTotal: 0 } };
+  for (var k = 0; k < order.length; k++) {
+    var th = by[order[k]];
+    th.months.sort();
+    th.preVatTotal = _payrollRound2(th.preVatTotal);
+    th.vatTotal = _payrollRound2(th.preVatTotal * (1 + PAYROLL_VAT_RATE));
+    out.therapists.push(th);
+    out.totals.paidCount += th.paidCount;
+    out.totals.preVatTotal += th.preVatTotal;
+  }
+  out.totals.preVatTotal = _payrollRound2(out.totals.preVatTotal);
+  out.totals.vatTotal = _payrollRound2(out.totals.preVatTotal * (1 + PAYROLL_VAT_RATE));
+  return out;
+}
+
+/* Mirror of TherapistPayout.monthlyPayoutSummary's partition: the live (still
+ * open) month + הפרשים (late rows of a month already closed for that therapist,
+ * capped at months <= target). Returns the row sets too, so the sender stamps
+ * exactly what the report contains. Salaried ('global') and settled rows never count. */
+function _payrollSummary(rows, month) {
+  var closed = {};
+  for (var i = 0; i < rows.length; i++) {
+    var fr = rows[i] || {};
+    if (_payrollStr(fr.forwardedToPayroll) === '') continue;
+    var fName = _payrollStr(fr.therapist);
+    var fMonth = _payoutMonthOf(fr.forwardedToPayroll) || _payoutMonthOf(fr.date);
+    if (!fMonth) continue;
+    if (!closed[fName]) closed[fName] = {};
+    closed[fName][fMonth] = true;
+  }
+  var currentRows = [], diffRows = [];
+  for (var j = 0; j < rows.length; j++) {
+    var row = rows[j] || {};
+    if (_payrollStr(row.forwardedToPayroll) !== '') continue;
+    if (_payrollStr(row.payModel) === 'global') continue;
+    var rm = _payoutMonthOf(row.date);
+    if (!rm) continue;
+    var isClosed = !!(closed[_payrollStr(row.therapist)] && closed[_payrollStr(row.therapist)][rm]);
+    if (rm === month && !isClosed) currentRows.push(row);
+    else if (isClosed && rm <= month) diffRows.push(row);
+  }
+  var cur = _payrollGroup(currentRows);
+  return { month: month, therapists: cur.therapists, totals: cur.totals, differences: _payrollGroup(diffRows), currentRows: currentRows, diffRows: diffRows };
+}
+
+/* Mirror of PayoutExport.buildPayoutRows / buildPayoutCsv (byte-identical, parity-tested). */
+function _payrollCsv(summary) {
+  function vatPortion(pre, total) { return _payrollRound2(_payrollNum(total) - _payrollNum(pre)); }
+  function cell(v) {
+    var s = (v === undefined || v === null) ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  var rows = [['תשלומי מטפלים', summary.month], [], PAYROLL_HEADER.slice()];
+  summary.therapists.forEach(function (t) {
+    rows.push([t.therapist || '', t.paidCount, _payrollRound2(t.preVatTotal), vatPortion(t.preVatTotal, t.vatTotal), _payrollRound2(t.vatTotal)]);
+  });
+  var tt = summary.totals;
+  rows.push(['סה״כ', tt.paidCount, _payrollRound2(tt.preVatTotal), vatPortion(tt.preVatTotal, tt.vatTotal), _payrollRound2(tt.vatTotal)]);
+  var diffs = summary.differences.therapists;
+  if (diffs.length) {
+    var dt = summary.differences.totals;
+    rows.push([]);
+    rows.push(['הפרשים (סשנים מחודשים קודמים שכבר הועברו)']);
+    rows.push(PAYROLL_DIFF_HEADER.slice());
+    diffs.forEach(function (t) {
+      rows.push([t.therapist || '', t.months.join(', '), t.paidCount, _payrollRound2(t.preVatTotal), vatPortion(t.preVatTotal, t.vatTotal), _payrollRound2(t.vatTotal)]);
+    });
+    rows.push(['סה״כ הפרשים', '', dt.paidCount, _payrollRound2(dt.preVatTotal), vatPortion(dt.preVatTotal, dt.vatTotal), _payrollRound2(dt.vatTotal)]);
+  }
+  return rows.map(function (r) { return r.map(cell).join(','); }).join('\r\n');
+}
+
+/* 'YYYY-MM', a real month, not after the current month (Asia/Jerusalem). */
+function _payrollMonthOk(m) {
+  if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return false;
+  var now = String(Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM')).slice(0, 7);
+  return m >= '2026-01' && m <= now;
+}
+
+function _sendPayrollReport(payload) {
+  var month = payload && payload.month;
+  if (!_payrollMonthOk(month)) return { ok: false, reason: 'invalid_month' };
+  var actor = _payrollStr(payload && payload.actorName).replace(/[\r\n\t]/g, ' ').slice(0, 80);
+  if (!actor) return { ok: false, reason: 'missing_actor' };
+  var to = _payrollStr(PropertiesService.getScriptProperties().getProperty('PAYROLL_REPORT_EMAIL'));
+  if (!/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(to)) return { ok: false, reason: 'not_configured' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
+    var sh = _ensureSheet('SessionLog', SESSION_LOG_HEADERS);
+    var rows = _readAll(sh, SESSION_LOG_HEADERS);
+    var s = _payrollSummary(rows, month);
+    var included = s.currentRows.concat(s.diffRows);
+    if (!included.length) return { ok: true, sent: false, reason: 'nothing_to_send', month: month };
+
+    var csv = _payrollCsv(s);
+    var fileName = 'therapist-payouts-' + month + '.csv';
+    var body = [
+      'שלום מורן,',
+      '',
+      'מצורף דוח תשלומי המטפלים לחודש ' + month + ' (קובץ ' + fileName + ', נפתח באקסל).',
+      'מטפלים: ' + s.therapists.length + ' · סשנים משולמים: ' + s.totals.paidCount +
+        (s.differences.therapists.length ? ' · הפרשים מחודשים קודמים: ' + s.differences.totals.paidCount + ' סשנים' : ''),
+      '',
+      'נשלח על ידי ' + actor + ' מאפליקציית המטפלים של איזון.',
+      'הסשנים בדוח סומנו כ«הועבר לחשבת שכר» ולא יישלחו שוב.'
+    ].join('\n');
+    MailApp.sendEmail({
+      to: to,
+      subject: 'תשלומי מטפלים — ' + month,
+      body: body,
+      name: 'איזון — תשלומי מטפלים',
+      attachments: [Utilities.newBlob('﻿' + csv, 'text/csv', fileName)]
+    });
+
+    // Sent → stamp exactly the reported rows, each with its OWN session month.
+    for (var i = 0; i < included.length; i++) included[i].forwardedToPayroll = _payoutMonthOf(included[i].date);
+    _writeAll(sh, SESSION_LOG_HEADERS, rows);
+    logAudit_('payroll_sent', '_sendPayrollReport', month, actor, {
+      month: month, therapists: s.therapists.length, sessions: s.currentRows.length,
+      differenceSessions: s.diffRows.length
+    });
+    return {
+      ok: true, sent: true, month: month,
+      therapists: s.therapists.length, paidSessions: s.totals.paidCount,
+      sessions: s.currentRows.length, differenceSessions: s.diffRows.length
+    };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function _resolveStopFlag(id, resolvedBy) {
   if (!id) return { ok: false, error: 'missing_id' };
   var lock = LockService.getScriptLock();
@@ -7966,6 +8144,8 @@ var SOURCE_POST_AUTH = {
   requestExtraSession: 'EXTRA_SESSION_SECRET',
   approveExtraSession: 'OUTPATIENT_PROXY_SECRET',
   recordSessionOutcome: 'SESSION_OUTCOME_SECRET',
+  // 2026-11-19: therapists Apps Script → email the payroll report to מורן. Dedicated secret.
+  sendPayrollReport: 'PAYROLL_SEND_SECRET',
   correctSessionOutcome: 'OUTPATIENT_PROXY_SECRET',
   markForwarded: 'OUTPATIENT_PROXY_SECRET',
   getStopFlags: 'OUTPATIENT_PROXY_SECRET',
@@ -8048,6 +8228,7 @@ function _sourceAuthOk(action, method, params, payload) {
   if (typeof expected !== 'string' || !expected || typeof got !== 'string') return false;
   if (key === 'OUTPATIENT_PROXY_SECRET' && expected.trim().length < 32) return false;
   if (key === 'ONE_TIME_SESSIONS_SECRET' && expected.trim().length < 32) return false;
+  if (key === 'PAYROLL_SEND_SECRET' && expected.trim().length < 32) return false;
   if ((key === 'PACKAGE_CATALOG_SECRET' || key === 'PACKAGE_REQUEST_SECRET') && !_pkgConfigSecretOk(key, expected)) return false;
   if (got.length !== expected.length) return false;
   var diff = 0;
@@ -8255,6 +8436,7 @@ function doPost(e) {
       }
       return _json(_setClinicalType(payload));
     }
+    if (action === 'sendPayrollReport') return _json(_sendPayrollReport(payload));
     if (action === 'deactivateClient') {
       var dcParams = (e && e.parameter) || {};
       if (payload && payload.secret) dcParams.secret = payload.secret;

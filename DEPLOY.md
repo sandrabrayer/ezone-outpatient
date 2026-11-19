@@ -122,6 +122,14 @@ Two ordered release phases:
 → `{ commit, builtAt }`; `commit` must equal the merge SHA. If it never
 updates, Railway skipped the deploy.
 
+## Payroll report to מורן (2026-11-19 — values are never committed)
+
+Apps Script → **Project Settings → Script properties**: `PAYROLL_SEND_SECRET` (≥ 32 random chars,
+distinct from every other secret; the **same value** goes on the therapists Apps Script) and
+`PAYROLL_REPORT_EMAIL` (מורן's address, one address). Until both exist `sendPayrollReport`
+refuses (`unauthorized` / `not_configured`) and nothing is emailed. No Railway variable. The
+`script.send_mail` scope is already in `appsscript.json`. See `CHANGELOG-payroll-email.md`.
+
 ## CRM handoff status feed (OP-CRM-2 / G2 — Phase D, draft; values are never committed)
 
 At release only: Apps Script → **Project Settings → Script properties**: add `HANDOFF_STATUS_SECRET`
