@@ -180,6 +180,7 @@
       <!-- Clients -->
       <section id="view-clients" class="view">
         <div id="duplicateClientsReport" class="dupreport" hidden></div>
+        <div id="clientTypeTabs" class="client-type-tabs" role="group" aria-label="סוג מטופל"></div>
         <div class="toolbar">
           <input id="clientsSearch" class="search" placeholder="חיפוש לפי שם…" />
           <button id="addClientBtn" class="btn btn-primary edit-only">+ הוסף מטופל ישירות</button>
@@ -615,6 +616,15 @@
           </label>
           <div class="wide sessions-host" data-host="editClientSessions"></div>
           <label>תאריך סיום מתוכנן<input name="plannedExitDate" type="date" /></label>
+          <label>סוג מטופל (לשונית ברשימת המטופלים)
+            <select name="patientTypeOverride">
+              <option value="">אוטומטי</option>
+              <option value="day_community">קהילה יומית</option>
+              <option value="individual">טיפולים פרטניים</option>
+              <option value="psychiatric">פסיכיאטר</option>
+            </select>
+            <small id="editClientPatientTypeAuto" class="muted-hint"></small>
+          </label>
 
           <div class="wide form-section-title">גורם משלם (קרוב משפחה או המטופל עצמו)</div>
           <label>שם גורם משלם<input name="payerName" type="text" /></label>
@@ -1210,6 +1220,7 @@
   <script src="my-day.js?v=__BUILD__" defer></script>
   <script src="one-time-sessions.js?v=__BUILD__" defer></script>
   <script src="session-outcome.js?v=__BUILD__" defer></script>
+  <script src="patient-type.js?v=__BUILD__" defer></script>
   <!-- treatment-map.js (price table) and therapist-pay.js (pay rates) are NOT public:
        the server answers 401 without a session, so they are loaded by app.js AFTER
        sign-in, in this order (therapist-payout.js reads TherapistPay when it loads).

@@ -449,9 +449,9 @@ test('editor helpers exist: preview logs the plan; apply logs before/after', () 
   assert.ok(/Logger\.log/.test(preview) && /Logger\.log/.test(apply));
 });
 
-test('CLIENTS_HEADERS: 41 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, preferredHouse, billingMode, then the plan metadata', () => {
+test('CLIENTS_HEADERS: 42 append-only columns — paymentAmountOverrides, the who/when stamps, plannedExitDate, preferredHouse, billingMode, then the plan metadata', () => {
   assert.equal(CLIENTS_HEADERS[0], 'id');
-  assert.deepEqual(CLIENTS_HEADERS.slice(-8), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists']);
-  assert.equal(CLIENTS_HEADERS.length, 41); // complementaryType + privateTherapists appended 2026-11-09
+  assert.deepEqual(CLIENTS_HEADERS.slice(-9), ['paymentAmountOverrides', 'updatedAt', 'updatedBy', 'plannedExitDate', 'preferredHouse', 'billingMode', 'complementaryType', 'privateTherapists', 'patientTypeOverride']);
+  assert.equal(CLIENTS_HEADERS.length, 42); // complementaryType + privateTherapists appended 2026-11-09, patientTypeOverride 2026-11-18
   assert.ok(CLIENTS_HEADERS.includes('nextBillingDate'));
 });

@@ -36,14 +36,14 @@ const base = (over) => Object.assign({
 
 /* ================================ A. schema ================================ */
 
-test('A: the two columns are appended LAST on Clients (40-41) and mirrored on the tombstone', () => {
+test('A: the two columns are appended on Clients (40-41, patientTypeOverride after them) and mirrored on the tombstone', () => {
   const { ctx } = sandbox();
   const H = plain(ctx.CLIENTS_HEADERS), R = plain(ctx.CLIENTS_REMOVED_HEADERS);
-  assert.equal(H.length, 41);
-  assert.deepEqual(H.slice(-2), ['complementaryType', 'privateTherapists']);
+  assert.equal(H.length, 42);
+  assert.deepEqual(H.slice(-3), ['complementaryType', 'privateTherapists', 'patientTypeOverride']);
   assert.equal(H.indexOf('billingMode'), 38, 'nothing before them moves');
   assert.equal(H.indexOf('phone'), 25, 'phone join key untouched');
-  assert.deepEqual(R.slice(-2), ['complementaryType', 'privateTherapists']);
+  assert.deepEqual(R.slice(-3), ['complementaryType', 'privateTherapists', 'patientTypeOverride']);
   assert.deepEqual(plain(ctx.COMPLEMENTARY_TYPES), ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic']);
   // Leads carry neither column.
   const L = plain(ctx.LEADS_HEADERS);

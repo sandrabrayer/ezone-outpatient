@@ -253,6 +253,20 @@ button, input, select, textarea {
 }
 .client-tabs .ct.active { color: var(--text); border-color: var(--green-deep); background: var(--panel-2); }
 
+/* Patient-type tabs of «מטופלים» (2026-11-18): קהילה יומית / טיפולים פרטניים / פסיכיאטר */
+.client-type-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.client-type-tabs[hidden], .client-tabs[hidden] { display: none; }
+.client-type-tabs .ctt {
+  padding: 8px 16px; border-radius: 10px; font-size: 14px; font-weight: 700;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+}
+.client-type-tabs .ctt.active { color: var(--text); border-color: var(--green); background: var(--panel-2); }
+.client-type-tabs .ctt-count {
+  display: inline-block; min-width: 22px; margin-inline-start: 4px; padding: 0 6px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); font-size: 12px; text-align: center;
+}
+.chip-patient-type { font-weight: 700; }
+
 /* Wider min so the two-column patient card has room (drops ~3→2 per row on a
    typical desktop, which is fine). */
 .clients-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; }
@@ -946,7 +960,7 @@ button.month-pay-btn:active { filter: brightness(0.88); }
 
 /* Touch targets ≥40px on coarse pointers (phones/tablets), all widths. */
 @media (pointer: coarse) {
-  .btn, .tab, .client-tabs .ct { min-height: 40px; }
+  .btn, .tab, .client-tabs .ct, .client-type-tabs .ctt { min-height: 40px; }
   .client-card .client-actions .btn { min-height: 40px; padding: 8px 12px; }
   button.month-pay-btn { min-height: 40px; }
   input, select, textarea { min-height: 40px; font-size: 16px; } /* 16px stops iOS zoom-on-focus */

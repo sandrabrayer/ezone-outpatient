@@ -109,7 +109,10 @@
 //   «מפגשים שדווחו» modal, a fourth correction option), app.js, therapist-payout.js and style.css changed
 //   (CHANGELOG-session-notice-outcome.md). Re-bumped v39 → v40 after #187 took v39 (deploy branch 8d42fe4); the LIVE
 //   /sw.js was NOT reachable from this sandbox (proxy 403 on egress) — re-check it serves v39 before release.
-var CACHE = 'ezone-outpatient-v40';
+// v41 (2026-11-18, patient-type tabs): new public/patient-type.js + its script tag; index.html (type tabs,
+//   «סוג מטופל» in עריכה), app.js and style.css changed (CHANGELOG-patient-type-tabs.md). Bumped from the LIVE
+//   value v40 (fetched from production /sw.js on 2026-11-18).
+var CACHE = 'ezone-outpatient-v41';
 var SHELL = [
   './',
   './index.html',

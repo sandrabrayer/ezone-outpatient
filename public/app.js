@@ -89,6 +89,20 @@
   // the STORED form: a legacy / blank cell stays blank (never rewritten to 'package' by a save — no migration)
   function billingModeStored(v) { var s = typeof v === 'string' ? v.trim() : ''; return BILLING_MODES.indexOf(s) >= 0 ? s : ''; }
   function isPerSession(c) { return !!c && billingModeOf(c.billingMode) === 'per_session'; }
+  // סוג מטופל (2026-11-18, CHANGELOG-patient-type-tabs.md): the «מטופלים» tab split.
+  // Rules live in public/patient-type.js (pure, tested). Fail-soft: if that module
+  // did not load, every patient is shown under «הכול» only and no override is lost
+  // (an unknown stored value is passed through untouched on save).
+  function patientTypeApi() { return (typeof window !== 'undefined' && window.PatientType) || null; }
+  function patientTypeOverrideOrBlank(v) {
+    var api = patientTypeApi();
+    if (api) return api.overrideOrBlank(v);
+    return typeof v === 'string' ? v.trim() : '';
+  }
+  function patientTypeOf(c) {
+    var api = patientTypeApi();
+    return api ? api.classify(c, state.oneTimeSessions) : { type: '', manual: false };
+  }
   // Suggestion rule for the one-click chip «סמן כתשלום לפי טיפול?» (NO automatic
   // flip, no migration): an active client whose ONLY service is פרטני, still billed
   // as a package, with no package evidence — no monthly amount AND no paid monthly
@@ -230,6 +244,7 @@
     inactiveSearch: '',
     billingSearch: '',
     clientTab: 'all',
+    clientType: 'all', // «מטופלים» patient-type tab: 'all' | PatientType.TYPES (2026-11-18)
     billingDate: '',
     /* הכנסות חודשיות (monthly revenue) — a SEPARATE view from the daily
      * גבייה worklist, which keeps its own billingDate/billingSearch above
@@ -919,7 +934,9 @@
       // טיפול משלים subtype (stable key, '' = none) + up to two therapists for
       // the weekly טיפול פרטני sessions (array in memory, JSON on the sheet).
       complementaryType: complementaryTypeOrBlank(row.complementaryType),
-      privateTherapists: privateTherapistsArray(row.privateTherapists)
+      privateTherapists: privateTherapistsArray(row.privateTherapists),
+      // סוג מטופל (2026-11-18): Vered's manual tab choice; '' = automatic (public/patient-type.js).
+      patientTypeOverride: patientTypeOverrideOrBlank(row.patientTypeOverride)
     };
   }
 
@@ -1041,7 +1058,10 @@
       privateTherapists: (function () {
         var names = privateTherapistsArray(c.privateTherapists);
         return names.length ? JSON.stringify(names) : '';
-      })()
+      })(),
+      // סוג מטופל: always sent (blank = automatic) so clearing an override is a
+      // real edit; the server validates (PATIENT_TYPES or blank).
+      patientTypeOverride: patientTypeOverrideOrBlank(c.patientTypeOverride)
     };
   }
 
@@ -2004,6 +2024,7 @@
     if (row.tab === 'clients') {
       state.clientSearch = name;
       state.clientTab = 'all';
+      state.clientType = 'all';
       var ci = $('#clientsSearch'); if (ci) ci.value = name;
       setView('clients');
     } else if (row.tab === 'inactive') {
@@ -6253,11 +6274,66 @@
   }
 
   // ---- Clients
+  // The patient-type tabs of «מטופלים» (2026-11-18): «הכול» + the three types of
+  // public/patient-type.js, each with its count of ACTIVE patients (search and the
+  // service filter below do not change the counts).
+  var CLIENT_TYPE_TABS = ['all', 'day_community', 'individual', 'psychiatric'];
+  function isListedClient(c) {
+    // Both inactive kinds live in the מטופלים לא פעילים tab, not here.
+    return !(c.status === 'סיים טיפול' || c.status === 'לא פעיל');
+  }
+  function renderClientTypeTabs(active) {
+    var el = $('#clientTypeTabs');
+    if (!el) return;
+    el.innerHTML = '';
+    var api = patientTypeApi();
+    // Module missing: no split is possible, so no tabs are offered (everything is «הכול»).
+    el.hidden = !api;
+    if (!api) return;
+    var counts = api.counts(active, state.oneTimeSessions);
+    CLIENT_TYPE_TABS.forEach(function (id) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctt' + (state.clientType === id ? ' active' : '');
+      b.dataset.clientType = id;
+      b.setAttribute('aria-pressed', state.clientType === id ? 'true' : 'false');
+      var name = id === 'all' ? 'הכול' : api.label(id);
+      b.innerHTML = escapeHtml(name) + ' <span class="ctt-count">' + (counts[id] || 0) + '</span>';
+      b.onclick = function () {
+        state.clientType = id;
+        state.clientTab = 'all';   // a service filter from another type would hide everyone
+        renderClients();
+      };
+      el.appendChild(b);
+    });
+  }
+  function matchesClientType(c) {
+    if (state.clientType === 'all' || !patientTypeApi()) return true;
+    return patientTypeOf(c).type === state.clientType;
+  }
+  function matchesServiceTab(c, tab) {
+    if (tab === 'all') return true;
+    // Day-center tab carries the new label; match old "מרכז יום" rows too.
+    return tab === DAY_CENTER_LABEL ? hasDayCenter(c.serviceType) : parseServices(c.serviceType).indexOf(tab) !== -1;
+  }
+
+  // ---- Clients
   function renderClients() {
     renderDuplicateReport();
+    if (CLIENT_TYPE_TABS.indexOf(state.clientType) < 0) state.clientType = 'all';
+    var active = state.clients.filter(isListedClient);
+    renderClientTypeTabs(active);
+    var inType = active.filter(matchesClientType);
+    // Service filter: only the treatment types that occur in this tab (all of
+    // them under «הכול»); hidden when it could not narrow anything.
+    var services = state.clientType === 'all' ? SERVICE_TYPES : SERVICE_TYPES.filter(function (s) {
+      return inType.some(function (c) { return matchesServiceTab(c, s); });
+    });
+    if (state.clientTab !== 'all' && services.indexOf(state.clientTab) < 0) state.clientTab = 'all';
     var tabsEl = $('#clientTabs');
     tabsEl.innerHTML = '';
-    var tabs = [{ id: 'all', label: 'הכול' }].concat(SERVICE_TYPES.map(function (s) { return { id: s, label: s }; }));
+    tabsEl.hidden = state.clientType !== 'all' && services.length < 2;
+    var tabs = [{ id: 'all', label: 'הכול' }].concat(services.map(function (s) { return { id: s, label: s }; }));
     tabs.forEach(function (t) {
       var b = document.createElement('button');
       b.className = 'ct' + (state.clientTab === t.id ? ' active' : '');
@@ -6268,16 +6344,8 @@
     var list = $('#clientsList');
     list.innerHTML = '';
     var q = state.clientSearch.trim().toLowerCase();
-    var visible = state.clients.filter(function (c) {
-      // Both inactive kinds live in the מטופלים לא פעילים tab, not here.
-      if (c.status === 'סיים טיפול' || c.status === 'לא פעיל') return false;
-      if (state.clientTab !== 'all') {
-        // Day-center tab carries the new label; match old "מרכז יום" rows too.
-        var matchesTab = state.clientTab === DAY_CENTER_LABEL
-          ? hasDayCenter(c.serviceType)
-          : parseServices(c.serviceType).indexOf(state.clientTab) !== -1;
-        if (!matchesTab) return false;
-      }
+    var visible = inType.filter(function (c) {
+      if (!matchesServiceTab(c, state.clientTab)) return false;
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -6291,6 +6359,18 @@
     decorated.sort(compareCardUrgency);
     decorated.forEach(function (d) { list.appendChild(clientCard(d.client)); });
     if (!decorated.length) list.innerHTML = '<div class="panel">אין מטופלים להצגה.</div>';
+  }
+
+  // Card chip: the patient's type under «הכול», and «ידני» wherever Vered's override decided.
+  function patientTypeChipHtml(c) {
+    var api = patientTypeApi();
+    if (!api) return '';
+    var pt = patientTypeOf(c);
+    var showType = state.clientType === 'all';
+    if (!showType && !pt.manual) return '';
+    var text = (showType ? api.label(pt.type) : '') + (pt.manual ? (showType ? ' · ' : '') + 'ידני' : '');
+    return '<span class="chip chip-patient-type" data-patient-type="' + escapeHtml(pt.type) + '"' +
+      (pt.manual ? ' title="סוג המטופל נקבע ידנית ב«עריכה»"' : '') + '>' + escapeHtml(text) + '</span>';
   }
 
   function statusClass(s) {
@@ -6321,6 +6401,7 @@
     var phoneChip = c.phone ? '<span class="chip">📞 ' + escapeHtml(c.phone) + '</span>' : '';
     var phoneIssueChip = phoneIssueChipHtml(c);
     var assignedChip = c.assignedTo ? '<span class="chip">משוייך: ' + escapeHtml(c.assignedTo) + '</span>' : '';
+    var patientTypeChip = patientTypeChipHtml(c);
 
     // Monthly session-credit balance (server-managed): cancelled-by-therapist
     // sessions bank a credit; a session beyond the monthly quota spends one.
@@ -6579,7 +6660,7 @@
           '<div class="client-name">' + escapeHtml(c.name) + '</div>' +
           '<span class="status-badge ' + statusClass(c.status) + '">' + escapeHtml(c.status) + '</span>' +
         '</div>' +
-        ((phoneChip || phoneIssueChip || locationChip || assignedChip) ? '<div class="client-meta">' + phoneChip + phoneIssueChip + locationChip + assignedChip + '</div>' : '') +
+        ((patientTypeChip || phoneChip || phoneIssueChip || locationChip || assignedChip) ? '<div class="client-meta">' + patientTypeChip + phoneChip + phoneIssueChip + locationChip + assignedChip + '</div>' : '') +
       '</div>' +
       '<div class="cc-body">' + moneyPanel + planPanel + '</div>' +
       otsPanelHtml(c) +
@@ -7261,6 +7342,14 @@
     if (form.plannedExitDate) form.plannedExitDate.value = client.plannedExitDate || '';
     if (form.preferredHouse) form.preferredHouse.value = preferredHouseOrBlank(client.preferredHouse);
     if (form.billingMode) form.billingMode.value = billingModeOf(client.billingMode);
+    if (form.patientTypeOverride) {
+      form.patientTypeOverride.value = patientTypeOverrideOrBlank(client.patientTypeOverride);
+      var ptHint = $('#editClientPatientTypeAuto');
+      if (ptHint) {
+        var ptApi = patientTypeApi();
+        ptHint.textContent = ptApi ? 'אוטומטי כרגע: ' + ptApi.label(ptApi.autoType(client, state.oneTimeSessions)) : '';
+      }
+    }
     // Treatment plan: service types + sessions per week per treatment
     var ecGroup = $('[data-group="serviceType"]', form);
     var ecHost = $('[data-host="editClientSessions"]', form);
@@ -9363,7 +9452,8 @@
         plannedExitDate: client.plannedExitDate,
         billingMode: client.billingMode,
         complementaryType: client.complementaryType,
-        privateTherapists: client.privateTherapists
+        privateTherapists: client.privateTherapists,
+        patientTypeOverride: client.patientTypeOverride
       };
       var newName = (fd.get('name') || '').trim();
       if (newName) client.name = newName;
@@ -9403,6 +9493,8 @@
         var bm = billingModeOf(fd.get('billingMode'));
         if (!(bm === 'package' && !billingModeStored(client.billingMode))) client.billingMode = bm;
       }
+      // סוג מטופל: '' = automatic; anything else must be a known key (the server re-validates).
+      if (fd.has('patientTypeOverride')) client.patientTypeOverride = patientTypeOverrideOrBlank(fd.get('patientTypeOverride'));
       // Treatment plan: service types + sessions per week
       var ecGroup2 = $('[data-group="serviceType"]', e.target);
       var ecHost2 = $('[data-host="editClientSessions"]', e.target);

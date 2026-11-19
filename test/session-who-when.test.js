@@ -414,16 +414,18 @@ test('C: CLIENTS_HEADERS, LEADS_HEADERS and both tombstone mirrors END with upda
     // all four then appended preferredHouse (בית מועדף) last.
     const H = headersOf(ctx, name);
     // (Clients + its tombstone also appended billingMode after preferredHouse, 2026-11-04)
-    // (Clients + its tombstone appended complementaryType + privateTherapists last, 2026-11-09)
-    const tail = /^CLIENTS/.test(name) ? H.slice(-7, -5) : H.slice(-3, -1);
+    // (Clients + its tombstone appended complementaryType + privateTherapists, 2026-11-09,
+    //  then patientTypeOverride last, 2026-11-18)
+    const tail = /^CLIENTS/.test(name) ? H.slice(-8, -6) : H.slice(-3, -1);
     assert.deepEqual(tail, ['updatedAt', 'updatedBy'], name);
   }
-  assert.equal(ctx.CLIENTS_HEADERS.length, 41);
+  assert.equal(ctx.CLIENTS_HEADERS.length, 42);
   assert.equal(ctx.CLIENTS_HEADERS[36], 'plannedExitDate');
   assert.equal(ctx.CLIENTS_HEADERS[37], 'preferredHouse');
   assert.equal(ctx.CLIENTS_HEADERS[38], 'billingMode');
   assert.equal(ctx.CLIENTS_HEADERS[39], 'complementaryType');
   assert.equal(ctx.CLIENTS_HEADERS[40], 'privateTherapists');
+  assert.equal(ctx.CLIENTS_HEADERS[41], 'patientTypeOverride');
   assert.equal(ctx.CLIENTS_HEADERS[33], 'paymentAmountOverrides', 'everything before the stamps unchanged');
   assert.equal(ctx.LEADS_HEADERS[ctx.LEADS_HEADERS.length - 4], 'assignedTo');
   assert.deepEqual(plain(ctx.CLIENTS_META_COLUMNS), ['id', 'updatedAt', 'updatedBy', 'creditsOwed', 'paymentAmountOverrides']);

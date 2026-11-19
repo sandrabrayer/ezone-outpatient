@@ -166,7 +166,7 @@ test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)',
   // directly after `phone`; the volta-only columns (physically unwritten) append at
   // the END, followed by paymentAmountOverrides (also append-only). Verified against
   // the sheet itself; append-only from here.
-  assert.deepEqual(H.slice(-16), [
+  assert.deepEqual(H.slice(-17), [
     'phone',
     'paymentStatus', 'paymentDate', 'nextBillingDate', 'creditsOwed',
     'clinicalTreatmentType', 'packageChangeDate', 'assignedTo', 'paymentAmountOverrides',
@@ -178,8 +178,8 @@ test('CLIENTS_HEADERS tail mirrors the LIVE physical sheet (frozen 2026-07-06)',
     'preferredHouse',
     // billing mode (אופן חיוב: package / per_session) — appended, physically unwritten
     'billingMode',
-    // plan metadata (2026-11-09) — appended last, physically unwritten
-    'complementaryType', 'privateTherapists'
+    // plan metadata (2026-11-09), then the patient-type override (2026-11-18) — appended last, physically unwritten
+    'complementaryType', 'privateTherapists', 'patientTypeOverride'
   ]);
 });
 
