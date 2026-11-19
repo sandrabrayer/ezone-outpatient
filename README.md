@@ -434,6 +434,15 @@ checkout ever drifts back.
   **Clients is never modified.** Posts directly to Apps Script `/exec` (no
   `server.js` change). This is the **receiver + compute only** — no therapists-side
   sender. See `CHANGELOG-session-outcome.md`. **Requires an Apps Script redeploy.**
+- `POST /exec { action:'sendPayrollReport', secret:<PAYROLL_SEND_SECRET>, month:'YYYY-MM', actorName }`
+  — the E-Zone Therapists app calls this when the coordinator presses **«שליחה למורן»**
+  (2026-11-19). Builds the month's therapist-payout report from SessionLog — the
+  **same** summary and CSV as «תשלומי מטפלים» → «ייצוא לאקסל» (parity-tested) —
+  emails it with the CSV attached to the Script Property **`PAYROLL_REPORT_EMAIL`**,
+  then stamps `forwardedToPayroll` on exactly the reported rows (a second press sends
+  only late rows, as הפרשים; an empty report is `nothing_to_send`). **Fail-closed** on
+  a **dedicated** `PAYROLL_SEND_SECRET` (≥ 32 chars, same value on both Apps Scripts;
+  never the proxy key). Replies with counts only. See `CHANGELOG-payroll-email.md`.
 - `POST /exec { action:'deactivateClient', secret:<DEACTIVATE_CLIENT_SECRET>, phone }`
   — the E-Zone Therapists app calls this when a patient is **deleted there**, so
   the patient stops appearing in outpatient's roster (the therapists roster unions

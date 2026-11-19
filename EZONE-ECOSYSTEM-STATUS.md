@@ -301,6 +301,17 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Payroll report → מורן by email (Nov 19, 2026 — two PRs, outpatient FIRST)
+
+- The coordinator (אורן) presses «שליחה למורן» in the therapists app («דוח שבועי»).
+  Therapists Apps Script → outpatient `sendPayrollReport` (dedicated `PAYROLL_SEND_SECRET`
+  on BOTH scripts, ≥ 32 chars, body only). Outpatient builds the same CSV as «ייצוא
+  לאקסל», emails it to `PAYROLL_REPORT_EMAIL` (outpatient Script Property, = מורן) and
+  stamps the reported SessionLog rows `forwardedToPayroll`. Counts-only reply.
+- Only APPROVED sessions are in SessionLog (the coordinator's «אישור לתשלום» pushes them);
+  the panel warns how many of the month still wait for approval.
+- Outpatient «תשלומי מטפלים» kept as a fallback; remove after the first real send.
+
 ## Outpatient: «מטופלים» split by patient type (Nov 18, 2026 — draft PR, not released)
 
 - Four tabs with counts: «הכול» / «קהילה יומית» / «טיפולים פרטניים» / «פסיכיאטר». Rules in

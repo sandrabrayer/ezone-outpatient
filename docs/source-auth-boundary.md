@@ -86,6 +86,7 @@ Dashboard
 | `flagStop`, `resolveStopFlag` by phone | POST | `STOP_FLAG_SECRET` | Therapists Apps Script; preserve query-only `flagStop` and body-based phone-resolution formats |
 | `setClinicalType` | POST | `CLINICAL_TYPE_SECRET` | Therapists Apps Script |
 | `deactivateClient` | POST | `DEACTIVATE_CLIENT_SECRET` | Therapists Apps Script |
+| `sendPayrollReport` | POST | `PAYROLL_SEND_SECRET` (≥ 32 chars) | Therapists Apps Script — «שליחה למורן»; recipient = Script Property `PAYROLL_REPORT_EMAIL` |
 | `requestExtraSession` | POST | `EXTRA_SESSION_SECRET` | Therapists Apps Script |
 | `recordSessionOutcome` | POST | `SESSION_OUTCOME_SECRET` | Therapists Apps Script; existing idempotent outcome/billing engine unchanged |
 | `createLead` | POST | `CREATE_LEAD_SECRET` | Dashboard Node uses its `OUTPATIENT_LEAD_SECRET`; names differ, value must match |
