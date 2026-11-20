@@ -1,5 +1,22 @@
 # Deploy — E-ZONE Outpatient
 
+> OUT↔Therapists draft #192 (20.11.2026): a group participant's outcome requires
+> `treatmentId` plus shared `sessionId`, and an over-quota request requires
+> `bookingRowId`. Both fields are append-only in the OUT source. The existing
+> Therapists #170 sender does not yet supply these fields, so **do not release
+> the OUT receiver alone**: paired sender ACK/HTTP acceptance is mandatory.
+> Frozen prior payment CI does not validate this later contract delta.
+>
+> Synthetic recovery drill: `npm test` regenerates the **disabled** standalone
+> `test-support/google-operational-drill-candidate.gs` from the exact current
+> Code.gs before testing. Before any release: regenerate using
+> `node test-support/build-google-operational-drill.cjs`, review the file change
+> and commit it on the approved candidate, then require
+> `git diff --exit-code -- test-support/google-operational-drill-candidate.gs`.
+> The historical `google-operational-drill.gs` remains immutable. The generated
+> candidate is not a production deployment or evidence of native Google acceptance.
+>
+
 > 2026-11-20 tasks 2/3 candidate: [exact acceptance and release/rollback gates](docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md).
 > No new secret, variable, source column or deployment. New renewal intents require
 > the source's `payment-date-v2` capability; existing stored legacy operations
