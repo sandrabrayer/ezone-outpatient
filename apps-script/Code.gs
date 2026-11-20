@@ -509,7 +509,9 @@ var STOP_FLAGS_HEADERS = [
 var EXTRA_SESSION_HEADERS = [
   'id', 'phone', 'patientName', 'treatmentType', 'therapist',
   'monthKey', 'quota', 'used', 'requestedBy', 'note',
-  'requestedAt', 'status', 'approvedBy', 'approvedAt'
+  'requestedAt', 'status', 'approvedBy', 'approvedAt',
+  // V2 append-only: stable Therapists booking row ID for retry-safe requests.
+  'bookingRowId'
 ];
 
 /* Continuation-track (מסלול המשך) workflow state. Yarden works over the roster of
@@ -3783,7 +3785,9 @@ var SESSION_LOG_HEADERS = [
   // whose revision is OLDER than the stored one (`stale_report_revision`) — two approved
   // pushes of one session that cross in flight can no longer leave the older result.
   // '' = recorded before this column / entered in Outpatient itself.
-  'reportRevision'
+  'reportRevision',
+  // V2 append-only: one outcome per participant in a shared group session.
+  'treatmentId'
 ];
 
 /* Exact report instant: null = genuinely absent; NaN = present but invalid.
@@ -3832,6 +3836,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   // Equal revision is a replay only when the stored result/identity agree.
   // Name is a display field; current pay rates/other sessions must not reprice a retry.
   var keys = ['sessionId', 'phone', 'clientId', 'therapist', 'clinicalTreatmentType', 'billingType', 'date', 'outcome', 'sessionStatus'];
+  if (incomingRow.billingType === GROUP_BILLING) keys.push('treatmentId');
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     var a = String(oldRow[key] == null ? '' : oldRow[key]).trim();
@@ -3855,6 +3860,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   return { ok: true, replay: {
     ok: true, sessionId: String(oldRow.sessionId), therapistPay: pay,
     clientSessionValue: value, sessionStatus: String(oldRow.sessionStatus),
+    treatmentId: String(oldRow.treatmentId == null ? '' : oldRow.treatmentId),
     creditStatus: String(oldRow.creditStatus == null ? '' : oldRow.creditStatus),
     upserted: true, replayed: true, reportRevision: new Date(stored).toISOString()
   } };
@@ -3923,6 +3929,13 @@ function _recordSessionOutcome(payload, source) {
     return { ok: false, reason: 'unknown_type' };
   }
   var billingType = _clinicalToBilling(clinical);
+  // A group session has one shared sessionId but MANY per-patient outcome rows.
+  // An immutable booking row ID is required; absent IDs cannot safely upsert.
+  var treatmentId = String(payload && payload.treatmentId == null ? '' : payload.treatmentId).trim();
+  if (billingType === GROUP_BILLING &&
+      (!treatmentId || !/^[A-Za-z0-9_.:-]{4,160}$/.test(treatmentId))) {
+    return { ok: false, reason: treatmentId ? 'invalid_treatment_id' : 'missing_treatment_id' };
+  }
   // A listed roster misspelling resolves to its TherapistRates name (explicit list only —
   // THERAPIST_NAME_ALIASES); the row is priced and stored under that one name.
   var therapist = _canonicalTherapistName(String((payload && payload.therapist) || '').trim());
@@ -3985,6 +3998,7 @@ function _recordSessionOutcome(payload, source) {
 
     var rowObj = {
       sessionId:          sessionId,
+      treatmentId:        treatmentId,
       phone:              phone,
       patientName:        patientName,
       clientId:           clientId,
@@ -4018,7 +4032,24 @@ function _recordSessionOutcome(payload, source) {
     var logRows = _readAll(sh, SESSION_LOG_HEADERS);
     var oldRow = null;
     for (var lr = 0; lr < logRows.length; lr++) {
-      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+      var candidate = logRows[lr];
+      if (String(candidate.sessionId) !== sessionId) continue;
+      // Never reinterpret a legacy shared group row as one participant or let
+      // a package event overwrite a group event with the same session ID.
+      if (billingType === GROUP_BILLING) {
+        if (String(candidate.billingType) !== GROUP_BILLING) return { ok: false, reason: 'source_outcome_conflict' };
+        var priorTreatmentId = String(candidate.treatmentId == null ? '' : candidate.treatmentId).trim();
+        if (!priorTreatmentId) return { ok: false, reason: 'legacy_group_identity_review' };
+        if (priorTreatmentId === treatmentId) {
+          if (oldRow) return { ok: false, reason: 'duplicate_group_identity_review' };
+          oldRow = candidate;
+        } else if (clientId && String(candidate.clientId) === clientId) {
+          return { ok: false, reason: 'duplicate_group_participant' };
+        }
+      } else {
+        if (String(candidate.billingType) === GROUP_BILLING || oldRow) return { ok: false, reason: 'source_outcome_conflict' };
+        oldRow = candidate;
+      }
     }
     // ---- Report order (2026-11-15) -----------------------------------------
     // Inside the lock and BEFORE any write: an approved push that carries an OLDER
@@ -4143,6 +4174,7 @@ function _recordSessionOutcome(payload, source) {
       sessionStatus: sessionStatus,
       creditStatus: rowObj.creditStatus
     };
+    if (billingType === GROUP_BILLING) result.treatmentId = treatmentId;
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
@@ -4554,16 +4586,48 @@ function _requestExtraSession(payload) {
   if (!_extraSessionAuthOk(payload)) return { ok: false, error: 'unauthorized' };
   var phone = _recoverPhone(payload && payload.phone);
   if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
-
+  // The sender must supply the immutable Schedule row ID. Guessing a key from
+  // phone/month/type would collapse two legitimately distinct bookings.
+  var bookingRowId = String(payload && payload.bookingRowId == null ? '' : payload.bookingRowId).trim();
+  if (!bookingRowId) return { ok: false, error: 'missing_booking_row_id' };
+  if (!/^[A-Za-z0-9_.:-]{6,160}$/.test(bookingRowId)) return { ok: false, error: 'invalid_booking_row_id' };
+  var identity = {
+    phone: phone,
+    patientName: String(payload.patientName == null ? '' : payload.patientName),
+    treatmentType: String(payload.treatmentType == null ? '' : payload.treatmentType),
+    therapist: String(payload.therapist == null ? '' : payload.therapist),
+    monthKey: String(payload.monthKey == null ? '' : payload.monthKey),
+    quota: Number(payload.quota) || 0,
+    used: Number(payload.used) || 0,
+    requestedBy: String(payload.requestedBy == null ? '' : payload.requestedBy),
+    note: String(payload.note == null ? '' : payload.note)
+  };
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('ExtraSessionRequests', EXTRA_SESSION_HEADERS);
+    var existing = _readAll(sh, EXTRA_SESSION_HEADERS);
+    for (var e = 0; e < existing.length; e++) {
+      if (String(existing[e].bookingRowId || '') !== bookingRowId) continue;
+      for (var key in identity) {
+        if (!Object.prototype.hasOwnProperty.call(identity, key)) continue;
+        var prior = existing[e][key];
+        var current = identity[key];
+        if (key === 'quota' || key === 'used') {
+          if ((Number(prior) || 0) !== current) return { ok: false, error: 'booking_row_conflict' };
+        } else if (String(prior == null ? '' : prior) !== String(current)) {
+          return { ok: false, error: 'booking_row_conflict' };
+        }
+      }
+      // Including approved requests: a lost reply never creates a new pending row.
+      return { ok: true, requestId: String(existing[e].id), status: String(existing[e].status), replayed: true };
+    }
     var id = 'esr_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1000);
     var row = EXTRA_SESSION_HEADERS.map(function (h) {
       switch (h) {
         case 'id': return id;
+        case 'bookingRowId': return bookingRowId;
         case 'phone': return phone;
         case 'patientName': return String(payload.patientName == null ? '' : payload.patientName);
         case 'treatmentType': return String(payload.treatmentType == null ? '' : payload.treatmentType);
@@ -4580,8 +4644,9 @@ function _requestExtraSession(payload) {
         default: return '';
       }
     });
+    sh.getRange(sh.getLastRow() + 1, EXTRA_SESSION_HEADERS.indexOf('bookingRowId') + 1).setNumberFormat('@');
     sh.appendRow(row);
-    return { ok: true, requestId: id };
+    return { ok: true, requestId: id, status: 'pending' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
