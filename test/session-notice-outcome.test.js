@@ -248,12 +248,13 @@ test('one-time sessions (outside the package) refuse the notice outcome — noth
   assert.equal(Object.keys(JSON.parse(JSON.stringify(f.sb.ctx.ONE_TIME_OUTCOME_STATUS))).includes(NOTICE), false);
 });
 
-test('SessionLog headers are unchanged (append-only; this change adds no column)', () => {
+test('SessionLog prior header indexes remain frozen; group identity is appended', () => {
   const { sb } = fixture();
   const H = JSON.parse(JSON.stringify(sb.ctx.SESSION_LOG_HEADERS));
-  assert.equal(H[H.length - 1], 'reportRevision');
+  assert.equal(H[H.length - 1], 'treatmentId');
+  assert.equal(H[H.length - 2], 'reportRevision');
   assert.equal(H.indexOf('outcome'), 8);
-  assert.equal(H.length, 19);
+  assert.equal(H.length, 20);
 });
 
 test('the monthly counters the therapists app shows: a notice cancellation is not a used session; the credit is a make-up', () => {
