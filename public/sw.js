@@ -112,7 +112,9 @@
 // v41 (2026-11-18, patient-type tabs): new public/patient-type.js + its script tag; index.html (type tabs,
 //   «סוג מטופל» in עריכה), app.js and style.css changed (CHANGELOG-patient-type-tabs.md). Bumped from the LIVE
 //   value v40 (fetched from production /sw.js on 2026-11-18).
-var CACHE = 'ezone-outpatient-v41';
+// v42: explicit ordinary/advance monthly coverage and conversion readback.
+// Live v41 / commit 3e393011 was verified read-only on 2026-11-20.
+var CACHE = 'ezone-outpatient-v42';
 var SHELL = [
   './',
   './index.html',

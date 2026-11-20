@@ -1726,6 +1726,27 @@ function _saveAll(payload) {
         existingById[eid] = existing[e];
       }
     }
+    // One saved client owns a lead conversion. Check under the same lock,
+    // before journal/tombstone/row writes: a stale tab can generate a new
+    // client id for the lead another tab has already admitted.
+    var conversionOwners = Object.create(null);
+    existing.forEach(function (c) {
+      if (c.fromLead) conversionOwners[String(c.fromLead)] = String(c.id);
+    });
+    for (var ci = 0; ci < clients.length; ci++) {
+      var candidate = clients[ci], candidateId = String(candidate.id || '');
+      var savedCandidate = existingById[candidateId];
+      // The original referral remains attached to its saved client, including
+      // when an older browser omits the field. Never silently move that link.
+      if (savedCandidate && savedCandidate.fromLead) candidate.fromLead = savedCandidate.fromLead;
+      var candidateLead = String(candidate.fromLead || '');
+      if (!candidateLead) continue;
+      var unchangedOwner = savedCandidate && String(savedCandidate.fromLead || '') === candidateLead;
+      if (!unchangedOwner && conversionOwners[candidateLead] && conversionOwners[candidateLead] !== candidateId) {
+        return { ok: false, error: 'lead_already_converted', existingClientId: conversionOwners[candidateLead] };
+      }
+      conversionOwners[candidateLead] = candidateId;
+    }
     var stampedClients = 0;
     // Stale-save conflict refusal (PR 2): rows another person changed after
     // this tab loaded them are refused ONE BY ONE — the sheet row is written
@@ -2504,12 +2525,20 @@ function _upsertPayment(payment) {
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(payment.id)) {
           _finGuard([sh.getRange(i + 2, PAYMENTS_HEADERS.indexOf('clientId') + 1).getValue()]);
+          // An exact ID must not select one of multiple receipts for this
+          // cycle. Historical verification requires an unambiguous source row.
+          if (String(payment.billingType || '') === 'monthly' && String(payment.id || '').indexOf('::chg-') < 0 &&
+              _finPayments(String(payment.id), String(payment.clientId), _coverageDateISO(payment.dueDate) || '', true).length > 1) return { ok: false, error: 'duplicate_monthly_cycle' };
           _forcePaymentTextCells(sh, i + 2);
           sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
           return { ok: true, payment: payment, updated: true };
         }
       }
     }
+    // New IDs never duplicate an existing logical cycle, including old clients
+    // submitting an unpaid/partial month-key row beside a date-key receipt.
+    if (String(payment.billingType || '') === 'monthly' && String(payment.id || '').indexOf('::chg-') < 0 &&
+        _finPayments(String(payment.id), String(payment.clientId), _coverageDateISO(payment.dueDate) || '', true).length) return { ok: false, error: 'duplicate_monthly_cycle' };
     // OP-BILL-01: fail closed on NEW fully-paid base-month receipts. Existing
     // historical rows are left unchanged on read and are not migrated here.
     // A custom explicit coverage period can differ from paid-date (advance),
@@ -4485,9 +4514,13 @@ function _deactivateClient(payload) {
     var payerIdx   = CLIENTS_HEADERS.indexOf('payerPhone');
     var statusIdx  = CLIENTS_HEADERS.indexOf('status');
     var rows = sh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
-    _finGuard(rows.filter(function (r) { return _recoverPhone(r[phoneIdx]) === phone ||
+    var matchingRows = rows.filter(function (r) { return _recoverPhone(r[phoneIdx]) === phone ||
       _recoverPhone(r[contactIdx]) === phone || _recoverPhone(r[payerIdx]) === phone;
-    }).map(function (r) { return r[0]; }));
+    });
+    // A payer/contact may belong to several patients. A phone-only request
+    // cannot select an identity in that case, even if one is already inactive.
+    if (matchingRows.length > 1) return { ok: false, error: 'ambiguous_client', reason: 'ambiguous_client', deactivated: 0 };
+    _finGuard(matchingRows.map(function (r) { return r[0]; }));
     var deactivated = 0;
     for (var i = 0; i < rows.length; i++) {
       if (_recoverPhone(rows[i][phoneIdx]) !== phone &&
@@ -5472,7 +5505,12 @@ function _createTask(payload) {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _crmNo('recovery_pending');
     var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
     var rows = _tasksRead(sh);
-    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === v.task.id) return { ok: true, task: _taskOut(rows[i]), created: false, replayed: true };
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === v.task.id) {
+      // A harmless replacement payload must not reveal a previously saved
+      // financial task through the idempotency key.
+      if (!_taskVisible(rows[i], payload)) return _crmNo('not_found');
+      return { ok: true, task: _taskOut(rows[i]), created: false, replayed: true };
+    }
     rows.push(v.task);
     _writeAll(sh, TASKS_HEADERS, rows);
     _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
@@ -5651,7 +5689,7 @@ function _logContact(payload) {
  * once PR #137 is live; absent columns simply never match). Never by name or
  * phone. The answer carries operational state only: no prices, payments,
  * clinical type, notes or phone. */
-var HANDOFF_STATES = ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant'];
+var HANDOFF_STATES = ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant', 'unknown'];
 function _handoffStatusAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('HANDOFF_STATUS_SECRET');
   if (!expected) return false; // not configured -> reject
@@ -5706,8 +5744,13 @@ function _getHandoffStatus(params) {
   var wantOut = {}, wantDash = {};
   outIds.forEach(function (x) { wantOut[x] = true; });
   dashIds.forEach(function (x) { wantDash[x] = true; });
-  var byLead = {}; // leadId -> client (activation)
-  clients.forEach(function (c) { if (c.fromLead) byLead[String(c.fromLead)] = c; });
+  var byLead = Object.create(null), ambiguousLead = Object.create(null);
+  clients.forEach(function (c) {
+    if (!c.fromLead) return;
+    var id = String(c.fromLead);
+    if (byLead[id] && String(byLead[id].id) !== String(c.id)) ambiguousLead[id] = true;
+    byLead[id] = c;
+  });
   var contacted = {}, lastAct = {}, nextTask = {};
   events.forEach(function (e) {
     var keys = [e.leadId ? 'lead:' + e.leadId : '', e.clientId ? 'client:' + e.clientId : ''];
@@ -5739,14 +5782,24 @@ function _getHandoffStatus(params) {
     };
   }
   var results = [], seen = {};
+  function ambiguity(id) {
+    // No arbitrary patient's status or fields when historical duplicates exist.
+    if (seen['ambiguous:' + id]) return;
+    results.push({ outpatientId: id, entity: 'lead', state: 'unknown', reason: 'ambiguous_conversion',
+      stateDate: '', dashboardPatientId: '', assignedTo: '', nextAction: '', nextActionDate: '', lastActionDate: '', updatedAt: '' });
+    seen['ambiguous:' + id] = true;
+  }
   leads.forEach(function (l) {
     if (!match(l)) return;
+    if (ambiguousLead[String(l.id)]) { ambiguity(String(l.id)); return; }
     var c = byLead[String(l.id)];
     if (c) { results.push(out('client', c, _handoffClientState(c))); seen[String(c.id)] = true; return; }
     results.push(out('lead', l, _handoffLeadState(l, !!contacted['lead:' + l.id])));
   });
   clients.forEach(function (c) {
-    if (seen[String(c.id)] || !match(c)) return;
+    var originalMatch = c.fromLead && wantOut[String(c.fromLead)];
+    if (originalMatch && ambiguousLead[String(c.fromLead)]) { ambiguity(String(c.fromLead)); originalMatch = false; }
+    if (seen[String(c.id)] || (!match(c) && !originalMatch)) return;
     results.push(out('client', c, _handoffClientState(c)));
   });
   return { ok: true, sourceApp: 'ezone-outpatient', states: HANDOFF_STATES, results: results };
@@ -5881,10 +5934,15 @@ function _finClient(id) {
   if (hits.length !== 1) throw new Error(hits.length ? 'duplicate_client' : 'client_not_found');
   return hits[0];
 }
-function _finPayments(paymentId, clientId, cycle) {
+function _finPayments(paymentId, clientId, cycle, exactCycle) {
   var sh = _ss().getSheetByName('Payments');
   if (!sh) return [];
   return _readAll(sh, PAYMENTS_HEADERS).filter(function (p) {
+    if (exactCycle) {
+      var legacyMonth = ['pay::' + clientId + '::base::' + cycle.slice(0, 7), 'pay::' + clientId + '::' + cycle.slice(0, 7), 'payment::' + clientId + '::' + cycle.slice(0, 7)].indexOf(String(p.id)) >= 0;
+      return String(p.id) === paymentId || (legacyMonth && (!_coverageDateISO(p.dueDate) || _coverageDateISO(p.dueDate) === cycle)) ||
+        (String(p.clientId) === clientId && String(p.id).indexOf('::chg-') < 0 && _asISODate(p.dueDate) === cycle && String(p.billingType) === 'monthly');
+    }
     return String(p.id) === paymentId || String(p.id) === 'pay::' + clientId + '::' + cycle.slice(0, 7);
   });
 }
@@ -5918,19 +5976,12 @@ function _finNext(c, due) {
   if (m > 12) { m = 1; y++; }
   return _nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || _finAddMonth(due);
 }
-/* OP-BILL-01: NEW verified monthly receipt default, independent of the old
- * billing-cycle anchor. Existing journal operations still use _finNext.
- * B1: coverage starts on max(paymentDate, cycleDate) — an early payment is an
- * advance from the due cycle, a late one covers a month from the actual
- * payment — so the next collection always lands in a LATER month key than the
- * cycle it settled. EXACT MIRROR of paymentDateCoverage() in
- * public/credits-ledger.js (parity-tested). An invalid/blank cycleDate falls
- * back to the payment date. */
+/* New ordinary receipts cover one calendar month from actual payment.
+ * Explicit advances and old immutable journal intents are handled separately. */
 function _finPaidDateCoverage(paymentDate, cycleDate) {
   var iso = _coverageDateISO(paymentDate);
   if (!iso || String(paymentDate) !== iso) return null;
-  var cycle = _coverageDateISO(cycleDate);
-  var start = (cycle && String(cycleDate) === cycle && cycle > iso) ? cycle : iso;
+  var start = iso;
   var next = _finAddMonth(start), p = next.split('-').map(Number);
   if (!next || p.length !== 3) return null;
   var prior = new Date(p[0], p[1] - 1, p[2] - 1);
@@ -5938,6 +5989,16 @@ function _finPaidDateCoverage(paymentDate, cycleDate) {
     '-' + ('0' + prior.getDate()).slice(-2);
   return { start: start, end: end, next: next };
 }
+function _finLegacyPaidDateCoverage(paymentDate, cycleDate) {
+  var paid = _finPaidDateCoverage(paymentDate), cycle = _coverageDateISO(cycleDate);
+  if (!paid) return null;
+  return cycle && String(cycleDate) === cycle && cycle > paymentDate ? _finPaidDateCoverage(cycle) : paid;
+}
+function _finDayAfter(value) {
+  var p = String(value).split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2] + 1);
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+function _finCyclePaymentId(clientId, cycle) { return 'pay::' + clientId + '::base::' + cycle; }
 function _finIntent(payload) {
   var p = payload.payment || {}, patch = payload.patch || {}, out = {};
   var fields = ['pricePerSession', 'paymentDate', 'nextBillingDate', 'sessionsPerWeek', 'packageChangeDate'];
@@ -5946,6 +6007,10 @@ function _finIntent(payload) {
   var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
   var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
     snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  if (_hasOwn(payload, 'coverageIntent')) {
+    if (payload.coverageIntent !== 'ordinary' && payload.coverageIntent !== 'advance') throw new Error('invalid_renewal_coverage_intent');
+    intent.coverageIntent = payload.coverageIntent;
+  }
   // A follow-on future-cycle receipt on the SAME paid date needs an explicit
   // separate-advance decision. Otherwise a lost reply followed by a fresh
   // renewal can silently settle the next month with the original receipt.
@@ -6002,12 +6067,18 @@ function _finPinPrior(intent, payments) {
   if (status === 'paid' || exp.status !== status || exp.amountPaid !== String(row.amountPaid == null ? '' : row.amountPaid)) {
     return 'prior_payment_changed';
   }
-  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0) return 'prior_payment_changed';
+  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0 ||
+      (intent.coverageIntent && _asISODate(row.dueDate) !== intent.cycleDate)) return 'prior_payment_changed';
+  if (intent.coverageIntent === 'advance' && p.coverageStart < p.paymentDate &&
+      (p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
+  if (intent.coverageIntent && (String(row.coverageStart || '').trim() || String(row.coverageEnd || '').trim()) &&
+      (_coveragePeriodError(row.coverageStart, row.coverageEnd) || p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
   intent.prior = _finRow(row, PAYMENTS_HEADERS);
   return '';
 }
 function _finIntentError(intent, c, stored) {
   var p = intent.payment, patch = intent.patch;
+  if (!stored && !intent.coverageIntent) return 'renewal_coverage_intent_required';
   if (!intent.cycleDate || _coverageDateISO(intent.cycleDate) !== intent.cycleDate ||
       (!stored && intent.cycleDate !== _finDue(c))) return 'renewal_period_changed';
   // An already-acknowledged operation is no longer active, so the next
@@ -6016,16 +6087,20 @@ function _finIntentError(intent, c, stored) {
   // confirmed second advance; existing stored journals replay unchanged.
   if (!stored && c.paymentDate && _asISODate(c.paymentDate) === p.paymentDate &&
       intent.cycleDate > _todayISODate() && p.paymentDate < intent.cycleDate &&
-      intent.advanceConfirmed !== true) return 'renewal_advance_confirmation_required';
+      (intent.advanceConfirmed !== true || intent.coverageIntent === 'ordinary')) return 'renewal_advance_confirmation_required';
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.
-  // B1: the window starts on max(paymentDate, cycleDate) — see _finPaidDateCoverage.
-  var paidWindow = _finPaidDateCoverage(p.paymentDate, intent.cycleDate);
+  // Only stored unmarked intents use B1's former max(paymentDate, cycleDate).
+  var paidWindow = intent.coverageIntent ? _finPaidDateCoverage(p.paymentDate) : _finLegacyPaidDateCoverage(p.paymentDate, intent.cycleDate);
   var newPolicy = paidWindow &&
       p.coverageStart === paidWindow.start && p.coverageEnd === paidWindow.end &&
       patch.nextBillingDate === paidWindow.next;
-  var legacyReplay = !!stored && patch.nextBillingDate === _finNext(c, intent.cycleDate);
+  if (intent.coverageIntent === 'advance') newPolicy = !!paidWindow && !!p.coverageStart && !!p.coverageEnd &&
+      !_coveragePeriodError(p.coverageStart, p.coverageEnd) && p.coverageStart === _coverageDateISO(p.coverageStart) &&
+      p.coverageEnd === _coverageDateISO(p.coverageEnd) && patch.nextBillingDate === _finDayAfter(p.coverageEnd) &&
+      (p.coverageStart >= p.paymentDate || !!intent.priorExpected);
+  var legacyReplay = !!stored && !intent.coverageIntent && patch.nextBillingDate === _finNext(c, intent.cycleDate);
   if (!newPolicy && !legacyReplay) return 'renewal_period_changed';
   // The PAYMENT may not be dated in the future; the window itself may start
   // later than today when an early payment advances from its due cycle.
@@ -6034,7 +6109,7 @@ function _finIntentError(intent, c, stored) {
   if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
       p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
       Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||
-      p.id !== 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7) ||
+      p.id !== (intent.coverageIntent ? (intent.priorExpected ? intent.priorExpected.id : _finCyclePaymentId(intent.clientId, intent.cycleDate)) : 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7)) ||
       p.clientId !== intent.clientId || p.dueDate !== intent.cycleDate || p.status !== 'paid' ||
       p.billingType !== 'monthly' || p.amountDue !== patch.pricePerSession || p.amountPaid !== patch.pricePerSession ||
       (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
@@ -6067,7 +6142,11 @@ function _getRenewalState(payload) {
       return { ok: true, protocol: 1, operation: summary };
     }
     var c = _finClient(id).client;
-    return { ok: true, protocol: 1, client: c, snapshot: _finSnapshot(c), cycleDate: _finDue(c) };
+    var cycle = _finDue(c), paymentId = _finCyclePaymentId(id, cycle), rows = _finPayments(paymentId, id, cycle, true);
+    if (rows.length > 1) return { ok: false, error: 'renewal_duplicate_cycle' };
+    if (rows.length && (String(rows[0].clientId) !== id || _coverageDateISO(rows[0].dueDate) !== cycle)) return { ok: false, error: 'renewal_cycle_requires_review' };
+    return { ok: true, protocol: 1, coveragePolicy: 'payment-date-v2', client: c, snapshot: _finSnapshot(c), cycleDate: cycle,
+      paymentId: rows.length ? rows[0].id : paymentId, priorPayment: rows.length ? rows[0] : null };
   } finally { lock.releaseLock(); }
 }
 function _reserveRenewal(payload) {
@@ -6088,7 +6167,7 @@ function _reserveRenewal(payload) {
     if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'renewal_snapshot_changed' };
     var invalid = _finIntentError(intent, c);
     if (invalid) return { ok: false, error: invalid };
-    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate));
+    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate, !!intent.coverageIntent));
     if (priorError) return { ok: false, error: priorError };
     canonical = JSON.stringify(intent);
     var after = Object.assign({}, c, patch);
@@ -6119,7 +6198,7 @@ function _applyRenewal(payload) {
     var storedHeaders = JSON.parse(op.before).headers;
     var storedIntent = JSON.parse(op.intent);
     var current = _finSnapshot(c.client, storedHeaders), p = storedIntent.payment;
-    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     if (op.state === 'prepared') {
       if (current !== op.before || _finPriorMismatch(storedIntent, payments)) return review('source_changed_before_apply');
       _finWrite(journal, op, 'client_writing', user);
@@ -6166,7 +6245,7 @@ function _applyRenewal(payload) {
         return p[h];
       });
       sh.getRange(row, 1, 1, PAYMENTS_HEADERS.length).setValues([paymentValues]);
-      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     }
     if (payments.length !== 1 || JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(p, PAYMENTS_HEADERS))) {
       return review('payment_write_uncertain_or_changed');
@@ -6182,7 +6261,7 @@ function _finReviewReadback(op) {
   if (JSON.parse(op.intent).kind === 'extra_charge') return _extraReadback(op);
   var client = null, clientError = '';
   try { client = _finClient(op.clientId).client; } catch (err) { clientError = String(err); }
-  var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+  var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!JSON.parse(op.intent).coverageIntent);
   var token = JSON.stringify({ client: client ? _finSnapshot(client) : null, clientError: clientError,
     payments: payments.map(function (p) { return _finRow(p, PAYMENTS_HEADERS); }) });
   return { token: token, clientExists: !!client, nextBillingDate: client ? _asISODate(client.nextBillingDate) : '',
@@ -6225,10 +6304,10 @@ function _finishRenewal(payload, cancel) {
     if (!cancel && op.state !== 'done') return { ok: false, error: 'renewal_not_complete' };
     var c = null;
     try { c = _finClient(op.clientId).client; } catch (_) { /* below: make the missing/duplicate client reviewable */ }
-    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!JSON.parse(op.intent).coverageIntent);
     var expected = cancel ? op.before : op.after;
     if (cancel && op.state !== 'prepared') return { ok: false, error: 'renewal_requires_review' };
-    if ((cancel ? op.state !== 'prepared' || payments.length : op.state !== 'done' || payments.length !== 1 ||
+    if ((cancel ? op.state !== 'prepared' || _finPriorMismatch(JSON.parse(op.intent), payments) : op.state !== 'done' || payments.length !== 1 ||
         JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(JSON.parse(op.intent).payment, PAYMENTS_HEADERS))) ||
         !c || _finSnapshot(c, JSON.parse(op.before).headers) !== expected) {
       _finWrite(journal, op, 'review', _requestUser(payload), 'source_changed_before_' + terminal);

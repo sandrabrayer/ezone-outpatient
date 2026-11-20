@@ -58,7 +58,9 @@ test('B: עוז — first payment 25.10 → collection 25.11; advance renewal of
   // Second month paid in advance on the same 25.10 (Oren's renewal): the due
   // cycle 25.11 is the anchor → the next collection is 2026-12-25, exactly
   // the figure Vered expects on the card.
-  const second = ctx._finPaidDateCoverage('2026-10-25', '2026-11-25');
+  // The explicit advance selects its start separately; it is no longer inferred
+  // just because the actual payment precedes the scheduled cycle.
+  const second = ctx._finPaidDateCoverage('2026-11-25');
   assert.deepEqual(JSON.parse(JSON.stringify(second)),
     { start: '2026-11-25', end: '2026-12-24', next: '2026-12-25' });
 });

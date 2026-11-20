@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Candidate: monthly payment coverage and full OUT workflow (2026-11-20)
+- Explicit ordinary versus advance renewal intent; ordinary new monthly receipts cover the actual paid date through one clamped calendar month. Exact-date cycle IDs prevent same-month cycle collisions while preserving recorded IDs/periods and legacy journal replay.
+- Refuse duplicate admission from a stale tab; preserve original referral status after conversion and reload; enforce persisted financial-task visibility on replay; refuse ambiguous shared-payer deactivation.
+- Actual-source and HTTP journey regressions plus mandatory browser coverage for offering, scheduling and the complete workflow. SW v42; verified live v41. Draft only, no history repair or deployment. See CHANGELOG-out-payment-workflow.md and docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md.
+
 ### Payroll report emailed to מורן from the therapists app (2026-11-19)
 - New source action `sendPayrollReport` (Therapists Apps Script → here, dedicated `PAYROLL_SEND_SECRET`, fail-closed, ≥ 32 chars). It builds the month's therapist-payout report from SessionLog — byte-identical to «תשלומי מטפלים» → «ייצוא לאקסל» (mirror of `therapist-payout.js` + `payout-export.js`, parity-tested) — emails it with the CSV attached to the Script Property `PAYROLL_REPORT_EMAIL`, then stamps `forwardedToPayroll` (each row's own month) on exactly the reported rows. Mail first, stamp after: a failed send stamps nothing. A second press sends only late rows (הפרשים); an empty report answers `nothing_to_send`, so nothing is emailed twice. Counts-only reply (the coordinator never sees pay). Audit row `payroll_sent`. No sheet column, no UI change here; «תשלומי מטפלים» stays as a fallback until the first real send. See CHANGELOG-payroll-email.md.
 

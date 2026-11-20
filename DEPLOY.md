@@ -1,5 +1,12 @@
 # Deploy — E-ZONE Outpatient
 
+> 2026-11-20 tasks 2/3 candidate: [exact acceptance and release/rollback gates](docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md).
+> No new secret, variable, source column or deployment. New renewal intents require
+> the source's `payment-date-v2` capability; existing stored legacy operations
+> retain their replay contract. During Node→Apps Script rollout, unsupported
+> new renewals stop and ask for refresh. Reconcile pending FinancialOps before
+> any downgrade; never rewrite historical coverage as a release step.
+
 > OP-03 candidate: [operational backup and recovery runbook](docs/operational-recovery.md).
 > `ops/removed-leads-header-correction.gs` is not part of the deployment root and must not be installed or run without separate authorization: [runbook](docs/removed-leads-header-correction.md).
 > The older eight-table evidence below proves only that subset, not full recovery.

@@ -907,3 +907,11 @@ check against pre-June-17 branches.
    July 4.
 7. **Dashboard Apps Script cleanup**: strip dead bonus logic (frontend now
    ignores it); keep raw-data endpoints only.
+# OUT tasks 2/3 candidate — 2026-11-20 (not released)
+
+Source of work: #152 / Dashboard #331, branch `codex/out-payment-workflow-20261120`,
+deployed base `3e393011`. Existing ledger/journal and workflows retained. Monthly
+coverage intent and four workflow integrity fixes are under acceptance; no
+production mutation. [Evidence, cross-app gaps, release and rollback](docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md).
+Therapists task 4 remains separately owned. Native Google and live paired
+acceptance must not be inferred from source/HTTP/browser fixture tests.

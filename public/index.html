@@ -1024,6 +1024,17 @@
         <form id="renewForm" class="form-grid">
           <label class="wide">סכום חודשי (₪)<input name="renewAmount" type="number" min="0" step="1" required /></label>
           <label class="wide">תאריך תשלום<input name="renewDate" type="date" /></label>
+          <label class="wide">מה התשלום מכסה?
+            <select name="renewCoverageIntent">
+              <option value="ordinary">תשלום חודשי רגיל — חודש ממועד התשלום בפועל</option>
+              <option value="advance">מקדמה או תקופת כיסוי מפורשת</option>
+            </select>
+          </label>
+          <div id="renewCoverageFields" class="wide" hidden>
+            <label>תחילת הכיסוי<input name="renewCoverageStart" type="date" /></label>
+            <label>סוף הכיסוי (כולל)<input name="renewCoverageEnd" type="date" /></label>
+          </div>
+          <p id="renewCoveragePreview" class="wide" role="status"></p>
           <label class="wide">הערות<textarea name="renewNotes" rows="2"></textarea></label>
 
           <!-- Package change folded in (was the standalone שינוי חבילה modal). Editing
@@ -1031,7 +1042,7 @@
                it updates the plan; גבייה הבאה remains anchored to the billed cycle.
                Leaving it unchanged renews only. -->
           <div class="wide form-section-title">שינוי חבילה (אופציונלי)</div>
-          <div class="wide renew-pkg-hint">עדכון תדירות המפגשים יעדכן את החבילה. מועד הגבייה הבא יישאר לפי מחזור החיוב של החודש שנבחר.</div>
+          <div class="wide renew-pkg-hint">עדכון תדירות המפגשים יעדכן את החבילה. הגבייה הבאה תחול ביום שלאחר סוף הכיסוי שנבחר.</div>
           <div class="wide sessions-host" data-host="renewSessions"></div>
 
           <div class="form-actions edit-only">
