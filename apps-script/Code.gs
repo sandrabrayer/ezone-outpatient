@@ -4042,6 +4042,8 @@ function _recordSessionOutcome(payload, source) {
         if (!priorTreatmentId) return { ok: false, reason: 'legacy_group_identity_review' };
         if (priorTreatmentId === treatmentId) {
           if (oldRow) return { ok: false, reason: 'duplicate_group_identity_review' };
+          if (String(candidate.clientId || '') !== clientId ||
+              _recoverPhone(candidate.phone) !== phone) return { ok: false, reason: 'participant_identity_conflict' };
           oldRow = candidate;
         } else if (clientId && String(candidate.clientId) === clientId) {
           return { ok: false, reason: 'duplicate_group_participant' };
@@ -4149,7 +4151,9 @@ function _recordSessionOutcome(payload, source) {
     if (lastRow > 1) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var r = 0; r < ids.length; r++) {
-        if (String(ids[r][0]) === sessionId) {
+        if (String(ids[r][0]) === sessionId &&
+            (billingType !== GROUP_BILLING ||
+              String(sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('treatmentId') + 1).getValue() || '') === treatmentId)) {
           sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
           sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
           upserted = true;
