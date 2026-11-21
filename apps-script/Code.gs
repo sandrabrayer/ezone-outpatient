@@ -3913,6 +3913,198 @@ function _computeSessionValue(billingType, freqPerWeek) {
   return _billingPrice(billingType, freqPerWeek);
 }
 
+
+/* Durable participant-credit journal. Apps Script cannot atomically set a
+ * Clients cell and a SessionLog row in separate Sheets. Every GROUP outcome,
+ * including a manual correction, records its immutable intent under ScriptLock
+ * before either financial side effect. A retry inspects both persisted effects,
+ * resumes only from an exact known state and otherwise holds for reconciliation.
+ * In particular it NEVER writes a guessed balance over later client activity. */
+var SESSION_OUTCOME_OP_HEADERS = [
+  'opKey', 'payloadStamp', 'sessionId', 'treatmentId', 'clientId',
+  'fromCredits', 'toCredits', 'oldRowStamp', 'newRowStamp',
+  'newRowJson', 'state', 'createdAt'
+];
+var SESSION_OUTCOME_OP_SHEET = 'SessionOutcomeOps';
+var SESSION_OUTCOME_ROW_STAMP_KEYS = [
+  'sessionId', 'treatmentId', 'phone', 'clientId', 'therapist',
+  'clinicalTreatmentType', 'billingType', 'date', 'outcome',
+  'therapistPay', 'clientSessionValue', 'sessionStatus',
+  'matchStatus', 'creditStatus', 'payModel',
+  'forwardedToPayroll', 'oneTimeSessionId', 'reportRevision'
+];
+function _soRowStamp(row) {
+  if (!row) return '!none';
+  return JSON.stringify(SESSION_OUTCOME_ROW_STAMP_KEYS.map(function(k) {
+    return String(row[k] == null ? '' : row[k]).trim();
+  }));
+}
+function _soPayloadStamp(row, incomingRev, source) {
+  return JSON.stringify([
+    row.sessionId, row.treatmentId, row.clientId, row.phone,
+    row.therapist, row.clinicalTreatmentType, row.billingType,
+    row.date, row.outcome,
+    incomingRev === null ? '' : new Date(incomingRev).toISOString(),
+    source === 'outpatient' ? 'outpatient' : 'therapists'
+  ]);
+}
+function _soEventKey(row, incomingRev, source) {
+  var stamp = _soPayloadStamp(row, incomingRev, source);
+  // Manual corrections do not carry a server-approved reportRevision.
+  // Their input fingerprint is the stable key, not a client-supplied UUID.
+  return JSON.stringify([row.sessionId, row.treatmentId,
+    incomingRev === null ? 'manual:' + stamp : new Date(incomingRev).toISOString()]);
+}
+function _soJournalRows(sh) {
+  var last = sh.getLastRow(), out = [];
+  if (last < 2) return out;
+  var all = sh.getRange(2, 1, last - 1, SESSION_OUTCOME_OP_HEADERS.length).getValues();
+  for (var i = 0; i < all.length; i++) {
+    var row = {};
+    for (var j = 0; j < SESSION_OUTCOME_OP_HEADERS.length; j++) {
+      row[SESSION_OUTCOME_OP_HEADERS[j]] = all[i][j];
+    }
+    if (String(row.opKey || '').trim()) { row._sheetRow = i + 2; out.push(row); }
+  }
+  return out;
+}
+function _soLiveRow(logSh, sessionId, treatmentId) {
+  var rows = _readAll(logSh, SESSION_LOG_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].sessionId) !== sessionId) continue;
+    if (String(rows[i].treatmentId || '') !== treatmentId) continue;
+    if (hit) return { ambiguous: true };
+    hit = rows[i];
+  }
+  return { row: hit };
+}
+function _soLiveCredit(clientsSh, clientId) {
+  var rows = _readAll(clientsSh, CLIENTS_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id) !== clientId) continue;
+    if (hit) return null; // duplicate identity is not a safe balance
+    hit = rows[i];
+  }
+  return hit ? _toCredits(hit.creditsOwed) : null;
+}
+function _soWriteLog(logSh, row, oldRowExists) {
+  var arr = SESSION_LOG_HEADERS.map(function(h) {
+    return row[h] == null ? '' : row[h];
+  });
+  var index = SESSION_LOG_HEADERS.indexOf('treatmentId') + 1;
+  var last = logSh.getLastRow();
+  if (oldRowExists) {
+    var ids = logSh.getRange(2, 1, last - 1, 1).getValues(), found = 0;
+    for (var r = 0; r < ids.length; r++) {
+      if (String(ids[r][0]) !== String(row.sessionId) ||
+          String(logSh.getRange(r + 2, index).getValue() || '') !== String(row.treatmentId)) continue;
+      found++;
+      if (found > 1) throw new Error('group_outcome_duplicate_identity');
+      logSh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+      logSh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([arr]);
+    }
+    if (found !== 1) throw new Error('group_outcome_row_disappeared');
+  } else {
+    var next = last + 1;
+    if (typeof logSh.getMaxRows === 'function' && next > logSh.getMaxRows())
+      logSh.insertRowsAfter(logSh.getMaxRows(), next - logSh.getMaxRows());
+    logSh.getRange(next, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+    logSh.appendRow(arr);
+  }
+}
+function _soAck(op, row, replayed) {
+  var result = {
+    ok: true, sessionId: String(op.sessionId), treatmentId: String(op.treatmentId),
+    therapistPay: _toNumberOrZero(row.therapistPay),
+    clientSessionValue: row.clientSessionValue === '' ? null : Number(row.clientSessionValue),
+    sessionStatus: String(row.sessionStatus), creditStatus: String(row.creditStatus || ''),
+    creditsOwed: Number(op.toCredits)
+  };
+  if (row.reportRevision) result.reportRevision = String(row.reportRevision);
+  if (op.oldRowStamp !== '!none') result.upserted = true;
+  else result.appended = true;
+  if (replayed) result.replayed = true;
+  return result;
+}
+function _soRecoveryHold() { return { ok: false, reason: 'session_credit_recovery_pending' }; }
+function _soResumeOp(op, journalSh, clientsSh, logSh, user, replayed) {
+  var from = Number(op.fromCredits), to = Number(op.toCredits);
+  if (!isFinite(from) || !isFinite(to) || from < 0 || to < 0) return _soRecoveryHold();
+  var row;
+  try { row = JSON.parse(String(op.newRowJson || '')); } catch (_) { return _soRecoveryHold(); }
+  if (!row || String(row.sessionId) !== String(op.sessionId) ||
+      String(row.treatmentId) !== String(op.treatmentId) ||
+      String(row.clientId) !== String(op.clientId) ||
+      _soRowStamp(row) !== String(op.newRowStamp)) return _soRecoveryHold();
+  var current = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+  if (current.ambiguous) return _soRecoveryHold();
+  var stamp = _soRowStamp(current.row), oldStamp = String(op.oldRowStamp);
+  var oldStillThere = stamp === oldStamp, newAlreadyThere = stamp === String(op.newRowStamp);
+  var balance = _soLiveCredit(clientsSh, String(op.clientId));
+  if ((!oldStillThere && !newAlreadyThere) || balance === null ||
+      (balance !== from && balance !== to)) return _soRecoveryHold();
+  // A row that committed while its credit did not is NOT safe to replay.
+  // It might have been changed by a different writer; require reconciliation.
+  if (newAlreadyThere && balance !== to) return _soRecoveryHold();
+  if (oldStillThere && !newAlreadyThere) {
+    if (balance === from && from !== to) {
+      if (!_writeCreditsOwed(clientsSh, String(op.clientId), to, user))
+        throw new Error('session_credit_client_not_found');
+      if (_soLiveCredit(clientsSh, String(op.clientId)) !== to)
+        throw new Error('session_credit_write_unverified');
+    }
+    // If the credit was already applied before a lost response, never add it
+    // again: persist ONLY the still-missing log row.
+    _soWriteLog(logSh, row, oldStamp !== '!none');
+    var logged = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+    if (logged.ambiguous || _soRowStamp(logged.row) !== String(op.newRowStamp))
+      throw new Error('session_outcome_write_unverified');
+  }
+  if (_soLiveCredit(clientsSh, String(op.clientId)) !== to) return _soRecoveryHold();
+  journalSh.getRange(op._sheetRow, SESSION_OUTCOME_OP_HEADERS.indexOf('state') + 1).setValue('committed');
+  return _soAck(op, row, replayed);
+}
+function _soPendingGroup(journalSh, row, incomingRev, source, clientsSh, logSh, user) {
+  var ops = _soJournalRows(journalSh), key = _soEventKey(row, incomingRev, source);
+  var stamp = _soPayloadStamp(row, incomingRev, source), found = null;
+  for (var i = 0; i < ops.length; i++) {
+    var op = ops[i];
+    var sameKey = String(op.opKey) === key;
+    var pendingForClient = String(op.state) !== 'committed' &&
+      (String(op.clientId) === String(row.clientId) ||
+        (String(op.sessionId) === String(row.sessionId) &&
+         String(op.treatmentId) === String(row.treatmentId)));
+    if (sameKey && String(op.state) === 'committed') {
+      // The log, not a stale journal entry, owns replay decisions.
+      continue;
+    }
+    if (!pendingForClient && !(sameKey && String(op.state) !== 'committed')) continue;
+    if (found || !sameKey || String(op.payloadStamp) !== stamp) return _soRecoveryHold();
+    found = op;
+  }
+  return found ? _soResumeOp(found, journalSh, clientsSh, logSh, user, true) : null;
+}
+function _soCommitGroup(journalSh, clientsSh, logSh, row, oldRow,
+                        fromCredits, toCredits, incomingRev, source, user) {
+  var key = _soEventKey(row, incomingRev, source);
+  var prior = _soJournalRows(journalSh);
+  for (var i = 0; i < prior.length; i++) {
+    if (String(prior[i].opKey) === key) return _soRecoveryHold();
+    if (String(prior[i].state) !== 'committed' &&
+        String(prior[i].clientId) === String(row.clientId)) return _soRecoveryHold();
+  }
+  var op = {
+    opKey: key, payloadStamp: _soPayloadStamp(row, incomingRev, source),
+    sessionId: String(row.sessionId), treatmentId: String(row.treatmentId),
+    clientId: String(row.clientId), fromCredits: fromCredits, toCredits: toCredits,
+    oldRowStamp: _soRowStamp(oldRow), newRowStamp: _soRowStamp(row),
+    newRowJson: JSON.stringify(row), state: 'pending', createdAt: new Date().toISOString()
+  };
+  op._sheetRow = journalSh.getLastRow() + 1;
+  journalSh.appendRow(SESSION_OUTCOME_OP_HEADERS.map(function(h) { return op[h]; }));
+  return _soResumeOp(op, journalSh, clientsSh, logSh, user, false);
+}
+
 function _recordSessionOutcome(payload, source) {
   var sessionId = String((payload && payload.sessionId) || '').trim();
   if (!sessionId) return { ok: false, reason: 'missing_session_id' };
@@ -4059,6 +4251,16 @@ function _recordSessionOutcome(payload, source) {
         oldRow = candidate;
       }
     }
+    // Recover a partially committed GROUP outcome before checking the saved
+    // report revision. A partially written log must not ACK while its journal
+    // remains pending, even if its revision now appears equal.
+    var soJournal = null;
+    if (billingType === GROUP_BILLING) {
+      soJournal = _ensureSheet(SESSION_OUTCOME_OP_SHEET, SESSION_OUTCOME_OP_HEADERS);
+      var previousGroupAttempt = _soPendingGroup(
+        soJournal, rowObj, incomingRev, source, clientsSh, sh, _requestUser(payload));
+      if (previousGroupAttempt) return previousGroupAttempt;
+    }
     // ---- Report order (2026-11-15) -----------------------------------------
     // Inside the lock and BEFORE any write: an approved push that carries an OLDER
     // report revision than the row already holds arrived late — refuse it whole (no
@@ -4138,7 +4340,11 @@ function _recordSessionOutcome(payload, source) {
         matchedClient.creditsOwed = balance;
         // who/when: '' for the cross-app receiver; the internal
         // correctSessionOutcome path carries the proxy-injected user.
-        _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        // GROUP writes go through SessionOutcomeOps first; non-group keeps its
+        // existing credit engine until the cross-app protocol is extended.
+        if (billingType !== GROUP_BILLING) {
+          _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        }
       }
       rowObj.creditsOwed = balance;
     } else if (outcome === 'happened' || _outcomeGrantsCredit(outcome)) {
@@ -4151,6 +4357,11 @@ function _recordSessionOutcome(payload, source) {
       var v = rowObj[h];
       return (v === undefined || v === null) ? '' : v;
     });
+    if (billingType === GROUP_BILLING) {
+      // Complete both side effects through a durable intent/recovery protocol.
+      return _soCommitGroup(soJournal, clientsSh, sh, rowObj, oldRow,
+        origCredits, rowObj.creditsOwed, incomingRev, source, _requestUser(payload));
+    }
     var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
     var lastRow = sh.getLastRow();
     var upserted = false;
