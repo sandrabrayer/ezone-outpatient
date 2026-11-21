@@ -36,6 +36,8 @@ test('a group outcome is keyed by shared sessionId AND immutable participant tre
   assert.equal(b.ok, true, JSON.stringify(b));
   assert.equal(a.treatmentId, 'treatment-a-100');
   assert.equal(b.treatmentId, 'treatment-b-100');
+  assert.equal(a.reportRevision, '2026-11-10T10:00:00.000Z');
+  assert.equal(b.reportRevision, '2026-11-10T10:00:00.000Z');
   const rows = s.rows('SessionLog').filter(r => r.sessionId === 'shared-group-100');
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map(r => [r.treatmentId, r.clientId, r.outcome]).sort(), [
@@ -83,18 +85,22 @@ test('one extra-session request per immutable booking, including lost response a
   const first = s.post(request('booking-row-123'));
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.equal(first.status, 'pending');
+  assert.equal(first.bookingRowId, 'booking-row-123');
+  assert.match(first.requestId, /^esr_[0-9a-f-]{36}$/i);
   const before = s.rows('ExtraSessionRequests');
   assert.equal(before.length, 1);
   const retry = s.post(request('booking-row-123'));
   assert.equal(retry.ok, true);
   assert.equal(retry.replayed, true);
   assert.equal(retry.requestId, first.requestId);
+  assert.equal(retry.bookingRowId, 'booking-row-123');
   assert.deepEqual(s.rows('ExtraSessionRequests'), before);
   assert.equal(s.ctx._approveExtraSession({ id: first.requestId, approvedBy: 'Vered' }).ok, true);
   const approved = JSON.stringify(s.rows('ExtraSessionRequests'));
   const after = s.post(request('booking-row-123'));
   assert.equal(after.ok, true);
   assert.equal(after.status, 'approved');
+  assert.equal(after.bookingRowId, 'booking-row-123');
   assert.equal(after.requestId, first.requestId);
   assert.equal(JSON.stringify(s.rows('ExtraSessionRequests')), approved, 'an approved request is never reset');
   assert.equal(s.post(request('booking-row-123', { phone: '0502222222' })).error, 'booking_row_conflict');

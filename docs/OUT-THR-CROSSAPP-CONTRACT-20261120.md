@@ -20,3 +20,7 @@ Real source sandbox tests cover group participants, replay, correction, legacy c
 ## Group payout and correction parity
 
 Group participant rows remain visible as distinct clinical outcomes; when the existing group payout is zero, they are not counted as multiple **paid therapist sessions**. Public payout and Apps Script payroll use the same rule. Pre-existing nonzero historical amounts remain visible rather than being silently discarded. The correction dialogue carries the immutable `treatmentId` of the selected row; an unidentified legacy group result is held for review. Creating group sessions through OUT's manual payout form is refused. Offline cache v43 packages this UI change.
+
+## Exact acknowledgement contract
+
+A successful group `recordSessionOutcome` response echoes the immutable `sessionId`, `treatmentId`, `sessionStatus` and canonical `reportRevision` on first delivery as well as exact replay. Therapists must verify all four before marking the approved result delivered. An `requestExtraSession` response echoes `bookingRowId`, original `requestId`, and current status on first delivery and replay. A lost response must retry the *same immutable payload*; an already-approved request never becomes pending again. OUT request IDs for newly-created requests use random UUIDs. Old `esr_` IDs remain readable and accepted for existing records.

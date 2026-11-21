@@ -4179,6 +4179,8 @@ function _recordSessionOutcome(payload, source) {
       creditStatus: rowObj.creditStatus
     };
     if (billingType === GROUP_BILLING) result.treatmentId = treatmentId;
+    // The sender must be able to match the ACK to the approved report version.
+    if (incomingRev !== null) result.reportRevision = rowObj.reportRevision;
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
@@ -4631,9 +4633,10 @@ function _requestExtraSession(payload) {
         }
       }
       // Including approved requests: a lost reply never creates a new pending row.
-      return { ok: true, requestId: String(existing[e].id), status: String(existing[e].status), replayed: true };
+      return { ok: true, requestId: String(existing[e].id),
+        bookingRowId: bookingRowId, status: String(existing[e].status), replayed: true };
     }
-    var id = 'esr_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1000);
+    var id = 'esr_' + Utilities.getUuid();
     var row = EXTRA_SESSION_HEADERS.map(function (h) {
       switch (h) {
         case 'id': return id;
@@ -4656,7 +4659,7 @@ function _requestExtraSession(payload) {
     });
     sh.getRange(sh.getLastRow() + 1, EXTRA_SESSION_HEADERS.indexOf('bookingRowId') + 1).setNumberFormat('@');
     sh.appendRow(row);
-    return { ok: true, requestId: id, status: 'pending' };
+    return { ok: true, requestId: id, bookingRowId: bookingRowId, status: 'pending' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
