@@ -9071,7 +9071,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|session-outcome-ops|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
