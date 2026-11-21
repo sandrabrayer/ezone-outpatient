@@ -16,3 +16,7 @@ The currently published Therapists #170 sender does **not yet include** this fie
 
 ## Release gates
 Real source sandbox tests cover group participants, replay, correction, legacy collision, duplicate participant, extra-session lost reply, already-approved replay, conflicting identity and distinct requests. Native Google, signed paired HTTP, sender ACK verification, source/Node release versions, backup/restore readiness and user acceptance remain open. Keep #192 a draft; this delta is not authorization to release.
+
+## Group payout and correction parity
+
+Group participant rows remain visible as distinct clinical outcomes; when the existing group payout is zero, they are not counted as multiple **paid therapist sessions**. Public payout and Apps Script payroll use the same rule. Pre-existing nonzero historical amounts remain visible rather than being silently discarded. The correction dialogue carries the immutable `treatmentId` of the selected row; an unidentified legacy group result is held for review. Creating group sessions through OUT's manual payout form is refused. Offline cache v43 packages this UI change.

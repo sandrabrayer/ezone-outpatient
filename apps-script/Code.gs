@@ -4290,7 +4290,13 @@ function _payrollGroup(subset) {
     var name = _payrollStr(row.therapist);
     if (!by[name]) { by[name] = { therapist: name, paidCount: 0, preVatTotal: 0, months: [] }; order.push(name); }
     var t = by[name];
-    if (PAYROLL_PAID_OUTCOMES[_payrollStr(row.outcome)] === true) { t.paidCount++; t.preVatTotal += _payrollNum(row.therapistPay); }
+    // Group participants remain separate reports, but zero-rate attendance
+    // cannot multiply paid-session counts. Historical nonzero money is retained.
+    var groupZero = _payrollStr(row.billingType) === GROUP_BILLING &&
+      _payrollNum(row.therapistPay) === 0;
+    if (PAYROLL_PAID_OUTCOMES[_payrollStr(row.outcome)] === true && !groupZero) {
+      t.paidCount++; t.preVatTotal += _payrollNum(row.therapistPay);
+    }
     var m = _payoutMonthOf(row.date);
     if (m && t.months.indexOf(m) === -1) t.months.push(m);
   }

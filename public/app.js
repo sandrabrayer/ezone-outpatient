@@ -4960,7 +4960,8 @@
         var correctBtn = canEdit
           ? '<button type="button" class="btn" data-action="payout-correct" ' +
               'data-session=\'' + escapeHtml(JSON.stringify({
-                sessionId: s.sessionId, therapist: t.therapist,
+                sessionId: s.sessionId, treatmentId: s.treatmentId,
+                therapist: t.therapist,
                 clinicalTreatmentType: s.type, date: fmtDate(s.date),
                 outcome: s.outcome, patientName: s.patient, phone: s.phone
               })) + '\' style="padding:2px 10px;font-size:0.8rem;">תקן</button>'
@@ -5767,6 +5768,7 @@
     form.reset();
     prefill = prefill || {};
     form.dataset.sessionId = prefill.sessionId || '';
+    form.dataset.treatmentId = prefill.treatmentId || '';
     var isCorrect = !!prefill.sessionId;
     $('#sessionModalTitle').textContent = isCorrect ? 'תיקון סשן' : 'הוספת סשן חסר';
     $('#sessionModalSub').textContent = isCorrect
@@ -5867,9 +5869,17 @@
     if (!outcome) { toast('יש לבחור תוצאה', true); return; }
 
     var existingId = (form.dataset.sessionId || '').trim();
+    var treatmentId = (form.dataset.treatmentId || '').trim();
+    // Never correct one arbitrary attendee using a shared group sessionId.
+    if (clinical === 'קבוצה' && !treatmentId) {
+      toast(existingId ? 'טיפול קבוצתי ישן ללא מזהה משתתף — נדרש בירור לפני תיקון' :
+        'טיפול קבוצתי חדש יש לקבוע דרך שיבוץ המטפלים', true);
+      return;
+    }
     var payload = {
       action: 'correctSessionOutcome',
       sessionId: existingId || uid(),
+      treatmentId: treatmentId,
       therapist: therapist,
       clinicalTreatmentType: clinical,
       date: date,

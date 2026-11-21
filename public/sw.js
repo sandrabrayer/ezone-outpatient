@@ -113,8 +113,9 @@
 //   «סוג מטופל» in עריכה), app.js and style.css changed (CHANGELOG-patient-type-tabs.md). Bumped from the LIVE
 //   value v40 (fetched from production /sw.js on 2026-11-18).
 // v42: explicit ordinary/advance monthly coverage and conversion readback.
+// v43: exact group participant correction and zero-rate payout counts.
 // Live v41 / commit 3e393011 was verified read-only on 2026-11-20.
-var CACHE = 'ezone-outpatient-v42';
+var CACHE = 'ezone-outpatient-v43';
 var SHELL = [
   './',
   './index.html',

@@ -110,3 +110,52 @@ test('missing/invalid booking ID never appends or guesses from phone/month', () 
   assert.equal(s.post(request('bad id')).error, 'invalid_booking_row_id');
   assert.equal(s.rows('ExtraSessionRequests').length, 0);
 });
+
+test('two group participants appear separately but do not multiply paid sessions or money', () => {
+  const { s } = seed();
+  assert.equal(s.post(group('treatment-a-100', '0501234567', 'happened')).ok, true);
+  assert.equal(s.post(group('treatment-b-100', '0502222222', 'patient_no_show')).ok, true);
+  const rows = s.rows('SessionLog');
+  const Payout = require('../public/therapist-payout');
+  const report = Payout.monthlyPayoutSummary(rows, '2026-11');
+  assert.equal(report.therapists.length, 1);
+  assert.equal(report.totals.paidCount, 0);
+  assert.equal(report.totals.preVatTotal, 0);
+  assert.equal(report.therapists[0].sessions.length, 2);
+  assert.deepEqual(report.therapists[0].sessions.map(x => x.treatmentId).sort(), [
+    'treatment-a-100', 'treatment-b-100'
+  ]);
+  const native = JSON.parse(JSON.stringify(s.ctx._payrollGroup(rows)));
+  assert.equal(native.totals.paidCount, 0, 'Apps Script payroll report matches the UI');
+  assert.equal(native.totals.preVatTotal, 0);
+  const csv = require('../public/payout-export').buildPayoutCsv(report);
+  assert.match(csv, /Synthetic Group Therapist,0,0,0,0/);
+});
+test('manual correction addresses only one group participant and rejects stale result', () => {
+  const { s } = seed();
+  assert.equal(s.post(group('treatment-a-100', '0501234567', 'happened')).ok, true);
+  assert.equal(s.post(group('treatment-b-100', '0502222222', 'patient_no_show')).ok, true);
+  const manual = Object.assign({}, group('treatment-b-100', '0502222222', 'therapist_cancelled'), {
+    action: 'correctSessionOutcome', proxySecret: 'synthetic-proxy-secret-0123456789012345',
+    user: 'Synthetic Billing Reviewer', moneyScope: 'full'
+  });
+  delete manual.secret;
+  const res = s.post(manual);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const rows = s.rows('SessionLog').filter(r => r.sessionId === 'shared-group-100');
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find(r => r.treatmentId === 'treatment-a-100').outcome, 'happened');
+  assert.equal(rows.find(r => r.treatmentId === 'treatment-b-100').outcome, 'therapist_cancelled');
+  const before = JSON.stringify(rows);
+  const stale = s.post(group('treatment-b-100', '0502222222', 'patient_no_show'));
+  assert.equal(stale.ok, false);
+  assert.equal(stale.reason, 'source_outcome_conflict');
+  assert.equal(JSON.stringify(s.rows('SessionLog').filter(r => r.sessionId === 'shared-group-100')), before);
+});
+test('payout UI preserves group participant identity through correction dialog', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public/app.js'), 'utf8');
+  assert.match(src, /sessionId: s\.sessionId, treatmentId: s\.treatmentId/);
+  assert.match(src, /form\.dataset\.treatmentId = prefill\.treatmentId \|\| ''/);
+  assert.match(src, /treatmentId: treatmentId/);
+  assert.match(src, /clinical === 'קבוצה' && !treatmentId/);
+});
