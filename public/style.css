@@ -1335,7 +1335,10 @@ body.ops-scope .client-card .cc-body { grid-template-columns: 1fr; }
 .md-chip.crm-dir-in { background: #FDAB3D; color: #1b1b1b; }
 .md-chip.crm-dir-note { background: #6b7f78; }
 .crm-void-btn { padding: 1px 6px; font-size: 11px; }
-.crm-task-actions { flex-wrap: wrap; justify-content: flex-end; }
+/* The task's buttons always sit on their own row under the title: a lead card in the board is
+   ~240px wide at ANY viewport, so a third grid column squeezed the title into one word per line. */
+.crm-task { grid-template-columns: auto 1fr; }
+.crm-task-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
 .crm-contact-card { max-width: 640px; }
 .crm-fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .crm-fieldset legend { font-size: 12px; color: var(--muted); padding: 0 4px; }

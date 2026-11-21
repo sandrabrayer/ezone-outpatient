@@ -58,6 +58,8 @@ change — is `note` («תיעוד שיחה»): the kind is never guessed. An un
 - **«עוד…»**: reassign, or cancel with a reason (the row stays).
 - Every `window.prompt` in the CRM is gone (5 modals instead); the same buttons are drawn on a card
   and on a «היום» row.
+- A task's buttons sit on their own row under its title, so the ~240 px lead card in the board
+  stays readable.
 
 ## 4. «ביטול תיעוד» — a record entered by mistake
 
