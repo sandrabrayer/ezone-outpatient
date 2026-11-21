@@ -165,3 +165,30 @@ test('payout UI preserves group participant identity through correction dialog',
   assert.match(src, /treatmentId: treatmentId/);
   assert.match(src, /clinical === 'קבוצה' && !treatmentId/);
 });
+
+test('rollout contract probes authenticate separately and reveal no patient/finance rows', () => {
+  const { s } = seed();
+  const group = s.get({ action: 'getTherapistsGroupContract', secret: SECRET });
+  assert.deepEqual(group, { ok: true, protocol: 'out-thr-group-v1', participantKey: true, revisionAck: true });
+  const extra = s.get({ action: 'getTherapistsExtraContract', secret: EXTRA });
+  assert.deepEqual(extra, { ok: true, protocol: 'out-thr-extra-v1', bookingRowId: true, replaySafe: true });
+  assert.equal(s.get({ action: 'getTherapistsGroupContract', secret: EXTRA }).ok, false);
+  assert.equal(s.get({ action: 'getTherapistsExtraContract', secret: SECRET }).ok, false);
+  assert.equal(s.get({ action: 'getTherapistsGroupContract' }).ok, false);
+  assert.equal(s.rows('SessionLog').length, 0);
+  assert.equal(s.rows('ExtraSessionRequests').length, 0);
+});
+test('group outcomes without an exact participant match refuse before any clinical or credit writes', () => {
+  const { s, snapshot } = seed();
+  const original = snapshot();
+  const absent = s.post(group('treatment-absent-100', '0509999999'));
+  assert.equal(absent.reason, 'group_participant_not_found');
+  assert.equal(snapshot(), original);
+  const clients = s.rows('Clients');
+  clients[1].phone = clients[0].phone;
+  s.seed('Clients', s.ctx.CLIENTS_HEADERS, clients);
+  const before = snapshot();
+  const ambiguous = s.post(group('treatment-ambiguous-100', '0501234567'));
+  assert.equal(ambiguous.reason, 'ambiguous_group_participant');
+  assert.equal(snapshot(), before);
+});

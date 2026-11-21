@@ -3995,6 +3995,12 @@ function _recordSessionOutcome(payload, source) {
         matchStatus = 'multi_match';
       }
     }
+    // A group result belongs to exactly ONE participant. Logging success while
+    // their identity is ambiguous would silently skip participant credit updates.
+    if (billingType === GROUP_BILLING && matchStatus !== 'matched') {
+      return { ok: false, reason: matchStatus === 'multi_match' ?
+        'ambiguous_group_participant' : 'group_participant_not_found' };
+    }
 
     var rowObj = {
       sessionId:          sessionId,
@@ -8246,6 +8252,10 @@ var SOURCE_GET_AUTH = {
   getCharges: 'OUTPATIENT_PROXY_SECRET',
   getSettings: 'OUTPATIENT_PROXY_SECRET',
   getExtraSessionRequests: 'OUTPATIENT_PROXY_SECRET',
+  // Data-free authenticated rollout probes. Old OUT sources reject these
+  // actions, so THR cannot mistakenly send v2 clinical/extra writes to v1.
+  getTherapistsGroupContract: 'SESSION_OUTCOME_SECRET',
+  getTherapistsExtraContract: 'EXTRA_SESSION_SECRET',
   getWinbackSource: 'WINBACK_SECRET',
   getDebtStatus: 'DEBT_STATUS_SECRET',
   getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
@@ -8411,6 +8421,12 @@ function doGet(e) {
     if (action === 'getCharges')   return _json(_getCharges());
     if (action === 'getSettings')  return _json(_getSettings());
     if (action === 'getExtraSessionRequests') return _json(_getExtraSessionRequests());
+    if (action === 'getTherapistsGroupContract') return _json({
+      ok: true, protocol: 'out-thr-group-v1', participantKey: true, revisionAck: true
+    });
+    if (action === 'getTherapistsExtraContract') return _json({
+      ok: true, protocol: 'out-thr-extra-v1', bookingRowId: true, replaySafe: true
+    });
     if (action === 'getWinbackSource') {
       if (!_winbackAuthOk(e && e.parameter)) {
         return _json({ ok: false, error: 'unauthorized' });
