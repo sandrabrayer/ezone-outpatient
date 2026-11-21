@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Contact record, tasks and «היום» — the same as the Dashboard CRM (2026-11-21)
+- Lead cards AND patient cards carry one activity block: «⏰ מה הלאה» (what · when · who), «שיחות אחרונות» (kind chip), open tasks, «📞 תיעוד שיחה» / «➕ משימה חדשה», history.
+- «תיעוד שיחה»: three kinds (שיחה יוצאת / שיחה נכנסת / תיעוד שיחה — none pre-chosen), the Dashboard's fields, new outcome «התקיימה שיחה — לא נדרש המשך», «קשר הבא» with no default and the real date shown. Stored in `detailsJson` — no sheet column.
+- Tasks: a new task needs a date AND a time; a call closes only through the contact record; «שינוי מועד» needs a reason only for a date promised in a call; every `window.prompt` replaced by an in-app form.
+- New source action `voidContact` («ביטול תיעוד», ורד only at Node and at the source): append-only `contact_voided` event; the open follow-up the record created is cancelled with it; a voided record is no longer «contacted» anywhere, including the Dashboard handoff feed.
+- «היום שלי» → «היום», heading «כל הצוות». New-lead form in the Dashboard's layout. SW cache v41 → v42. **Apps Script release needed.** See CHANGELOG-crm-dashboard-parity.md.
+
 ### Tests: the continuation-milestone sync tests no longer depend on today's date (2026-11-21)
 - `test/continuation-milestones.test.js` used fixed calendar fixtures (entry 20/10/2026 → first milestone 20/11/2026) against the real clock, so five tests went red on 2026-11-21 — on the deploy branch itself, before any change. The clock is now pinned INSIDE the Apps Script sandbox for that file only (the day the fixtures were written). Test-only: no source or app change.
 

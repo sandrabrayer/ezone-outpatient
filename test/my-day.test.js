@@ -163,12 +163,12 @@ test('9. build is pure and tolerant of garbage rows', () => {
   assert.equal(MyDay.stateText({ priority: 'exception' }), '⚠ חריג');
 });
 
-test('10. wiring: index.html hosts #myDay first, loads my-day.js cache-busted, tab reads «היום שלי», metrics collapsed', () => {
+test('10. wiring: index.html hosts #myDay first, loads my-day.js cache-busted, tab reads «היום», metrics collapsed', () => {
   assert.ok(indexRaw.includes('<div id="myDay" class="my-day">'), '#myDay container');
   assert.ok(indexRaw.indexOf('id="myDay"') < indexRaw.indexOf('id="panel-renewals"'), 'my-day renders above the renewals panel');
   assert.match(indexRaw, /<script src="my-day\.js\?v=__BUILD__" defer><\/script>/);
   assert.ok(indexRaw.includes('data-view="dashboard"'), 'dashboard view id unchanged (deep links / tests)');
-  assert.match(indexRaw, /data-view="dashboard">היום שלי</);
+  assert.match(indexRaw, /data-view="dashboard">היום</);
   assert.match(indexRaw, /<details class="panel my-day-metrics" open>/, 'breakdowns open by default (Sandra, 2026-10-31)');
   // the three headline KPIs sit ABOVE «היום שלי» on landing; revenue is money-only
   assert.ok(indexRaw.indexOf('class="kpis kpis-landing"') < indexRaw.indexOf('id="myDay"'), 'KPIs above the work screen');

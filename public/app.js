@@ -1813,11 +1813,7 @@
     var row = function (r) {
       // a persisted task row carries the CRM subject so ✓ / 📞 work right here (handleCrmClick)
       var crmAttrs = r.kind === 'task' ? ' data-crm-lead="' + escapeHtml(r.leadId || '') + '" data-crm-client="' + escapeHtml(r.clientId || '') + '" data-crm-name="' + escapeHtml(r.name) + '"' : '';
-      var taskBtns = r.kind === 'task' && editor
-        ? '<button type="button" class="btn btn-sm" data-crm="contact" data-task-id="' + escapeHtml(r.taskId) + '" title="תיעוד קשר שסוגר את המשימה">📞</button>' +
-          '<button type="button" class="btn btn-sm" data-crm="complete" data-task-id="' + escapeHtml(r.taskId) + '" title="סמן כבוצע">✓</button>' +
-          '<button type="button" class="btn btn-sm" data-crm="defer" data-task-id="' + escapeHtml(r.taskId) + '" title="דחייה">⏩</button>'
-        : '';
+      var taskBtns = r.kind === 'task' && editor ? crmTaskButtons(r.taskId, r.taskKind, false) : '';
       return '<div class="md-row' + (r.priority === 'exception' ? ' is-exception' : '') + '" data-md-open="' + escapeHtml(r.open) + '" data-md-id="' + escapeHtml(r.subjectId) + '" data-md-name="' + escapeHtml(r.name) + '"' + crmAttrs + '>' +
         '<span><b class="name">' + escapeHtml(r.name) + '</b>' + (r.sub ? '<br><span class="sub">' + escapeHtml(r.sub) + '</span>' : '') + '</span>' +
         '<span><b>' + escapeHtml(r.action) + '</b>' + (r.why ? '<br><span class="sub">' + escapeHtml(r.why) + '</span>' : '') + '</span>' +
@@ -1832,7 +1828,8 @@
       return '<div class="md-rows"><div class="md-row h"><span>מי</span><span>הפעולה ולמה עכשיו</span><span>מועד ומצב</span><span>אחראי</span><span>קשר אחרון ותוצאה</span><span></span></div>' + list.map(row).join('') + '</div>' +
         (cap && rows.length > cap ? '<p class="md-empty">מוצגים ' + cap + ' מתוך ' + rows.length + '</p>' : '');
     };
-    var html = '<div class="md-head"><h2>היום שלי</h2><span class="sub">יום ' + dayName + ', ' + escapeHtml(window.MyDay.fmtDate(m.today)) + (state.user ? ' · ' + escapeHtml(state.user) : '') + '</span></div>';
+    // «היום» is the team's page (Sandra 21/11/2026): every owner's work, the «אחראי» column says whose.
+    var html = '<div class="md-head"><h2>היום</h2><span class="sub">יום ' + dayName + ', ' + escapeHtml(window.MyDay.fmtDate(m.today)) + ' · כל הצוות</span></div>';
     html += '<div class="md-cards">' + m.cards.map(card).join('') + '</div>';
     if (!myDayDomain) {
       // Phase C: the day in priority order — overdue payments, dated follow-ups/tasks, calls today,
@@ -5385,8 +5382,8 @@
             return '<option value="' + escapeHtml(o.id) + '"' + (o.id === p.offerRequestId ? ' selected' : '') + '>' + escapeHtml(o.patientName || '—') + ' · ' + escapeHtml(offerStatusHe(o.crmStatus)) + (o.validUntil ? ' · עד ' + escapeHtml(displayDate(o.validUntil)) : '') + '</option>';
           }).join('') + '</select></label>' : '') +
         '<button type="button" class="btn btn-primary continuation-save" data-caction="save">שמור</button>' +
-        (p.ref ? '<button type="button" class="btn continuation-save" data-crm="contact">📞 יצרתי קשר</button>' +
-                 '<button type="button" class="btn continuation-save" data-crm="task">➕ משימה</button>' : '') +
+        (p.ref ? '<button type="button" class="btn continuation-save" data-crm="contact">📞 תיעוד שיחה</button>' +
+                 '<button type="button" class="btn continuation-save" data-crm="task">➕ משימה חדשה</button>' : '') +
       '</div>';
     } else {
       var ro = [];
@@ -5923,7 +5920,10 @@
     bad_assignee: 'אחראי/ת לא מוכר/ת', bad_kind: 'סוג לא תקין', forbidden_money_task: 'משימת גבייה אינה זמינה למשתמש תפעולי',
     not_found: 'המשימה לא נמצאה', not_open: 'המשימה כבר נסגרה', missing_reason: 'נדרשת סיבה (לפחות 2 תווים)',
     missing_next_explanation: 'אין המשך? נדרש הסבר קצר', bad_outcome: 'יש לבחור תוצאה', bad_channel: 'ערוץ לא תקין',
-    missing_next: 'יש לבחור מה הצעד הבא', busy: 'המערכת עסוקה — נסו שוב', forbidden_money_action: 'פעולה כספית אינה זמינה'
+    missing_next: 'יש לבחור מה הצעד הבא', busy: 'המערכת עסוקה — נסו שוב', forbidden_money_action: 'פעולה כספית אינה זמינה',
+    bad_direction: 'סוג התיעוד אינו תקין', bad_occurred_at: 'תאריך השיחה אינו תקין', bad_event_id: 'התיעוד אינו תקין — רענני את הדף',
+    forbidden_user: 'ביטול תיעוד — לורד בלבד', contact_void_vered_only: 'ביטול תיעוד — לורד בלבד',
+    void_not_confirmed: 'הביטול לא אושר על ידי השרת — רענני', recovery_pending: 'המערכת בשחזור — נסו שוב מאוחר יותר'
   };
   function crmErr(err) { var c = err && err.message ? String(err.message) : String(err || ''); return CRM_ERROR_HE[c] || c; }
   function crmSubjectOf(el) {
@@ -5948,9 +5948,41 @@
   function crmAssigneeOptions(selected) {
     return ['ורד', 'אורן', 'דנה'].map(function (n) { return '<option value="' + n + '"' + (n === selected ? ' selected' : '') + '>' + n + '</option>'; }).join('');
   }
-  /* The compact activity block every lead / client card carries: last contact,
-   * next action, open tasks with their direct actions, the two entry buttons and
-   * a collapsible history. Null data = «המידע אינו זמין», never an empty list. */
+  /* Who sees «ביטול תיעוד» (display only — the Node proxy and Apps Script both enforce it:
+   * lib/users.js CONTACT_VOID_USERS / Code.gs CONTACT_VOID_USERS). */
+  var CONTACT_VOID_USERS = ['ורד'];
+  function crmCanVoid() { return state.role === 'editor' && CONTACT_VOID_USERS.indexOf(state.user) >= 0; }
+  function crmStateWord(st) { return st === 'late' ? 'באיחור' : st === 'today' ? 'להיום' : st === 'undated' ? 'ללא תאריך' : 'ממתין'; }
+  function crmChip(st, text) { return '<span class="md-chip st-' + escapeHtml(st) + '">' + escapeHtml(text) + '</span>'; }
+  function crmDirChip(dir) {
+    var CA = window.CrmActivity;
+    return '<span class="md-chip crm-dir crm-dir-' + escapeHtml(dir) + '">' + escapeHtml(CA.directionLabel(dir)) + '</span>';
+  }
+  function crmTaskWhen(t) {
+    var CA = window.CrmActivity;
+    return t && t.dueDate ? CA.fmtDate(t.dueDate) + (t.dueTime ? ' ' + t.dueTime : '') : 'ללא תאריך — קבעי תאריך';
+  }
+  /* A follow-up saved without a summary carries the outcome as its reason — the same words as its
+   * title («לחזור — <outcome>»). Shown once. */
+  function crmExtraReason(title, reason) { return reason && String(title || '').indexOf(reason) < 0 ? reason : ''; }
+  function crmTaskById(id) {
+    return (Array.isArray(state.tasks) ? state.tasks : []).filter(function (t) { return t && String(t.id) === String(id); })[0] || null;
+  }
+  /* A call is closed only through the contact record («תיעוד שיחה»), never by a bare «סיום». */
+  function crmIsCallKind(kind) { return kind === 'call' || kind === 'collection'; }
+  /* The task buttons, the same wherever a task is drawn (card, «היום»): a call → «תיעוד שיחה»;
+   * any other kind → «סיום» (+ «תיעוד שיחה», which also closes it); then «שינוי מועד». */
+  function crmTaskButtons(taskId, kind, withMore) {
+    var id = escapeHtml(taskId);
+    var contact = '<button type="button" class="btn btn-sm' + (crmIsCallKind(kind) ? ' btn-primary' : '') + '" data-crm="contact" data-task-id="' + id + '" title="תיעוד שיחה שסוגר את המשימה">תיעוד שיחה</button>';
+    return (crmIsCallKind(kind) ? contact : '<button type="button" class="btn btn-sm btn-primary" data-crm="complete" data-task-id="' + id + '">סיום</button>' + contact) +
+      '<button type="button" class="btn btn-sm" data-crm="defer" data-task-id="' + id + '">שינוי מועד</button>' +
+      (withMore ? '<button type="button" class="btn btn-sm" data-crm="more" data-task-id="' + id + '" title="שיוך מחדש / ביטול המשימה">עוד…</button>' : '');
+  }
+  /* The activity block every lead / client card carries — the Dashboard CRM card, in this app's
+   * card (CHANGELOG-crm-dashboard-parity.md): «מה הלאה» (what · when · who), «שיחות אחרונות»
+   * (kind chip, «ביטול תיעוד» for ורד), the open tasks with their actions, the two entry buttons
+   * and the full history. Null data = «המידע אינו זמין», never an empty list. */
   function crmBlockHtml(kind, row) {
     var CA = window.CrmActivity;
     if (!CA) return '';
@@ -5959,13 +5991,34 @@
     if (state.tasks === null && state.activity === null) {
       return '<div class="crm-block"' + attrs + '><div class="crm-na">פעילות: המידע אינו זמין</div></div>';
     }
-    var sum = CA.summarize(state.tasks || [], state.activity || [], subj, today());
+    var tasks = state.tasks || [], events = state.activity || [];
+    var sum = CA.summarize(tasks, events, subj, today());
     var editor = state.role === 'editor';
     var html = '<div class="crm-block"' + attrs + '>';
-    html += '<div class="crm-line"><span class="crm-k">קשר אחרון</span>' +
-      (sum.lastContact ? '<span>' + escapeHtml(sum.lastContact.when) + ' · ' + escapeHtml(sum.lastContact.who || '—') + (sum.lastContact.channel ? ' · ' + escapeHtml(sum.lastContact.channel) : '') + '<br><span class="sub">' + escapeHtml(sum.lastContact.summary) + '</span></span>' : '<span class="sub">לא תועד קשר</span>') + '</div>';
-    html += '<div class="crm-line"><span class="crm-k">הפעולה הבאה</span>' +
-      (sum.nextAction ? '<span><b>' + escapeHtml(sum.nextAction.title) + '</b> · ' + escapeHtml(sum.nextAction.assignee || '—') + (sum.nextAction.due ? ' · ' + escapeHtml(sum.nextAction.due) + (sum.nextAction.dueTime ? ' ' + escapeHtml(sum.nextAction.dueTime) : '') : ' · ללא מועד') + ' <span class="md-chip st-' + sum.nextAction.state + '">' + CA.stateText(sum.nextAction.state) + '</span></span>' : '<span class="sub">אין פעולה פתוחה</span>') + '</div>';
+    // «מה הלאה»: every open follow-up as WHAT · WHEN · WHO, most urgent first
+    var steps = CA.nextSteps(subj, tasks, today());
+    if (steps.length) {
+      var worst = steps[0].state === 'late' ? 'late' : steps[0].state === 'today' ? 'today' : 'wait';
+      html += '<div class="next-steps ' + worst + '" role="status"><div class="next-steps-h">⏰ מה הלאה</div><ul>' + steps.map(function (x) {
+        return '<li data-next-step="' + escapeHtml(x.id) + '"><strong>' + escapeHtml(x.title) + '</strong> — ' + crmChip(x.state, x.rel) + (x.when ? ' ' + escapeHtml(x.when) : '') +
+          (x.assignee ? ' · אחראי/ת: ' + escapeHtml(x.assignee) : '') + (crmExtraReason(x.title, x.reason) ? '<br><span class="sub">' + escapeHtml(x.reason) + '</span>' : '') + '</li>';
+      }).join('') + '</ul></div>';
+    }
+    // «שיחות אחרונות»: the last documented contacts with their kind; a voided record is left out
+    var rc = CA.recentContacts(events, subj, 3);
+    html += '<div class="crm-sec-title">שיחות אחרונות</div>';
+    if (!rc.total) html += '<div class="crm-na">אין שיחות מתועדות עדיין.</div>';
+    else {
+      var canVoid = crmCanVoid();
+      html += '<ul class="crm-timeline crm-recent">' + rc.items.map(function (x) {
+        var next = x.nextTaskId ? tasks.filter(function (t) { return t && String(t.id) === x.nextTaskId && (t.status === 'open' || t.status === 'deferred'); })[0] : null;
+        return '<li data-contact-event="' + escapeHtml(x.eventId) + '"><div class="t">' + escapeHtml(x.when) + (x.actorName ? ' · ' + escapeHtml(x.actorName) : '') + ' · ' + crmDirChip(x.direction) +
+          (canVoid && CA.CONTACT_EVENT_ID_RE.test(x.eventId) ? ' <button type="button" class="btn btn-sm btn-ghost crm-void-btn" data-crm="void" data-event-id="' + escapeHtml(x.eventId) + '">ביטול תיעוד</button>' : '') + '</div>' +
+          '<div>' + escapeHtml(x.text) + '</div>' +
+          (next ? '<div class="sub">המשך: ' + escapeHtml(next.title) + ' · ' + escapeHtml(crmTaskWhen(next)) + (next.assignee ? ' · ' + escapeHtml(next.assignee) : '') + '</div>' : '') + '</li>';
+      }).join('') + '</ul>' +
+        (rc.total > rc.items.length ? '<div class="crm-na">מוצגות ' + rc.items.length + ' האחרונות מתוך ' + rc.total + ' — כל השיחות ב«היסטוריה» למטה.</div>' : '');
+    }
     var offers = offersFor(subj);
     if (offers.length) {
       html += '<div class="crm-line"><span class="crm-k">הצעת מחיר</span><span>' + offers.slice(0, 3).map(function (o) {
@@ -5974,36 +6027,87 @@
       }).join('<br>') + '</span></div>';
     }
     if (sum.openTasks.length) {
-      html += '<div class="crm-tasks">' + sum.openTasks.map(function (t) {
+      html += '<div class="crm-sec-title">משימות פתוחות</div><div class="crm-tasks">' + sum.openTasks.map(function (t) {
         return '<div class="crm-task" data-task-id="' + escapeHtml(t.id) + '">' +
-          '<span class="md-chip st-' + t.state + '">' + t.stateText + '</span>' +
-          '<span class="crm-task-title"><b>' + escapeHtml(t.title) + '</b> <span class="sub">' + escapeHtml(t.kindHe) + ' · ' + escapeHtml(t.assignee || '—') + (t.dueDate ? ' · ' + escapeHtml(CA.fmtDate(t.dueDate)) + (t.dueTime ? ' ' + escapeHtml(t.dueTime) : '') : '') + (t.reason ? ' · ' + escapeHtml(t.reason) : '') + '</span></span>' +
-          (editor ? '<span class="crm-task-actions">' +
-            '<button type="button" class="btn btn-sm" data-crm="contact" data-task-id="' + escapeHtml(t.id) + '" title="תיעוד קשר שסוגר את המשימה">📞</button>' +
-            '<button type="button" class="btn btn-sm" data-crm="complete" data-task-id="' + escapeHtml(t.id) + '" title="סמן כבוצע">✓</button>' +
-            '<button type="button" class="btn btn-sm" data-crm="defer" data-task-id="' + escapeHtml(t.id) + '" title="דחייה">⏩</button>' +
-            '<button type="button" class="btn btn-sm" data-crm="reassign" data-task-id="' + escapeHtml(t.id) + '" title="העברת אחריות">👤</button>' +
-            '<button type="button" class="btn btn-sm btn-ghost" data-crm="withdraw" data-task-id="' + escapeHtml(t.id) + '" title="ביטול משימה">✕</button>' +
-          '</span>' : '') +
+          crmChip(t.state, crmStateWord(t.state)) +
+          '<span class="crm-task-title"><b>' + escapeHtml(t.title) + '</b><br><span class="sub">' + escapeHtml(t.kindHe) + (t.source === 'contact' ? ' · נקבע בשיחה' : '') + ' · ' + escapeHtml(t.assignee || '—') + ' · ' + escapeHtml(crmTaskWhen(t)) + (crmExtraReason(t.title, t.reason) ? ' · ' + escapeHtml(t.reason) : '') + '</span></span>' +
+          (editor ? '<span class="crm-task-actions">' + crmTaskButtons(t.id, t.kind, true) + '</span>' : '') +
         '</div>';
       }).join('') + '</div>';
     }
     if (editor) {
-      html += '<div class="crm-actions"><button type="button" class="btn btn-sm btn-primary" data-crm="contact">📞 יצרתי קשר</button>' +
-        '<button type="button" class="btn btn-sm" data-crm="task">➕ משימה</button></div>';
+      html += '<div class="crm-actions"><button type="button" class="btn btn-sm btn-primary" data-crm="contact">📞 תיעוד שיחה</button>' +
+        '<button type="button" class="btn btn-sm" data-crm="task">➕ משימה חדשה</button></div>';
     }
     html += '<details class="crm-history"><summary>היסטוריה (' + sum.timeline.length + ')</summary>' +
       (sum.timeline.length ? '<ul class="crm-timeline">' + sum.timeline.slice(0, 50).map(function (e) {
-        return '<li><span class="t">' + escapeHtml(e.when) + ' · ' + escapeHtml(e.who || '—') + ' · ' + escapeHtml(e.kindHe) + '</span><br>' + escapeHtml(e.summary) +
-          (e.nextAction ? '<br><span class="sub">הבא: ' + escapeHtml(e.nextAction) + (e.nextDate ? ' (' + escapeHtml(e.nextDate) + ')' : '') + '</span>' : '') + '</li>';
+        return '<li' + (e.voided ? ' class="voided"' : '') + '><div class="t">' + escapeHtml(e.when) + ' · ' + escapeHtml(e.who || '—') + ' · ' + escapeHtml(e.kindHe) +
+          (e.direction ? ' · ' + crmDirChip(e.direction) : '') + (e.voided ? ' ' + crmChip('late', 'בוטל') : '') + '</div><div>' + escapeHtml(e.summary) + '</div>' +
+          (e.nextAction && !e.voided ? '<div class="sub">הבא: ' + escapeHtml(e.nextAction) + (e.nextDate ? ' (' + escapeHtml(e.nextDate) + ')' : '') + '</div>' : '') + '</li>';
       }).join('') + '</ul>' : '<div class="sub">אין רישומים</div>') + '</details>';
     html += '</div>';
     return html;
   }
   // ---- modals
-  var crmPending = null; // { subject, taskId }
+  var crmPending = null; // { subject, taskId } | { taskId, task } | { eventId }
+  /* A form's values by field name (a radio group gives its checked value, '' when none is). */
+  function crmFormValues(f) {
+    var v = {};
+    Array.prototype.forEach.call(f.elements, function (el) {
+      if (!el.name) return;
+      if (el.type === 'radio') { if (el.checked) v[el.name] = el.value; else if (!(el.name in v)) v[el.name] = ''; }
+      else v[el.name] = el.value;
+    });
+    return v;
+  }
+  /* Field errors under their fields (textContent only); `formMsg` goes to the form's own line. */
+  function crmShowErrors(f, errs, formMsg) {
+    $$('[data-err]', f).forEach(function (el) {
+      var k = el.getAttribute('data-err');
+      el.textContent = k === '_form' ? (formMsg || '') : ((errs && errs[k]) || '');
+    });
+  }
+  function crmHasErrors(errs) { return Object.keys(errs || {}).length > 0; }
+  function crmRadios(name, list, checked) {
+    return list.map(function (o) {
+      return '<label class="crm-radio"><input type="radio" name="' + name + '" value="' + escapeHtml(o.id) + '"' + (o.id === checked ? ' checked' : '') + '> ' + escapeHtml(o.he) + '</label>';
+    }).join('');
+  }
+  /* The panel's wording per kind, and the outcome list a kind offers. Switching the kind keeps
+   * everything typed; an outcome the new kind does not offer is cleared. */
+  function crmApplyDirection(f) {
+    var CA = window.CrmActivity, v = crmFormValues(f);
+    var dir = v.direction === 'out' || v.direction === 'in' ? v.direction : 'note';
+    $$('[data-dir-text]', f).forEach(function (el) { var t = CA.DIR_TEXT[el.getAttribute('data-dir-text')]; if (t) el.textContent = t[dir]; });
+    var sel = f.elements.outcome, keep = sel.value;
+    sel.innerHTML = '<option value="">בחרי…</option>' + CA.outcomesFor(v.direction).map(function (o) {
+      return '<option value="' + o.id + '"' + (o.id === keep ? ' selected' : '') + '>' + escapeHtml(o.he) + '</option>';
+    }).join('');
+  }
+  /* «קשר הבא»: show the fields of the picked choice and the ACTUAL date it means. */
+  function crmRefreshNext(f) {
+    var CA = window.CrmActivity, v = crmFormValues(f);
+    var plan = v.next ? CA.contactNextPlan(v, today()) : null;
+    $$('[data-next-for]', f).forEach(function (el) {
+      var k = el.getAttribute('data-next-for');
+      el.hidden = !(k === v.next || (k === 'task' && v.next && v.next !== 'none'));
+    });
+    var req = $('[data-none-req]', f); if (req) req.hidden = v.outcome === CA.NO_FOLLOW_UP_OUTCOME; // that outcome needs no typed explanation
+    var p = $('#contactNextPreview'); if (p) p.textContent = plan ? plan.text : (v.next ? 'השלימי את הפרטים' : 'בחרי מועד — התאריך בפועל יוצג כאן.');
+  }
+  function onContactFormChange(e) {
+    var f = $('#contactForm'), CA = window.CrmActivity; if (!f || !CA) return;
+    var name = e && e.target ? e.target.name : '';
+    if (name === 'direction') crmApplyDirection(f);
+    // «התקיימה שיחה — לא נדרש המשך» is itself the answer to «קשר הבא»
+    if (name === 'outcome' && e.target.value === CA.NO_FOLLOW_UP_OUTCOME) {
+      var none = $('[name="next"][value="none"]', f); if (none) none.checked = true;
+    }
+    crmRefreshNext(f);
+  }
   function openContactModal(subject, taskId) {
     var CA = window.CrmActivity; if (!CA) return;
+    var task = taskId ? crmTaskById(taskId) : null;
     crmPending = { subject: subject, taskId: taskId || '' };
     var f = $('#contactForm'); if (!f) return;
     f.reset();
@@ -6012,15 +6116,26 @@
     // for another patient would make the server answer «replayed» and silently
     // keep that patient's record unsaved. form.reset() does not clear dataset.
     delete f.dataset.sid;
+    crmShowErrors(f, {}, '');
     $('#contactModalName').textContent = subject.name || '';
-    $('#contactChannel').innerHTML = CA.CHANNELS.map(function (c) { return '<option value="' + c.id + '">' + c.he + '</option>'; }).join('');
-    $('#contactOutcome').innerHTML = '<option value="">—</option>' + CA.OUTCOMES.map(function (o) { return '<option value="' + o.id + '">' + o.he + '</option>'; }).join('');
-    $('#contactNextAssignee').innerHTML = crmAssigneeOptions(state.user);
-    $('#contactTaskHint').hidden = !taskId;
-    var d = new Date(); var local = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-    $('#contactOccurredAt').value = local;
+    // The kind is chosen by the user; only a TASK (a contact we planned to make) opens as «שיחה יוצאת».
+    $('#contactDirections').innerHTML = crmRadios('direction', CA.DIRECTIONS, taskId ? 'out' : '');
+    $('#contactNextChoices').innerHTML = crmRadios('next', CA.NEXT_CHOICES, '');
+    $('#contactChannel').innerHTML = CA.CHANNELS.map(function (c) { return '<option value="' + c.id + '"' + (c.id === 'phone' ? ' selected' : '') + '>' + escapeHtml(c.he) + '</option>'; }).join('');
+    $('#contactNextAssignee').innerHTML = crmAssigneeOptions(task && task.assignee ? task.assignee : state.user);
+    var hint = $('#contactTaskHint');
+    hint.hidden = !taskId;
+    hint.textContent = taskId ? 'המשימה: ' + (task ? task.title + ' · ' + crmTaskWhen(task) + (task.reason ? ' · ' + task.reason : '') : '') + ' — התיעוד יסגור אותה.' : '';
+    var d = new Date();
+    f.elements.when.value = today(); f.elements.when.max = today();
+    f.elements.time.value = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    f.elements.nextDate.min = today();
+    f.elements.who.value = state.user || '';
+    f.elements.reason.value = task ? task.title : '';
+    crmApplyDirection(f);
+    crmRefreshNext(f);
     $('#contactModal').hidden = false;
-    $('#contactOutcome').focus();
+    var first = $('[name="direction"]', f); if (first) first.focus();
   }
   function closeContactModal() { var m = $('#contactModal'); if (m) m.hidden = true; crmPending = null; }
   function openTaskModal(subject) {
@@ -6029,18 +6144,68 @@
     var f = $('#taskForm'); if (!f) return;
     f.reset();
     delete f.dataset.sid; // new opening = new submission key (see openContactModal)
+    crmShowErrors(f, {}, '');
     $('#taskModalName').textContent = subject.name || '';
     $('#taskKind').innerHTML = CA.TASK_KINDS.filter(function (k) { return !(k.money && isOpsScope()); }).map(function (k) { return '<option value="' + k.id + '">' + k.he + '</option>'; }).join('');
     $('#taskAssignee').innerHTML = crmAssigneeOptions(state.user);
+    f.elements.dueDate.value = today(); f.elements.dueDate.min = today();
     $('#taskModal').hidden = false;
+    f.elements.title.focus();
   }
   function closeTaskModal() { var m = $('#taskModal'); if (m) m.hidden = true; crmPending = null; }
   function openDeferModal(taskId) {
-    crmPending = { taskId: taskId };
-    var f = $('#deferForm'); if (f) f.reset();
+    var task = crmTaskById(taskId);
+    crmPending = { taskId: taskId, task: task };
+    var f = $('#deferForm'); if (!f) return;
+    f.reset();
+    crmShowErrors(f, {}, '');
+    $('#deferModalName').textContent = task ? task.title : '';
+    f.elements.dueDate.value = task && task.dueDate ? String(task.dueDate).slice(0, 10) : '';
+    f.elements.dueTime.value = task && task.dueTime ? task.dueTime : '';
+    $('#deferReasonLabel').textContent = 'סיבה' + (task && task.source === 'contact' ? ' * (מועד שהובטח בשיחה)' : '');
     $('#deferModal').hidden = false;
   }
   function closeDeferModal() { var m = $('#deferModal'); if (m) m.hidden = true; crmPending = null; }
+  function openTaskDoneModal(taskId) {
+    var task = crmTaskById(taskId);
+    crmPending = { taskId: taskId, task: task };
+    var f = $('#taskDoneForm'); if (!f) return;
+    f.reset();
+    $('#taskDoneModalName').textContent = task ? task.title : '';
+    $('#taskDoneModal').hidden = false;
+    f.elements.outcome.focus();
+  }
+  function closeTaskDoneModal() { var m = $('#taskDoneModal'); if (m) m.hidden = true; crmPending = null; }
+  function openTaskMoreModal(taskId) {
+    var task = crmTaskById(taskId);
+    crmPending = { taskId: taskId, task: task };
+    var rf = $('#taskReassignForm'), wf = $('#taskWithdrawForm'); if (!rf || !wf) return;
+    rf.reset(); wf.reset();
+    crmShowErrors(wf, {}, '');
+    $('#taskMoreModalName').textContent = task ? task.title : '';
+    $('#taskReassignAssignee').innerHTML = crmAssigneeOptions(task ? task.assignee : state.user);
+    $('#taskMoreModal').hidden = false;
+  }
+  function closeTaskMoreModal() { var m = $('#taskMoreModal'); if (m) m.hidden = true; crmPending = null; }
+  function openVoidContactModal(eventId) {
+    var CA = window.CrmActivity; if (!CA || !crmCanVoid()) return;
+    var ev = (Array.isArray(state.activity) ? state.activity : []).filter(function (e) { return e && String(e.eventId) === String(eventId); })[0] || null;
+    var f = $('#voidContactForm'); if (!f || !ev) return;
+    crmPending = { eventId: eventId };
+    f.reset();
+    crmShowErrors(f, {}, '');
+    $('#voidContactText').textContent = CA.fmtWhen(ev.occurredAt) + ' · ' + (ev.actorName || '—') + ' · ' + CA.contactEventText(ev) + ' — התיעוד יישאר בהיסטוריה מסומן «בוטל».';
+    var d = {};
+    try { d = ev.detailsJson ? JSON.parse(ev.detailsJson) : {}; } catch (_) { d = {}; }
+    var next = d && d.nextTaskId ? crmTaskById(d.nextTaskId) : null;
+    var note = $('#voidContactNextNote');
+    var openNext = next && (next.status === 'open' || next.status === 'deferred');
+    note.hidden = !openNext;
+    note.textContent = openNext ? 'משימת ההמשך שנוצרה מהתיעוד הזה («' + next.title + '») תבוטל יחד איתו.' : '';
+    $('#voidContactModal').hidden = false;
+    f.elements.reason.focus();
+  }
+  function closeVoidContactModal() { var m = $('#voidContactModal'); if (m) m.hidden = true; crmPending = null; }
   function crmPost(action, body) {
     return apiPostAction(action, body).then(function (res) {
       if (!res || res.ok === false) throw new Error((res && res.error) || 'unknown');
@@ -6058,73 +6223,112 @@
     if (what === 'contact') { if (subject) openContactModal(subject, taskId); return; }
     if (what === 'task') { if (subject) openTaskModal(subject); return; }
     if (what === 'defer') { openDeferModal(taskId); return; }
-    if (what === 'complete') {
-      var outcome = window.prompt('תוצאה (רשות):', '') ;
-      if (outcome === null) return;
-      busyStart(btn);
-      crmPost('completeTask', { id: taskId, outcome: outcome }).then(function () { toast('המשימה סומנה כבוצעה'); return crmReload(); }).catch(function (err) { toast('שגיאה: ' + crmErr(err), true); busyEnd(btn); });
-      return;
-    }
-    if (what === 'reassign') {
-      var to = window.prompt('להעביר אחריות אל (ורד / אורן / דנה):', '');
-      if (!to) return;
-      busyRun(btn, function () {
-        return crmPost('reassignTask', { id: taskId, assignee: to.trim() }).then(function () { toast('האחריות הועברה'); return crmReload(); }).catch(function (err) { toast('שגיאה: ' + crmErr(err), true); });
-      });
-      return;
-    }
-    if (what === 'withdraw') {
-      var reason = window.prompt('סיבת הביטול:', '');
-      if (!reason) return;
-      busyRun(btn, function () {
-        return crmPost('withdrawTask', { id: taskId, reason: reason.trim() }).then(function () { toast('המשימה בוטלה'); return crmReload(); }).catch(function (err) { toast('שגיאה: ' + crmErr(err), true); });
-      });
-    }
+    if (what === 'complete') { openTaskDoneModal(taskId); return; }
+    if (what === 'more') { openTaskMoreModal(taskId); return; }
+    if (what === 'void') { openVoidContactModal(btn.getAttribute('data-event-id') || ''); return; }
   }
   function submitContactForm(e) {
     e.preventDefault();
     var CA = window.CrmActivity, p = crmPending; if (!CA || !p || !p.subject) return;
-    var fd = new FormData($('#contactForm'));
-    var nextMode = String(fd.get('nextMode') || 'date');
-    var next;
-    if (nextMode === 'none') next = { none: true, explanation: String(fd.get('nextExplanation') || '').trim() };
-    else if (nextMode === 'days') next = { days: fd.get('nextDays'), kind: fd.get('nextKind') || 'call', title: String(fd.get('nextTitle') || '').trim(), assignee: fd.get('nextAssignee') };
-    else next = { dueDate: fd.get('nextDate'), dueTime: fd.get('nextTime'), kind: fd.get('nextKind') || 'call', title: String(fd.get('nextTitle') || '').trim(), assignee: fd.get('nextAssignee') };
-    var body = {
-      submissionId: $('#contactForm').dataset.sid || ($('#contactForm').dataset.sid = CA.newSubmissionId('contact')),
-      contact: { leadId: p.subject.leadId, clientId: p.subject.clientId, channel: fd.get('channel'), outcome: fd.get('outcome'), summary: String(fd.get('summary') || '').trim(), withWhom: String(fd.get('withWhom') || '').trim(), occurredAt: fd.get('occurredAt'), taskId: p.taskId || '' },
-      next: next
-    };
+    var f = $('#contactForm'), v = crmFormValues(f);
+    var errs = CA.contactErrors(v, today());
+    crmShowErrors(f, errs, crmHasErrors(errs) ? 'יש לתקן את השדות המסומנים' : '');
+    if (crmHasErrors(errs)) return;
+    // One key per opening: a failed save keeps it (safe retry, the server replays), a saved one drops it.
+    var sid = f.dataset.sid || (f.dataset.sid = CA.newSubmissionId('contact'));
+    var body = CA.contactBody(p.subject, v, sid, p.taskId || '', today());
     var btn = $('#contactSubmit'); busyStart(btn);
     crmPost('logContact', body).then(function (res) {
-      delete $('#contactForm').dataset.sid; // a NEW contact gets a new key; a failed one keeps it (safe retry)
+      delete f.dataset.sid; // a NEW contact gets a new key; a failed one keeps it (safe retry)
       closeContactModal();
-      toast(res.replayed ? 'הקשר כבר תועד' : 'הקשר תועד' + (res.created ? ' · נוצרה משימת המשך' : ''));
+      toast(res.replayed ? 'השיחה כבר תועדה' : 'השיחה נשמרה ✓' + (res.created ? ' · המשך: ' + res.created.title + ' — ' + crmTaskWhen(res.created) : ''));
       return crmReload();
-    }).catch(function (err) { toast('התיעוד לא נשמר: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+    }).catch(function (err) {
+      crmShowErrors(f, {}, 'השיחה לא נשמרה — הטקסט נשמר, נסי שוב (' + crmErr(err) + ')');
+      toast('השיחה לא נשמרה: ' + crmErr(err), true);
+    }).finally(function () { busyEnd(btn); });
   }
   function submitTaskForm(e) {
     e.preventDefault();
     var CA = window.CrmActivity, p = crmPending; if (!CA || !p || !p.subject) return;
-    var fd = new FormData($('#taskForm'));
+    var f = $('#taskForm'), v = crmFormValues(f);
+    var errs = CA.newTaskErrors(v, today());
+    crmShowErrors(f, errs, crmHasErrors(errs) ? 'יש לתקן את השדות המסומנים' : '');
+    if (crmHasErrors(errs)) return;
     var body = {
-      submissionId: $('#taskForm').dataset.sid || ($('#taskForm').dataset.sid = CA.newSubmissionId('task')),
-      task: { kind: fd.get('kind'), leadId: p.subject.leadId, clientId: p.subject.clientId, title: String(fd.get('title') || '').trim(), reason: String(fd.get('reason') || '').trim(), assignee: fd.get('assignee'), dueDate: fd.get('dueDate'), dueTime: fd.get('dueTime') }
+      submissionId: f.dataset.sid || (f.dataset.sid = CA.newSubmissionId('task')),
+      task: { kind: v.kind, leadId: p.subject.leadId, clientId: p.subject.clientId, title: String(v.title || '').trim(), assignee: v.assignee, dueDate: v.dueDate, dueTime: v.dueTime }
     };
     var btn = $('#taskSubmit'); busyStart(btn);
     crmPost('createTask', body).then(function (res) {
-      delete $('#taskForm').dataset.sid;
-      closeTaskModal(); toast(res.replayed ? 'המשימה כבר קיימת' : 'המשימה נוצרה'); return crmReload();
-    }).catch(function (err) { toast('המשימה לא נשמרה: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+      delete f.dataset.sid;
+      closeTaskModal(); toast(res.replayed ? 'המשימה כבר קיימת' : 'יצירת משימה ✓'); return crmReload();
+    }).catch(function (err) {
+      crmShowErrors(f, {}, 'לא נשמר — נסי שוב (' + crmErr(err) + ')');
+      toast('המשימה לא נשמרה: ' + crmErr(err), true);
+    }).finally(function () { busyEnd(btn); });
   }
   function submitDeferForm(e) {
     e.preventDefault();
-    var p = crmPending; if (!p || !p.taskId) return;
-    var fd = new FormData($('#deferForm'));
+    var CA = window.CrmActivity, p = crmPending; if (!CA || !p || !p.taskId) return;
+    var f = $('#deferForm'), v = crmFormValues(f);
+    var errs = CA.rescheduleErrors(v, p.task);
+    crmShowErrors(f, errs, '');
+    if (crmHasErrors(errs)) return;
     var btn = $('#deferSubmit'); busyStart(btn);
-    crmPost('deferTask', { id: p.taskId, dueDate: fd.get('dueDate'), dueTime: fd.get('dueTime'), reason: String(fd.get('reason') || '').trim() })
-      .then(function () { closeDeferModal(); toast('המשימה נדחתה'); return crmReload(); })
-      .catch(function (err) { toast('הדחייה לא נשמרה: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+    crmPost('deferTask', { id: p.taskId, dueDate: v.dueDate, dueTime: v.dueTime, reason: String(v.reason || '').trim() })
+      .then(function () { closeDeferModal(); toast('שינוי מועד ✓'); return crmReload(); })
+      .catch(function (err) { toast('המועד לא נשמר: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+  }
+  function submitTaskDoneForm(e) {
+    e.preventDefault();
+    var p = crmPending; if (!p || !p.taskId) return;
+    var v = crmFormValues($('#taskDoneForm'));
+    var btn = $('#taskDoneSubmit'); busyStart(btn);
+    crmPost('completeTask', { id: p.taskId, outcome: String(v.outcome || '').trim() })
+      .then(function () { closeTaskDoneModal(); toast('המשימה הושלמה ✓'); return crmReload(); })
+      .catch(function (err) { toast('שגיאה: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+  }
+  function submitTaskReassignForm(e) {
+    e.preventDefault();
+    var p = crmPending; if (!p || !p.taskId) return;
+    var v = crmFormValues($('#taskReassignForm'));
+    var btn = $('#taskReassignSubmit'); busyStart(btn);
+    crmPost('reassignTask', { id: p.taskId, assignee: v.assignee })
+      .then(function () { closeTaskMoreModal(); toast('שיוך ✓'); return crmReload(); })
+      .catch(function (err) { toast('שגיאה: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+  }
+  function submitTaskWithdrawForm(e) {
+    e.preventDefault();
+    var p = crmPending; if (!p || !p.taskId) return;
+    var f = $('#taskWithdrawForm'), reason = String(crmFormValues(f).reason || '').trim();
+    var errs = reason.length < 2 ? { reason: 'יש לציין סיבה (2 תווים לפחות)' } : {};
+    crmShowErrors(f, errs, '');
+    if (crmHasErrors(errs)) return;
+    var btn = $('#taskWithdrawSubmit'); busyStart(btn);
+    crmPost('withdrawTask', { id: p.taskId, reason: reason })
+      .then(function () { closeTaskMoreModal(); toast('המשימה בוטלה'); return crmReload(); })
+      .catch(function (err) { toast('שגיאה: ' + crmErr(err), true); }).finally(function () { busyEnd(btn); });
+  }
+  /* voidContact: ONE post; the lists re-read after it (the follow-up task may have been cancelled with it). */
+  function submitVoidContactForm(e) {
+    e.preventDefault();
+    var CA = window.CrmActivity, p = crmPending; if (!CA || !p || !p.eventId) return;
+    var f = $('#voidContactForm'), reason = String(crmFormValues(f).reason || '').trim();
+    var bad = CA.voidContactError(p.eventId, reason);
+    crmShowErrors(f, bad ? { reason: bad } : {}, '');
+    if (bad) return;
+    var eventId = p.eventId, btn = $('#voidContactSubmit'); busyStart(btn);
+    crmPost('voidContact', { eventId: eventId, reason: reason }).then(function (res) {
+      // the voided id must be echoed — a void is never assumed
+      if (!res.voided || String(res.voided.eventId) !== String(eventId)) throw new Error('void_not_confirmed');
+      closeVoidContactModal();
+      toast('התיעוד בוטל ✓' + (res.cancelledTask ? ' · משימת ההמשך בוטלה' : ''));
+      return crmReload();
+    }).catch(function (err) {
+      crmShowErrors(f, { reason: 'לא בוטל — נסי שוב (' + crmErr(err) + ')' }, '');
+      toast('התיעוד לא בוטל: ' + crmErr(err), true);
+    }).finally(function () { busyEnd(btn); });
   }
 
   function leadCard(l, stage) {
@@ -7191,6 +7395,9 @@
     editingLeadId = lead ? lead.id : null;
     var m = $('#leadModal');
     $('#leadModalTitle').textContent = lead ? 'עריכת ליד' : 'ליד חדש';
+    // Dashboard-CRM look: a new lead says where it lands and its button reads «הוסף ליד»
+    var leadMeta = $('#leadModalMeta'); if (leadMeta) leadMeta.hidden = !!lead;
+    var leadSubmit = $('#leadFormSubmit'); if (leadSubmit) leadSubmit.textContent = lead ? 'שמירה' : 'הוסף ליד';
     var f = $('#leadForm');
     f.reset();
     var group = $('[data-group="serviceType"]', f);
@@ -8731,15 +8938,13 @@
     on('#contactForm', 'submit', submitContactForm);
     on('#taskForm', 'submit', submitTaskForm);
     on('#deferForm', 'submit', submitDeferForm);
-    $$('#contactForm [name="nextMode"]').forEach(function (r) {
-      r.addEventListener('change', function () {
-        var mode = String(r.value);
-        $('#contactNextDate').hidden = mode !== 'date';
-        $('#contactNextDays').hidden = mode !== 'days';
-        $('#contactNextNone').hidden = mode !== 'none';
-        $('#contactNextTaskFields').hidden = mode === 'none';
-      });
-    });
+    on('#taskDoneForm', 'submit', submitTaskDoneForm);
+    on('#taskReassignForm', 'submit', submitTaskReassignForm);
+    on('#taskWithdrawForm', 'submit', submitTaskWithdrawForm);
+    on('#voidContactForm', 'submit', submitVoidContactForm);
+    // the contact form re-words itself per kind and shows the real date of «קשר הבא» as it is filled
+    on('#contactForm', 'change', onContactFormChange);
+    on('#contactForm', 'input', onContactFormChange);
     on('#billingDate', 'change', function (e) { state.billingDate = e.target.value || today(); renderBilling(); });
     /* הכנסות חודשיות — its own month + search state, so switching months or
      * searching here never disturbs the daily גבייה screen's date. */
@@ -8769,7 +8974,7 @@
 
     $$('[data-close]').forEach(function (b) {
       b.addEventListener('click', function () {
-        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal(); closeOtsModal(); closeOtsCancelModal(); closeClientSessionsModal();
+        closeLeadModal(); closeAgreementModal(); closeActivateModal(); closeExitModal(); closeDirectClientModal(); closeEditClientModal(); closeSettingsModal(); closeNotRelevantReasonModal(); closeRemoveLeadModal(); closeDuplicateLeadModal(); closeAddChargeModal(); closeEditChargeModal(); closeEditAmountModal(); closeRenewModal(); closeMergeClientsModal(); closeSessionModal(); closeContinuationToOutpatientModal(); closeStopAlertModal(); closeResumeTreatmentModal(); closeRestoreClientModal(); closeCreditsModal(); closeMarkCreditPaidModal(); closeContactModal(); closeTaskModal(); closeDeferModal(); closeTaskDoneModal(); closeTaskMoreModal(); closeVoidContactModal(); closeOtsModal(); closeOtsCancelModal(); closeClientSessionsModal();
       });
     });
 

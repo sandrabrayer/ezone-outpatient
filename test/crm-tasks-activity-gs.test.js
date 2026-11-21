@@ -103,7 +103,9 @@ test('complete / defer / reassign / withdraw: state machine, history, no second 
   post(sb, { action: 'createTask', submissionId: 't1', task: TASK });
   const d = post(sb, { action: 'deferTask', id: 'task-t1', dueDate: '2026-11-10', dueTime: '', reason: 'ביקשה שבוע' }, 'דנה');
   assert.equal(d.ok, true); assert.equal(d.task.status, 'deferred'); assert.equal(d.task.dueDate, '2026-11-10'); assert.equal(d.task.deferredFrom, '2026-11-03'); assert.equal(d.task.updatedBy, 'דנה');
-  assert.equal(post(sb, { action: 'deferTask', id: 'task-t1', dueDate: '2026-11-11' }).error, 'missing_reason');
+  // 2026-11-21: a reason is required only for a date promised in a contact (source 'contact') —
+  // covered in crm-dashboard-parity.test.js; a manual task may simply be re-dated
+  assert.equal(post(sb, { action: 'deferTask', id: 'task-t1', dueDate: '2026-11-10' }).ok, true);
   assert.equal(post(sb, { action: 'deferTask', id: 'task-t1', reason: 'xx' }).error, 'bad_due');
   const r = post(sb, { action: 'reassignTask', id: 'task-t1', assignee: 'אורן' });
   assert.equal(r.task.assignee, 'אורן');

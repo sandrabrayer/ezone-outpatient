@@ -112,7 +112,11 @@
 // v41 (2026-11-18, patient-type tabs): new public/patient-type.js + its script tag; index.html (type tabs,
 //   «סוג מטופל» in עריכה), app.js and style.css changed (CHANGELOG-patient-type-tabs.md). Bumped from the LIVE
 //   value v40 (fetched from production /sw.js on 2026-11-18).
-var CACHE = 'ezone-outpatient-v41';
+// v42 (2026-11-21, Dashboard-CRM parity): index.html (tab «היום», the contact / task /
+//   void modals, the new-lead grouping), app.js, crm-activity.js, my-day.js, package-pricing.js and style.css changed
+//   (CHANGELOG-crm-dashboard-parity.md). Bumped from the repo value v41; the
+//   LIVE /sw.js was NOT reachable from this session — confirm production still serves v41 before release.
+var CACHE = 'ezone-outpatient-v42';
 var SHELL = [
   './',
   './index.html',
