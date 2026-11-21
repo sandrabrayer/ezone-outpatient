@@ -152,3 +152,32 @@ test('typed backup source inventory includes the durable participant-credit jour
   const captured=t.s.ctx._integritySourceSpecs().map(x=>x.source);
   assert.equal(captured.filter(x=>x==='SessionOutcomeOps').length,1);
 });
+
+test('missing or corrupted group journal is refused rather than recreated or rewritten',()=>{
+  const missing=setup();
+  assert.equal(missing.send('patient_cancelled_notice').ok,true);
+  assert.equal(missing.s.props.SESSION_OUTCOME_OPS_CREATED,'1');
+  delete missing.s.sheets.SessionOutcomeOps;
+  assert.equal(missing.send('happened','2026-11-20T11:00:00.000Z').ok,false);
+  assert.equal(missing.credit(),1);
+  assert.equal(missing.log().length,1);
+  assert.equal(missing.s.sheets.SessionOutcomeOps,undefined);
+  const corrupt=setup();
+  assert.equal(corrupt.send('patient_cancelled_notice').ok,true);
+  const sh=corrupt.s.sheets.SessionOutcomeOps;
+  sh.grid[0][0]='incorrectOpKeyHeader';
+  const res=corrupt.send('happened','2026-11-20T11:00:00.000Z');
+  assert.equal(res.ok,false);
+  assert.equal(sh.grid[0][0],'incorrectOpKeyHeader','no silent header overwrite');
+  assert.equal(corrupt.credit(),1);
+  assert.equal(corrupt.log().length,1);
+});
+test('backup refuses to invent an empty journal after it was activated',()=>{
+  const t=setup();
+  assert.equal(t.send('patient_cancelled_notice').ok,true);
+  const ss=t.s.ctx.SpreadsheetApp.getActiveSpreadsheet();
+  const found=t.s.ctx._integrityCaptureData(ss);
+  assert.equal(found.find(x=>x.source==='SessionOutcomeOps').absent,false);
+  delete t.s.sheets.SessionOutcomeOps;
+  assert.throws(()=>t.s.ctx._integrityCaptureData(ss),/Missing backup source: SessionOutcomeOps/);
+});

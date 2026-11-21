@@ -3955,8 +3955,24 @@ function _soEventKey(row, incomingRev, source) {
   return JSON.stringify([row.sessionId, row.treatmentId,
     incomingRev === null ? 'manual:' + stamp : new Date(incomingRev).toISOString()]);
 }
+function _soOpenJournal() {
+  var ss = _ss(), props = PropertiesService.getScriptProperties();
+  var sh = ss.getSheetByName(SESSION_OUTCOME_OP_SHEET);
+  if (!sh) {
+    if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) throw new Error('session_credit_journal_missing');
+    sh = _ensureSheet(SESSION_OUTCOME_OP_SHEET, SESSION_OUTCOME_OP_HEADERS);
+    props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    return sh;
+  }
+  var headers = sh.getRange(1, 1, 1, SESSION_OUTCOME_OP_HEADERS.length).getValues()[0];
+  if (sh.getLastColumn() !== SESSION_OUTCOME_OP_HEADERS.length ||
+      JSON.stringify(headers) !== JSON.stringify(SESSION_OUTCOME_OP_HEADERS))
+    throw new Error('session_credit_journal_headers');
+  if (!props.getProperty('SESSION_OUTCOME_OPS_CREATED')) props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+  return sh;
+}
 function _soJournalRows(sh) {
-  var last = sh.getLastRow(), out = [];
+  var last = sh.getLastRow(), out = [], seen = Object.create(null);
   if (last < 2) return out;
   var all = sh.getRange(2, 1, last - 1, SESSION_OUTCOME_OP_HEADERS.length).getValues();
   for (var i = 0; i < all.length; i++) {
@@ -3964,7 +3980,15 @@ function _soJournalRows(sh) {
     for (var j = 0; j < SESSION_OUTCOME_OP_HEADERS.length; j++) {
       row[SESSION_OUTCOME_OP_HEADERS[j]] = all[i][j];
     }
-    if (String(row.opKey || '').trim()) { row._sheetRow = i + 2; out.push(row); }
+    if (String(row.opKey || '').trim()) {
+      var key = String(row.opKey);
+      if (seen[key] || ['pending','committed'].indexOf(String(row.state)) < 0 ||
+          !String(row.clientId || '') || !String(row.sessionId || '') ||
+          !String(row.treatmentId || ''))
+        throw new Error('session_credit_journal_corrupt');
+      seen[key] = true;
+      row._sheetRow = i + 2; out.push(row);
+    }
   }
   return out;
 }
@@ -4256,7 +4280,7 @@ function _recordSessionOutcome(payload, source) {
     // remains pending, even if its revision now appears equal.
     var soJournal = null;
     if (billingType === GROUP_BILLING) {
-      soJournal = _ensureSheet(SESSION_OUTCOME_OP_SHEET, SESSION_OUTCOME_OP_HEADERS);
+      soJournal = _soOpenJournal();
       var previousGroupAttempt = _soPendingGroup(
         soJournal, rowObj, incomingRev, source, clientsSh, sh, _requestUser(payload));
       if (previousGroupAttempt) return previousGroupAttempt;
@@ -9258,7 +9282,8 @@ function _integrityCaptureData(sourceSs) {
     var captured = specs.map(function (spec) {
       known[spec.source] = true;
       var sh = sourceSs.getSheetByName(spec.source);
-      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired))) {
+      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired) ||
+          (spec.source === SESSION_OUTCOME_OP_SHEET && !!props.getProperty('SESSION_OUTCOME_OPS_CREATED')))) {
         throw new Error('Missing backup source: ' + spec.source);
       }
       var range = sh ? sh.getDataRange() : null;
@@ -9563,6 +9588,15 @@ function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
     var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
     var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
+    var groupJournal = _ss().getSheetByName(SESSION_OUTCOME_OP_SHEET);
+    if (groupJournal) {
+      var groupOps = _soJournalRows(groupJournal);
+      if (groupOps.some(function(op) { return op.state !== 'committed'; }))
+        throw new Error('session_credit_recovery_pending');
+      props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    } else if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) {
+      throw new Error('session_credit_journal_missing');
+    }
     try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
     if (result.journalRequired) props.setProperty('FINANCIAL_OPS_CREATED', '1');
     else if (props.getProperty('FINANCIAL_OPS_CREATED')) throw new Error('Restore journal required');
