@@ -63,10 +63,11 @@ test('A: mirrored at the END of the tombstone, Leads and removed-leads literals'
     const H = plain(ctx[name]);
     // the Clients tombstone later appended billingMode + complementaryType +
     // privateTherapists + patientTypeOverride after it (same mirror rule, 2026-11-04 / 2026-11-09 / 2026-11-18)
-    assert.equal(H[H.length - (name === 'CLIENTS_REMOVED_HEADERS' ? 5 : 1)], 'preferredHouse', name);
+    // (Leads appended the contact person — 3 columns — after it, 2026-11-21; the removed-leads archive did not)
+    assert.equal(H[H.length - (name === 'CLIENTS_REMOVED_HEADERS' ? 5 : name === 'LEADS_HEADERS' ? 4 : 1)], 'preferredHouse', name);
     assert.equal(H.filter((h) => h === 'preferredHouse').length, 1, name);
   }
-  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-3), ['updatedAt', 'updatedBy', 'preferredHouse']);
+  assert.deepEqual(plain(ctx.LEADS_HEADERS).slice(-6, -3), ['updatedAt', 'updatedBy', 'preferredHouse']);
 });
 
 test('A: allowed list is identical in Code.gs, app.js and index.html', () => {
@@ -290,7 +291,7 @@ test('F: lead card shows the handoff value as an escaped chip', () => {
 });
 
 test('F: app.js loads, prefills, edits via the single-cell action, and carries lead -> client', () => {
-  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(row\.preferredHouse\)\n\s*\};/, 'read from sheet');
+  assert.match(APP, /preferredHouse: preferredHouseOrBlank\(row\.preferredHouse\),\n\s*\/\/ איש קשר/, 'read from sheet (the lead contact person follows it, 2026-11-21)');
   assert.match(APP, /form\.preferredHouse\.value = preferredHouseOrBlank\(client\.preferredHouse\)/, 'prefilled');
   assert.match(APP, /apiPostAction\('setPreferredHouse', \{/, 'single-cell action');
   assert.match(APP, /if \(!preferredHouseChanged\) return null;\n\s*return persistPreferredHouse\(client\.id, client\.preferredHouse\)/, 'only when changed');

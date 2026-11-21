@@ -301,6 +301,34 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Outpatient: contact record / tasks / «היום» aligned with the Dashboard CRM + «טיפול תחלואה כפולה» (Nov 21, 2026 — draft PR, not released)
+
+- Reference: E-Zone-Dashboard `a3983f4` (PR #426). Lead cards and patient cards carry the same
+  block: «מה הלאה», «שיחות אחרונות», open tasks, «📞 תיעוד שיחה», «➕ משימה חדשה», history.
+- `logContact` stores `direction` (`out` | `in` | `note`; missing = `note`) and `reason` in
+  `detailsJson` — **no sheet column**. Appended: channels `sms` / `in_person`, outcome
+  `spoke_no_follow_up` (needs no typed explanation for «ללא משימת המשך»).
+- New source action **`voidContact`** (internal POST, `OUTPATIENT_PROXY_SECRET`): append-only
+  `contact_voided` event (`detailsJson.supersedesEventId`); cancels the still-open follow-up the
+  record created. **ורד only** — Node 403 `contact_void_vered_only` (`lib/users.js`
+  `CONTACT_VOID_USERS`) and Code.gs `CONTACT_VOID_USERS`. A voided contact no longer makes a lead
+  `contacted` in **`getHandoffStatus`** (the Dashboard reads it) — contract keys unchanged.
+- `deferTask`: a reason is required only when `source = 'contact'`.
+- «היום שלי» → «היום» (heading «כל הצוות»). No `window.prompt` left in the CRM.
+- «טיפול תחלואה כפולה»: a PLAN type only (`SERVICE_TYPES`). No price / billing mapping / therapist
+  rate — not chargeable and not recordable as a session until Sandra decides them; ezone-therapists
+  receives it inside the plan's `serviceType` and may need a display follow-up.
+- SW cache v41 → v42 (live value not verified from the session). Apps Script release required.
+- **Lead contact person** (same PR): `Leads` appended `contactName`, `contactPhone`,
+  `contactRelation` (19 → 22 columns; browser-owned, validated in `_saveAll`, kept for pre-release
+  tabs). `contactPhone` is text-forced but **never a cross-app match key**
+  (`CROSS_APP_PHONE_SOURCES` unchanged; never copied to `treatmentContactPhone`). «לידים שהוסרו» is
+  NOT widened (OP-03 header correction pending). `createLead` does not carry it yet.
+  `CHANGELOG-lead-contact-person.md`.
+- Not done: optional name / phone on a lead, the billing-phone choice, the week-window follow-up,
+  the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`,
+  `CHANGELOG-dual-diagnosis-plan-type.md`.
+
 ## Payroll report → מורן by email (Nov 19, 2026 — two PRs, outpatient FIRST)
 
 - The coordinator (אורן) presses «שליחה למורן» in the therapists app («דוח שבועי»).

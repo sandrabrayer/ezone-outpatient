@@ -649,7 +649,7 @@
     var why = h('input', { type: 'text', maxlength: '200', placeholder: 'סיבה (רשות)', 'aria-label': 'סיבת ה' + (del ? 'מחיקה' : 'איפוס'), value: C.reason || '', oninput: function () { C.reason = why.value; } });
     return h('div', { class: 'pkg-confirm card', role: 'alertdialog', 'aria-label': del ? 'אישור מחיקת הצעה' : 'אישור איפוס הצעה' }, [
       h('div', { class: 'pkg-fam-title', text: del ? 'למחוק את ההצעה של ' + (r.patientName || '') + '?' : 'לאפס את ההצעה של ' + (r.patientName || '') + '?' }),
-      h('p', { class: 'muted', text: del ? 'ההצעה תוסתר מכל הרשימות, הכרטיסים ו«היום שלי». הרשומה נשמרת בגיליון עם תיעוד מי / מתי / למה. אין חיוב, תשלום או חידוש שמושפעים.'
+      h('p', { class: 'muted', text: del ? 'ההצעה תוסתר מכל הרשימות, הכרטיסים ו«היום». הרשומה נשמרת בגיליון עם תיעוד מי / מתי / למה. אין חיוב, תשלום או חידוש שמושפעים.'
         : 'ההצעה תחזור לטיוטה ריקה: הפריטים, התמחור, האישור והשליחה יימחקו (מתועד). הלקוח, התוקף והמעקב נשארים.' }),
       h('div', { class: 'pkg-row' }, [why,
         h('button', { type: 'button', class: 'btn ' + (del ? 'btn-danger' : 'btn-primary') + ' pkg-confirm-ok', text: del ? 'אישור מחיקה' : 'אישור איפוס', onclick: function (e) {

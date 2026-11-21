@@ -27,7 +27,8 @@ test('summarize: last contact = newest contact event; next action = earliest ope
   const s = CA.summarize(tasks, events, { leadId: 'L1' }, TODAY);
   assert.equal(s.lastContact.who, 'דנה');
   assert.equal(s.lastContact.when, '02/11/2026 09:15');
-  assert.equal(s.lastContact.channel, 'שיחת טלפון');
+  assert.equal(s.lastContact.channel, 'טלפון');
+  assert.equal(s.lastContact.direction, 'note', 'a record written before the kind existed is «תיעוד שיחה»');
   assert.equal(s.nextAction.id, 'task-1');
   assert.equal(s.nextAction.state, 'late');
   assert.deepEqual(s.openTasks.map((t) => t.id), ['task-1', 'task-2']);
@@ -51,8 +52,12 @@ test('summarize: a client follows its lead-era history via fromLead; undated tas
 
 test('vocabularies mirror Code.gs; submission ids are unique and token-safe', () => {
   const gs = (name) => GS.match(new RegExp('var ' + name + ' = \\[([^\\]]*)\\]'))[1].match(/'[^']+'/g).map((x) => x.slice(1, -1));
-  assert.deepEqual(CA.CHANNELS.map((c) => c.id), gs('CONTACT_CHANNELS'));
-  assert.deepEqual(CA.OUTCOMES.map((o) => o.id), gs('CONTACT_OUTCOMES'));
+  // same SETS (the source lists are append-only, the form lists follow the Dashboard CRM's order);
+  // 'meeting' stays a valid stored channel but is no longer offered by the form
+  assert.deepEqual(CA.ALL_CHANNELS.map((c) => c.id).sort(), gs('CONTACT_CHANNELS').sort());
+  assert.equal(CA.CHANNELS.some((c) => c.id === 'meeting'), false);
+  assert.deepEqual(CA.OUTCOMES.map((o) => o.id).sort(), gs('CONTACT_OUTCOMES').sort());
+  assert.deepEqual(CA.DIRECTIONS.map((d) => d.id), gs('CONTACT_DIRECTIONS'));
   assert.deepEqual(CA.TASK_KINDS.map((k) => k.id), gs('TASK_KINDS'));
   const he = GS.match(/var CONTACT_OUTCOME_HE = \{([\s\S]*?)\};/)[1];
   for (const o of CA.OUTCOMES) assert.ok(he.includes("'" + o.he + "'"), o.id + ' label mirrors Code.gs');
@@ -65,15 +70,17 @@ test('wiring: cards carry the block, modals exist, submissions reuse their key u
   assert.match(APP, /crmBlockHtml\('lead', l\)/);
   assert.match(APP, /crmBlockHtml\('client', c\)/);
   assert.match(APP, /document\.addEventListener\('click', handleCrmClick\)/);
-  for (const id of ['contactModal', 'taskModal', 'deferModal', 'contactForm', 'taskForm', 'deferForm', 'contactOutcome', 'contactNextAssignee']) assert.ok(HTML.includes('id="' + id + '"'), id);
+  for (const id of ['contactModal', 'taskModal', 'deferModal', 'contactForm', 'taskForm', 'deferForm', 'contactOutcome', 'contactNextAssignee', 'taskDoneModal', 'taskMoreModal', 'voidContactModal']) assert.ok(HTML.includes('id="' + id + '"'), id);
   assert.match(HTML, /<script src="crm-activity\.js\?v=__BUILD__" defer><\/script>/);
-  assert.match(APP, /dataset\.sid \|\| \(\$\('#contactForm'\)\.dataset\.sid = CA\.newSubmissionId\('contact'\)\)/, 'contact key minted once, kept on failure');
-  assert.match(APP, /delete \$\('#contactForm'\)\.dataset\.sid/, 'new key after success');
+  assert.match(APP, /var sid = f\.dataset\.sid \|\| \(f\.dataset\.sid = CA\.newSubmissionId\('contact'\)\)/, 'contact key minted once, kept on failure');
+  assert.match(APP, /crmPost\('logContact', body\)\.then\(function \(res\) \{\s*delete f\.dataset\.sid;/, 'new key after success');
+  assert.equal(/window\.prompt\(/.test(APP), false, 'no browser prompt anywhere — every task action is an in-app form');
   assert.match(APP, /state\.tasks === null && state\.activity === null/, 'unavailable source shows המידע אינו זמין');
   assert.match(APP, /apiGetTasks\(\)\.catch\(function \(te\) \{[^}]*return null; \}\)/, 'a failed read is null, never []');
   // no default follow-up date anywhere in the contact form
   const form = HTML.slice(HTML.indexOf('id="contactForm"'), HTML.indexOf('id="taskModal"'));
   assert.equal(/name="nextDate"[^>]*value=/.test(form), false);
   assert.equal(/name="nextDays"[^>]*value=/.test(form), false);
+  assert.equal(/type="radio"[^>]*checked/.test(form), false, 'no radio is pre-chosen in the markup');
   assert.match(APP, /\.filter\(function \(k\) \{ return !\(k\.money && isOpsScope\(\)\); \}\)/, 'ops session is not offered a money task kind');
 });

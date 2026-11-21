@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Contact record, tasks and «היום» — the same as the Dashboard CRM (2026-11-21)
+- Lead cards AND patient cards carry one activity block: «⏰ מה הלאה» (what · when · who), «שיחות אחרונות» (kind chip), open tasks, «📞 תיעוד שיחה» / «➕ משימה חדשה», history.
+- «תיעוד שיחה»: three kinds (שיחה יוצאת / שיחה נכנסת / תיעוד שיחה — none pre-chosen), the Dashboard's fields, new outcome «התקיימה שיחה — לא נדרש המשך», «קשר הבא» with no default and the real date shown. Stored in `detailsJson` — no sheet column.
+- Tasks: a new task needs a date AND a time; a call closes only through the contact record; «שינוי מועד» needs a reason only for a date promised in a call; every `window.prompt` replaced by an in-app form.
+- New source action `voidContact` («ביטול תיעוד», ורד only at Node and at the source): append-only `contact_voided` event; the open follow-up the record created is cancelled with it; a voided record is no longer «contacted» anywhere, including the Dashboard handoff feed.
+- «היום שלי» → «היום», heading «כל הצוות». New-lead form in the Dashboard's layout. SW cache v41 → v42. **Apps Script release needed.** See CHANGELOG-crm-dashboard-parity.md.
+
+### איש קשר של ליד — the caller's details on a lead (2026-11-21)
+- Lead form: optional «פרטי הפונה / איש קשר» — name, phone, relation to the patient (the Dashboard's list). Shown on the lead card, offered in «תיעוד שיחה» («עם מי» pre-filled), and written to the patient's «הערות» when the lead becomes a patient.
+- `Leads` sheet: `contactName`, `contactPhone`, `contactRelation` appended at the end (19 → 22). Validated at the source; a tab loaded before the release never blanks them; the contact phone is never a patient match key. The removed-leads archive is deliberately unchanged. **Apps Script release needed.** See CHANGELOG-lead-contact-person.md.
+
+### Tests: the continuation-milestone sync tests no longer depend on today's date (2026-11-21)
+- `test/continuation-milestones.test.js` used fixed calendar fixtures (entry 20/10/2026 → first milestone 20/11/2026) against the real clock, so five tests went red on 2026-11-21 — on the deploy branch itself, before any change. The clock is now pinned INSIDE the Apps Script sandbox for that file only (the day the fixtures were written). Test-only: no source or app change.
+
+### «טיפול תחלואה כפולה» — new plan treatment type (2026-11-21)
+- Selectable in every plan picker, with its own frequency; shown on the card and sent to the therapists app in the plan. Plan-only: no price, no billing mapping, no therapist rate yet, so it is not offered as a charge and a session cannot be recorded under it. See CHANGELOG-dual-diagnosis-plan-type.md.
+
 ### Payroll report emailed to מורן from the therapists app (2026-11-19)
 - New source action `sendPayrollReport` (Therapists Apps Script → here, dedicated `PAYROLL_SEND_SECRET`, fail-closed, ≥ 32 chars). It builds the month's therapist-payout report from SessionLog — byte-identical to «תשלומי מטפלים» → «ייצוא לאקסל» (mirror of `therapist-payout.js` + `payout-export.js`, parity-tested) — emails it with the CSV attached to the Script Property `PAYROLL_REPORT_EMAIL`, then stamps `forwardedToPayroll` (each row's own month) on exactly the reported rows. Mail first, stamp after: a failed send stamps nothing. A second press sends only late rows (הפרשים); an empty report answers `nothing_to_send`, so nothing is emailed twice. Counts-only reply (the coordinator never sees pay). Audit row `payroll_sent`. No sheet column, no UI change here; «תשלומי מטפלים» stays as a fallback until the first real send. See CHANGELOG-payroll-email.md.
 

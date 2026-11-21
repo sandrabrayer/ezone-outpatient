@@ -1,4 +1,4 @@
-/* «היום שלי» for the Outpatient app (OP-CRM-1, CHANGELOG-my-day.md).
+/* «היום» (the team's day; «היום שלי» until 2026-11-21) for the Outpatient app (OP-CRM-1, CHANGELOG-my-day.md).
  *
  * The opening screen answers, for the signed-in person: what is urgent, why
  * now, what happened, and what she can do — the same model as the Dashboard
@@ -84,8 +84,15 @@
     (cont || []).forEach(function (r) { if (r && s(r.patientRef) && !nameOf['client:cont:' + s(r.patientRef)]) nameOf['client:cont:' + s(r.patientRef)] = s(r.name); });
     // last logged contact per subject (newest first) — shown on every row so «מה היה» sits next to «מה עכשיו»
     var lastContactOf = {};
+    // a contact record voided by mistake (a contact_voided event names it) is not a contact
+    var voidedContacts = {};
+    (activity || []).forEach(function (e) {
+      if (!e || e.kind !== 'contact_voided') return;
+      var vd = {}; try { vd = e.detailsJson ? JSON.parse(e.detailsJson) : {}; } catch (_) { vd = {}; }
+      if (vd && s(vd.supersedesEventId)) voidedContacts[s(vd.supersedesEventId)] = true;
+    });
     (activity || []).slice().sort(function (a, b) { return s(b.occurredAt) < s(a.occurredAt) ? -1 : s(b.occurredAt) > s(a.occurredAt) ? 1 : 0; }).forEach(function (e) {
-      if (!e || e.kind !== 'contact_logged') return;
+      if (!e || e.kind !== 'contact_logged' || voidedContacts[s(e.eventId)]) return;
       var d = {}; try { d = e.detailsJson ? JSON.parse(e.detailsJson) : {}; } catch (_) { d = {}; }
       ['lead:' + s(e.leadId), 'client:' + s(e.clientId)].forEach(function (k) {
         if (k === 'lead:' || k === 'client:' || lastContactOf[k]) return;
@@ -107,7 +114,7 @@
     }
     // first contact: a lead with a logged contact is «ממתין» rather than «ללא קשר ראשון»
     var contacted = {};
-    (activity || []).forEach(function (e) { if (e && e.kind === 'contact_logged' && s(e.leadId)) contacted[s(e.leadId)] = true; });
+    (activity || []).forEach(function (e) { if (e && e.kind === 'contact_logged' && s(e.leadId) && !voidedContacts[s(e.eventId)]) contacted[s(e.leadId)] = true; });
     openTasks.forEach(function (t) {
       var d = isoDay(t.dueDate), tm = s(t.dueTime);
       var st = !d ? 'undated' : d < today ? 'late' : d === today ? 'today' : 'wait';
@@ -255,7 +262,7 @@
     return { today: today, money: money, cards: cards, rowsBy: rowsBy, urgent: urgent, sections: sections, overduePayments: overduePayments, domains: DOMAINS.filter(function (d) { return !d.money || money; }), total: all.length };
   }
 
-  var CONTACT_OUTCOME_HE = { spoke_follow_up: 'שיחה — נדרש המשך', no_answer: 'אין מענה', call_back_later: 'לחזור במועד', awaiting_decision: 'ממתינים להחלטה', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע', bad_contact_details: 'פרטי קשר שגויים', stop_contact: 'ביקש/ה הפסקת פניות' };
+  var CONTACT_OUTCOME_HE = { spoke_no_follow_up: 'שיחה — לא נדרש המשך', spoke_follow_up: 'שיחה — נדרש המשך', no_answer: 'אין מענה', call_back_later: 'לחזור במועד', awaiting_decision: 'ממתינים להחלטה', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע', bad_contact_details: 'פרטי קשר שגויים', stop_contact: 'ביקש/ה הפסקת פניות' };
   function lastContactText(r) {
     var lc = r && r.lastContact;
     if (!lc) return '';
