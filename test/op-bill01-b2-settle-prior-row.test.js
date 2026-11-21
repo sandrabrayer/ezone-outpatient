@@ -29,10 +29,13 @@ function renewal(sb, opId, paidDate, extra = {}) {
   const st = sb.post({ action: 'getRenewalState', clientId: client.id });
   assert.equal(st.ok, true, JSON.stringify(st));
   const cycle = st.cycleDate;
-  const win = CL.paymentDateCoverage(paidDate, cycle);
+  const recorded = extra.priorPayment && st.priorPayment && CL.recordedCoverage(st.priorPayment);
+  const win = recorded ? { start: CL.isoFromLocalDate(recorded.start), end: CL.isoFromLocalDate(recorded.end),
+    next: CL.isoFromLocalDate(CL.addDays(recorded.end, 1)) } : CL.paymentDateCoverage(paidDate);
   const request = { action: 'reserveRenewal', opId, clientId: client.id, snapshot: st.snapshot, cycleDate: cycle,
+    coverageIntent: recorded ? 'advance' : 'ordinary',
     patch: { pricePerSession: 500, paymentDate: paidDate, nextBillingDate: win.next },
-    payment: { id: 'pay::C1::base::' + cycle.slice(0, 7), clientId: client.id, clientName: client.name,
+    payment: { id: extra.priorPayment ? st.paymentId : 'pay::C1::base::' + cycle, clientId: client.id, clientName: client.name,
       billingType: 'monthly', dueDate: cycle, amountDue: 500, amountPaid: 500, status: 'paid',
       paymentDate: paidDate, coverageStart: win.start, coverageEnd: win.end, notes: '' }, ...extra };
   return { cycle, win, request, reserve: () => sb.post(request), apply: () => sb.post({ action: 'applyRenewal', opId }) };
@@ -59,15 +62,15 @@ test('B2: an existing PARTIAL row of the due cycle is settled in place by the re
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'paid');
   assert.equal(String(rows[0].amountPaid), '500');
-  assert.equal(rows[0].coverageStart, '2026-11-10');
-  assert.equal(rows[0].coverageEnd, '2026-12-09');
-  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-10');
+  assert.equal(rows[0].coverageStart, '2026-11-01', 'the partial receipt already allocated this period');
+  assert.equal(rows[0].coverageEnd, '2026-11-30');
+  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-01');
   const op = JSON.parse(sb.rows('FinancialOps')[0].intent);
   assert.deepEqual(op.priorExpected, { id: 'pay::C1::base::2026-11', status: 'partial', amountPaid: '200' });
   assert.equal(Array.isArray(op.prior), true, 'the observed row is pinned in the journal');
 });
 
-test('B2: an existing UNPAID overdue row is settled in place; the window follows the late payment date', () => {
+test('B2: an existing UNPAID overdue row is settled in place without replacing its recorded period', () => {
   const sb = sandbox([], [{ ...client }]);
   seedPrior(sb, {});
   sb.ctx._todayISODate = () => '2026-11-12';
@@ -78,7 +81,34 @@ test('B2: an existing UNPAID overdue row is settled in place; the window follows
   assert.equal(sb.rows('Payments').length, 1);
   assert.equal(sb.rows('Payments')[0].status, 'paid');
   assert.equal(sb.rows('Payments')[0].notes, '');
-  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-12');
+  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-01');
+  assert.deepEqual([sb.rows('Payments')[0].coverageStart, sb.rows('Payments')[0].coverageEnd], ['2026-11-01', '2026-11-30']);
+});
+
+test('B2: a prior row with no recorded period can use the selected ordinary paid-date window', () => {
+  const sb = mk();
+  seedPrior(sb, { coverageStart: '', coverageEnd: '', status: 'partial', amountPaid: 200 });
+  const r = renewal(sb, 'renew-b2-blank-000001', '2026-11-10',
+    { priorPayment: { id: 'pay::C1::base::2026-11', status: 'partial', amountPaid: 200 } });
+  assert.equal(r.request.coverageIntent, 'ordinary');
+  assert.equal(r.reserve().ok, true);
+  assert.equal(r.apply().operation.state, 'done');
+  assert.equal(sb.rows('Payments').length, 1);
+  assert.deepEqual([sb.rows('Payments')[0].coverageStart, sb.rows('Payments')[0].coverageEnd], ['2026-11-10', '2026-12-09']);
+  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-10');
+});
+
+test('B2: changing the recorded period while settling a prior row is refused before a journal write', () => {
+  const sb = mk(); seedPrior(sb, { status: 'partial', amountPaid: 200 });
+  const r = renewal(sb, 'renew-b2-period-00001', '2026-11-10',
+    { priorPayment: { id: 'pay::C1::base::2026-11', status: 'partial', amountPaid: 200 } });
+  r.request.coverageIntent = 'ordinary';
+  r.request.payment.coverageStart = '2026-11-10';
+  r.request.payment.coverageEnd = '2026-12-09';
+  r.request.patch.nextBillingDate = '2026-12-10';
+  assert.equal(r.reserve().error, 'renewal_recorded_coverage_changed');
+  assert.equal(sb.rows('FinancialOps').length, 0);
+  assert.equal(sb.rows('Payments')[0].coverageStart, '2026-11-01');
 });
 
 test('B2: without a prior expectation an existing row is still refused; a stale or paid expectation is refused with no journal write', () => {
@@ -145,25 +175,23 @@ function chipFixture(payments, clientOverrides) {
   ctx.state.role = 'editor';
   ctx.state.payments = payments;
   ctx.monthPaidPrevClient = {};
+  ctx.openRenewModal = c => { f.out.closed.push({ modal: 'renew', id: c.id }); };
   ctx.persist = async () => { f.out.writes.push({ kind: 'persist', client: JSON.parse(JSON.stringify(f.client)) }); };
   for (const name of ['paymentKindFromId', 'findPaymentById', 'paymentForClientOn', 'legacyBasePaymentId',
     'latestPaidBaseDueDate', 'prevCycleDueDateBefore', 'addDays', 'setCurrentMonthPaid']) vm.runInContext(named(name), ctx);
   return f;
 }
 
-test('B2 UI: the quick chip settles an OVERDUE unpaid cycle — explicit B1 window on the row, anchor = window end + 1', async () => {
+test('B2 UI: the quick chip opens the journalled intent form without writing an overdue payment optimistically', async () => {
   const f = chipFixture([{ id: 'pay::fixture-client::base::2026-10', clientId: 'fixture-client', billingType: 'monthly',
     dueDate: '2026-10-01', amountDue: 500, amountPaid: 0, status: 'unpaid', paymentDate: '',
     coverageStart: '2026-10-01', coverageEnd: '2026-10-31' }]);
   f.ctx.setCurrentMonthPaid(f.client, true);
   await settled(); await settled(); await settled();
-  const pay = f.out.writes.find((w) => w.kind === 'payment');
-  assert.ok(pay, 'the row was persisted');
-  assert.equal(pay.row.status, 'paid');
-  assert.equal(pay.row.paymentDate, '2026-10-18');
-  assert.deepEqual([pay.row.coverageStart, pay.row.coverageEnd], ['2026-10-18', '2026-11-17']);
-  const persisted = f.out.writes.find((w) => w.kind === 'persist');
-  assert.equal(persisted.client.nextBillingDate, '2026-11-18');
+  assert.deepEqual(f.out.writes, []);
+  assert.deepEqual(f.out.closed, [{ modal: 'renew', id: f.client.id }]);
+  assert.equal(f.client.nextBillingDate, '2026-10-01');
+  assert.equal(f.ctx.state.payments[0].status, 'unpaid');
   assert.ok(!f.out.notices.some((n) => n.error), JSON.stringify(f.out.notices));
 });
 
@@ -174,17 +202,19 @@ test('B2 UI: the chip never overwrites an explicitly recorded different period, 
   explicit.ctx.setCurrentMonthPaid(explicit.client, true);
   await settled();
   assert.equal(explicit.out.writes.length, 0);
-  assert.ok(explicit.out.notices.some((n) => n.error && /בירור/.test(n.message)));
+  assert.deepEqual(explicit.out.closed, [{ modal: 'renew', id: explicit.client.id }]);
+  assert.equal(explicit.ctx.state.payments[0].coverageEnd, '2026-11-30');
 
   const paid = chipFixture([{ id: 'pay::fixture-client::base::2026-10', clientId: 'fixture-client', billingType: 'monthly',
     dueDate: '2026-10-01', amountDue: 500, amountPaid: 500, status: 'paid', paymentDate: '2026-10-01' }]);
   paid.ctx.setCurrentMonthPaid(paid.client, true);
   await settled();
   assert.equal(paid.out.writes.length, 0);
-  assert.ok(paid.out.notices.some((n) => n.error));
+  assert.deepEqual(paid.out.closed, [{ modal: 'renew', id: paid.client.id }]);
+  assert.equal(paid.ctx.state.payments[0].paymentDate, '2026-10-01');
 });
 
-test('B2 UI: the billing editor routes the DUE cycle to the renewal and settles OLDER arrears directly with the B1 window', async () => {
+test('B2 UI: the billing editor routes the DUE cycle to renewal and preserves recorded OLDER arrears coverage', async () => {
   const f = uiFixture();
   const { ctx } = f;
   ctx.state.role = 'editor';
@@ -205,16 +235,17 @@ test('B2 UI: the billing editor routes the DUE cycle to the renewal and settles 
   const pay = f.out.writes.find((w) => w.kind === 'payment');
   assert.ok(pay);
   assert.equal(pay.row.id, 'pay::fixture-client::base::2026-08');
-  assert.deepEqual([pay.row.coverageStart, pay.row.coverageEnd], ['2026-10-18', '2026-11-17']);
+  assert.deepEqual([pay.row.coverageStart, pay.row.coverageEnd], ['2026-08-01', '2026-08-31']);
   assert.equal(f.client.nextBillingDate, '2026-10-01');
   // a brand-new row (no prior) still goes to the renewal
   ctx.saveBillingRow({ ...due, id: 'pay::fixture-client::base::2026-11', dueDate: '2026-11-01', status: 'paid', amountPaid: 500, paymentDate: '2026-10-18' });
   assert.equal(f.out.writes.filter((w) => w.kind === 'renew').length, 2);
 });
 
-test('B1/B2 UI wiring: renewal, edit, intake and activation pass the cycle to the window and the renewal pins the prior row', () => {
+test('B1/B2 UI wiring: renewal uses an explicit coverage selection and source prior row; first-payment paths remain paid-date based', () => {
   const renew = named('submitDurableRenewal');
-  assert.match(renew, /CL\.paymentDateCoverage\(paidDate, renewSourceState\.cycleDate\)/);
+  assert.match(renew, /renewalCoverageSelection\(form\)/);
+  assert.match(renew, /var priorRow = renewSourceState\.priorPayment/);
   assert.match(renew, /renewRow\.coverageStart = paidCoverage\.start/);
   assert.match(renew, /request\.priorPayment = \{ id: priorRow\.id, status: priorRow\.status, amountPaid: priorRow\.amountPaid \}/);
   assert.match(source, /CL\.paymentDateCoverage\(client\.paymentDate, cycleDueISO\)/);

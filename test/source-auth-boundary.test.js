@@ -61,8 +61,19 @@ for (const [method, actions] of Object.entries(policies)) {
       const field = key === 'OUTPATIENT_PROXY_SECRET' ? 'proxySecret' : 'secret';
       const good = key === 'OUTPATIENT_PROXY_SECRET' ? PROXY : 'fixture-scoped-' + key;
       const f = fixture({ [key]: good });
-      assert.equal(f.request(method, action, { [field]: good }).ok, true);
-      assert.equal(f.calls.length, 1);
+      const result = f.request(method, action, { [field]: good });
+      assert.equal(result.ok, true);
+      // Two new data-free rollout capability endpoints respond from the router
+      // itself. They MUST NOT touch Google Sheets or invoke a business handler.
+      const probe = method === 'GET' &&
+        (action === 'getTherapistsGroupContract' || action === 'getTherapistsExtraContract');
+      if (probe) {
+        assert.equal(result.protocol, action === 'getTherapistsGroupContract' ?
+          'out-thr-group-v1' : 'out-thr-extra-v1');
+        assert.equal(f.calls.length, 0);
+      } else {
+        assert.equal(f.calls.length, 1);
+      }
       assert.equal(f.touched(), 0);
     });
   }

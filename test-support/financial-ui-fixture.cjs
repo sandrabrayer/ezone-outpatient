@@ -22,6 +22,11 @@ function handler(formName) {
 }
 const copy = (v) => JSON.parse(JSON.stringify(v));
 function fixture(fields = {}) {
+  fields = { renewCoverageIntent: 'ordinary', ...fields };
+  const form = { querySelectorAll: () => [] };
+  for (const name of ['renewCoverageIntent', 'renewCoverageStart', 'renewCoverageEnd', 'renewDate']) {
+    form[name] = { get value() { return fields[name] || ''; }, set value(v) { fields[name] = v; } };
+  }
   const button = { disabled: false }, warning = { hidden: true }, warningText = {};
   const client = { id: 'fixture-client', name: 'מטופל בדיקה', phone: '0500000001', billingDay: 1,
     startDate: '2026-09-01', nextBillingDate: '2026-10-01', pricePerSession: 500,
@@ -66,11 +71,11 @@ function fixture(fields = {}) {
   vm.runInContext(source.match(/var COMPLEMENTARY_HE = \{[^}]*\};/)[0], ctx);
   // the shared busy-spinner adapters the submit handlers call (public/busy.js is absent here → plain disabled)
   for (const name of ['busyApi', 'busyRun', 'busyStart', 'busyEnd', 'busyIs', 'preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
-    'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
+    'paymentId', 'cyclePaymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate', 'addDays', 'renewalCoverageSelection',
     'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);
-  return { ctx, client, lead, out, button, warning, warningText,
+  return { ctx, client, lead, out, button, warning, warningText, form,
     submit: (name) => vm.runInContext(handler(name), ctx)({ preventDefault() {}, target: {} }) };
 }
 const settled = () => new Promise(setImmediate);

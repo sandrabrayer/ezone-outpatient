@@ -1,113 +1,16 @@
 'use strict';
 
-/**
- * Coverage for the secured `deactivateClient` cross-app receiver in
- * apps-script/Code.gs — the outpatient pair to the E-Zone Therapists
- * delete-propagation sender (ezone-therapists PR #24, `_postDeactivateClient`).
- * Run with:  npm test     (Node >= 18, built-in runner)
- *
- * Code.gs cannot be imported in the Node runtime, so the pure logic below mirrors
- * `_deactivateAuthOk`, `_recoverPhone`, and `_deactivateClient` (minus the sheet
- * I/O — the Clients sheet is an in-memory array, mutated exactly as the real
- * positional write would persist it). To keep the behaviour honest, the
- * `CLIENTS_HEADERS` and the `DEACTIVATED_CLIENT_STATUS_HE` value are PARSED out of
- * Code.gs (not re-typed), like the other receiver tests.
- *
- * Contracts locked (sender contract from PR #24):
- *   - action `deactivateClient`, payload { action, secret, phone }, response
- *     { ok:true, deactivated:N }
- *   - auth is FAIL-CLOSED on a DEDICATED `DEACTIVATE_CLIENT_SECRET` (unset/empty/
- *     wrong rejected) — NOT reused from STOP_FLAG_SECRET
- *   - deactivates by canonical phone (sets status, not a hard delete)
- *   - dropped-leading-zero phone still matches
- *   - no match -> { ok:true, deactivated:0 } (orphan-safe, never a crash)
- *   - a deactivated client is excluded from getTreatmentPlans AND getDebtStatus
- *   - discharged (`סיים טיפול`) clients are NOT excluded (debt survives discharge)
- */
-
+/* Real Apps Script doPost/doGet handlers in the shared in-memory Google runtime.
+ * Cross-app contract: a unique canonical phone/contact/payer match is softly
+ * deactivated; no match is a successful no-op; ambiguous matches change no row.
+ * No receiver, auth, normalization, or feed projection is mirrored here. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { sandbox } = require('../test-support/apps-script-sandbox.js');
 
-const GS = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
-
-// --- parse CLIENTS_HEADERS out of Code.gs (no re-typed list) -----------------
-function clientsHeaders() {
-  const m = GS.match(/var CLIENTS_HEADERS = \[([\s\S]*?)\];/);
-  assert.ok(m, 'CLIENTS_HEADERS not found in Code.gs');
-  return m[1]
-    .split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n')
-    .match(/'[^']*'/g).map((s) => s.slice(1, -1));
-}
-
-// --- parse the DEACTIVATED status value out of Code.gs -----------------------
-function deactivatedStatus() {
-  const m = GS.match(/var DEACTIVATED_CLIENT_STATUS_HE = '([^']*)';/);
-  assert.ok(m, 'DEACTIVATED_CLIENT_STATUS_HE not found in Code.gs');
-  return m[1];
-}
-
-const H = clientsHeaders();
-const DEACTIVATED = deactivatedStatus();
+const SECRET = 'synthetic-deactivation-secret';
+const DEACTIVATED = 'לא פעיל';
 const DISCHARGED = 'סיים טיפול';
-
-// --- pure mirror of Code.gs --------------------------------------------------
-function recoverPhone(raw) {
-  if (raw === null || raw === undefined) return '';
-  let s = String(raw).replace(/[\s\-()]/g, '');
-  if (s.indexOf('+') === 0) s = s.slice(1);
-  if (s.indexOf('00') === 0) s = s.slice(2);
-  s = s.replace(/\D/g, '');
-  if (!s) return '';
-  if (s.indexOf('972') === 0) s = '0' + s.slice(3);
-  else if (s.charAt(0) !== '0') s = '0' + s;
-  return s;
-}
-
-function deactivateAuthOk(expected, got) {
-  if (!expected) return false; // fail-closed: not configured -> reject
-  const g = (got != null) ? String(got) : '';
-  return g !== '' && g === expected;
-}
-
-// Mirror of _deactivateClient minus the sheet I/O: `clients` is the in-memory
-// array (mutated in place exactly as the positional setValue would persist it).
-function deactivateClient(payload, clients) {
-  const phone = recoverPhone(payload && payload.phone);
-  if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, reason: 'invalid_phone' };
-  let deactivated = 0;
-  for (const c of clients) {
-    if (recoverPhone(c.phone) !== phone &&
-        recoverPhone(c.treatmentContactPhone) !== phone &&
-        recoverPhone(c.payerPhone) !== phone) continue;
-    if (String(c.status) === DEACTIVATED) continue; // already -> not re-counted
-    c.status = DEACTIVATED;
-    deactivated++;
-  }
-  return { ok: true, deactivated };
-}
-
-// Mirror of _getTreatmentPlans projection (with the new deactivation exclusion).
-function projectPlans(clients) {
-  return (clients || [])
-    .filter((c) => c && c.id != null && String(c.id))
-    .filter((c) => c.status !== DEACTIVATED)
-    .map((cl) => ({
-      sourceApp: 'ezone-outpatient', clientId: String(cl.id), name: cl.name || '',
-      phone: recoverPhone(cl.phone) || recoverPhone(cl.treatmentContactPhone),
-      serviceType: cl.serviceType || '', sessions: cl.sessionsPerWeek || '',
-      status: cl.status || ''
-    }));
-}
-
-// Mirror of the _getDebtStatus client loop's inclusion rule.
-function debtClientIds(clients) {
-  return (clients || [])
-    .filter((c) => c && c.id != null && String(c.id))
-    .filter((c) => c.status !== DEACTIVATED)
-    .map((c) => String(c.id));
-}
 
 function freshClients() {
   return [
@@ -116,135 +19,177 @@ function freshClients() {
     { id: 'c3', name: 'מאיה', status: DISCHARGED, phone: '0541111111', treatmentContactPhone: '', payerPhone: '' }
   ];
 }
+function fixture(clients = freshClients()) {
+  const sb = sandbox([], clients);
+  sb.props.DEACTIVATE_CLIENT_SECRET = SECRET;
+  sb.props.TREATMENT_PLANS_SECRET = 'synthetic-plans-secret';
+  sb.props.DEBT_STATUS_SECRET = 'synthetic-debt-secret';
+  return sb;
+}
+// Match the THR sender: dedicated secret in the JSON body, no internal proxy key.
+function request(sb, body) {
+  return JSON.parse(sb.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify({ action: 'deactivateClient', ...body }) } }).getContent());
+}
+const deactivate = (sb, phone) => request(sb, { secret: SECRET, phone });
+const snapshot = sb => JSON.stringify(Object.fromEntries(Object.entries(sb.sheets).map(([name, sh]) => [name, sh.grid])));
+const feed = (sb, action, key) => sb.get({ action, secret: sb.props[key] });
 
-// --- the receiver uses a dedicated status, distinct from discharge ----------
-test('the deactivation status is its own value, not the discharge status', () => {
-  assert.equal(DEACTIVATED, 'לא פעיל');
+test('the actual receiver uses a deactivation status distinct from discharge', () => {
+  const sb = fixture();
+  assert.equal(sb.ctx.DEACTIVATED_CLIENT_STATUS_HE, DEACTIVATED);
   assert.notEqual(DEACTIVATED, DISCHARGED);
 });
 
-// --- auth is fail-closed on a DEDICATED secret ------------------------------
-test('auth is fail-closed: unset / empty / wrong DEACTIVATE_CLIENT_SECRET rejected', () => {
-  assert.equal(deactivateAuthOk('', 'anything'), false);   // property unset -> reject
-  assert.equal(deactivateAuthOk(null, 'anything'), false);
-  assert.equal(deactivateAuthOk('d3act', ''), false);      // empty provided
-  assert.equal(deactivateAuthOk('d3act', null), false);
-  assert.equal(deactivateAuthOk('d3act', 'wrong'), false);
+test('doPost auth rejects unset, empty, missing and wrong dedicated secrets without source writes', () => {
+  const sb = fixture();
+  const before = snapshot(sb);
+  for (const configured of [undefined, null, '']) {
+    sb.props.DEACTIVATE_CLIENT_SECRET = configured;
+    assert.deepEqual(request(sb, { secret: SECRET, phone: '0501234567' }), { ok: false, error: 'unauthorized' });
+  }
+  sb.props.DEACTIVATE_CLIENT_SECRET = SECRET;
+  for (const secret of [undefined, null, '', 'wrong']) {
+    assert.deepEqual(request(sb, { secret, phone: '0501234567' }), { ok: false, error: 'unauthorized' });
+  }
+  assert.equal(snapshot(sb), before);
+  assert.equal(sb.isLocked(), false);
 });
 
-test('auth accepts the exact configured secret', () => {
-  assert.equal(deactivateAuthOk('d3act', 'd3act'), true);
+test('doPost accepts the exact configured dedicated secret', () => {
+  assert.deepEqual(deactivate(fixture(), '0501234567'), { ok: true, deactivated: 1 });
 });
 
-test('the receiver keys off DEACTIVATE_CLIENT_SECRET, never STOP_FLAG_SECRET', () => {
-  // The dedicated-secret contract (least authority) must be wired in Code.gs.
-  assert.match(GS, /_deactivateAuthOk[\s\S]*?getProperty\('DEACTIVATE_CLIENT_SECRET'\)/);
-  // and the deactivate auth fn must NOT read STOP_FLAG_SECRET
-  const fn = GS.match(/function _deactivateAuthOk[\s\S]*?\n}/)[0];
-  assert.equal(/STOP_FLAG_SECRET/.test(fn), false);
+test('STOP_FLAG_SECRET and the internal proxy key cannot authorize deactivation', () => {
+  const sb = fixture();
+  sb.props.STOP_FLAG_SECRET = 'synthetic-stop-only';
+  const before = snapshot(sb);
+  assert.deepEqual(request(sb, { secret: sb.props.STOP_FLAG_SECRET, phone: '0501234567' }), { ok: false, error: 'unauthorized' });
+  assert.deepEqual(request(sb, { proxySecret: sb.props.OUTPATIENT_PROXY_SECRET, phone: '0501234567' }), { ok: false, error: 'unauthorized' });
+  delete sb.props.DEACTIVATE_CLIENT_SECRET;
+  assert.deepEqual(request(sb, { secret: sb.props.STOP_FLAG_SECRET, phone: '0501234567' }), { ok: false, error: 'unauthorized' });
+  assert.equal(snapshot(sb), before);
 });
 
-// --- deactivates by phone (soft, not hard delete) ---------------------------
-test('deactivates the matching client by phone; sets status, returns deactivated:1', () => {
-  const clients = freshClients();
-  const res = deactivateClient({ phone: '0501234567' }, clients);
-  assert.deepEqual(res, { ok: true, deactivated: 1 });
-  assert.equal(clients[0].status, DEACTIVATED);
-  // soft, not deleted — the row and its fields are still present
-  assert.equal(clients[0].id, 'c1');
-  assert.equal(clients[0].name, 'אורי');
+test('unique phone match softly deactivates one row and preserves every other client', () => {
+  const sb = fixture();
+  const before = sb.rows('Clients');
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 1 });
+  const clients = sb.rows('Clients');
   assert.equal(clients.length, 3);
-  // other rows untouched
-  assert.equal(clients[1].status, 'פעיל');
-  assert.equal(clients[2].status, DISCHARGED);
+  assert.equal(clients[0].status, DEACTIVATED);
+  assert.equal(clients[0].id, before[0].id);
+  assert.equal(clients[0].name, before[0].name);
+  assert.match(clients[0].updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(clients.slice(1), before.slice(1));
+  assert.equal(sb.isLocked(), false);
 });
 
-test('matches via treatmentContactPhone and payerPhone too', () => {
-  let clients = freshClients();
-  assert.deepEqual(deactivateClient({ phone: '0527654321' }, clients), { ok: true, deactivated: 1 });
-  assert.equal(clients[1].status, DEACTIVATED);
-
-  clients = freshClients();
+test('unique treatment contact and payer phone matches retain the sender contract', () => {
+  const contact = fixture();
+  assert.deepEqual(deactivate(contact, '0527654321'), { ok: true, deactivated: 1 });
+  assert.equal(contact.rows('Clients')[1].status, DEACTIVATED);
+  const clients = freshClients();
   clients[0].payerPhone = '0539998877';
-  assert.deepEqual(deactivateClient({ phone: '0539998877' }, clients), { ok: true, deactivated: 1 });
-  assert.equal(clients[0].status, DEACTIVATED);
+  const payer = fixture(clients);
+  assert.deepEqual(deactivate(payer, '0539998877'), { ok: true, deactivated: 1 });
+  assert.equal(payer.rows('Clients')[0].status, DEACTIVATED);
 });
 
-// --- dropped-leading-zero / intl phone still matches ------------------------
-test('dropped-leading-zero (numeric) phone still matches', () => {
+test('dropped-leading-zero numeric stored phone still matches', () => {
   const clients = freshClients();
-  clients[0].phone = 501234567; // Sheets coerced to a number, dropped the 0
-  const res = deactivateClient({ phone: '0501234567' }, clients);
-  assert.deepEqual(res, { ok: true, deactivated: 1 });
-  assert.equal(clients[0].status, DEACTIVATED);
+  clients[0].phone = 501234567;
+  const sb = fixture(clients);
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 1 });
+  assert.equal(sb.rows('Clients')[0].status, DEACTIVATED);
 });
 
-test('normalized inbound phone (+972 / dashes) matches a canonical stored phone', () => {
+test('international inbound phone with punctuation matches the unique canonical phone', () => {
+  const sb = fixture();
+  assert.deepEqual(deactivate(sb, '+972-50-1234567'), { ok: true, deactivated: 1 });
+  assert.equal(sb.rows('Clients')[0].status, DEACTIVATED);
+});
+
+test('no match is an orphan-safe no-op preserving the client rows', () => {
+  const sb = fixture();
+  const before = sb.rows('Clients');
+  assert.deepEqual(deactivate(sb, '0509999999'), { ok: true, deactivated: 0 });
+  assert.deepEqual(sb.rows('Clients'), before);
+});
+
+test('empty client sheet is an orphan-safe no-op', () => {
+  const sb = fixture([]);
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 0 });
+  assert.deepEqual(sb.rows('Clients'), []);
+});
+
+test('invalid phone is rejected without source writes', () => {
+  const sb = fixture();
+  const before = snapshot(sb);
+  for (const phone of ['12345', '', null]) {
+    assert.deepEqual(deactivate(sb, phone), { ok: false, reason: 'invalid_phone' });
+  }
+  assert.equal(snapshot(sb), before);
+});
+
+test('retrying an already-deactivated unique client returns zero without restamping', () => {
+  const sb = fixture();
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 1 });
+  const before = sb.rows('Clients');
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 0 });
+  assert.deepEqual(sb.rows('Clients'), before);
+});
+
+test('shared primary phone refuses the entire call before any source write', () => {
   const clients = freshClients();
-  assert.deepEqual(deactivateClient({ phone: '+972-50-1234567' }, clients), { ok: true, deactivated: 1 });
-  assert.equal(clients[0].status, DEACTIVATED);
+  clients.push({ id: 'c4', name: 'אורי תאום', status: 'פעיל', phone: '0501234567' });
+  const sb = fixture(clients);
+  const before = snapshot(sb);
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: false, error: 'ambiguous_client', reason: 'ambiguous_client', deactivated: 0 });
+  assert.equal(snapshot(sb), before);
+  assert.equal(sb.isLocked(), false);
 });
 
-// --- orphan-safe: no match -> deactivated:0, no crash -----------------------
-test('no match returns { ok:true, deactivated:0 } (orphan-safe)', () => {
+test('shared contact or payer refuses even when one matching person is already inactive', () => {
+  for (const field of ['treatmentContactPhone', 'payerPhone']) {
+    const clients = freshClients();
+    clients[0][field] = '0539998877';
+    clients[1][field] = '+972-53-9998877';
+    clients[1].status = DEACTIVATED;
+    const sb = fixture(clients);
+    const before = snapshot(sb);
+    assert.deepEqual(deactivate(sb, '0539998877'), { ok: false, error: 'ambiguous_client', reason: 'ambiguous_client', deactivated: 0 });
+    assert.equal(snapshot(sb), before);
+  }
+});
+
+test('one row matching multiple phone fields is still one unambiguous client', () => {
   const clients = freshClients();
-  const before = JSON.stringify(clients);
-  const res = deactivateClient({ phone: '0509999999' }, clients);
-  assert.deepEqual(res, { ok: true, deactivated: 0 });
-  assert.equal(JSON.stringify(clients), before); // nothing changed
+  clients[0].treatmentContactPhone = '+972-50-1234567';
+  clients[0].payerPhone = '0501234567';
+  const sb = fixture(clients);
+  assert.deepEqual(deactivate(sb, '0501234567'), { ok: true, deactivated: 1 });
 });
 
-test('empty client list is orphan-safe', () => {
-  assert.deepEqual(deactivateClient({ phone: '0501234567' }, []), { ok: true, deactivated: 0 });
-});
-
-test('invalid phone is rejected before any scan', () => {
-  const clients = freshClients();
-  assert.deepEqual(deactivateClient({ phone: '12345' }, clients), { ok: false, reason: 'invalid_phone' });
-  assert.deepEqual(deactivateClient({ phone: '' }, clients), { ok: false, reason: 'invalid_phone' });
-  assert.equal(clients[0].status, 'פעיל'); // untouched
-});
-
-// --- idempotent + multi-row -------------------------------------------------
-test('idempotent: re-deactivating an already-deactivated client returns 0', () => {
-  const clients = freshClients();
-  assert.equal(deactivateClient({ phone: '0501234567' }, clients).deactivated, 1);
-  assert.equal(deactivateClient({ phone: '0501234567' }, clients).deactivated, 0); // already
-  assert.equal(clients[0].status, DEACTIVATED);
-});
-
-test('all rows sharing the phone are deactivated and counted', () => {
-  const clients = freshClients();
-  clients.push({ id: 'c4', name: 'אורי תאום', status: 'פעיל', phone: '0501234567', treatmentContactPhone: '', payerPhone: '' });
-  const res = deactivateClient({ phone: '0501234567' }, clients);
-  assert.deepEqual(res, { ok: true, deactivated: 2 });
-  assert.equal(clients[0].status, DEACTIVATED);
-  assert.equal(clients[3].status, DEACTIVATED);
-});
-
-// --- excluded from the cross-app projections --------------------------------
-test('a deactivated client is excluded from getTreatmentPlans', () => {
-  const clients = freshClients();
-  deactivateClient({ phone: '0501234567' }, clients); // c1 -> deactivated
-  const rows = projectPlans(clients);
-  const ids = rows.map((r) => r.clientId);
-  assert.equal(ids.includes('c1'), false);  // gone from the roster source
-  assert.equal(ids.includes('c2'), true);
-  assert.equal(ids.includes('c3'), true);   // discharged still listed
-});
-
-test('a deactivated client is excluded from getDebtStatus', () => {
-  const clients = freshClients();
-  deactivateClient({ phone: '0501234567' }, clients);
-  const ids = debtClientIds(clients);
+test('real getTreatmentPlans excludes deactivated clients but retains discharged clients', () => {
+  const sb = fixture();
+  assert.equal(deactivate(sb, '0501234567').ok, true);
+  const response = feed(sb, 'getTreatmentPlans', 'TREATMENT_PLANS_SECRET');
+  assert.equal(response.ok, true);
+  const ids = response.clients.map(row => row.clientId);
   assert.equal(ids.includes('c1'), false);
-  assert.equal(ids.includes('c3'), true);   // discharged stays — debt survives discharge
+  assert.equal(ids.includes('c2'), true);
+  assert.equal(ids.includes('c3'), true);
 });
 
-test('a discharged client is NOT deactivated by a non-matching call and stays in both projections', () => {
-  const clients = freshClients();
-  deactivateClient({ phone: '0501234567' }, clients); // only c1
-  assert.equal(clients[2].status, DISCHARGED);        // c3 unchanged
-  assert.equal(projectPlans(clients).some((r) => r.clientId === 'c3'), true);
-  assert.equal(debtClientIds(clients).includes('c3'), true);
+test('real getDebtStatus excludes deactivated clients and preserves discharged debt', () => {
+  const sb = fixture();
+  sb.seed('Payments', sb.ctx.PAYMENTS_HEADERS, [{ id: 'p3', clientId: 'c3', amountDue: 900, amountPaid: 100, status: 'partial' }]);
+  assert.equal(deactivate(sb, '0501234567').ok, true);
+  const response = feed(sb, 'getDebtStatus', 'DEBT_STATUS_SECRET');
+  assert.equal(response.ok, true);
+  assert.equal(response.clients.some(row => row.clientId === 'c1'), false);
+  const discharged = response.clients.find(row => row.clientId === 'c3');
+  assert.equal(discharged.debtStatus, 'debt');
+  assert.equal(discharged.amountOwed, 800);
+  assert.equal(sb.rows('Clients')[2].status, DISCHARGED);
 });

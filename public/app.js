@@ -543,9 +543,8 @@
     return { renewalDate: renewal, daysLeft: daysLeft, status: status };
   }
 
-  // Is the PREVIOUS month's base package row paid? The base payment id keys on
-  // the month only, so the 1st of the previous month addresses the same row as
-  // any other day of it.
+  // Resolve the previous month's actual billing day before the exact-cycle
+  // lookup. A month-only legacy ID does not make every day the same cycle.
   function prevMonthBasePaid(c) {
     var t = today();
     var y = parseInt(t.slice(0, 4), 10);
@@ -553,7 +552,8 @@
     if (!isFinite(y) || !isFinite(m)) return false;
     m -= 1;
     if (m < 1) { m = 12; y -= 1; }
-    var prevIso = y + '-' + ('0' + m).slice(-2) + '-01';
+    var prevIso = nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01');
+    if (!prevIso) return false;
     return paymentForClientOn(c, prevIso).status === 'paid';
   }
 
@@ -665,6 +665,11 @@
       var pending = new Error(BACKEND_UPGRADE_PENDING_MSG);
       pending.code = 'backend_upgrade_pending';
       throw pending;
+    }
+    if (data && data.error === 'lead_already_converted') {
+      var converted = new Error('הפנייה כבר הועברה למטופלים בחלון אחר. לא נוצר כרטיס נוסף ולא נשלח תשלום. יש להמשיך מהכרטיס הקיים.');
+      converted.code = 'lead_already_converted';
+      throw converted;
     }
     if (!r.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
@@ -1083,7 +1088,18 @@
     // the save itself is safe (merge-don't-drop preserves the rows this tab
     // never loaded), but the tab is showing an incomplete picture.
     if (state.dataVersion != null) payload.dataVersion = state.dataVersion;
-    var data = await apiSave(payload);
+    var data;
+    try { data = await apiSave(payload); }
+    catch (saveError) {
+      if (saveError && saveError.code === 'lead_already_converted') {
+        // Read back the winning conversion. Never retry a snapshot that has
+        // a newly generated second client id, or run its dependent payment.
+        try { await loadAll({ fresh: true }); }
+        catch (_) { saveError.message += ' טעינת הכרטיס הקיים נכשלה; יש לרענן לפני פעולה נוספת.'; }
+        showConflictBanner(saveError.message);
+      }
+      throw saveError;
+    }
     if (opts && opts.requireIds && (!data || data.ok !== true)) {
       throw new Error('לא התקבל אישור לשמירת הכרטיס');
     }
@@ -1577,6 +1593,7 @@
   function legacyBasePaymentId(clientId, dueDateISO) {
     return 'pay::' + clientId + '::' + monthKey(dueDateISO);
   }
+  function cyclePaymentId(clientId, dueDateISO) { return 'pay::' + clientId + '::base::' + dueDateISO; }
   // Detect: 'pay::<clientId>::<YYYY-MM>' has 3 segments; new shapes have 4.
   function isLegacyBasePaymentId(id) {
     if (!id) return false;
@@ -1602,14 +1619,13 @@
   function paymentForClientOn(client, dueDateISO) {
     // Look up base monthly under either the new or legacy shape. The legacy
     // row keeps its legacy id forever; new patients/months get the new id.
-    var newId = paymentId(client, dueDateISO, 'base');
-    var existing = findPaymentById(newId);
-    if (existing) return existing;
-    var legacyId = legacyBasePaymentId(client.id, dueDateISO);
-    existing = findPaymentById(legacyId);
-    if (existing) return existing;
+    var newId = cyclePaymentId(client.id, dueDateISO);
+    var exact = state.payments.filter(function (p) { return String(p.clientId) === String(client.id) &&
+      paymentKindFromId(p.id).kind === 'base' && p.billingType === 'monthly' && fmtDate(p.dueDate) === dueDateISO; });
+    if (exact.length === 1) return exact[0];
     return {
       id: newId, clientId: client.id, clientName: client.name,
+      ambiguousCycle: exact.length > 1,
       billingType: 'monthly', dueDate: dueDateISO,
       amountDue: clientAmountDue(client), amountPaid: 0,
       status: 'unpaid', paymentDate: '', method: '', notes: '',
@@ -1623,7 +1639,7 @@
   // and renew-and-pay (Bug C).
   function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
     return {
-      id: paymentId(client, dueDateISO, 'base'),
+      id: cyclePaymentId(client.id, dueDateISO),
       clientId: client.id, clientName: client.name || '',
       billingType: 'monthly', dueDate: dueDateISO,
       amountDue: amount, amountPaid: amount, status: 'paid',
@@ -3559,8 +3575,8 @@
     if (paymentKindFromId(updated.id).kind === 'base' &&
         updated.billingType === 'monthly' && updated.status === 'paid') {
       var sourceClient = state.clients.find(function (c) { return c.id === updated.clientId; });
-      var dueCycleKey = sourceClient ? monthKey(cyclePaymentDueDate(sourceClient, today())) : '';
-      if (!prev || (prev.status !== 'paid' && monthKey(updated.dueDate) === dueCycleKey)) {
+      var dueCycle = sourceClient ? cyclePaymentDueDate(sourceClient, today()) : '';
+      if (!prev || (prev.status !== 'paid' && fmtDate(updated.dueDate) === dueCycle)) {
         // The CURRENT due cycle: a paid receipt must land together with the
         // client's next collection date, so route to the OP-02 journalled
         // renewal (B2: it settles an existing unpaid/partial row in place).
@@ -3573,9 +3589,9 @@
         // B2: arrears for an OLDER cycle than the client's due one. Settling it
         // does not move the collection anchor; the period follows the B1 rule
         // unless somebody recorded an explicit different one on the row.
-        var arrearsWindow = CL && CL.paymentDateCoverage(updated.paymentDate, updated.dueDate);
+        var arrearsWindow = CL && CL.legacyPaymentDateCoverage(updated.paymentDate, updated.dueDate);
         if (!arrearsWindow || updated.paymentDate > today()) { toast('תאריך תשלום לא תקין', true); renderBilling(); return; }
-        if (!(CL.recordedCoverage(prev) && CL.coverageDiffersFromDefault(prev))) {
+        if (!CL.recordedCoverage(prev)) {
           updated.coverageStart = arrearsWindow.start; updated.coverageEnd = arrearsWindow.end;
         }
       } else if (updated.paymentDate !== prev.paymentDate ||
@@ -3650,6 +3666,7 @@
     // future nextBillingDate; require a separate finance reconciliation.
     if (!cycleDue || nextCycleDueDateAfter(c, cycleDue) !== pkg.until) return null;
     var cycleRow = paymentForClientOn(c, cycleDue);
+    if (cycleRow.ambiguousCycle) return null;
     // A paid-but-disputed source row must not be overwritten by a quick
     // verification action. Its period needs financial reconciliation instead.
     if (cycleRow.status === 'paid' || confirmedPackagePayment(c, pkg.until, cycleRow)) return null;
@@ -3704,6 +3721,9 @@
 
   function setCurrentMonthPaid(c, makePaid) {
     if (state.role !== 'editor') return;
+    // New monthly receipts use the same source journal and explicit intent form.
+    // The old quick path cannot atomically confirm payment plus next collection.
+    if (makePaid) return openRenewModal(c);
     var todayIso = today();
     // The chip toggles the PACKAGE state (packagePaidState — the same anchor
     // it renders from), so the toggle is gated on that state, never on a
@@ -4940,7 +4960,8 @@
         var correctBtn = canEdit
           ? '<button type="button" class="btn" data-action="payout-correct" ' +
               'data-session=\'' + escapeHtml(JSON.stringify({
-                sessionId: s.sessionId, therapist: t.therapist,
+                sessionId: s.sessionId, treatmentId: s.treatmentId,
+                therapist: t.therapist,
                 clinicalTreatmentType: s.type, date: fmtDate(s.date),
                 outcome: s.outcome, patientName: s.patient, phone: s.phone
               })) + '\' style="padding:2px 10px;font-size:0.8rem;">תקן</button>'
@@ -5747,6 +5768,7 @@
     form.reset();
     prefill = prefill || {};
     form.dataset.sessionId = prefill.sessionId || '';
+    form.dataset.treatmentId = prefill.treatmentId || '';
     var isCorrect = !!prefill.sessionId;
     $('#sessionModalTitle').textContent = isCorrect ? 'תיקון סשן' : 'הוספת סשן חסר';
     $('#sessionModalSub').textContent = isCorrect
@@ -5847,9 +5869,17 @@
     if (!outcome) { toast('יש לבחור תוצאה', true); return; }
 
     var existingId = (form.dataset.sessionId || '').trim();
+    var treatmentId = (form.dataset.treatmentId || '').trim();
+    // Never correct one arbitrary attendee using a shared group sessionId.
+    if (clinical === 'קבוצה' && !treatmentId) {
+      toast(existingId ? 'טיפול קבוצתי ישן ללא מזהה משתתף — נדרש בירור לפני תיקון' :
+        'טיפול קבוצתי חדש יש לקבוע דרך שיבוץ המטפלים', true);
+      return;
+    }
     var payload = {
       action: 'correctSessionOutcome',
       sessionId: existingId || uid(),
+      treatmentId: treatmentId,
       therapist: therapist,
       clinicalTreatmentType: clinical,
       date: date,
@@ -7588,6 +7618,7 @@
   }
   function otsErrorText(err) {
     var m = String(err && err.message || '');
+    if (err && err.code === 'lead_already_converted') return m;
     if (m === 'ots_unavailable') return 'שירות הטיפולים החד פעמיים אינו זמין כרגע — נסו שוב בעוד רגע.';
     if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG;
     if (m === 'extra_pending') return window.OneTimeSessions.errorText('extra_pending');
@@ -7754,7 +7785,7 @@
       await persistClientChange(client);
     } catch (err) {
       state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-      if (leadIdx >= 0 && !state.leads.some(function (x) { return x.id === live.id; })) state.leads.splice(leadIdx, 0, live);
+      if (err.code !== 'lead_already_converted' && leadIdx >= 0 && !state.leads.some(function (x) { return x.id === live.id; })) state.leads.splice(leadIdx, 0, live);
       render();
       throw err;
     }
@@ -8020,6 +8051,8 @@
   function renewalErrorMessage(err) {
     var message = String(err && err.message || '');
     if (err && err.code === 'finance_unavailable') return FINANCE_UNAVAILABLE_MSG; // nothing was sent
+    if (/renewal_coverage_intent_required|renewal_coverage_protocol_unavailable/.test(message)) return 'יש לרענן את היישום לפני רישום תשלום חדש. גרסת המקור טרם אישרה את תקופת התשלום; לא נוצר חיוב.';
+    if (/renewal_recorded_coverage_changed|renewal_duplicate_cycle|renewal_cycle_requires_review/.test(message)) return 'קיימת תקופת תשלום או רשומת גבייה שדורשת בדיקה. יש לשמור את הכיסוי הרשום ולבדוק בגבייה לפני חידוש.';
     if (message.indexOf('extra_charge_pending') >= 0) return 'יש חיוב נוסף פתוח למטופל. יש לחזור אל הוסף טיפול ולהשלים את הבדיקה לפני חידוש.';
     if (message.indexOf('renewal_payment_exists') >= 0) return 'כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.';
     if (message.indexOf('renewal_advance_confirmation_required') >= 0) return 'כבר דווח תשלום באותו תאריך. כדי לרשום מקדמה נוספת לחודש הבא יש לפתוח מחדש ולאשר במפורש שזה תשלום נפרד.';
@@ -8058,6 +8091,7 @@
     if (!data || data.ok !== true || data.protocol !== 1) throw new Error('renewal_protocol_unavailable');
     if (token !== renewLoadToken || renewClientId !== clientId) return;
     if (data.operation) { showRenewalOperation(data.operation); return; }
+    if (data.coveragePolicy !== 'payment-date-v2' || !data.paymentId) throw new Error('renewal_coverage_protocol_unavailable');
     if (!data.client || !data.snapshot || !data.cycleDate) throw new Error('renewal_state_missing');
     renewSourceState = data;
     var client = normalizeClientFromSheet(data.client), form = $('#renewForm');
@@ -8068,12 +8102,18 @@
     $('#renewClientName').textContent = 'חידוש עבור: ' + (client.name || '') + ' — ' + monthLabel(data.cycleDate);
     form.renewAmount.value = client.pricePerSession || '';
     form.renewDate.value = today();
+    var prior = data.priorPayment, recorded = prior && CL.recordedCoverage(prior);
+    form.renewCoverageIntent.value = recorded ? 'advance' : 'ordinary';
+    var suggested = CL.paymentDateCoverage(data.cycleDate);
+    form.renewCoverageStart.value = recorded ? CL.isoFromLocalDate(recorded.start) : suggested.start;
+    form.renewCoverageEnd.value = recorded ? CL.isoFromLocalDate(recorded.end) : suggested.end;
+    updateRenewalCoveragePreview(form);
     var host = $('[data-host="renewSessions"]', form);
     if (host) renderSessionsHost(host, client.serviceType, client.sessionsPerWeek, client.sessionsUnit);
     $('#renewRecovery').hidden = true;
     $('#renewSubmit').hidden = false;
     busyEnd($('#renewSubmit'));
-    $('#renewMarkPaid').hidden = false;
+    $('#renewMarkPaid').hidden = true;
     busyEnd($('#renewMarkPaid'));
   }
   async function openRenewModal(client) {
@@ -8102,6 +8142,25 @@
     renewSourceState = null;
     renewLoadToken++;
   }
+  function renewalCoverageSelection(form) {
+    var mode = form.renewCoverageIntent.value, paid = form.renewDate.value || today();
+    if (mode === 'ordinary') return CL && CL.paymentDateCoverage(paid);
+    if (mode !== 'advance') return null;
+    var start = form.renewCoverageStart.value, end = form.renewCoverageEnd.value;
+    if (!start || !end || CL.coveragePeriodError(start, end)) return null;
+    var prior = renewSourceState && renewSourceState.priorPayment;
+    var preserving = prior && fmtDate(prior.coverageStart) === start && fmtDate(prior.coverageEnd) === end;
+    if (start < paid && !preserving) return null;
+    return { start: start, end: end, next: addDays(end, 1) };
+  }
+  function updateRenewalCoveragePreview(form) {
+    var explicit = form.renewCoverageIntent.value === 'advance';
+    $('#renewCoverageFields').hidden = !explicit;
+    var coverage = renewalCoverageSelection(form);
+    $('#renewCoveragePreview').textContent = coverage
+      ? 'כיסוי: ' + displayDate(coverage.start) + ' עד ' + displayDate(coverage.end) + ' · גבייה הבאה: ' + displayDate(coverage.next)
+      : 'יש לבחור תקופת כיסוי תקינה; תקופה רשומה נשמרת ללא שינוי.';
+  }
   async function submitDurableRenewal(form) {
     var submit = $('#renewSubmit');
     if (busyIs(submit) || !renewClientId || !renewSourceState || renewSourceState.operation) return;
@@ -8111,10 +8170,10 @@
     if (!amount || amount <= 0) { toast('יש להזין סכום', true); return; }
     var paidDate = fd.get('renewDate') || today(), notes = (fd.get('renewNotes') || '').trim();
     var pkg = readPackageSessionsFromForm(c, form), changed = packageSessionsChanged(c, pkg);
-    // B1: coverage starts on max(paymentDate, cycleDate) — an early payment is
-    // an advance from the due cycle, a late one covers a month from the actual
-    // payment — so the next collection never shares the cycle's month key.
-    var paidCoverage = CL && CL.paymentDateCoverage(paidDate, renewSourceState.cycleDate);
+    // The operator distinguishes an ordinary receipt from an explicit period.
+    // Ordinary coverage starts on paidDate; an advance uses the chosen pair.
+    var coverageIntent = fd.get('renewCoverageIntent');
+    var paidCoverage = renewalCoverageSelection(form);
     if (!paidCoverage || paidDate > today()) {
       toast('תאריך תשלום לא תקין', true); return;
     }
@@ -8127,10 +8186,11 @@
       patch.packageChangeDate = paidDate;
     }
     var renewRow = basePaymentPaidOn(c, renewSourceState.cycleDate, amount, paidDate, notes);
+    renewRow.id = renewSourceState.paymentId;
     renewRow.coverageStart = paidCoverage.start; renewRow.coverageEnd = paidCoverage.end;
     // B2: an existing unpaid/partial row of this cycle is SETTLED in place by
     // the source (guarded against the row it pins at reserve), never duplicated.
-    var priorRow = findPaymentById(renewRow.id);
+    var priorRow = renewSourceState.priorPayment;
     if (priorRow && priorRow.status === 'paid') { toast('כבר קיימת רשומת תשלום לחודש הזה. יש לבדוק אותה בגבייה לפני חידוש.', true); return; }
     if (priorRow) { renewRow.notes = notes || priorRow.notes || ''; renewRow.method = priorRow.method || ''; }
     // A new future-cycle payment reusing the last recorded paid date can be a
@@ -8141,13 +8201,14 @@
       renewSourceState.cycleDate > today() && paidDate < renewSourceState.cycleDate;
     var advanceConfirmed = false;
     if (sameDateFutureAdvance) {
+      if (coverageIntent !== 'advance') { toast('תשלום נוסף באותו תאריך דורש בחירה מפורשת במקדמה ובתקופת הכיסוי שלה.', true); return; }
       advanceConfirmed = confirm('בכרטיס כבר מופיע תשלום בתאריך ' + fmtDate(c.paymentDate) +
         '. כעת נפתח חיוב נוסף עבור ' + monthLabel(renewSourceState.cycleDate) +
         '. האם התקבל בפועל תשלום נוסף ונפרד עבור חודש זה? אם מדובר בניסיון חוזר אחרי שמירה שלא אושרה — בחרו ביטול ובדקו את הגבייה.');
       if (!advanceConfirmed) { toast('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', true); return; }
     }
     var request = { opId: 'renew-' + uid(), clientId: cid, snapshot: renewSourceState.snapshot,
-      cycleDate: renewSourceState.cycleDate, patch: patch,
+      cycleDate: renewSourceState.cycleDate, coverageIntent: coverageIntent, patch: patch,
       payment: paymentForSheet(renewRow) };
     if (priorRow) request.priorPayment = { id: priorRow.id, status: priorRow.status, amountPaid: priorRow.amountPaid };
     if (advanceConfirmed) request.advanceConfirmed = true;
@@ -8880,6 +8941,10 @@
     $('#extraReviewResolve').addEventListener('click', function (e) { continueExtraCharge('review', e.currentTarget); });
 
     var renewForm = $('#renewForm');
+    if (renewForm) {
+      renewForm.addEventListener('input', function () { if (renewSourceState && !renewSourceState.operation) updateRenewalCoveragePreview(renewForm); });
+      renewForm.addEventListener('change', function () { if (renewSourceState && !renewSourceState.operation) updateRenewalCoveragePreview(renewForm); });
+    }
     if (renewForm) renewForm.addEventListener('submit', function (e) {
       e.preventDefault();
       submitDurableRenewal(e.target);
@@ -9245,7 +9310,7 @@
             showFinancialSaveWarning('המטופל נשמר', client.name);
           } else {
             state.clients = state.clients.filter(function (x) { return x.id !== client.id; });
-            if (leadIdx >= 0 && !state.leads.some(function (x) { return x.id === lead.id; })) {
+            if (err.code !== 'lead_already_converted' && leadIdx >= 0 && !state.leads.some(function (x) { return x.id === lead.id; })) {
               state.leads.splice(leadIdx, 0, lead);
             }
             toast('שמירה נכשלה: ' + err.message, true);
@@ -9421,6 +9486,12 @@
       if (ptPhoneChanged && duplicateClientBlock(ptPhone, client.id)) { busyEnd(submit); return; }
       var proposedPaidDate = String(fd.get('paymentDate') || '');
       var proposedPaidStatus = String(fd.get('paymentStatus') || client.paymentStatus || '');
+      if (proposedPaidStatus === 'paid' && (proposedPaidDate !== String(client.paymentDate || '') || client.paymentStatus !== 'paid') &&
+          state.payments.some(function (p) { return p && String(p.clientId) === String(client.id) && paymentKindFromId(p.id).kind === 'base'; })) {
+        toast('רישום או השלמת תשלום קיים נעשים דרך חידוש ותשלום, כדי לשמור את הרשומה ואת תקופת הכיסוי. לא נשמר שינוי כספי.', true);
+        busyEnd(submit);
+        return;
+      }
       if (proposedPaidDate && proposedPaidDate !== String(client.paymentDate || '') &&
           proposedPaidStatus === 'paid') {
         var newWindow = CL && CL.paymentDateCoverage(proposedPaidDate);

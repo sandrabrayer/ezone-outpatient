@@ -150,12 +150,13 @@ test('?fresh=1 bypasses a valid cache; an undisturbed read is cached as before',
   assert.equal(f.upstream.reads, 2);
 });
 
-test('app.js: the stale-conflict and staleSave reloads ask the proxy for a fresh read; ordinary loads keep the cache', () => {
+test('app.js: stale conversion, row-conflict and staleSave reloads ask for a fresh read; ordinary loads keep the cache', () => {
   const APP = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.match(APP, /var conflictReload = loadAll\(\{ fresh: true \}\)/);
   assert.match(APP, /var staleReload = loadAll\(\{ fresh: true \}\)/);
   assert.match(APP, /async function apiLoad\(fresh\) \{\s*var r = await apiFetch\(fresh \? '\/api\/sheets\?fresh=1' : '\/api\/sheets', \{ cache: 'no-store' \}\);/);
   assert.match(APP, /async function loadAll\(opts\) \{/);
   assert.match(APP, /apiLoad\(!!\(opts && opts\.fresh\)\)/);
-  assert.equal((APP.match(/loadAll\(\{ fresh: true \}\)/g) || []).length, 2, 'only the two stale-picture reloads bypass the cache');
+  assert.match(APP, /saveError\.code === 'lead_already_converted'[\s\S]*?await loadAll\(\{ fresh: true \}\)/);
+  assert.equal((APP.match(/loadAll\(\{ fresh: true \}\)/g) || []).length, 3, 'only stale conversion and the two stale-picture reloads bypass the cache');
 });

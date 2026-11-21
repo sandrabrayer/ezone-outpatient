@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "pretest": "node test-support/build-google-operational-drill.cjs",
     "test": "node --test"
   },
   "engines": {

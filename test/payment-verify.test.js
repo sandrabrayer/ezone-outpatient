@@ -24,9 +24,10 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { fixture, settled, named, source } = require('../test-support/financial-ui-fixture.cjs');
 const CreditsLedger = require('../public/credits-ledger.js');
+const { sandbox } = require('../test-support/apps-script-sandbox');
 
 const HELPERS = ['toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey', 'addDays',
-  'paymentId', 'legacyBasePaymentId', 'paymentKindFromId', 'findPaymentById', 'basePaymentPaidOn',
+  'paymentId', 'cyclePaymentId', 'legacyBasePaymentId', 'paymentKindFromId', 'findPaymentById', 'basePaymentPaidOn',
   'clampedCycleIso', 'nextCycleDueDate', 'nextCycleDueDateAfter', 'currentMonthBaseDueDate',
   'prevCycleDueDateBefore', 'packagePaidState', 'paymentForClientOn', 'confirmedPackagePayment',
   'clientAmountDue', 'missingCyclePayment'];
@@ -50,7 +51,7 @@ test('A: the stuck card yields the current cycle row, anchor untouched', () => {
   const c = { ...STUCK };
   const plan = ctx.missingCyclePayment(c, TODAY);
   assert.ok(plan);
-  assert.equal(plan.row.id, 'pay::fixture-client-9::base::2026-10');
+  assert.equal(plan.row.id, 'pay::fixture-client-9::base::2026-10-26');
   assert.equal(plan.row.dueDate, '2026-10-26');
   assert.equal(plan.row.status, 'paid');
   assert.equal(plan.row.amountDue, 1234);
@@ -111,6 +112,28 @@ test('A: a future paid date is clamped to today', () => {
   assert.equal(plan.row.paymentDate, TODAY);
 });
 
+test('ambiguous historical cycles cannot be verified or overwrite either source period', () => {
+  const ids = ['pay::fixture-client-9::base::2026-10', 'pay::fixture-client-9::base::2026-10-26'];
+  const rows = ids.map(id => ({ id, clientId: STUCK.id, billingType: 'monthly', dueDate: '2026-10-26',
+    amountDue: 1234, amountPaid: 100, status: 'partial', paymentDate: '2026-10-22',
+    coverageStart: '2026-10-01', coverageEnd: '2026-12-31' }));
+  for (const ordered of [rows, rows.slice().reverse()]) {
+    const ctx = harness(ordered);
+    ctx.CL = CreditsLedger;
+    assert.equal(ctx.missingCyclePayment({ ...STUCK }, TODAY), null);
+    const sb = sandbox([], [{ ...STUCK }]);
+    sb.seed('Payments', sb.ctx.PAYMENTS_HEADERS, ordered);
+    const before = JSON.stringify(sb.rows('Payments'));
+    for (const id of ids) {
+      const result = sb.post({ action: 'savePayment', payment: { ...rows[0], id, status: 'paid', amountPaid: 1234,
+        coverageStart: '2026-10-26', coverageEnd: '2026-11-25' } });
+      assert.equal(result.error, 'duplicate_monthly_cycle');
+      assert.equal(JSON.stringify(sb.rows('Payments')), before, 'neither recorded period may be shortened');
+    }
+    assert.equal(sb.rows('Clients')[0].nextBillingDate, STUCK.nextBillingDate);
+  }
+});
+
 test('B: edit form — status set to «שולם» with an anchor already ahead records the cycle row', async () => {
   const f = fixture({ paymentStatus: 'paid', paymentDate: '2026-10-05' });
   // Fixture client: today 2026-10-18; anchor ahead (2026-11-01), status unpaid, no rows.
@@ -121,10 +144,51 @@ test('B: edit form — status set to «שולם» with an anchor already ahead r
   f.submit('editForm'); await settled(); await settled();
   const pay = f.out.writes.filter((w) => w.kind === 'payment');
   assert.equal(pay.length, 1, 'exactly one payment write');
-  assert.equal(pay[0].row.id, 'pay::fixture-client::base::2026-10');
+  assert.equal(pay[0].row.id, 'pay::fixture-client::base::2026-10-01');
   assert.equal(pay[0].row.status, 'paid');
   assert.equal(pay[0].row.paymentDate, '2026-10-05');
   assert.equal(f.client.nextBillingDate, '2026-11-01', 'anchor unchanged');
+});
+
+test('historical verification reaches the actual source, preserving its window and any existing legacy ID', async () => {
+  for (const existingId of ['', 'pay::fixture-client-9::base::2026-10', 'pay::fixture-client-9::2026-10']) {
+    const sb = sandbox([], [{ ...STUCK }]);
+    const prior = existingId ? [{ id: existingId, clientId: STUCK.id, billingType: 'monthly',
+      dueDate: '2026-10-26', status: 'unpaid', amountDue: 1234, amountPaid: 0,
+      method: 'historical-method', notes: 'historical-note' }] : [];
+    sb.seed('Payments', sb.ctx.PAYMENTS_HEADERS, prior);
+    const before = JSON.stringify(sb.rows('Clients'));
+    const ctx = harness(prior);
+    ctx.CL = CreditsLedger;
+    ctx.state.role = 'editor';
+    let successes = 0, failures = 0, writes = 0;
+    Object.assign(ctx, {
+      today: () => TODAY, confirm: () => true, displayDate: x => x,
+      busyStart() {}, busyEnd() {}, render() {}, toast() { successes++; },
+      showFinancialSaveWarning() { failures++; },
+      async persistPayment(payment) {
+        writes++;
+        const result = sb.post({ action: 'savePayment', payment });
+        assert.equal(result.ok, true, JSON.stringify(result));
+      },
+      rememberConfirmedPayment() { ctx.state.payments = sb.rows('Payments'); }
+    });
+    vm.runInContext(named('confirmCyclePayment'), ctx);
+    ctx.confirmCyclePayment({ ...STUCK }, {});
+    await settled();
+    assert.equal(successes, 1);
+    assert.equal(failures, 0);
+    assert.equal(writes, 1);
+    const rows = sb.rows('Payments');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, existingId || 'pay::fixture-client-9::base::2026-10-26');
+    assert.deepEqual([rows[0].coverageStart, rows[0].coverageEnd, rows[0].paymentDate],
+      ['2026-10-26', '2026-11-25', '2026-10-22']);
+    assert.equal(JSON.stringify(sb.rows('Clients')), before, 'historical verification never changes the anchor');
+    assert.equal(ctx.missingCyclePayment({ ...STUCK }, TODAY), null, 'confirmed history is not recorded twice');
+    assert.equal(CreditsLedger.paidThroughReview(STUCK, rows, TODAY).state, 'confirmed');
+    assert.equal(sb.rows('FinancialOps').length, 0, 'no new renewal is invented for historical evidence');
+  }
 });
 
 test('C: the review chip is a confirm button for editors only, wired to confirmCyclePayment', () => {

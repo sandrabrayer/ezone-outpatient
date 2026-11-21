@@ -37,10 +37,10 @@ test('opt-in stamps a NEW verified monthly receipt, but preserves historical due
   const source = CL.withDefaultCoverage(row);
   assert.equal(source.coverageStart, '2026-10-23');
   assert.equal(source.coverageEnd, '2026-11-22');
-  // B1: paid 15 Oct BEFORE the 23 Oct cycle -> advance from the due date.
+  // New ordinary receipt starts on actual payment, before the planned cycle.
   const fresh = CL.withDefaultCoverage(row, { newPaidMonthly: true });
-  assert.equal(fresh.coverageStart, '2026-10-23');
-  assert.equal(fresh.coverageEnd, '2026-11-22');
+  assert.equal(fresh.coverageStart, '2026-10-15');
+  assert.equal(fresh.coverageEnd, '2026-11-14');
   // Paid 30 Oct AFTER the 23 Oct cycle -> one month from the actual payment.
   const late = CL.withDefaultCoverage({ ...row, paymentDate: '2026-10-30' }, { newPaidMonthly: true });
   assert.equal(late.coverageStart, '2026-10-30');

@@ -10,6 +10,8 @@ const legacyValidator = require('../test-support/op-bill01-legacy-validator.cjs'
 
 function oldPolicy(f) { vm.runInContext(legacyValidator, f.sb.ctx); }
 function oldRequest(f) {
+  delete f.request.coverageIntent;
+  f.request.payment.id = 'pay::journal-client::base::2026-02';
   f.request.patch.nextBillingDate = '2026-03-31';
   f.request.payment.coverageStart = '2026-02-28';
   f.request.payment.coverageEnd = '2026-03-27';

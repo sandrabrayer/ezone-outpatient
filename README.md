@@ -603,3 +603,11 @@ checkout ever drifts back.
   (`_clinicalToBilling`); absent/empty leaves `serviceType` as-is, unknown
   throws. Receiver only — no sender/form yet. See
   `CHANGELOG-clinical-treatment-type-receiver.md`.
+# Monthly coverage and workflow candidate — 2026-11-20
+
+The current draft continues tasks 2/3 on the existing OUT code, ledger and
+financial journal. It distinguishes ordinary paid-date coverage from explicit
+advance periods, protects conversion identity and task privacy, and refuses
+ambiguous cross-app deactivation. It has not been released.
+See [acceptance, open boundaries and release/rollback](docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md)
+and [change details](CHANGELOG-out-payment-workflow.md).
