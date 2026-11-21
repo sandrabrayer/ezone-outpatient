@@ -140,3 +140,15 @@ test('lost journal commit after both side effects finalizes by verified readback
   assert.equal(t.credit(),1);assert.equal(t.log().length,1);
   assert.equal(t.journal()[0].state,'committed');
 });
+
+test('typed backup source inventory includes the durable participant-credit journal',()=>{
+  const t=setup();
+  const source=t.s.ctx._integritySourceSpecs().find(x=>x.source==='SessionOutcomeOps');
+  assert.ok(source);
+  assert.equal(source.key,'opKey');
+  assert.deepEqual(Array.from(source.headers),Array.from(t.s.ctx.SESSION_OUTCOME_OP_HEADERS));
+  assert.equal(t.send('patient_cancelled_notice').ok,true);
+  assert.equal(t.journal().length,1);
+  const captured=t.s.ctx._integritySourceSpecs().map(x=>x.source);
+  assert.equal(captured.filter(x=>x==='SessionOutcomeOps').length,1);
+});

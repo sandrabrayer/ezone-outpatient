@@ -9198,6 +9198,9 @@ function _integritySourceSpecs() {
     { source: 'Credits', prefix: 'credits-', key: 'id', headers: CREDIT_COLUMNS },
     { source: 'FinancialOps', prefix: 'financial-ops-', key: 'id', headers: FINANCIAL_OP_HEADERS },
     { source: 'SessionLog', prefix: 'session-log-', key: 'sessionId', headers: SESSION_LOG_HEADERS },
+    // Recover the credit write-ahead journal together with Clients/SessionLog.
+    // Optional on pre-upgrade workbooks, mandatory once a grouped credit exists.
+    { source: SESSION_OUTCOME_OP_SHEET, prefix: 'session-outcome-ops-', key: 'opKey', headers: SESSION_OUTCOME_OP_HEADERS },
     // One-time sessions own their schedule, charge link and source outcome; typed
     // backup/restore must preserve the full append-only schema and stable ID.
     // Optional until the first OTS booking creates the sheet; then tracked like
