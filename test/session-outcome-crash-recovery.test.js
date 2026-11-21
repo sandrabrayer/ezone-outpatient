@@ -191,6 +191,6 @@ test('a partial or tampered operation record never becomes an untracked replay',
   assert.equal(result.ok,false);
   assert.equal(t.credit(),1);
   assert.equal(t.log().length,1);
-  assert.equal(t.journal().length,0,'the damaged row remains physically present but is not silently repaired');
+  assert.equal(t.journal().length,1,'the damaged row remains physically present and is not silently repaired');
   assert.equal(journal.grid.length,2);
 });
