@@ -35,7 +35,16 @@ var LEADS_HEADERS = [
   // _saveAll carries the on-sheet value for existing leads, so a browser
   // snapshot can never change or blank it. Follows the lead onto the client on
   // activation. Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  // APPEND-ONLY (איש קשר / contact person, 2026-11-21, CHANGELOG-lead-contact-person.md):
+  // who called on behalf of the patient — a name, a phone and the relation to the
+  // patient. All three OPTIONAL and browser-owned (the lead form). contactPhone is
+  // a PHONE_COLUMNS member (text-forced, leading zero kept) but it is NEVER a
+  // cross-app match key: CROSS_APP_PHONE_SOURCES is untouched, the patient is
+  // matched by `phone` only. _saveAll validates every write (LEAD_CONTACT_COLUMNS)
+  // and keeps the on-sheet value when a tab loaded before these columns existed
+  // saves a lead without them. Old rows read back blank.
+  'contactName', 'contactPhone', 'contactRelation'
 ];
 
 /* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
@@ -491,6 +500,11 @@ var REMOVED_LEADS_HEADERS = [
   'updatedAt', 'updatedBy',
   // APPEND-ONLY mirror of the Leads preferred house (preferredHouse).
   'preferredHouse'
+  // NOT mirrored (deliberate, 2026-11-21): the Leads contact person
+  // (contactName / contactPhone / contactRelation). This archive's header is the
+  // subject of the pending OP-03 operator correction (ops/removed-leads-header-
+  // correction.gs, exact cells S1:U1, schema-bound) — its width must not move
+  // under that procedure. A removed lead's contact person is not archived.
 ];
 
 /* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
@@ -568,7 +582,19 @@ var STOP_ALERT_TYPES = { stop: true, resume: true };
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
-var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true, patientPhone: true };
+var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true, patientPhone: true,
+  // 2026-11-21 (APPENDED): a lead's contact-person phone — text-forced like every phone, never a match key
+  contactPhone: true };
+
+/* The lead's contact person (2026-11-21): the three browser-owned columns and their write rule.
+ * name ≤ 80, relation ≤ 40 (control chars stripped); the phone must be a valid Israeli number
+ * (0 + 8–9 digits, mobile or landline) after leading-zero recovery, else it is stored blank —
+ * an invalid phone is never written. */
+var LEAD_CONTACT_COLUMNS = ['contactName', 'contactPhone', 'contactRelation'];
+function _leadContactValue(col, v) {
+  if (col === 'contactPhone') { var p = _recoverPhone(v); return /^0\d{8,9}$/.test(p) ? p : ''; }
+  return _sanitizeLeadText(v, col === 'contactName' ? 80 : 40);
+}
 
 /* Mirror of recoverPhone() in public/app.js — keep both in sync. Normalizes to
  * the leading-zero canonical form and restores a leading zero that Sheets
@@ -1954,6 +1980,14 @@ function _saveAll(payload) {
           ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
           : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
         _opsPreserveMoney(payload, leads[li], existingLead, OPS_LEAD_MONEY_KEYS); // OP-CRM-3A
+        // Contact person: a payload WITHOUT the key comes from a tab loaded before the columns
+        // existed — keep the sheet's value (never blank it); a sent value is validated.
+        for (var lc = 0; lc < LEAD_CONTACT_COLUMNS.length; lc++) {
+          var lcCol = LEAD_CONTACT_COLUMNS[lc];
+          leads[li][lcCol] = _hasOwn(leads[li], lcCol)
+            ? _leadContactValue(lcCol, leads[li][lcCol])
+            : (existingLead && existingLead[lcCol] != null ? existingLead[lcCol] : '');
+        }
       }
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {

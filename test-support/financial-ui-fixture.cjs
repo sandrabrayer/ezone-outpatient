@@ -67,7 +67,7 @@ function fixture(fields = {}) {
   // the shared busy-spinner adapters the submit handlers call (public/busy.js is absent here → plain disabled)
   for (const name of ['busyApi', 'busyRun', 'busyStart', 'busyEnd', 'busyIs', 'preferredHouseOrBlank', 'billingModeOf', 'billingModeStored', 'toNum', 'fmtDate', 'dayOfMonth', 'lastDayOfMonth', 'addMonth', 'monthKey',
     'paymentId', 'basePaymentPaidOn', 'nextRenewalDueDate', 'clampedCycleIso', 'nextCycleDueDate',
-    'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError',
+    'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError', 'leadContactText', 'leadContactNote',
     'nextCycleDueDateAfter', 'currentMonthBaseDueDate', 'conflictsMessage', 'applySavedStamps', 'packagePaidState', 'missingCyclePayment', 'persist',
     'persistClientChange', 'rememberConfirmedPayment', 'showFinancialSaveWarning']) vm.runInContext(named(name), ctx);
   return { ctx, client, lead, out, button, warning, warningText,

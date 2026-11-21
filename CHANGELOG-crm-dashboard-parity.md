@@ -88,9 +88,9 @@ line «ליד חדש נכנס ללוח בשלב «פרטים אישיים»», b
 
 ## Not in this change (decisions for Sandra)
 
-- **«פרטי הפונה»** on a lead (contact person, their phone, relation, billing phone) and **optional
-  name / phone** on intake, as in the Dashboard. They need new `Leads` columns (append-only) and a
-  decision on the phone being this app's cross-app match key; ~25 guard tests pin the header.
+- **«פרטי הפונה»** on a lead — added right after this change, in the same release: see
+  `CHANGELOG-lead-contact-person.md`. Still open: **optional name / phone** on intake and the
+  billing-phone choice, which need a decision on the phone being this app's cross-app match key.
 - The Dashboard's **«במהלך שבוע נבחר»** follow-up (this app's tasks have a date, not a week window)
   and its **30-minute in-app reminder**.
 

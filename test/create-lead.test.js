@@ -77,7 +77,10 @@ const LEADS_HEADERS = [
   'updatedAt', 'updatedBy',
   // preferredHouse (בית מועדף): optional createLead field, validated against
   // PREFERRED_HOUSES — real-handler coverage in test/preferred-house.test.js.
-  'preferredHouse'
+  'preferredHouse',
+  // contact person (איש קשר, 2026-11-21): browser-owned lead-form columns; createLead
+  // leaves them blank — real-handler coverage in test/lead-contact-person.test.js.
+  'contactName', 'contactPhone', 'contactRelation'
 ];
 
 function createLead(sheet, expectedSecret, payload, today) {

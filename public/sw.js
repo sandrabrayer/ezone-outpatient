@@ -114,7 +114,8 @@
 //   value v40 (fetched from production /sw.js on 2026-11-18).
 // v42 (2026-11-21, Dashboard-CRM parity + «טיפול תחלואה כפולה»): index.html (tab «היום», the contact / task /
 //   void modals, the new-lead grouping), app.js, crm-activity.js, my-day.js, package-pricing.js and style.css changed
-//   (CHANGELOG-crm-dashboard-parity.md, CHANGELOG-dual-diagnosis-plan-type.md). Bumped from the repo value v41; the
+//   (CHANGELOG-crm-dashboard-parity.md, CHANGELOG-dual-diagnosis-plan-type.md, CHANGELOG-lead-contact-person.md —
+//   the lead form's contact-person section). Bumped from the repo value v41; the
 //   LIVE /sw.js was NOT reachable from this session — confirm production still serves v41 before release.
 var CACHE = 'ezone-outpatient-v42';
 var SHELL = [

@@ -384,6 +384,13 @@
           <div class="wide form-section-title">פרטי המטופל</div>
           <label>שם<input name="name" required /></label>
           <label>טלפון<input name="phone" type="tel" required /></label>
+          <!-- איש קשר (2026-11-21, CHANGELOG-lead-contact-person.md): who called for the patient —
+               the Dashboard CRM's «פרטי הפונה». All optional; the relation list is filled by app.js. -->
+          <div class="wide form-section-title">פרטי הפונה / איש קשר (לא חובה)</div>
+          <label>שם איש הקשר<input name="contactName" maxlength="80" /></label>
+          <label>טלפון איש הקשר<input name="contactPhone" type="tel" /></label>
+          <label>קשר למטופל<select name="contactRelation" id="leadContactRelation"></select></label>
+          <label id="leadContactRelationOtherWrap" hidden>קשר אחר<input name="contactRelationOther" maxlength="40" /></label>
           <div class="wide form-section-title">פרטים נוספים</div>
           <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
             <div class="checkgroup" data-group="serviceType" data-for="leadForm"></div>
@@ -1132,6 +1139,7 @@
     <div id="contactModal" class="modal" hidden>
       <div class="modal-card crm-contact-card">
         <div class="modal-title">תיעוד שיחה · <span id="contactModalName"></span></div>
+        <p id="contactPeople" class="crm-na" hidden></p>
         <p id="contactTaskHint" class="crm-na" hidden></p>
         <form id="contactForm" class="form-grid crm-contact" novalidate>
           <fieldset class="wide crm-fieldset crm-direction"><legend>סוג התיעוד *</legend>

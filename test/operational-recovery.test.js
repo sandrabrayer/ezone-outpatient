@@ -85,7 +85,8 @@ for (const [name, header] of preferredSchemas) {
     // Clients + its tombstone appended billingMode (2026-11-04) then the plan
     // metadata (2026-11-09) and patientTypeOverride (2026-11-18) after preferredHouse;
     // the lead schemas end with preferredHouse
-    assert.equal(s.ctx[header][oldHeader.length], /^Clients/.test(name) ? 'patientTypeOverride' : 'preferredHouse');
+    // (Leads appended the contact person last, 2026-11-21; the removed-leads archive did not)
+    assert.equal(s.ctx[header][oldHeader.length], /^Clients/.test(name) ? 'patientTypeOverride' : name === 'Leads' ? 'contactRelation' : 'preferredHouse');
     s.seed(name, oldHeader, [{ id: 'synthetic-old-schema' }]);
     const h = snapshot(s), r = restored(h);
     assert.ok(h.ctx._integrityValidateRestoreSet(h.backup, dayOf(h)).length);

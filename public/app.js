@@ -79,6 +79,23 @@
   // «טיפול תחלואה כפולה», which has no price yet — the source refuses a charge under an unknown type.
   function chargeServiceTypes() { return SERVICE_TYPES.filter(function (s) { return s !== DUAL_DIAGNOSIS_LABEL; }); }
   var LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
+  // איש קשר של ליד (2026-11-21, CHANGELOG-lead-contact-person.md): who called for the patient.
+  // The relation list is the Dashboard CRM's (CONTACT_RELATIONS there); «אחר» opens a free text.
+  // Three optional lead columns (contactName / contactPhone / contactRelation); the source
+  // re-validates every write. The contact phone is NEVER a patient match key.
+  var CONTACT_RELATIONS = ['מטופל', 'אמא', 'אבא', 'אח/אחות', 'בן/בת', 'בן/בת זוג', 'סבא/סבתא', 'קרוב משפחה', 'חבר/חברה', 'עו"ס', 'אחר'];
+  var CONTACT_RELATION_OTHER = 'אחר';
+  /* «רונית (אמא) · 0501234567» — '' when the lead has no contact person. Plain text (callers escape). */
+  function leadContactText(l) {
+    if (!l) return '';
+    var name = String(l.contactName || '').trim(), rel = String(l.contactRelation || '').trim(), phone = String(l.contactPhone || '').trim();
+    var who = name ? name + (rel ? ' (' + rel + ')' : '') : rel;
+    return [who, phone].filter(Boolean).join(' · ');
+  }
+  /* The contact person carried onto the patient's «הערות» when a lead becomes a patient (the
+   * lead row leaves the Leads sheet then). No Clients column, and never treatmentContactPhone:
+   * that one is a cross-app match key for the PATIENT. */
+  function leadContactNote(l) { var t = leadContactText(l); return t ? 'איש קשר: ' + t : ''; }
   // בית מועדף: closed set of exact labels. Mirrors PREFERRED_HOUSES in
   // apps-script/Code.gs (the server re-validates every write) and the
   // <option>s in index.html. '' = none.
@@ -856,7 +873,11 @@
       updatedBy: row.updatedBy || '',
       // בית מועדף from the createLead handoff (read-only here; follows the lead
       // onto the client on activation).
-      preferredHouse: preferredHouseOrBlank(row.preferredHouse)
+      preferredHouse: preferredHouseOrBlank(row.preferredHouse),
+      // איש קשר (optional): who called for the patient
+      contactName: row.contactName || '',
+      contactPhone: row.contactPhone ? recoverPhone(row.contactPhone) : '',
+      contactRelation: row.contactRelation || ''
     };
   }
   // Plan-types save fix (2026-11-09, CHANGELOG-plan-types-save-fix.md): until
@@ -995,7 +1016,12 @@
       updatedBy: l.updatedBy || '',
       // Column alignment only: the server keeps the on-sheet value for an
       // existing lead (createLead is the only writer).
-      preferredHouse: l.preferredHouse || ''
+      preferredHouse: l.preferredHouse || '',
+      // איש קשר: always sent (a payload WITHOUT these keys means «a tab from before the
+      // columns» to the source, which then keeps the sheet's value).
+      contactName: l.contactName || '',
+      contactPhone: l.contactPhone || '',
+      contactRelation: l.contactRelation || ''
     };
   }
   function clientForSheet(c) {
@@ -4200,6 +4226,7 @@
           (l.assignedTo ? '<span class="chip">אחראי/ת: ' + escapeHtml(l.assignedTo) + '</span>' : '') +
           '</div>';
         var body = retRow('טלפון', l.phone ? escapeHtml(String(l.phone)) : '') +
+          retRow('איש קשר', escapeHtml(leadContactText(l))) +
           retRow('סוג טיפול', l.serviceType ? escapeHtml(formatServices(parseServices(l.serviceType))) : '') +
           retRow('סניף', l.location ? escapeHtml(l.location) : '') +
           retRow('בית מוצא', escapeHtml(houseOfOriginLabel(l.house_of_origin))) +
@@ -6133,6 +6160,16 @@
     $('#contactNextChoices').innerHTML = crmRadios('next', CA.NEXT_CHOICES, '');
     $('#contactChannel').innerHTML = CA.CHANNELS.map(function (c) { return '<option value="' + c.id + '"' + (c.id === 'phone' ? ' selected' : '') + '>' + escapeHtml(c.he) + '</option>'; }).join('');
     $('#contactNextAssignee').innerHTML = crmAssigneeOptions(task && task.assignee ? task.assignee : state.user);
+    // Who to reach (lead cards): the patient's phone and the contact person — and «עם מי» starts
+    // with the contact person's name, as in the Dashboard. textContent only.
+    var cLead = subject.leadId && !subject.clientId ? state.leads.filter(function (x) { return x && String(x.id) === String(subject.leadId); })[0] : null;
+    var people = $('#contactPeople');
+    if (people) {
+      var bits = cLead ? [cLead.phone ? 'טלפון: ' + cLead.phone : '', leadContactNote(cLead)].filter(Boolean) : [];
+      people.hidden = !bits.length;
+      people.textContent = bits.join(' · ');
+    }
+    f.elements.withWhom.value = cLead && cLead.contactName ? cLead.contactName : '';
     var hint = $('#contactTaskHint');
     hint.hidden = !taskId;
     hint.textContent = taskId ? 'המשימה: ' + (task ? task.title + ' · ' + crmTaskWhen(task) + (task.reason ? ' · ' + task.reason : '') : '') + ' — התיעוד יסגור אותה.' : '';
@@ -6390,6 +6427,7 @@
     card.innerHTML =
       '<div class="name">' + escapeHtml(l.name) + '</div>' +
       '<div class="meta">' + escapeHtml(l.phone) + '</div>' +
+      (leadContactText(l) ? '<div class="meta lead-contact">איש קשר: ' + escapeHtml(leadContactText(l)) + '</div>' : '') +
       createdLine + startLine +
       (chipsHtml ? '<div class="row">' + chipsHtml + '</div>' : '') +
       (l.note ? '<div class="note">' + escapeHtml(l.note) + '</div>' : '') +
@@ -7115,8 +7153,21 @@
       note: (fd.get('note') || '').trim(),
       created: fd.get('created') || today(),
       house_of_origin: (fd.get('house_of_origin') || '').trim(),
-      assignedTo: (fd.get('assignedTo') || '').trim()
+      assignedTo: (fd.get('assignedTo') || '').trim(),
+      contactName: (fd.get('contactName') || '').trim().slice(0, 80),
+      contactPhone: normalizePhone(fd.get('contactPhone') || ''),
+      contactRelation: leadFormRelation(fd)
     };
+  }
+  /* The relation the form holds: a list value, or the free text typed for «אחר». */
+  function leadFormRelation(fd) {
+    var rel = (fd.get('contactRelation') || '').trim();
+    if (rel !== CONTACT_RELATION_OTHER) return rel;
+    return ((fd.get('contactRelationOther') || '').trim() || CONTACT_RELATION_OTHER).slice(0, 40);
+  }
+  function updateLeadRelationOther(form) {
+    var wrap = $('#leadContactRelationOtherWrap');
+    if (wrap && form.contactRelation) wrap.hidden = form.contactRelation.value !== CONTACT_RELATION_OTHER;
   }
   function addLeadFromForm(form) {
     var f = readLeadFormFields(form);
@@ -7128,7 +7179,8 @@
       created: f.created, introDateTime: '',
       paymentStatus: '', paymentDate: '', nextBillingDate: '',
       house_of_origin: f.house_of_origin,
-      assignedTo: f.assignedTo
+      assignedTo: f.assignedTo,
+      contactName: f.contactName, contactPhone: f.contactPhone, contactRelation: f.contactRelation
     };
     state.leads.push(lead);
     return lead;
@@ -7140,6 +7192,8 @@
     lead.note = f.note; lead.created = f.created;
     if (f.house_of_origin) lead.house_of_origin = f.house_of_origin;
     if (f.assignedTo) lead.assignedTo = f.assignedTo;
+    // the contact person may be cleared, so the three are always taken from the form
+    lead.contactName = f.contactName; lead.contactPhone = f.contactPhone; lead.contactRelation = f.contactRelation;
   }
 
   // --- dynamic per-service sessions fields
@@ -7412,6 +7466,17 @@
     f.reset();
     var group = $('[data-group="serviceType"]', f);
     populateServiceGroup(group, lead ? lead.serviceType : '');
+    // איש קשר: the relation list, then the lead's own values (a stored free-text relation shows under «אחר»)
+    if (f.contactRelation) {
+      f.contactRelation.innerHTML = '<option value="">— ללא —</option>' + CONTACT_RELATIONS.map(function (r) { return '<option>' + escapeHtml(r) + '</option>'; }).join('');
+      var storedRel = lead ? String(lead.contactRelation || '').trim() : '';
+      var listed = !storedRel || (CONTACT_RELATIONS.indexOf(storedRel) >= 0 && storedRel !== CONTACT_RELATION_OTHER);
+      f.contactRelation.value = listed ? storedRel : CONTACT_RELATION_OTHER;
+      f.contactRelationOther.value = listed || storedRel === CONTACT_RELATION_OTHER ? '' : storedRel;
+      f.contactName.value = lead ? (lead.contactName || '') : '';
+      f.contactPhone.value = lead ? (lead.contactPhone || '') : '';
+      updateLeadRelationOther(f);
+    }
     if (lead) {
       f.name.value = lead.name;
       f.phone.value = lead.phone;
@@ -7945,7 +8010,7 @@
       serviceType: '', location: location,
       sessionsPerWeek: {}, sessionsUnit: {}, pricePerSession: 0,
       startDate: today(), status: 'פעיל', exitDate: '', fromLead: lead.id,
-      source: 'lead', notes: 'נפתח/ה מליד לצורך טיפול חד פעמי', billingType: 'monthly',
+      source: 'lead', notes: 'נפתח/ה מליד לצורך טיפול חד פעמי' + (leadContactNote(lead) ? ' · ' + leadContactNote(lead) : ''), billingType: 'monthly',
       billingDay: '', paymentStatus: '', paymentDate: '', nextBillingDate: '',
       house_of_origin: lead.house_of_origin || '',
       assignedTo: lead.assignedTo || '',
@@ -8948,6 +9013,7 @@
     on('#contactForm', 'submit', submitContactForm);
     on('#taskForm', 'submit', submitTaskForm);
     on('#deferForm', 'submit', submitDeferForm);
+    on('#leadContactRelation', 'change', function () { updateLeadRelationOther($('#leadForm')); });
     on('#taskDoneForm', 'submit', submitTaskDoneForm);
     on('#taskReassignForm', 'submit', submitTaskReassignForm);
     on('#taskWithdrawForm', 'submit', submitTaskWithdrawForm);
@@ -9273,6 +9339,11 @@
         toast('יש לבחור למי הליד משוייך', true); return;
       }
       if (acceptPhone((form.phone && form.phone.value) || '', 'טלפון', 'mobile', true) === false) return;
+      // איש קשר: optional, but a typed phone must be a valid Israeli number (mobile or landline)
+      if (form.contactPhone && acceptPhone(form.contactPhone.value || '', 'טלפון איש הקשר', 'payer', false) === false) return;
+      if (form.contactRelation && form.contactRelation.value === CONTACT_RELATION_OTHER && !(form.contactRelationOther.value || '').trim()) {
+        toast('יש לפרט את הקשר למטופל', true); return;
+      }
       busyStart(submit);
       function runAddFlow() {
         busyStart(submit);
@@ -9391,7 +9462,7 @@
         pricePerSession: toNum(fd.get('pricePerSession')),
         startDate: startDate,
         status: 'פעיל', exitDate: '', fromLead: lead.id,
-        source: 'lead', notes: '', billingType: 'monthly',
+        source: 'lead', notes: leadContactNote(lead), billingType: 'monthly',
         // First-payment rule: the first payment's day-of-month defines the
         // billing day; startDate's day is only the no-payment fallback.
         billingDay: (((payStatus === 'paid' || payStatus === 'partial') && payDate && dayOfMonth(payDate)) ||

@@ -319,8 +319,14 @@ subscriptions, check-ins or unapproved production release.
   rate — not chargeable and not recordable as a session until Sandra decides them; ezone-therapists
   receives it inside the plan's `serviceType` and may need a display follow-up.
 - SW cache v41 → v42 (live value not verified from the session). Apps Script release required.
-- Not done: «פרטי הפונה» + optional name / phone on a lead (new `Leads` columns), the week-window
-  follow-up, the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`,
+- **Lead contact person** (same PR): `Leads` appended `contactName`, `contactPhone`,
+  `contactRelation` (19 → 22 columns; browser-owned, validated in `_saveAll`, kept for pre-release
+  tabs). `contactPhone` is text-forced but **never a cross-app match key**
+  (`CROSS_APP_PHONE_SOURCES` unchanged; never copied to `treatmentContactPhone`). «לידים שהוסרו» is
+  NOT widened (OP-03 header correction pending). `createLead` does not carry it yet.
+  `CHANGELOG-lead-contact-person.md`.
+- Not done: optional name / phone on a lead, the billing-phone choice, the week-window follow-up,
+  the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`,
   `CHANGELOG-dual-diagnosis-plan-type.md`.
 
 ## Payroll report → מורן by email (Nov 19, 2026 — two PRs, outpatient FIRST)

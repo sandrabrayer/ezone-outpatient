@@ -12,6 +12,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - New source action `voidContact` («ביטול תיעוד», ורד only at Node and at the source): append-only `contact_voided` event; the open follow-up the record created is cancelled with it; a voided record is no longer «contacted» anywhere, including the Dashboard handoff feed.
 - «היום שלי» → «היום», heading «כל הצוות». New-lead form in the Dashboard's layout. SW cache v41 → v42. **Apps Script release needed.** See CHANGELOG-crm-dashboard-parity.md.
 
+### איש קשר של ליד — the caller's details on a lead (2026-11-21)
+- Lead form: optional «פרטי הפונה / איש קשר» — name, phone, relation to the patient (the Dashboard's list). Shown on the lead card, offered in «תיעוד שיחה» («עם מי» pre-filled), and written to the patient's «הערות» when the lead becomes a patient.
+- `Leads` sheet: `contactName`, `contactPhone`, `contactRelation` appended at the end (19 → 22). Validated at the source; a tab loaded before the release never blanks them; the contact phone is never a patient match key. The removed-leads archive is deliberately unchanged. **Apps Script release needed.** See CHANGELOG-lead-contact-person.md.
+
 ### Tests: the continuation-milestone sync tests no longer depend on today's date (2026-11-21)
 - `test/continuation-milestones.test.js` used fixed calendar fixtures (entry 20/10/2026 → first milestone 20/11/2026) against the real clock, so five tests went red on 2026-11-21 — on the deploy branch itself, before any change. The clock is now pinned INSIDE the Apps Script sandbox for that file only (the day the fixtures were written). Test-only: no source or app change.
 

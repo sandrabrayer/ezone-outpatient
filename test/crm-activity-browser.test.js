@@ -418,3 +418,62 @@ test('browser: a stale submission key never follows the form to the next opening
   assert.equal(f.sb.rows('Tasks').length, 1);
   assert.deepEqual(f.errors, []);
 });
+
+test('browser: a new lead with a contact person — optional, validated, shown on the card and offered in «תיעוד שיחה»', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const page = await f.login('ורד');
+  await page.click('#addLeadBtn');
+  await page.waitForSelector('#leadModal:not([hidden])');
+  assert.equal(await page.locator('#leadFormSubmit').innerText(), 'הוסף ליד');
+  assert.match(await page.locator('#leadModalMeta').innerText(), /פרטים אישיים/);
+  assert.equal(await page.locator('#leadContactRelationOtherWrap').isHidden(), true);
+  await page.fill('#leadForm [name="name"]', 'נועם ישראלי');
+  await page.fill('#leadForm [name="phone"]', '0501234599');
+  await page.locator('#leadForm [data-group="serviceType"] input[type="checkbox"]').first().check();
+  await page.selectOption('#leadForm [name="location"]', { index: 1 });
+  await page.selectOption('#leadForm [name="house_of_origin"]', 'external');
+  await page.selectOption('#leadForm [name="assignedTo"]', 'ורד');
+  await page.fill('#leadForm [name="contactName"]', '<i>רונית</i>');
+  // an invalid contact phone stops the save; nothing travels
+  await page.fill('#leadForm [name="contactPhone"]', '12345');
+  await page.click('#leadFormSubmit');
+  await page.waitForSelector('#toast:not([hidden])');
+  assert.match(await page.locator('#toast').innerText(), /טלפון איש הקשר לא תקין/);
+  assert.equal(f.captured.filter((x) => x.payload.action === 'saveAll').length, 0);
+  await page.fill('#leadForm [name="contactPhone"]', '052-5264094');
+  // «אחר» must be spelled out
+  await page.selectOption('#leadContactRelation', 'אחר');
+  assert.equal(await page.locator('#leadContactRelationOtherWrap').isHidden(), false);
+  await page.click('#leadFormSubmit');
+  await page.waitForFunction(() => /יש לפרט את הקשר למטופל/.test(document.getElementById('toast').textContent));
+  assert.equal(f.captured.filter((x) => x.payload.action === 'saveAll').length, 0);
+  await page.selectOption('#leadContactRelation', 'אמא');
+  assert.equal(await page.locator('#leadContactRelationOtherWrap').isHidden(), true);
+  // the browser's full save carries no explicit action (the proxy defaults it to saveAll)
+  const saved = page.waitForResponse((r) => r.url().endsWith('/api/sheets') && r.request().method() === 'POST' && ['saveAll', undefined].includes(r.request().postDataJSON().action));
+  await page.click('#leadFormSubmit');
+  assert.equal((await (await saved).json()).ok, true);
+  await page.waitForSelector('#leadModal[hidden]', { state: 'attached' });
+  const row = f.sb.rows('Leads').find((l) => l.name === 'נועם ישראלי');
+  assert.equal(row.contactName, '<i>רונית</i>'); assert.equal(row.contactPhone, '0525264094'); assert.equal(row.contactRelation, 'אמא');
+  assert.equal(row.phone, '0501234599');
+  // the card shows it — as text, never as markup
+  const c = card(page, 'נועם ישראלי');
+  await c.locator('.lead-contact').waitFor();
+  assert.equal(await c.locator('.lead-contact').innerText(), 'איש קשר: <i>רונית</i> (אמא) · 0525264094');
+  assert.equal(await c.locator('.lead-contact i').count(), 0);
+  // «תיעוד שיחה»: who to reach, and «עם מי» starts with the contact person
+  await c.locator('.crm-actions [data-crm="contact"]').click();
+  await page.waitForSelector('#contactModal:not([hidden])');
+  assert.equal(await page.locator('#contactPeople').innerText(), 'טלפון: 0501234599 · איש קשר: <i>רונית</i> (אמא) · 0525264094');
+  assert.equal(await page.inputValue('#contactForm [name="withWhom"]'), '<i>רונית</i>');
+  await page.click('#contactModal [data-close]');
+  // the fixture lead has no contact person: no line on its card, nothing pre-filled
+  assert.equal(await card(page, LEAD.name).locator('.lead-contact').count(), 0);
+  await card(page, LEAD.name).locator('.crm-actions [data-crm="contact"]').click();
+  await page.waitForSelector('#contactModal:not([hidden])');
+  assert.equal(await page.inputValue('#contactForm [name="withWhom"]'), '');
+  assert.equal(await page.locator('#contactPeople').innerText(), 'טלפון: ' + LEAD.phone);
+  await page.click('#contactModal [data-close]');
+  assert.deepEqual(f.errors, []);
+});
