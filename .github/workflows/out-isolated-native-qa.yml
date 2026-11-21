@@ -1,0 +1,43 @@
+name: Isolated native OUT recovery drill build (no deploy)
+on:
+  push:
+    branches: [codex/out-thr-isolated-native-qa-20261121]
+permissions:
+  contents: write
+jobs:
+  build-isolated-drill:
+    if: github.event.head_commit.message != 'test: frozen isolated native drill output'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Strict source boundary and dependency install
+        run: |
+          set -eu
+          test "$(git branch --show-current)" = "codex/out-thr-isolated-native-qa-20261121"
+          git merge-base --is-ancestor d73d2d10114883352b203bd0bf1ae36003e83324 HEAD
+          npm ci
+      - name: Build exact-source standalone script for new isolated project only
+        env:
+          TZ: UTC
+        run: |
+          node test-support/build-google-operational-drill.cjs --script-id 1Ux_h2BmKOM1XmlI5TTFvloA0BJ_jQIQw3wpMBTclv5OMnZwpPPM5_tyZ > /tmp/isolated-drill-metadata.json
+          node --check test-support/google-operational-drill-candidate.gs
+          if grep -q 'var expectedScriptId = "ISOLATED_SCRIPT_ID_REQUIRED"' test-support/google-operational-drill-candidate.gs; then exit 1; fi
+          cat /tmp/isolated-drill-metadata.json
+      - name: Commit only test harness on QA branch, never production
+        run: |
+          set -eu
+          test "$(git branch --show-current)" = "codex/out-thr-isolated-native-qa-20261121"
+          git add test-support/google-operational-drill-candidate.gs
+          git diff --cached --name-only | grep -x 'test-support/google-operational-drill-candidate.gs'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m 'test: frozen isolated native drill output'
+          git push origin HEAD:codex/out-thr-isolated-native-qa-20261121
