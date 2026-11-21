@@ -155,7 +155,7 @@ test('E: the menu, pickers, gating and round-trip fields exist in app.js', () =>
   assert.match(APP, /COMPLEMENTARY_LABEL = 'טיפול משלים'/);
   assert.match(APP, /COMPLEMENTARY_TYPES = \['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'\]/);
   assert.match(APP, /yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות', somatic: 'טיפול סומטי'/);
-  assert.match(APP, /'מעקב פסיכיאטרי',\s*\n\s*COMPLEMENTARY_LABEL\s*\n\s*\];/, 'added to SERVICE_TYPES');
+  assert.match(APP, /'מעקב פסיכיאטרי',\s*\n\s*COMPLEMENTARY_LABEL,\s*\n\s*DUAL_DIAGNOSIS_LABEL\s*\n\s*\];/, 'added to SERVICE_TYPES (טיפול תחלואה כפולה appended after it, 2026-11-21)');
   // subtype picker + therapist selects, gated on פרטני 2+/שבוע
   assert.match(APP, /dataset\.complementaryType = '1'/);
   assert.match(APP, /dataset\.privateTherapist = String\(idx \+ 1\)/);

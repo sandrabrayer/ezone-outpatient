@@ -15,6 +15,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Tests: the continuation-milestone sync tests no longer depend on today's date (2026-11-21)
 - `test/continuation-milestones.test.js` used fixed calendar fixtures (entry 20/10/2026 → first milestone 20/11/2026) against the real clock, so five tests went red on 2026-11-21 — on the deploy branch itself, before any change. The clock is now pinned INSIDE the Apps Script sandbox for that file only (the day the fixtures were written). Test-only: no source or app change.
 
+### «טיפול תחלואה כפולה» — new plan treatment type (2026-11-21)
+- Selectable in every plan picker, with its own frequency; shown on the card and sent to the therapists app in the plan. Plan-only: no price, no billing mapping, no therapist rate yet, so it is not offered as a charge and a session cannot be recorded under it. See CHANGELOG-dual-diagnosis-plan-type.md.
+
 ### Payroll report emailed to מורן from the therapists app (2026-11-19)
 - New source action `sendPayrollReport` (Therapists Apps Script → here, dedicated `PAYROLL_SEND_SECRET`, fail-closed, ≥ 32 chars). It builds the month's therapist-payout report from SessionLog — byte-identical to «תשלומי מטפלים» → «ייצוא לאקסל» (mirror of `therapist-payout.js` + `payout-export.js`, parity-tested) — emails it with the CSV attached to the Script Property `PAYROLL_REPORT_EMAIL`, then stamps `forwardedToPayroll` (each row's own month) on exactly the reported rows. Mail first, stamp after: a failed send stamps nothing. A second press sends only late rows (הפרשים); an empty report answers `nothing_to_send`, so nothing is emailed twice. Counts-only reply (the coordinator never sees pay). Audit row `payroll_sent`. No sheet column, no UI change here; «תשלומי מטפלים» stays as a fallback until the first real send. See CHANGELOG-payroll-email.md.
 

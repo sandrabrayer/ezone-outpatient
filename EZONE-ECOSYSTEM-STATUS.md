@@ -301,7 +301,7 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
-## Outpatient: contact record / tasks / «היום» aligned with the Dashboard CRM (Nov 21, 2026 — draft PR, not released)
+## Outpatient: contact record / tasks / «היום» aligned with the Dashboard CRM + «טיפול תחלואה כפולה» (Nov 21, 2026 — draft PR, not released)
 
 - Reference: E-Zone-Dashboard `a3983f4` (PR #426). Lead cards and patient cards carry the same
   block: «מה הלאה», «שיחות אחרונות», open tasks, «📞 תיעוד שיחה», «➕ משימה חדשה», history.
@@ -315,9 +315,13 @@ subscriptions, check-ins or unapproved production release.
   `contacted` in **`getHandoffStatus`** (the Dashboard reads it) — contract keys unchanged.
 - `deferTask`: a reason is required only when `source = 'contact'`.
 - «היום שלי» → «היום» (heading «כל הצוות»). No `window.prompt` left in the CRM.
+- «טיפול תחלואה כפולה»: a PLAN type only (`SERVICE_TYPES`). No price / billing mapping / therapist
+  rate — not chargeable and not recordable as a session until Sandra decides them; ezone-therapists
+  receives it inside the plan's `serviceType` and may need a display follow-up.
 - SW cache v41 → v42 (live value not verified from the session). Apps Script release required.
 - Not done: «פרטי הפונה» + optional name / phone on a lead (new `Leads` columns), the week-window
-  follow-up, the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`.
+  follow-up, the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`,
+  `CHANGELOG-dual-diagnosis-plan-type.md`.
 
 ## Payroll report → מורן by email (Nov 19, 2026 — two PRs, outpatient FIRST)
 

@@ -32,6 +32,12 @@
   // a closed menu. The subtype is stored as a stable English key on the client
   // (complementaryType, server-validated); Hebrew labels are render-time only.
   var COMPLEMENTARY_LABEL = 'טיפול משלים';
+  // טיפול תחלואה כפולה (2026-11-21, Sandra): a PLAN treatment type — selectable wherever the plan's
+  // treatments are picked (lead, activation, direct intake, עריכה), with its own frequency row, and
+  // sent to the therapists app in the plan (getTreatmentPlans). Plan-only, like «טיפול משלים» was on
+  // 2026-11-09: it has NO price, NO clinical/billing mapping and NO therapist rate — sessions cannot
+  // be recorded under it until those are decided (CHANGELOG-dual-diagnosis-plan-type.md).
+  var DUAL_DIAGNOSIS_LABEL = 'טיפול תחלואה כפולה';
   var COMPLEMENTARY_TYPES = ['yoga', 'acupuncture', 'reflexology', 'art', 'somatic'];
   var COMPLEMENTARY_HE = { yoga: 'יוגה', acupuncture: 'דיקור', reflexology: 'רפלקסולוגיה', art: 'אמנות', somatic: 'טיפול סומטי' };
   function complementaryTypeOrBlank(v) {
@@ -66,8 +72,12 @@
     'טיפול משפחתי',
     DAY_CENTER_LABEL,
     'מעקב פסיכיאטרי',
-    COMPLEMENTARY_LABEL
+    COMPLEMENTARY_LABEL,
+    DUAL_DIAGNOSIS_LABEL
   ];
+  // The treatment types a CHARGE («+ הוסף טיפול») may carry: the plan list without the plan-only
+  // «טיפול תחלואה כפולה», which has no price yet — the source refuses a charge under an unknown type.
+  function chargeServiceTypes() { return SERVICE_TYPES.filter(function (s) { return s !== DUAL_DIAGNOSIS_LABEL; }); }
   var LOCATIONS = ['רעננה הפרדס', 'רעננה אשר', 'רמות השבים', 'קיסריה גמילה', 'קיסריה עפרוני'];
   // בית מועדף: closed set of exact labels. Mirrors PREFERRED_HOUSES in
   // apps-script/Code.gs (the server re-validates every write) and the
@@ -7649,7 +7659,7 @@
     var typeSel = $('#addChargeTreatmentType');
     if (typeSel) {
       typeSel.innerHTML = '<option value="">—</option>' +
-        SERVICE_TYPES.map(function (s) {
+        chargeServiceTypes().map(function (s) {
           return '<option value="' + escapeHtml(s) + '">' + escapeHtml(serviceLabel(s)) + '</option>';
         }).join('');
     }
@@ -8130,7 +8140,7 @@
     var typeSel = $('#editChargeTreatmentType');
     if (typeSel) {
       typeSel.innerHTML = '<option value="">—</option>' +
-        SERVICE_TYPES.map(function (s) {
+        chargeServiceTypes().map(function (s) {
           return '<option value="' + escapeHtml(s) + '">' + escapeHtml(serviceLabel(s)) + '</option>';
         }).join('');
     }
