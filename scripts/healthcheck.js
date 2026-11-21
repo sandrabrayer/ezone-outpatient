@@ -14,10 +14,10 @@
  *
  * CRITICAL checks (any failure -> exit 1, workflow goes red):
  *   a. GET APP_URL           -> 200 + HTML shell marker ("E-ZONE Outpatient").
- *   b. POST /api/verify-pin  -> 200 { ok:true }. This app is STATELESS: the PIN
- *      gate stores the role in the browser's sessionStorage and no session
- *      cookie is issued — any Set-Cookie is still captured and replayed
- *      defensively.
+ *   b. POST /api/verify-pin {pin, user:SHARED_PIN_USER} -> 200 {ok:true, stage:'named'}.
+ *      The app uses a signed HttpOnly ezone_session cookie. A PIN-only request is
+ *      PREAUTH and cannot reach data routes; no reads run until named login and
+ *      its real session cookie are confirmed.
  *   c. Every read the frontend's loadAll() fires in parallel (Promise.all in
  *      public/app.js): getData, getPayments, getCharges, getStopFlags,
  *      getExtraSessionRequests, getSettings, getMyStopAlerts
@@ -49,6 +49,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { SHARED_PIN_USER } = require('../lib/users');
 
 const DEFAULT_APP_URL = 'https://ezone-outpatient.up.railway.app';
 const HTML_SHELL_MARKER = 'E-ZONE Outpatient';
@@ -263,16 +264,25 @@ async function runHealthcheck(opts) {
     const login = await fetchWithRetry(fetchImpl, appUrl + '/api/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: appPin })
+      // APP_PIN belongs to SHARED_PIN_USER; the PIN-only first stage issues
+      // a deliberately unauthorised preauth cookie. No extra secret is needed.
+      body: JSON.stringify({ pin: appPin, user: SHARED_PIN_USER })
     });
     const body = classifyBody(login.text);
     if (login.status === 200 && body.kind === 'json' && body.data && body.data.ok === true) {
-      const cookies = extractCookies(login.headers);
-      if (cookies.length) {
-        cookieHeader = cookies.join('; ');
-        notes.push('login: session cookie captured (' + cookies.length + ' cookie(s); values not logged)');
+      if (body.data.stage !== 'named') {
+        criticals.push('login: PIN accepted but named login is incomplete (preauth only); protected reads skipped');
       } else {
-        notes.push('login: PIN accepted; no session cookie issued — this app is stateless by design (role lives in browser sessionStorage)');
+        // An unrelated cookie (e.g. an expired catalog-admin cookie) is NOT a
+        // valid data session. Never log or persist cookie content.
+        const sessionCookies = extractCookies(login.headers).filter(function (c) {
+          return /^ezone_session=[^;\\s]+$/.test(c);
+        });
+        if (sessionCookies.length !== 1) criticals.push('login: named login returned no unique session cookie; protected reads skipped');
+        else {
+          cookieHeader = sessionCookies[0];
+          notes.push('login: named session cookie captured (value not logged)');
+        }
       }
     } else if (login.status === 401) {
       criticals.push('login: PIN rejected (401) — the APP_PIN secret does not match the deployed APP_PIN');
@@ -284,6 +294,10 @@ async function runHealthcheck(opts) {
   } catch (err) {
     criticals.push('login: request failed — ' + (err && err.message ? err.message : String(err)));
   }
+
+  // A PIN-only preauth is intentionally refused by /api/sheets. Do not turn one
+  // authentication failure into seven misleading data outages.
+  if (!cookieHeader) return { criticals, warnings, notes, stats };
 
   // ---- c+d. loadAll data endpoints ----------------------------------------
   const datasets = {};
