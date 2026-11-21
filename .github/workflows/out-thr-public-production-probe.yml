@@ -1,0 +1,48 @@
+name: Read-only live OUT and Therapists release identity check
+on:
+  push:
+    branches:
+      - codex/out-thr-readonly-prod-probes-20261121
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-readonly-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Compare LIVE Railway public version and health — absolutely no data
+        shell: bash
+        run: |
+          node <<'NODE'
+          'use strict';
+          const assert = require('node:assert/strict');
+          const expected = [
+            { name: 'outpatient', origin: 'https://ezone-outpatient.up.railway.app', commit: '3e3930119987c069d14f58496fe9cdd3ca463ecd' },
+            { name: 'therapists', origin: 'https://ezone-therapists.up.railway.app', commit: 'f9331ee72e2d58c3ac21d184e2e73c6a7fa5020a' }
+          ];
+          async function publicGet(origin, path) {
+            const response = await fetch(origin + path, {
+              method: 'GET', redirect: 'error',
+              headers: { Accept: 'application/json', 'Cache-Control': 'no-store' },
+              signal: AbortSignal.timeout(15000)
+            });
+            assert.equal(response.status, 200, path + ' must be available');
+            const raw = await response.text();
+            assert.ok(raw.length < 4096, 'unexpectedly large public response');
+            const json = JSON.parse(raw);
+            assert.equal(typeof json, 'object');
+            return json;
+          }
+          (async () => {
+            for (const service of expected) {
+              const version = await publicGet(service.origin, '/api/version');
+              const health = await publicGet(service.origin, '/healthz');
+              assert.equal(version.commit, service.commit, service.name + ' deployed commit drift');
+              assert.equal(health.ok, true, service.name + ' health failed');
+              // Deliberately report only the release identity and ok flag.
+              // Never request or log clinical, payment, roster, secret or patient endpoints.
+              console.log(JSON.stringify({service:service.name,liveCommit:version.commit,healthy:health.ok,publicReadOnly:true}));
+            }
+          })().catch(e => { console.error('Public-only readiness FAILED:', e.message); process.exitCode = 1; });
+          NODE
