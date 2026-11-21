@@ -27,7 +27,7 @@ jobs:
           TZ: UTC
         run: |
           node test-support/build-google-operational-drill.cjs --script-id 1Ux_h2BmKOM1XmlI5TTFvloA0BJ_jQIQw3wpMBTclv5OMnZwpPPM5_tyZ > /tmp/isolated-drill-metadata.json
-          node --check test-support/google-operational-drill-candidate.gs
+          node --check < test-support/google-operational-drill-candidate.gs
           if grep -q 'var expectedScriptId = "ISOLATED_SCRIPT_ID_REQUIRED"' test-support/google-operational-drill-candidate.gs; then exit 1; fi
           cat /tmp/isolated-drill-metadata.json
       - name: Commit only test harness on QA branch, never production
