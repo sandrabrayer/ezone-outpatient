@@ -1,0 +1,54 @@
+name: Ephemeral integration audit OUT192 and CRM193 (no publish)
+on:
+  push:
+    branches: [codex/out192-crm193-ephemeral-merge-audit-20261121]
+permissions:
+  contents: read
+jobs:
+  integration-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout isolated QA only (no production branch writes)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Attempt exact 193-on-192 merge in disposable runner only
+        shell: bash
+        run: |
+          set -eu
+          test "$GITHUB_REF_NAME" = "codex/out192-crm193-ephemeral-merge-audit-20261121"
+          node -e 'if(process.env.GITHUB_REF_NAME !== "codex/out192-crm193-ephemeral-merge-audit-20261121")process.exit(1)'
+          git cat-file -e d73d2d10114883352b203bd0bf1ae36003e83324^{commit}
+          git fetch --no-tags origin d2f917c05f8b63598c41f6bb2e71dd4ebf13043b
+          git config user.name "E-ZONE disposable merge audit"
+          git config user.email "e-zone-audit@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff d2f917c05f8b63598c41f6bb2e71dd4ebf13043b > /tmp/merge-audit-stdout 2>&1
+          merge_rc=$?
+          set -e
+          if [ "$merge_rc" -ne 0 ]; then
+            echo "INTEGRATION_STATUS=CONFLICT (no branch push, no commit, no deploy)"
+            echo "Unmerged filenames:"
+            git diff --name-only --diff-filter=U
+            echo "Merge change summary:"
+            sed -n '/^CONFLICT/p' /tmp/merge-audit-stdout | head -50
+            git merge --abort || true
+            exit 1
+          fi
+          echo "INTEGRATION_STATUS=AUTOMATIC_MERGE_ONLY (not release acceptance)"
+          git status --short | head -50
+          # No git commit/push. Temporary changes live only on the disposable runner.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Reconcile-source focused tests if and ONLY if no merge conflicts
+        shell: bash
+        env:
+          TZ: UTC
+        run: |
+          npm ci --no-audit --no-fund
+          node --test --test-concurrency=1 test/session-outcome-crash-recovery.test.js test/session-outcome.test.js test/continuation-milestones.test.js test/crm-dashboard-parity.test.js test/lead-contact-person.test.js
+          echo "NOTE: this is synthetic nonproduction compatibility evidence; new native Google/paired THR UAT required for combined release."
