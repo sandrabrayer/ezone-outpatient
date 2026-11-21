@@ -20,7 +20,7 @@ jobs:
         run: |
           set -eu
           test "$(git branch --show-current)" = "codex/out-thr-isolated-native-qa-20261121"
-          git merge-base --is-ancestor d73d2d10114883352b203bd0bf1ae36003e83324 HEAD
+          node -e "const fs=require('fs'), crypto=require('crypto'); const h=crypto.createHash('sha256').update(fs.readFileSync('apps-script/Code.gs')).digest('hex'); if(h!=='afef5855623203543317a2daa274393d999ed1d12c81c94f509a165f8e284363') throw Error('OUT source drift: '+h)"
           npm ci
       - name: Build exact-source standalone script for new isolated project only
         env:
