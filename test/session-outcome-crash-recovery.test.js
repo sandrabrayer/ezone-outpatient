@@ -181,3 +181,16 @@ test('backup refuses to invent an empty journal after it was activated',()=>{
   delete t.s.sheets.SessionOutcomeOps;
   assert.throws(()=>t.s.ctx._integrityCaptureData(ss),/Missing backup source: SessionOutcomeOps/);
 });
+
+test('a partial or tampered operation record never becomes an untracked replay',()=>{
+  const t=setup();
+  assert.equal(t.send('patient_cancelled_notice').ok,true);
+  const journal=t.s.sheets.SessionOutcomeOps;
+  journal.grid[1][0]=''; // simulate a damaged operation identifier
+  const result=t.send('happened','2026-11-20T11:00:00.000Z');
+  assert.equal(result.ok,false);
+  assert.equal(t.credit(),1);
+  assert.equal(t.log().length,1);
+  assert.equal(t.journal().length,0,'the damaged row remains physically present but is not silently repaired');
+  assert.equal(journal.grid.length,2);
+});

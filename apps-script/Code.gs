@@ -3980,15 +3980,26 @@ function _soJournalRows(sh) {
     for (var j = 0; j < SESSION_OUTCOME_OP_HEADERS.length; j++) {
       row[SESSION_OUTCOME_OP_HEADERS[j]] = all[i][j];
     }
-    if (String(row.opKey || '').trim()) {
-      var key = String(row.opKey);
-      if (seen[key] || ['pending','committed'].indexOf(String(row.state)) < 0 ||
-          !String(row.clientId || '') || !String(row.sessionId || '') ||
-          !String(row.treatmentId || ''))
+    if (!String(row.opKey || '').trim()) {
+      if (SESSION_OUTCOME_OP_HEADERS.some(function(h) { return row[h] !== '' && row[h] != null; }))
         throw new Error('session_credit_journal_corrupt');
-      seen[key] = true;
-      row._sheetRow = i + 2; out.push(row);
+      continue;
     }
+    var key = String(row.opKey), intended;
+    try { intended = JSON.parse(String(row.newRowJson || '')); } catch (_) {
+      throw new Error('session_credit_journal_corrupt');
+    }
+    if (seen[key] || ['pending','committed'].indexOf(String(row.state)) < 0 ||
+        !String(row.clientId || '') || !String(row.sessionId || '') ||
+        !String(row.treatmentId || '') ||
+        !intended || String(intended.clientId) !== String(row.clientId) ||
+        String(intended.sessionId) !== String(row.sessionId) ||
+        String(intended.treatmentId) !== String(row.treatmentId) ||
+        _soRowStamp(intended) !== String(row.newRowStamp) ||
+        !isFinite(Number(row.fromCredits)) || !isFinite(Number(row.toCredits)))
+      throw new Error('session_credit_journal_corrupt');
+    seen[key] = true;
+    row._sheetRow = i + 2; out.push(row);
   }
   return out;
 }
