@@ -9379,13 +9379,16 @@ function _integrityWriteSnapshot(backupSs, snapName, grid, formats) {
  * name-matched via _integrityIsExpiredSnapshot; never deletes the last
  * remaining sheet (Sheets requires >= 1). */
 function _integrityApplyRetention(backupSs, todayName, retentionDays) {
+  // A single source inventory avoids 400+ remote getSheets() calls per
+  // retention pass. Preserve the last worksheet and unknown/manual tabs.
   var sheets = backupSs.getSheets();
-  var deleted = [];
+  var remaining = sheets.length, deleted = [];
   for (var i = 0; i < sheets.length; i++) {
-    if (backupSs.getSheets().length <= 1) break;
+    if (remaining <= 1) break;
     var name = sheets[i].getName();
     if (_integrityIsExpiredSnapshot(name, todayName, retentionDays)) {
       backupSs.deleteSheet(sheets[i]);
+      remaining--;
       deleted.push(name);
     }
   }
@@ -9440,6 +9443,39 @@ function _integritySendAlert(body) {
     Logger.log('INTEGRITY ALERT send failed (' + err + '):\n' + body);
     return false;
   }
+}
+
+/* The scheduled backup has already read back EVERY new snapshot, checked
+ * exact typed values, and rejected formulas before publishing its name.
+ * The six-minute trigger must not do ANOTHER 25+ remote readbacks. Instead,
+ * re-read only the published manifest and run the UNCHANGED strict structural,
+ * inventory, checksum and journal validator over these just-verified grids.
+ * Independent restore preflight still reads the actual Google backup sheets,
+ * using _integrityValidateRestoreSet(backupSs,...), unchanged.
+ * This does not make live source capture atomic against external editors. */
+function _integrityValidateJustPublishedSet_(backupSs, day, manifest, captured, requireJournal) {
+  var manifestName = INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day;
+  var sheet = backupSs.getSheetByName(manifestName);
+  if (!sheet) throw new Error('Published backup manifest missing');
+  var storedManifest = sheet.getDataRange().getValues();
+  _integrityVerifyGrid(manifest, storedManifest);
+  var verifiedGrids = Object.create(null);
+  captured.forEach(function(item) {
+    var name = INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day;
+    if (Object.prototype.hasOwnProperty.call(verifiedGrids, name))
+      throw new Error('Duplicate verified backup snapshot: ' + name);
+    verifiedGrids[name] = item.grid;
+  });
+  var verifiedView = {
+    getSheetByName: function(name) {
+      var grid = name === manifestName ? storedManifest : verifiedGrids[name];
+      if (!grid) return null;
+      return { getDataRange: function() {
+        return { getValues: function() { return grid; } };
+      } };
+    }
+  };
+  return _integrityValidateRestoreSet(verifiedView, day, requireJournal);
 }
 
 /* The 2:00 AM trigger handler. Each check runs in its own try/catch so one
@@ -9588,7 +9624,8 @@ function nightlyIntegrityJob() {
           entry.absent ? '1' : '0', _integrityFingerprint(entry.grid)]);
       });
       _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
-      _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
+      _integrityValidateJustPublishedSet_(backupSs, day, manifest, captured,
+        !!props.getProperty('FINANCIAL_OPS_CREATED'));
       backupPublished = true; // only after a coherent, checksum-verified snapshot set
       // Once observed, disappearing operational/manual tables are a backup
       // failure, not a new legitimate empty baseline that ages out good history.
