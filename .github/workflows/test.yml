@@ -11,6 +11,8 @@ on:
   push:
     branches:
       - claude/youthful-volta-laarnk
+      # QA-only: validate draft two-stage backup even while its PR is divergent.
+      - codex/op03-two-stage-backup-20261122
   pull_request:
 
 permissions:
