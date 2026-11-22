@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const hc = require('../scripts/healthcheck');
+const { SHARED_PIN_USER } = require('../lib/users');
 
 const DUMMY_PIN = '424242';
 const BASE = 'https://healthcheck.test.invalid';
@@ -60,9 +61,17 @@ function mockFetch(payloads) {
     let body;
     if (init && init.method === 'POST' && url.indexOf('/api/verify-pin') !== -1) {
       const spec = payloads['verify-pin'];
+      const sent = JSON.parse(init.body);
+      assert.equal(sent.pin, DUMMY_PIN, 'the test PIN stays synthetic');
+      assert.equal(sent.user, SHARED_PIN_USER, 'named login is required before reading data');
+      const cookies = spec.cookies !== undefined
+        ? spec.cookies
+        : (spec.status === 200 && spec.json && spec.json.ok === true
+          ? ['ezone_session=synthetic-cookie-not-a-secret']
+          : []);
       return {
         status: spec.status,
-        headers: { getSetCookie: function () { return spec.cookies || []; } },
+        headers: { getSetCookie: function () { return cookies; } },
         text: async function () { return JSON.stringify(spec.json); }
       };
     }
@@ -92,11 +101,29 @@ test('all endpoints healthy -> no criticals, no warnings', async () => {
   const r = await run(okPayloads());
   assert.deepEqual(r.criticals, []);
   assert.deepEqual(r.warnings, []);
-  assert.ok(r.notes.some((n) => n.includes('stateless')), 'notes explain the no-cookie login');
+  assert.ok(r.notes.some((n) => n.includes('session cookie captured')), 'named session cookie is required');
   assert.ok(r.notes.some((n) => n.includes('TherapistRates')), 'TherapistRates skip is noted');
 });
 
 /* ===== criticals ========================================================== */
+
+test('PIN-only or missing Set-Cookie fails closed: zero protected dataset requests', async () => {
+  let protectedReads = 0;
+  const fixture = mockFetch(okPayloads({
+    'verify-pin': { status: 200, json: { ok: true }, cookies: [] }
+  }));
+  const r = await hc.runHealthcheck({
+    appUrl: BASE,
+    appPin: DUMMY_PIN,
+    fetchImpl: async (url, init) => {
+      if (String(url).includes('/api/sheets')) protectedReads++;
+      return fixture(url, init);
+    }
+  });
+  assert.equal(protectedReads, 0, 'must not make any patient/finance read without a signed named cookie');
+  assert.ok(r.criticals.some((c) => c.includes('no named session cookie')));
+  assert.ok(!JSON.stringify(r).includes(DUMMY_PIN), 'never echo PIN');
+});
 
 test('HTML instead of JSON on a loadAll endpoint is CRITICAL (Google error page)', async () => {
   const r = await run(okPayloads({ 'action=getPayments': '<html><body>Google Drive error</body></html>' }));
