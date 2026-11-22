@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OUT #195 release candidate now also carries the two-stage backup (#199) — DRAFT (2026-11-22)
+- Draft-only integration: finance / group receiver + deployed CRM/monitor + OP-03 two-stage backup in one tree. `INTEGRITY_DATA_SNAPSHOT_RE` recognises both the `session-outcome-ops` family and the new `pending-manifest` / `verified` families. QA-only branch push triggers removed from `test.yml`. New synthetic test: a committed GROUP `SessionOutcomeOps` row travels through Phase A → Phase B into the certified set, replay after restore credits once, a tampered journal fails closed. Release order and rollback: docs/OUT-195-RELEASE-RUNBOOK-20261122.md. Native isolated Google run still required.
+
 ### Carry production optional task date/time into OUT195 (2026-11-22)
 - Preserve live new-task date/hour optional and undated tasks in «היום», alongside pending finance/group settlement. Candidate SW v45; neither deployed nor merged. No Apps Script, backup or therapist changes in this compatibility patch.
 

@@ -301,6 +301,10 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Outpatient: combined release candidate #195 — finance/group receiver + two-stage backup (Nov 22, 2026 — DRAFT, not released)
+
+One candidate tree on `codex/out192-on-live-crm193-candidate-20261122`, aligned with deployed `b7de864f`, containing the per-participant group settlement / over-quota receiver (THR #171 pair), deployed CRM #193/#196 and monitor #197, and the OP-03 two-stage backup (#199, dormant until `setupIntegrityTwoStage()`). SW v45 (live v43). Order: OUT Node → OUT Apps Script → THR probe → THR #171. Gates still open: isolated native Google A/B + restore rehearsal, a verified current production backup (#124, last manifest 17 Nov), operator probe and UAT, Sandra's exact-SHA approval. See `docs/OUT-195-RELEASE-RUNBOOK-20261122.md`, `docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md`.
+
 ## Outpatient: contact record / tasks / «היום» aligned with the Dashboard CRM + «טיפול תחלואה כפולה» (Nov 21, 2026 — draft PR, not released)
 
 - Reference: E-Zone-Dashboard `a3983f4` (PR #426). Lead cards and patient cards carry the same
