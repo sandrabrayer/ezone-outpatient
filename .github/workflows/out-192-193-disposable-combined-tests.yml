@@ -87,6 +87,17 @@ jobs:
         run: |
           npm test
           echo "Full synthetic pass only; combined native Google and integrated THR/browser UAT still required."
+      - name: Install isolated Chromium tooling (no network to production services)
+        run: |
+          npm install --prefix /tmp/ezone-browser-tools --no-save --package-lock=false playwright@1.51.1
+          node /tmp/ezone-browser-tools/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+      - name: Run REAL Chromium local integration UI scenarios
+        env:
+          NODE_PATH: /tmp/ezone-browser-tools/node_modules
+          EZONE_REQUIRE_BROWSER_TESTS: '1'
+          TZ: UTC
+        run: |
+          node --test --test-concurrency=1 test/lead-save-browser.test.js test/financial-save-browser.test.js test/protected-price-browser.test.js test/package-calculator-browser.test.js test/money-scope-browser.test.js test/crm-activity-browser.test.js test/package-change-save-browser.test.js test/read-only-boot-browser.test.js test/continuation-crm-browser.test.js test/plan-types-save-browser.test.js test/one-time-lead-browser.test.js test/session-notice-outcome-browser.test.js test/offers-crm-browser.test.js test/crm-followup-2-browser.test.js test/one-time-session-browser.test.js test/out-workflow-acceptance-browser.test.js
       - name: Terminal safety statement
         if: always()
         run: |
