@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «משימה חדשה»: date and hour optional; a task with no date is today's work (2026-11-22)
+- The new-task form no longer refuses a task without an hour («בחרי שעה»): only what and who are required. The date («לטיפול בתאריך») opens on today and may be cleared.
+- A task with no date shows as «להיום» on the card («מה הלאה»: «לטיפול היום») and in today's section of «היום», instead of «בהמשך השבוע» / «ללא מועד». Browser-only; no Apps Script release. SW cache v42 → v43. See CHANGELOG-task-time-optional.md.
+
 ### Contact record, tasks and «היום» — the same as the Dashboard CRM (2026-11-21)
 - Lead cards AND patient cards carry one activity block: «⏰ מה הלאה» (what · when · who), «שיחות אחרונות» (kind chip), open tasks, «📞 תיעוד שיחה» / «➕ משימה חדשה», history.
 - «תיעוד שיחה»: three kinds (שיחה יוצאת / שיחה נכנסת / תיעוד שיחה — none pre-chosen), the Dashboard's fields, new outcome «התקיימה שיחה — לא נדרש המשך», «קשר הבא» with no default and the real date shown. Stored in `detailsJson` — no sheet column.
