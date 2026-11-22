@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 two-stage nightly backup + recovery certificate — DRAFT, dormant until `setupIntegrityTwoStage()` (2026-11-22)
+- Phase A (existing 02:00 job) captures and publishes a pending-only set; Phase B (one 03:00 finalizer) independently re-reads every snapshot, certifies `outpatient-verified-<day>`, then runs retention/sentinel. v3 restore refuses an uncertified set; v2 stays readable. Includes #198's single-inventory retention. No behaviour change in production until the operator activates staged mode. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md (isolated native rehearsal still required).
+
 ### «משימה חדשה»: date and hour optional; a task with no date is today's work (2026-11-22)
 - The new-task form no longer refuses a task without an hour («בחרי שעה»): only what and who are required. The date («לטיפול בתאריך») opens on today and may be cleared.
 - A task with no date shows as «להיום» on the card («מה הלאה»: «לטיפול היום») and in today's section of «היום», instead of «בהמשך השבוע» / «ללא מועד». Browser-only; no Apps Script release. SW cache v42 → v43. See CHANGELOG-task-time-optional.md.
