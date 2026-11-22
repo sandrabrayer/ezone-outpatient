@@ -234,3 +234,14 @@ test('independent finalizer keeps legacy nonempty-row sentinel semantics with ma
   assert.equal(h.props.INTEGRITY_LAST_COUNT, '2', 'nonempty damaged row is counted, as in _readAll');
   assert.deepEqual(JSON.parse(h.props.INTEGRITY_LAST_IDS), ['client-1']);
 });
+
+test('last-run witness remains the capture instant, not a later verifier timestamp', () => {
+  const h = staged(), day = dayOf(h);
+  h.ctx.nightlyIntegrityJob();
+  const metadata = h.backup.getSheetByName('outpatient-recovery-meta-' + day)
+    .getDataRange().getValues();
+  const capturedAt = metadata.find(row => row[0] === 'capturedAt')[1];
+  assert.ok(capturedAt);
+  assert.equal(h.ctx.finalizeNightlyIntegrityJob().ok, true);
+  assert.equal(h.props.INTEGRITY_LAST_RUN, capturedAt);
+});
