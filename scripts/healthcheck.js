@@ -43,7 +43,7 @@
  *     the TherapistRates sheet and this healthcheck must not add backend code.
  *
  * Privacy/security: APP_PIN and any cookie value are never logged. CI output
- * contains ids/counts only — never client or patient names, and never raw
+ * contains counts and row positions only — never patient IDs, names, or raw
  * response bodies.
  */
 
@@ -175,11 +175,11 @@ function warnDateFields(rows, fields, idKey, label) {
       const v = r ? r[field] : undefined;
       if (v == null || String(v).trim() === '') return;
       if (!DATE_RE.test(String(v).trim())) {
-        bad.push(r && r[idKey] ? String(r[idKey]) : '#' + (i + 1));
+        bad.push(i + 1); // relative row positions only; never send patient IDs into CI logs
       }
     });
     if (bad.length) {
-      warnings.push(label + '.' + field + ': ' + bad.length + ' non-empty value(s) not matching YYYY-MM-DD (ids: ' + bad.slice(0, 5).join(', ') + (bad.length > 5 ? ', …' : '') + ')');
+      warnings.push(label + '.' + field + ': ' + bad.length + ' non-empty value(s) not matching YYYY-MM-DD (data-row positions: ' + bad.slice(0, 5).join(', ') + (bad.length > 5 ? ', …' : '') + ')');
     }
   });
   return warnings;
