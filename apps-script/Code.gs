@@ -9791,7 +9791,9 @@ function finalizeNightlyIntegrityJob() {
     // has no id. The sentinel's separate ID list keeps only nonblank IDs.
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(populated.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(ids));
-    props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+    // The sentinel timestamp is the CAPTURE instant, not a later retry day.
+    // Never make an old pending backup appear fresh merely by finalizing it.
+    props.setProperty(INTEGRITY_PROP_LAST_RUN, String(meta.capturedAt));
     var doneLock = LockService.getScriptLock(); doneLock.waitLock(30000);
     try {
       if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== markerBefore)
