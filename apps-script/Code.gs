@@ -8809,7 +8809,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|pending-manifest|verified|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -9018,12 +9018,18 @@ function _integrityCaptureData(sourceSs) {
     });
     // No credentials, auth secrets or PINs are copied from Script Properties.
     // Inventory is hashed along with the datasets and published last in manifest.
-    var meta = [['key', 'value'], ['schemaVersion', '2'],
+    // A v3 capture is NOT a recovery certificate until the independent
+    // finalizer writes its own verified marker into the BACKUP workbook.
+    var staged = props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1';
+    var active = staged ? JSON.parse(props.getProperty('INTEGRITY_ACTIVE_BACKUP') || '{}') : null;
+    if (staged && (!active || !active.id)) throw new Error('Two-stage capture needs active run identity');
+    var meta = [['key', 'value'], ['schemaVersion', staged ? '3' : '2'],
       ['sourceSpreadsheetId', sourceSs.getId()], ['capturedAt', new Date().toISOString()],
       ['financialOpsCreated', journalRequired ? '1' : '0'],
       ['inventory', JSON.stringify(captured.map(function (x) { return [x.source, x.prefix, x.absent ? '1' : '0']; }))],
       ['knownSources', JSON.stringify(specs.map(function (x) { return x.source; }))],
       ['unclassifiedSources', JSON.stringify(unknown)]];
+    if (staged) meta.push(['backupRunId', String(active.id)]);
     captured.push({ source: '__RecoveryMetadata', prefix: 'recovery-meta-', absent: false, grid: meta, formats: null });
     return captured;
   } finally { lock.releaseLock(); }
@@ -9067,7 +9073,7 @@ function _integrityValidateCrmGrid_(source, grid) {
     seen[raw] = true;
   }
 }
-function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
+function _integrityValidateRestoreSet(backupSs, day, requireJournal, allowUncertified) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
   if (!sh) throw new Error('Restore manifest missing');
@@ -9127,6 +9133,16 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   if (meta.financialOpsCreated === '1' && result.some(function (x) { return x.source === 'FinancialOps' && x.absent; })) {
     throw new Error('Restore journal required');
   }
+  // For v3 the manifest alone is a PENDING artifact: an expired finalizer must
+  // never turn an incomplete snapshot into a certified operational restore.
+  // Only finalizeNightlyIntegrityJob may skip this gate during its full
+  // independent post-publication readback, BEFORE writing the certificate.
+  if (meta.schemaVersion === '3' && allowUncertified !== true) {
+    var certificate = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + day);
+    if (!certificate) throw new Error('Two-stage restore set not certified');
+    _integrityVerifyGrid(_integrityCertificateGrid(day, meta.backupRunId, rows),
+                         certificate.getDataRange().getValues());
+  }
   return result;
 }
 
@@ -9134,13 +9150,17 @@ function _integrityRecoveryMetadata(captured) {
   var item = captured.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
   if (!item || item.absent) throw new Error('Legacy backup is not a full operational recovery set');
   var grid = item.grid, meta = {};
+  var version = grid[1] && grid[1][0] === 'schemaVersion' ? grid[1][1] : '';
   var fields = ['schemaVersion', 'sourceSpreadsheetId', 'capturedAt', 'financialOpsCreated', 'inventory', 'knownSources', 'unclassifiedSources'];
+  if (version === '3') fields.push('backupRunId');
   if (JSON.stringify(grid[0]) !== JSON.stringify(['key', 'value']) || grid.length !== fields.length + 1) throw new Error('Invalid recovery metadata');
   grid.slice(1).forEach(function (r) {
     if (r.length !== 2 || fields.indexOf(r[0]) < 0 || _hasOwn(meta, r[0]) || typeof r[1] !== 'string') throw new Error('Invalid recovery metadata');
     meta[r[0]] = r[1];
   });
-  if (meta.schemaVersion !== '2' || !meta.sourceSpreadsheetId || !isFinite(Date.parse(meta.capturedAt)) ||
+  if (['2', '3'].indexOf(meta.schemaVersion) < 0 ||
+      (meta.schemaVersion === '3' && (!meta.backupRunId || meta.backupRunId.length > 128)) ||
+      !meta.sourceSpreadsheetId || !isFinite(Date.parse(meta.capturedAt)) ||
       ['0', '1'].indexOf(meta.financialOpsCreated) < 0 ||
       !Array.isArray(JSON.parse(meta.inventory)) || !Array.isArray(JSON.parse(meta.knownSources)) ||
       !Array.isArray(JSON.parse(meta.unclassifiedSources))) throw new Error('Invalid recovery metadata');
@@ -9156,7 +9176,7 @@ function beginOutpatientRecovery() {
     props.setProperty('OUTPATIENT_RECOVERY_HOLD', '1');
     // Freeze new admissions now, but do not authorize cutover while a job
     // admitted before this hold can still publish or update its sentinels.
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
     return { ok: true, state: 'recovery_pending' };
   } finally { lock.releaseLock(); }
 }
@@ -9294,7 +9314,7 @@ function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
   if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('Recovery backup still running');
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) throw new Error('Recovery backup still pending');
     var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
     var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
@@ -9449,6 +9469,7 @@ function _integritySendAlert(body) {
  * failure never silences the others; internal errors join the alert. */
 function nightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
+  var stagedMode = props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1';
   var admission = LockService.getScriptLock();
   if (!admission.tryLock(5000)) {
     _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
@@ -9459,7 +9480,8 @@ function nightlyIntegrityJob() {
   var runMarker = '', admissionError = '';
   try {
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
-    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) admissionError = 'backup_busy';
+    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') ||
+             (stagedMode && props.getProperty('INTEGRITY_PENDING_BACKUP'))) admissionError = 'backup_busy';
     else {
       runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
       props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
@@ -9569,6 +9591,14 @@ function nightlyIntegrityJob() {
   try {
     if (clientsReadOk && clientsGrid && clientsGrid.length) {
       var sourceSs = _ss();
+      // Verify duplicate-day admission BEFORE touching the same-day families.
+      // This also prevents a manual retry from overwriting a certified set.
+      var proposedDay = _integritySnapshotName(new Date()).slice(INTEGRITY_SNAPSHOT_PREFIX.length);
+      if (stagedMode && backupSs &&
+          (backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + proposedDay) ||
+           backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + proposedDay))) {
+        throw new Error('Two-stage backup day already published; operator review required');
+      }
       var captured = _integrityCaptureData(sourceSs);
       if (!backupSs) {
         backupSs = SpreadsheetApp.create(INTEGRITY_BACKUP_NAME);
@@ -9577,6 +9607,15 @@ function nightlyIntegrityJob() {
       if (backupSs.getId() === sourceSs.getId()) throw new Error('Backup destination is the live spreadsheet');
       var todayName = _integritySnapshotName(new Date());
       var day = todayName.slice(INTEGRITY_SNAPSHOT_PREFIX.length);
+      if (stagedMode) {
+        // Durable admission BEFORE the first external write; on timeout or
+        // interrupted upload the pending marker remains fail-closed.
+        var admitted = JSON.parse(runMarker);
+        props.setProperty('INTEGRITY_PENDING_BACKUP', JSON.stringify({
+          id: admitted.id, day: day, backupId: backupSs.getId(),
+          startedAt: admitted.startedAt
+        }));
+      }
       for (var b = 0; b < captured.length; b++) {
         var item = captured[b];
         _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day, item.grid, item.formats);
@@ -9590,17 +9629,25 @@ function nightlyIntegrityJob() {
         manifest.push([entry.source, entry.source, INTEGRITY_SNAPSHOT_PREFIX + entry.prefix + day,
           entry.absent ? '1' : '0', _integrityFingerprint(entry.grid)]);
       });
-      _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
-      _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
-      backupPublished = true; // only after a coherent, checksum-verified snapshot set
-      // Once observed, disappearing operational/manual tables are a backup
-      // failure, not a new legitimate empty baseline that ages out good history.
-      props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
-        return !x.absent && x.source !== '__RecoveryMetadata';
-      }).map(function (x) { return x.source; })));
-      // Retention runs only after every data snapshot and the manifest verify.
-      var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
-      if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
+      if (stagedMode) {
+        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'pending-manifest-' + day, manifest);
+        // NOT a certified snapshot. The second trigger has to publish the final
+        // manifest, independently re-read every sheet, and write the certificate.
+        backupPublished = true;
+        Logger.log('nightlyIntegrityJob: staged only; independent finalization PENDING (%s)', day);
+      } else {
+        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
+        _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
+        backupPublished = true; // only after a coherent, checksum-verified snapshot set
+        // Once observed, disappearing operational/manual tables are a backup
+        // failure, not a new legitimate empty baseline that ages out good history.
+        props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
+          return !x.absent && x.source !== '__RecoveryMetadata';
+        }).map(function (x) { return x.source; })));
+        // Retention runs only after every data snapshot and the manifest verify.
+        var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
+        if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
+      }
     }
   } catch (err) { errors.push('הגיבוי היומי נכשל: ' + err); }
 
@@ -9613,14 +9660,14 @@ function nightlyIntegrityJob() {
       prevCount: prevCountRaw === null ? '?' : String(prevCountRaw),
       currentCount: String(clients.length)
     }));
-  } else {
+  } else if (!stagedMode) {
     Logger.log('nightlyIntegrityJob: ok (clients=%s, payments=%s)', String(clients.length), String(payments.length));
   }
 
   // ---- persist the sentinel state for tomorrow's run — but only off a
   //      SUCCESSFUL Clients read: seeding count 0 after a failed read would
   //      fire a false full-loss alert tomorrow ----
-  if (clientsReadOk) {
+  if (clientsReadOk && !stagedMode) {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
@@ -9660,6 +9707,123 @@ function setupIntegrityTrigger() {
   }
   ScriptApp.newTrigger('nightlyIntegrityJob').timeBased().everyDays(1).atHour(2).create();
   return { ok: true, installed: 'nightlyIntegrityJob @ 02:00' };
+}
+
+/* Two-stage certificate: stored in the backup workbook, not just Script Properties.
+ * Strictly binds the independently scanned manifest and immutable run identity.
+ * v2 legacy sets are still inspectable; v3 sets MUST carry this certificate. */
+function _integrityCertificateGrid(day, runId, manifestGrid) {
+  return [['key', 'value'], ['day', day], ['backupRunId', String(runId)],
+          ['manifestSha256', _integrityFingerprint(manifestGrid)]];
+}
+
+/* SECOND trigger. Does not touch the live workbook, Google editor credentials,
+ * trigger configuration or patient records. Only the existing backup target.
+ * A failed/cancelled finalize keeps INTEGRITY_PENDING_BACKUP for a safe retry;
+ * a dead execution may also strand ACTIVE and must NEVER be auto-cleared. */
+function finalizeNightlyIntegrityJob() {
+  var props = PropertiesService.getScriptProperties();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error('backup_busy');
+  var ownedMarker = '', pending, markerBefore;
+  try {
+    if (props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') !== '1')
+      throw new Error('two_stage_not_enabled');
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD'))
+      throw new Error('recovery_pending');
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP'))
+      throw new Error('backup_busy');
+    markerBefore = props.getProperty('INTEGRITY_PENDING_BACKUP');
+    if (!markerBefore) throw new Error('no_pending_backup; inspect previous capture');
+    try { pending = JSON.parse(markerBefore); } catch (_) { throw new Error('invalid_pending_backup'); }
+    if (!pending || !pending.id || !/^\d{4}-\d{2}-\d{2}$/.test(pending.day) ||
+        !pending.backupId || pending.backupId !== props.getProperty(INTEGRITY_PROP_BACKUP_SSID))
+      throw new Error('invalid_pending_backup');
+    ownedMarker = JSON.stringify({ id: Utilities.getUuid(), phase: 'verify',
+                                    pendingId: pending.id, startedAt: new Date().toISOString() });
+    props.setProperty('INTEGRITY_ACTIVE_BACKUP', ownedMarker);
+  } finally { lock.releaseLock(); }
+  try {
+    var backupSs = SpreadsheetApp.openById(pending.backupId);
+    if (backupSs.getId() !== pending.backupId) throw new Error('backup_target_mismatch');
+    var stagedName = INTEGRITY_SNAPSHOT_PREFIX + 'pending-manifest-' + pending.day;
+    var stagedSheet = backupSs.getSheetByName(stagedName);
+    if (!stagedSheet) throw new Error('pending_manifest_missing; operator review');
+    var manifest = stagedSheet.getDataRange().getValues();
+    if (!manifest.length || JSON.stringify(manifest[0]) !==
+        JSON.stringify(['id', 'source', 'snapshot', 'absent', 'sha256']))
+      throw new Error('pending_manifest_invalid');
+    // The verified marker is only published AFTER the final manifest and the
+    // unchanged full independent readback, including all typed/unknown tabs.
+    _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + pending.day, manifest);
+    var result = _integrityValidateRestoreSet(backupSs, pending.day,
+                   !!props.getProperty('FINANCIAL_OPS_CREATED'), true);
+    var meta = _integrityRecoveryMetadata(result);
+    if (meta.schemaVersion !== '3' || meta.backupRunId !== String(pending.id) ||
+        meta.sourceSpreadsheetId === backupSs.getId()) throw new Error('pending_run_identity_mismatch');
+    var certificate = _integrityCertificateGrid(pending.day, pending.id, manifest);
+    _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day, certificate);
+    // Read the tiny certificate back once, with strict source+date+manifest hash.
+    var written = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day);
+    _integrityVerifyGrid(certificate, written.getDataRange().getValues());
+    // Only after certificate, update the source history from the independently
+    // verified inventory (never from the current, possibly changed live source).
+    var inventory = JSON.parse(meta.inventory), required = inventory.filter(function (entry) {
+      return entry[2] === '0';
+    }).map(function (entry) { return entry[0]; });
+    props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(required));
+    // Complete retention after certification; a failure keeps pending so the
+    // finalizer can recheck and resume, without allowing tomorrow's capture.
+    _integrityApplyRetention(backupSs, INTEGRITY_SNAPSHOT_PREFIX + pending.day, INTEGRITY_RETENTION_DAYS);
+    var clients = result.filter(function (x) { return x.source === 'Clients'; })[0];
+    if (!clients || clients.absent) throw new Error('certified_clients_missing');
+    var idCol = clients.grid[0].indexOf('id');
+    if (idCol < 0) throw new Error('certified_clients_id_missing');
+    var ids = clients.grid.slice(1).map(function (row) { return String(row[idCol] || ''); })
+      .filter(function (id) { return !!id; });
+    // No false reset on a failed capture; only the certified captured rows
+    // become tomorrow's sentinel comparison baseline.
+    props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(ids.length));
+    props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(ids));
+    props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+    var doneLock = LockService.getScriptLock(); doneLock.waitLock(30000);
+    try {
+      if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== markerBefore)
+        throw new Error('pending_run_changed');
+      props.deleteProperty('INTEGRITY_PENDING_BACKUP');
+    } finally { doneLock.releaseLock(); }
+    Logger.log('finalizeNightlyIntegrityJob: VERIFIED (%s, %s sources)', pending.day, result.length);
+    return { ok: true, state: 'verified', day: pending.day, sources: result.length };
+  } catch (err) {
+    _integritySendAlert('Independent OUT backup finalization failed; pending marker retained; operator review: ' + String(err));
+    throw err;
+  } finally {
+    var completion = LockService.getScriptLock(); completion.waitLock(30000);
+    try {
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') === ownedMarker)
+        props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    } finally { completion.releaseLock(); }
+  }
+}
+
+/* Approval-gated one-time INSTALLER, never called by source handlers or tests.
+ * Existing 02:00 nightly trigger remains unchanged. Create ONE independent
+ * 03:00 finalizer trigger; enable staged mode LAST only if both are present.
+ * The owner MUST review Executions/properties before invoking in production. */
+function setupIntegrityTwoStage() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP') ||
+        props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('backup_or_recovery_pending');
+    var triggers = ScriptApp.getProjectTriggers();
+    var nightly = triggers.filter(function (t) { return t.getHandlerFunction() === 'nightlyIntegrityJob'; });
+    var second = triggers.filter(function (t) { return t.getHandlerFunction() === 'finalizeNightlyIntegrityJob'; });
+    if (nightly.length !== 1 || second.length > 1) throw new Error('unexpected_integrity_trigger_inventory');
+    if (!second.length) ScriptApp.newTrigger('finalizeNightlyIntegrityJob').timeBased().everyDays(1).atHour(3).create();
+    props.setProperty('INTEGRITY_TWO_STAGE_ENABLED', '1');
+    return { ok: true, nightly: '02:00 existing', finalizer: '03:00', enabled: true };
+  } finally { lock.releaseLock(); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
