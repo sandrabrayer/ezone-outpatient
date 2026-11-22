@@ -11,6 +11,8 @@ on:
   push:
     branches:
       - claude/youthful-volta-laarnk
+      # QA-only: run raw OUT195 candidate CI even while PR conflicts block pull_request events.
+      - codex/out192-on-live-crm193-candidate-20261122
   pull_request:
 
 permissions:
