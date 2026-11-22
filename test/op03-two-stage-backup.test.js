@@ -212,3 +212,14 @@ test('installer refuses missing/duplicate nightly, recovery hold and unresolved 
   triggers.push({ getHandlerFunction: () => 'nightlyIntegrityJob' });
   assert.throws(() => h.ctx.setupIntegrityTwoStage(), /unexpected_integrity_trigger_inventory/);
 });
+
+test('disabling stage mode during an unfinished backup never reopens the old destructive writer', () => {
+  const h = staged();
+  h.ctx.nightlyIntegrityJob();
+  const pending = h.props.INTEGRITY_PENDING_BACKUP;
+  const writes = h.events.filter(e => e[0] === 'write').length;
+  delete h.props.INTEGRITY_TWO_STAGE_ENABLED; // synthetic misconfiguration only
+  assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
+  assert.equal(h.props.INTEGRITY_PENDING_BACKUP, pending);
+  assert.equal(h.events.filter(e => e[0] === 'write').length, writes);
+});
