@@ -9782,11 +9782,14 @@ function finalizeNightlyIntegrityJob() {
     if (!clients || clients.absent) throw new Error('certified_clients_missing');
     var idCol = clients.grid[0].indexOf('id');
     if (idCol < 0) throw new Error('certified_clients_id_missing');
-    var ids = clients.grid.slice(1).map(function (row) { return String(row[idCol] || ''); })
+    var populated = clients.grid.slice(1).filter(function (row) {
+      return row.some(function (v) { return v !== '' && v !== null; });
+    });
+    var ids = populated.map(function (row) { return String(row[idCol] || ''); })
       .filter(function (id) { return !!id; });
-    // No false reset on a failed capture; only the certified captured rows
-    // become tomorrow's sentinel comparison baseline.
-    props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(ids.length));
+    // Match _readAll's historic nonempty-row count, even when a damaged row
+    // has no id. The sentinel's separate ID list keeps only nonblank IDs.
+    props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(populated.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(ids));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
     var doneLock = LockService.getScriptLock(); doneLock.waitLock(30000);
