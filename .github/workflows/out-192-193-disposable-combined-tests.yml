@@ -1,0 +1,79 @@
+name: Disposable mixed OUT financial and CRM source acceptance (NO DEPLOY)
+on:
+  push:
+    branches: [codex/out192-crm193-ephemeral-merge-audit-20261121]
+permissions:
+  contents: read
+jobs:
+  synthetic-combination:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Temporary source union with explicitly temporary conflict choices
+        shell: bash
+        run: |
+          set -eu
+          test "$GITHUB_REF_NAME" = "codex/out192-crm193-ephemeral-merge-audit-20261121"
+          test "$(git rev-parse d73d2d10114883352b203bd0bf1ae36003e83324^{commit})" = "d73d2d10114883352b203bd0bf1ae36003e83324"
+          git fetch --no-tags origin d2f917c05f8b63598c41f6bb2e71dd4ebf13043b
+          git config user.name "Synthetic QA (no push)"
+          git config user.email "e-zone-qa@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff d2f917c05f8b63598c41f6bb2e71dd4ebf13043b > /tmp/merge-log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          conflicts="$(git diff --name-only --diff-filter=U | LC_ALL=C sort)"
+          expected="$(printf '%s\n' CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs | LC_ALL=C sort)"
+          echo "Source overlap detection: exactly four known textual conflicts"
+          echo "$conflicts"
+          test "$conflicts" = "$expected"
+          # These choices are ONLY a temporary diagnostic approximation. They
+          # MUST NOT be committed/released as a reconciled product.
+          git checkout --ours -- CHANGELOG.md test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs public/sw.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const sw = 'public/sw.js';
+          let source = fs.readFileSync(sw, 'utf8');
+          if (!source.includes("var CACHE = 'ezone-outpatient-v43';")) throw new Error('unexpected SW source');
+          source = source.replace("var CACHE = 'ezone-outpatient-v43';", "// SYNTHETIC UNION ONLY; final service-worker changelog/asset audit required\nvar CACHE = 'ezone-outpatient-v44';");
+          fs.writeFileSync(sw, source);
+          const app = fs.readFileSync('apps-script/Code.gs', 'utf8');
+          for (const token of ['getTherapistsGroupContract', 'getTherapistsExtraContract', 'SESSION_OUTCOME_OP_SHEET', 'voidContact', 'contactRelation']) {
+            if (!app.includes(token)) throw new Error('Expected merged source marker missing: ' + token);
+          }
+          console.log('Merged Code.gs contains both OUT v1 and CRM markers; no semantic acceptance implied');
+          NODE
+          git add CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --stat | tail -45
+          echo "TEMPORARY source combined ONLY inside disposable CI process; no commit, no push"
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Cross-domain direct tests on ephemeral union
+        env:
+          TZ: UTC
+        run: |
+          node --test --test-concurrency=1 \
+            test/session-outcome-crash-recovery.test.js \
+            test/session-outcome.test.js \
+            test/crm-dashboard-parity.test.js \
+            test/crm-tasks-activity-gs.test.js \
+            test/lead-contact-person.test.js \
+            test/continuation-milestones.test.js \
+            test/operational-recovery.test.js \
+            test/source-proxy.test.js \
+            test/paid-date-coverage.test.js
+      - name: Terminal safety statement
+        if: always()
+        run: |
+          echo "NO_GIT_PUSH=TRUE; NO_PRODUCTION_DEPLOY=TRUE"
+          echo "This workflow's test results do not qualify the final merged code or a native Google release."
