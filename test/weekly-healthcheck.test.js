@@ -169,12 +169,13 @@ test('blank client id is a WARNING, not critical', async () => {
   assert.ok(r.warnings.some((w) => w.includes('blank/missing client id')));
 });
 
-test('malformed date is a WARNING with ids only', async () => {
+test('malformed date warning reports only relative row positions, never patient identifiers', async () => {
   const r = await run(okPayloads({
     getData: { ok: true, leads: [], clients: [fullClient({ paymentDate: '01/07/2026' })] }
   }));
   assert.deepEqual(r.criticals, []);
-  assert.ok(r.warnings.some((w) => w.includes('clients.paymentDate') && w.includes('c1')));
+  assert.ok(r.warnings.some((w) => w.includes('clients.paymentDate') && w.includes('data-row positions: 1')));
+  assert.ok(!JSON.stringify(r.warnings).includes('c1'), 'do not print patient identifiers in CI logs');
 });
 
 test('SessionLog no_match rows are counted as a WARNING', async () => {
