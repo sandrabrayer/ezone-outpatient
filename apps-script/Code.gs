@@ -9481,7 +9481,7 @@ function nightlyIntegrityJob() {
   try {
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
     else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') ||
-             (stagedMode && props.getProperty('INTEGRITY_PENDING_BACKUP'))) admissionError = 'backup_busy';
+             props.getProperty('INTEGRITY_PENDING_BACKUP')) admissionError = 'backup_busy';
     else {
       runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
       props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
