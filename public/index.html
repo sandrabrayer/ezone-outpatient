@@ -1188,7 +1188,8 @@
       </div>
     </div>
 
-    <!-- CRM: «משימה חדשה» — what to do, who, a date and a time (Dashboard CRM form) -->
+    <!-- CRM: «משימה חדשה» — what to do and who; the date (today by default) and the time are optional
+         (2026-11-22, CHANGELOG-task-time-optional.md) -->
     <div id="taskModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">משימה חדשה — <span id="taskModalName"></span></div>
@@ -1196,9 +1197,9 @@
           <label>סוג<select name="kind" id="taskKind"></select><span class="crm-err" data-err="kind"></span></label>
           <label>אחראי<select name="assignee" id="taskAssignee"></select></label>
           <label class="wide">מה לעשות *<input name="title" type="text" maxlength="160" /><span class="crm-err" data-err="title"></span></label>
-          <label>תאריך *<input name="dueDate" type="date" /><span class="crm-err" data-err="dueDate"></span></label>
-          <label>שעה *<input name="dueTime" type="time" /><span class="crm-err" data-err="dueTime"></span></label>
-          <p class="wide crm-na">המשימה תופיע ב«היום» ביום שלה, ובכרטיס תחת «מה הלאה».</p>
+          <label>לטיפול בתאריך<input name="dueDate" type="date" /><span class="crm-err" data-err="dueDate"></span></label>
+          <label>שעה (לא חובה)<input name="dueTime" type="time" /><span class="crm-err" data-err="dueTime"></span></label>
+          <p class="wide crm-na">התאריך הוא היום שבו המשימה צריכה להיות מטופלת — ברירת המחדל היא היום. בלי שעה: לטיפול במהלך אותו יום. בלי תאריך: המשימה נשארת ב«היום» עד שמטפלים בה.</p>
           <div class="wide crm-err" data-err="_form"></div>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>

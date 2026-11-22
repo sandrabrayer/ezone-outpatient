@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Carry production optional task date/time into OUT195 (2026-11-22)
+- Preserve live new-task date/hour optional and undated tasks in «היום», alongside pending finance/group settlement. Candidate SW v45; neither deployed nor merged. No Apps Script, backup or therapist changes in this compatibility patch.
+
 ### Candidate: monthly payment coverage and full OUT workflow (2026-11-20)
 - Explicit ordinary versus advance renewal intent; ordinary new monthly receipts cover the actual paid date through one clamped calendar month. Exact-date cycle IDs prevent same-month cycle collisions while preserving recorded IDs/periods and legacy journal replay.
 - Refuse duplicate admission from a stale tab; preserve original referral status after conversion and reload; enforce persisted financial-task visibility on replay; refuse ambiguous shared-payer deactivation.

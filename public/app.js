@@ -1869,7 +1869,7 @@
       return '<div class="md-row' + (r.priority === 'exception' ? ' is-exception' : '') + '" data-md-open="' + escapeHtml(r.open) + '" data-md-id="' + escapeHtml(r.subjectId) + '" data-md-name="' + escapeHtml(r.name) + '"' + crmAttrs + '>' +
         '<span><b class="name">' + escapeHtml(r.name) + '</b>' + (r.sub ? '<br><span class="sub">' + escapeHtml(r.sub) + '</span>' : '') + '</span>' +
         '<span><b>' + escapeHtml(r.action) + '</b>' + (r.why ? '<br><span class="sub">' + escapeHtml(r.why) + '</span>' : '') + '</span>' +
-        '<span>' + (r.when ? escapeHtml(window.MyDay.fmtDate(r.when) + (r.time ? ' ' + r.time : '')) : '—') + '<br><span class="md-chip st-' + escapeHtml(r.priority === 'exception' ? 'exception' : r.state) + '">' + escapeHtml(window.MyDay.stateText(r)) + '</span></span>' +
+        '<span>' + (r.when ? escapeHtml(window.MyDay.fmtDate(r.when) + (r.time ? ' ' + r.time : '')) : '—') + '<br><span class="md-chip st-' + escapeHtml(r.priority === 'exception' ? 'exception' : (r.kind === 'task' && r.state === 'undated' ? 'today' : r.state)) + '">' + escapeHtml(window.MyDay.stateText(r)) + '</span></span>' +
         '<span>' + escapeHtml(r.owner || '—') + '</span>' +
         '<span class="md-last">' + (r.lastContact ? escapeHtml(window.MyDay.lastContactText(r)) + (r.lastContact.summary ? '<br><span class="sub">' + escapeHtml(r.lastContact.summary.slice(0, 60)) + '</span>' : '') : '<span class="sub">—</span>') + '</span>' +
         '<span class="md-actions">' + taskBtns + '<button type="button" class="btn btn-primary btn-sm" data-md-go="1">' + (r.open === 'lead' ? 'פתיחת הליד' : r.open === 'client' ? 'כרטיס' : r.open === 'continuation' ? 'מסלול המשך' : r.open === 'offer' ? 'להצעה' : 'לפעולה') + '</button></span></div>';
@@ -6019,15 +6019,16 @@
    * lib/users.js CONTACT_VOID_USERS / Code.gs CONTACT_VOID_USERS). */
   var CONTACT_VOID_USERS = ['ורד'];
   function crmCanVoid() { return state.role === 'editor' && CONTACT_VOID_USERS.indexOf(state.user) >= 0; }
-  function crmStateWord(st) { return st === 'late' ? 'באיחור' : st === 'today' ? 'להיום' : st === 'undated' ? 'ללא תאריך' : 'ממתין'; }
-  function crmChip(st, text) { return '<span class="md-chip st-' + escapeHtml(st) + '">' + escapeHtml(text) + '</span>'; }
+  function crmStateWord(st) { return st === 'late' ? 'באיחור' : st === 'today' || st === 'undated' ? 'להיום' : 'ממתין'; } // no date = today's work
+  // a task with no date is today's work: it wears the «היום» colour, not the grey «ללא תאריך»
+  function crmChip(st, text) { return '<span class="md-chip st-' + escapeHtml(st === 'undated' ? 'today' : st) + '">' + escapeHtml(text) + '</span>'; }
   function crmDirChip(dir) {
     var CA = window.CrmActivity;
     return '<span class="md-chip crm-dir crm-dir-' + escapeHtml(dir) + '">' + escapeHtml(CA.directionLabel(dir)) + '</span>';
   }
   function crmTaskWhen(t) {
     var CA = window.CrmActivity;
-    return t && t.dueDate ? CA.fmtDate(t.dueDate) + (t.dueTime ? ' ' + t.dueTime : '') : 'ללא תאריך — קבעי תאריך';
+    return t && t.dueDate ? CA.fmtDate(t.dueDate) + (t.dueTime ? ' ' + t.dueTime : '') : 'ללא תאריך — לטיפול היום';
   }
   /* A follow-up saved without a summary carries the outcome as its reason — the same words as its
    * title («לחזור — <outcome>»). Shown once. */
@@ -6065,7 +6066,7 @@
     // «מה הלאה»: every open follow-up as WHAT · WHEN · WHO, most urgent first
     var steps = CA.nextSteps(subj, tasks, today());
     if (steps.length) {
-      var worst = steps[0].state === 'late' ? 'late' : steps[0].state === 'today' ? 'today' : 'wait';
+      var worst = steps[0].state === 'late' ? 'late' : steps[0].state === 'today' || steps[0].state === 'undated' ? 'today' : 'wait';
       html += '<div class="next-steps ' + worst + '" role="status"><div class="next-steps-h">⏰ מה הלאה</div><ul>' + steps.map(function (x) {
         return '<li data-next-step="' + escapeHtml(x.id) + '"><strong>' + escapeHtml(x.title) + '</strong> — ' + crmChip(x.state, x.rel) + (x.when ? ' ' + escapeHtml(x.when) : '') +
           (x.assignee ? ' · אחראי/ת: ' + escapeHtml(x.assignee) : '') + (crmExtraReason(x.title, x.reason) ? '<br><span class="sub">' + escapeHtml(x.reason) + '</span>' : '') + '</li>';

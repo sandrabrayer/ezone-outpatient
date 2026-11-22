@@ -119,7 +119,8 @@
 //   LIVE /sw.js was NOT reachable from this session — confirm production still serves v41 before release.
 // v43-v44 candidate: combined paid-date billing and participant-specific group outcomes, plus CRM parity.
 // This is NOT yet released. Keep both UI generations in one monotonic cache.
-var CACHE = 'ezone-outpatient-v44';
+// v45 draft: live v43 optional task date/time + OUT195 finance/group contracts; not deployed.
+var CACHE = 'ezone-outpatient-v45';
 var SHELL = [
   './',
   './index.html',

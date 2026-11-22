@@ -50,7 +50,8 @@
     { id: 'days', he: 'בעוד X ימים' }, { id: 'date', he: 'תאריך ושעה' }, { id: 'none', he: 'ללא משימת המשך' }
   ];
   var DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
-  var STATE_ORDER = { late: 0, today: 1, wait: 2, undated: 3 };
+  // A task with NO date is work for today (Sandra, 22/11/2026): it sorts with today's, ahead of future dates.
+  var STATE_ORDER = { late: 0, today: 1, undated: 2, wait: 3 };
   var CONTACT_EVENT_ID_RE = /^contact:[A-Za-z0-9_:-]{1,110}$/;
   var TASK_KINDS = [
     { id: 'call', he: 'שיחה' }, { id: 'meeting', he: 'פגישה' }, { id: 'intro', he: 'שיחת היכרות' }, { id: 'plan', he: 'תוכנית טיפול' },
@@ -216,21 +217,25 @@
     return (Array.isArray(tasks) ? tasks : []).filter(function (t) { return openish(t) && matches(t, subject); }).map(function (t) {
       var st = dueState(t, today), due = isoDay(t.dueDate);
       var n = due && isoOk(today) ? daysBetween(today, due) : null;
-      var rel = st === 'undated' ? 'ללא תאריך'
+      var rel = st === 'undated' ? 'לטיפול היום'
         : st === 'late' ? 'באיחור' + (n !== null && n < 0 ? ' של ' + (-n === 1 ? 'יום' : -n + ' ימים') : '')
         : n === 0 ? 'היום' : n === 1 ? 'מחר' : 'בעוד ' + n + ' ימים';
       return { id: s(t.id), kind: s(t.kind), title: s(t.title), reason: s(t.reason), assignee: s(t.assignee), state: st, rel: rel,
         when: due ? dateWithDay(due) + (s(t.dueTime) ? ' ' + s(t.dueTime) : '') : '', due: (due || '9999') + ' ' + (s(t.dueTime) || '99:99') };
     }).sort(function (a, b) { return (STATE_ORDER[a.state] - STATE_ORDER[b.state]) || (a.due < b.due ? -1 : a.due > b.due ? 1 : 0); });
   }
-  /* «משימה חדשה»: what to do, who, a DATE (today or later) and a TIME — nothing else. */
+  /* «משימה חדשה»: what to do and who. The DATE and the TIME are OPTIONAL (Sandra, 22/11/2026 — a
+   * request such as «לתאם פגישה עם ד״ר נטליה ביום שני» has no hour yet, and may have no date: what
+   * matters is that it is handled today). The form opens on today's date; no time = any time that
+   * day; no date = stays in «היום» until handled. A typed date is today or later; a time needs a date. */
   function newTaskErrors(v, today) {
     var e = {};
     v = v || {};
     if (!TASK_KINDS.some(function (k) { return k.id === v.kind; })) e.kind = 'בחרי סוג';
     if (!s(v.title) || s(v.title).length > 160) e.title = 'כותרת (עד 160 תווים)';
-    if (!isoOk(v.dueDate) || s(v.dueDate) < s(today)) e.dueDate = 'בחרי תאריך — היום או אחריו';
-    if (!timeOk(v.dueTime)) e.dueTime = 'בחרי שעה';
+    if (s(v.dueDate) && (!isoOk(v.dueDate) || s(v.dueDate) < s(today))) e.dueDate = 'תאריך — היום או אחריו';
+    if (s(v.dueTime) && !timeOk(v.dueTime)) e.dueTime = 'שעה בפורמט HH:MM';
+    else if (s(v.dueTime) && !s(v.dueDate)) e.dueTime = 'שעה דורשת תאריך';
     return e;
   }
   /* «שינוי מועד»: a date (+ time); a reason is required when the task came from a contact
