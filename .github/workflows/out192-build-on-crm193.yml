@@ -1,0 +1,109 @@
+name: Build combined OUT192 on released CRM193 (draft only)
+on:
+  push:
+    branches: [codex/out192-on-live-crm193-candidate-20261122]
+permissions:
+  contents: write
+jobs:
+  generate-candidate:
+    if: ${{ !startsWith(github.event.head_commit.message, 'test: combined OUT192 on CRM193 QA candidate') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Merge financial source into released CRM source, keeping ALL product changes
+        shell: bash
+        run: |
+          set -eu
+          test "$GITHUB_REF_NAME" = "codex/out192-on-live-crm193-candidate-20261122"
+          git merge-base --is-ancestor 62da2e25e710f79dbe7b03f169a3adaf64c7ab29 HEAD
+          git fetch --no-tags origin d73d2d10114883352b203bd0bf1ae36003e83324
+          git config user.name "E-ZONE test-only integration"
+          git config user.email "ezone-integrator@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff d73d2d10114883352b203bd0bf1ae36003e83324 > /tmp/merge-log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          actual="$(git diff --name-only --diff-filter=U | LC_ALL=C sort)"
+          expected="$(printf '%s\n' CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs | LC_ALL=C sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Unexpected changed merge conflicts — refusing any integration"
+            printf 'Actual conflicts:\n%s\n' "$actual"
+            exit 1
+          fi
+          node <<'NODE'
+          'use strict';
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+          const stage = (n, file) => cp.execFileSync('git', ['show', ':' + n + ':' + file], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+          // Production CRM changelog remains authoritative; insert the new billing
+          // draft note separately, preserving both families and their history.
+          const releaseLog = stage(2, 'CHANGELOG.md');
+          const financeLog = stage(3, 'CHANGELOG.md');
+          const start = financeLog.indexOf('### Candidate: monthly payment coverage and full OUT workflow');
+          const end = financeLog.indexOf('### Payroll report emailed', start);
+          if (start < 0 || end <= start || !releaseLog.includes('## [Unreleased]\n\n')) throw Error('Changelog anchor drift');
+          fs.writeFileSync('CHANGELOG.md', releaseLog.replace('## [Unreleased]\n\n', '## [Unreleased]\n\n' + financeLog.slice(start, end)));
+          // Preserve new CRM SW description; monotonic new version for merged JS.
+          let sw = stage(2, 'public/sw.js');
+          const oldCache = "var CACHE = 'ezone-outpatient-v42';";
+          if (!sw.includes(oldCache) || sw.includes("var CACHE = 'ezone-outpatient-v44';")) throw Error('SW release baseline drift');
+          sw = sw.replace(oldCache, "// v43-v44 candidate: combined paid-date billing and participant-specific group outcomes, plus CRM parity.\n// This is NOT yet released. Keep both UI generations in one monotonic cache.\nvar CACHE = 'ezone-outpatient-v44';");
+          fs.writeFileSync('public/sw.js', sw);
+          // Keep billing's durable two-phase write harness while loading new
+          // CRM contact-person helpers into its synthetic activateForm fixture.
+          let fixture = stage(3, 'test-support/financial-ui-fixture.cjs');
+          const hook = "'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError',";
+          if (!fixture.includes(hook) || fixture.includes("'leadContactText', 'leadContactNote'")) throw Error('Fixture anchor drift');
+          fixture = fixture.replace(hook, hook + " 'leadContactText', 'leadContactNote',");
+          fs.writeFileSync('test-support/financial-ui-fixture.cjs', fixture);
+          // This checked-in file is a DEACTIVATED test harness, never production.
+          // Regenerate below from the integrated Code.gs rather than choose one.
+          fs.writeFileSync('test-support/google-operational-drill-candidate.gs', stage(2, 'test-support/google-operational-drill-candidate.gs'));
+          // Old OUT end-to-end synthetic browser test must use the deployed
+          // CRM's actual radio controls, not the removed pre-CRM form fields.
+          const path = 'test/out-workflow-acceptance-browser.test.js';
+          let journey = fs.readFileSync(path, 'utf8');
+          const oldNext = '#contactForm [name="nextMode"][value="none"]';
+          const outcome = "await page.selectOption('#contactOutcome', 'meeting_set');";
+          if (!journey.includes(oldNext) || !journey.includes(outcome)) throw Error('Journey selector drift');
+          journey = journey.replace(oldNext, '#contactForm [name="next"][value="none"]');
+          journey = journey.replace(outcome, "await page.check('#contactForm [name=\"direction\"][value=\"out\"]');\n  " + outcome);
+          fs.writeFileSync(path, journey);
+          const gs = fs.readFileSync('apps-script/Code.gs', 'utf8');
+          ['getTherapistsGroupContract','getTherapistsExtraContract','SESSION_OUTCOME_OP_SHEET','voidContact','contactRelation'].forEach(k => {
+            if (!gs.includes(k)) throw Error('Code.gs missing source after merge: ' + k);
+          });
+          console.log('Both finance and deployed CRM Code.gs source markers present — semantic CI still required');
+          NODE
+          git add CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs test/out-workflow-acceptance-browser.test.js
+          test -z "$(git diff --name-only --diff-filter=U)"
+      - name: Build exact disabled combined Google test script from merged source
+        shell: bash
+        env:
+          TZ: UTC
+        run: |
+          npm ci --no-audit --no-fund
+          node test-support/build-google-operational-drill.cjs
+          test -f test-support/google-operational-drill-candidate.gs
+          grep -q 'ISOLATED_SCRIPT_ID_REQUIRED' test-support/google-operational-drill-candidate.gs
+          git add test-support/google-operational-drill-candidate.gs
+          echo 'Disabled synthetic recovery harness rebuilt; no Google deployment or run'
+      - name: Commit to the private QA candidate branch only — NEVER production
+        shell: bash
+        run: |
+          set -eu
+          test "$GITHUB_REF_NAME" = "codex/out192-on-live-crm193-candidate-20261122"
+          git diff --cached --check
+          git add -A
+          git commit -m 'test: combined OUT192 on CRM193 QA candidate'
+          git push origin HEAD:codex/out192-on-live-crm193-candidate-20261122
+          echo 'QA commit pushed to explicit QA branch ONLY; no production merge or deploy'
