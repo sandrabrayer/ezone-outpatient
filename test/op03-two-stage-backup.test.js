@@ -144,3 +144,71 @@ test('legacy v2 backup remains valid without certificate when two-stage is not e
   assert.ok(h.ctx._integrityValidateRestoreSet(h.backup, day, false).length);
   assert.equal(h.backup.getSheetByName('outpatient-verified-' + day), null);
 });
+
+test('retention failure after certification keeps pending and a later finalizer retry completes', () => {
+  const h = staged(), day = dayOf(h), n = names(h, day);
+  h.backup.insertSheet('outpatient-leads-2020-01-01', [['id'],['expired']]);
+  h.ctx.nightlyIntegrityJob();
+  const del = h.backup.deleteSheet.bind(h.backup);
+  let injected = false;
+  h.backup.deleteSheet = function (sh) {
+    if (!injected && sh.getName() === 'outpatient-leads-2020-01-01') {
+      injected = true;
+      throw Error('synthetic retention outage');
+    }
+    return del(sh);
+  };
+  assert.throws(() => h.ctx.finalizeNightlyIntegrityJob(), /synthetic retention outage/);
+  assert.ok(h.backup.getSheetByName(n.certificate), 'verified set survives a cleanup outage');
+  assert.ok(h.props.INTEGRITY_PENDING_BACKUP, 'next capture stays blocked');
+  assert.equal(h.props.INTEGRITY_LAST_COUNT, undefined, 'source sentinel must not advance');
+  h.backup.deleteSheet = del;
+  assert.equal(h.ctx.finalizeNightlyIntegrityJob().ok, true);
+  assert.equal(h.backup.getSheetByName('outpatient-leads-2020-01-01'), null);
+  assert.equal(h.props.INTEGRITY_PENDING_BACKUP, undefined);
+  assert.equal(h.props.INTEGRITY_LAST_COUNT, '1');
+});
+
+test('installer adds one finalizer only and enables staged mode LAST, never from normal job', () => {
+  const h = harness(), triggers = [{ getHandlerFunction: () => 'nightlyIntegrityJob' }];
+  let created = 0;
+  h.ctx.ScriptApp = {
+    getProjectTriggers() { return triggers.slice(); },
+    newTrigger(handler) {
+      assert.equal(handler, 'finalizeNightlyIntegrityJob');
+      return {
+        timeBased() { return this; },
+        everyDays(n) { assert.equal(n, 1); return this; },
+        atHour(n) { assert.equal(n, 3); return this; },
+        create() {
+          created++;
+          assert.equal(h.props.INTEGRITY_TWO_STAGE_ENABLED, undefined,
+            'do not enable staged mode before finalizer creation');
+          triggers.push({ getHandlerFunction: () => handler });
+        }
+      };
+    }
+  };
+  assert.equal(h.props.INTEGRITY_TWO_STAGE_ENABLED, undefined);
+  assert.equal(h.ctx.setupIntegrityTwoStage().ok, true);
+  assert.equal(h.ctx.setupIntegrityTwoStage().ok, true);
+  assert.equal(created, 1);
+  assert.equal(h.props.INTEGRITY_TWO_STAGE_ENABLED, '1');
+  assert.deepEqual(h.locks(), [false,false]);
+});
+
+test('installer refuses missing/duplicate nightly, recovery hold and unresolved pending stage', () => {
+  const h = harness(), triggers = [];
+  h.ctx.ScriptApp = {
+    getProjectTriggers() { return triggers; },
+    newTrigger() { throw Error('must not create trigger'); }
+  };
+  assert.throws(() => h.ctx.setupIntegrityTwoStage(), /unexpected_integrity_trigger_inventory/);
+  triggers.push({ getHandlerFunction: () => 'nightlyIntegrityJob' });
+  h.props.INTEGRITY_PENDING_BACKUP = 'synthetic-incomplete';
+  assert.throws(() => h.ctx.setupIntegrityTwoStage(), /backup_or_recovery_pending/);
+  assert.equal(h.props.INTEGRITY_TWO_STAGE_ENABLED, undefined);
+  delete h.props.INTEGRITY_PENDING_BACKUP; // synthetic fixture only
+  triggers.push({ getHandlerFunction: () => 'nightlyIntegrityJob' });
+  assert.throws(() => h.ctx.setupIntegrityTwoStage(), /unexpected_integrity_trigger_inventory/);
+});
