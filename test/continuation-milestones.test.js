@@ -15,7 +15,19 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const CL = require('../public/continuation-logic.js');
-const { sandbox } = require('../test-support/apps-script-sandbox');
+const vm = require('node:vm');
+const { sandbox: liveSandbox } = require('../test-support/apps-script-sandbox');
+/* The sync fixtures below are FIXED calendar dates (entry 20/10/2026 → milestones 20/11, 20/12, 20/01),
+ * and the source drops a milestone that has already passed. Run against the real clock they went red
+ * on 2026-11-21, the day after the first milestone. The source's clock is therefore pinned to the day
+ * the fixtures were written; only `Date` INSIDE the Apps Script sandbox is replaced (argument-less
+ * `new Date()` and `Date.now()`), nothing in Code.gs and nothing in Node. */
+const FIXED_NOW = Date.parse('2026-11-03T08:00:00.000Z');
+function sandbox(...args) {
+  const sb = liveSandbox(...args);
+  vm.runInContext('(function (fixed) { var Real = Date; function D() { var a = Array.prototype.slice.call(arguments); if (!(this instanceof D)) return new Real(fixed).toString(); return a.length ? new (Function.prototype.bind.apply(Real, [null].concat(a)))() : new Real(fixed); } D.prototype = Real.prototype; D.now = function () { return fixed; }; D.parse = Real.parse; D.UTC = Real.UTC; Date = D; })(' + FIXED_NOW + ')', sb.ctx);
+  return sb;
+}
 const PROXY = process.env.OUTPATIENT_PROXY_SECRET;
 const plain = (v) => JSON.parse(JSON.stringify(v)); // vm-context objects vs. deepEqual prototypes
 

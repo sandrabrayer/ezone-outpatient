@@ -19,7 +19,7 @@ Light theme since OP-CRM-4 (`CHANGELOG-crm-theme.md`): the Dashboard CRM's forma
 surfaces, red = exception / amber = waiting / green = done — always with a word) on this app's own sage/forest palette.
 Tokens live in `public/style.css` `:root`; mobile keeps the top tab strip.
 
-1. **«היום שלי»** (tab id `dashboard`) – the CRM opening screen: summary
+1. **«היום»** (tab id `dashboard`) – the CRM opening screen: summary
    cards, an urgent band and work lists by domain (leads/intros, plans to
    activate, renewals & collection, pending approvals, continuation), each row
    with one direct action; built by the pure `public/my-day.js`
@@ -297,7 +297,7 @@ checkout ever drifts back.
   (`previewContinuationMilestones`) behind «N שינויים ממתינים». Opening, navigating and refreshing the app performs
   no source write; a failed read shows «מידע לא זמין», never an empty list.
 - `GET /api/offers` — session-gated, full money scope only (דנה → 403): PRICE-FREE package-offer summaries
-  (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום שלי» and
+  (id, CRM status, patient, attached lead/client, follow-up, validity, owner) for the cards, «היום» and
   «מסלול המשך». Full offers with amounts stay behind `/api/catalog-admin/rpc` (`createRequest`, `setStatus`
   ops added — `CHANGELOG-offers-crm.md`, `CHANGELOG-offer-whatsapp.md`). 2026-11-04: `deleteRequest` /
   `resetRequest` ops (ורד only — 403 `offer_delete_vered_only` for anyone else, re-checked at the source), a
@@ -308,6 +308,9 @@ checkout ever drifts back.
   `deferTask` / `reassignTask` / `withdrawTask` / `logContact` (writes) are Apps Script actions reached through
   the two session-gated `/api/sheets` calls; the proxy's `body.user` is the actor and its `moneyScope` hides money
   tasks from an operational session. Writes are idempotent by a browser `submissionId`. See `CHANGELOG-crm-tasks-activity.md`.
+  2026-11-21: `voidContact` («ביטול תיעוד») joins them — ורד only (403 `contact_void_vered_only` from the signed
+  session, re-checked at the source); `logContact` stores the record's kind (`out` / `in` / `note`) in
+  `detailsJson`. See `CHANGELOG-crm-dashboard-parity.md`.
 - The credits ledger adds **no route**: `getCredits` (read) and `saveCredit`
   (write) are Apps Script actions the client reaches through the two
   session-gated `/api/sheets` calls above. On `saveCredit` the proxy's

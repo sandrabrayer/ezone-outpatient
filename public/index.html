@@ -46,7 +46,7 @@
     <header class="topbar">
       <div class="logo"><img class="logo-mark" src="icon-v1-192.png?v=__BUILD__" alt="" width="30" height="30" />טיפולי חוץ</div>
       <nav class="tabs">
-        <button class="tab active" data-view="dashboard">היום שלי</button>
+        <button class="tab active" data-view="dashboard">היום</button>
         <button class="tab" data-view="leads">לידים</button>
         <button class="tab" data-view="clients">מטופלים</button>
         <button class="tab" data-view="billing">גבייה</button>
@@ -379,9 +379,19 @@
     <div id="leadModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title" id="leadModalTitle">ליד חדש</div>
+        <p class="crm-na lead-modal-meta" id="leadModalMeta">ליד חדש נכנס ללוח בשלב «פרטים אישיים»</p>
         <form id="leadForm" class="form-grid">
+          <div class="wide form-section-title">פרטי המטופל</div>
           <label>שם<input name="name" required /></label>
-          <label>טלפון<input name="phone" required /></label>
+          <label>טלפון<input name="phone" type="tel" required /></label>
+          <!-- איש קשר (2026-11-21, CHANGELOG-lead-contact-person.md): who called for the patient —
+               the Dashboard CRM's «פרטי הפונה». All optional; the relation list is filled by app.js. -->
+          <div class="wide form-section-title">פרטי הפונה / איש קשר (לא חובה)</div>
+          <label>שם איש הקשר<input name="contactName" maxlength="80" /></label>
+          <label>טלפון איש הקשר<input name="contactPhone" type="tel" /></label>
+          <label>קשר למטופל<select name="contactRelation" id="leadContactRelation"></select></label>
+          <label id="leadContactRelationOtherWrap" hidden>קשר אחר<input name="contactRelationOther" maxlength="40" /></label>
+          <div class="wide form-section-title">פרטים נוספים</div>
           <label class="wide">סוגי טיפול (אפשר לבחור יותר מאחד)
             <div class="checkgroup" data-group="serviceType" data-for="leadForm"></div>
           </label>
@@ -1123,77 +1133,130 @@
     </div>
 
     <!-- Continuation → outpatient lead confirm (מסלול המשך) -->
-    <!-- CRM (OP-CRM-3B): contact log — the one form every «יצרתי קשר» goes through.
-         No default follow-up date: a date, «בעוד N ימים», or «אין המשך» + reason. -->
+    <!-- CRM contact record — the one form every «תיעוד שיחה» goes through. Fields, wording and rules
+         follow the Dashboard CRM (CHANGELOG-crm-dashboard-parity.md): three kinds, no default for
+         «קשר הבא» (a date, «בעוד N ימים», or «ללא משימת המשך» + reason). Lists are filled by app.js. -->
     <div id="contactModal" class="modal" hidden>
-      <div class="modal-card">
-        <div class="modal-title">תיעוד יצירת קשר — <span id="contactModalName"></span></div>
-        <form id="contactForm" class="form-grid">
-          <p id="contactTaskHint" class="wide" hidden style="margin:0;color:var(--muted);font-size:12px;">התיעוד יסגור את המשימה הפתוחה שממנה הגעתם.</p>
-          <label>ערוץ<select name="channel" id="contactChannel" required></select></label>
-          <label>מתי<input name="occurredAt" id="contactOccurredAt" type="datetime-local" required /></label>
-          <label>עם מי<input name="withWhom" type="text" maxlength="80" placeholder="המטופל/ת, הורה, גורם מפנה…" /></label>
-          <label>תוצאה<select name="outcome" id="contactOutcome" required></select></label>
-          <label class="wide">סיכום קצר<textarea name="summary" rows="3" maxlength="1000" placeholder="מה סוכם / מה נאמר"></textarea></label>
-          <div class="wide form-section-title">הצעד הבא</div>
-          <div class="wide crm-next-modes">
-            <label class="inline"><input type="radio" name="nextMode" value="date" checked /> בתאריך</label>
-            <label class="inline"><input type="radio" name="nextMode" value="days" /> בעוד</label>
-            <label class="inline"><input type="radio" name="nextMode" value="none" /> אין המשך</label>
-          </div>
-          <div id="contactNextDate" class="wide form-grid-inline">
-            <label>תאריך<input name="nextDate" type="date" /></label>
-            <label>שעה (רשות)<input name="nextTime" type="time" /></label>
-          </div>
-          <div id="contactNextDays" class="wide" hidden>
-            <label>ימים<input name="nextDays" type="number" min="1" max="365" placeholder="3" /></label>
-          </div>
-          <div id="contactNextNone" class="wide" hidden>
-            <label class="wide">למה אין המשך<input name="nextExplanation" type="text" maxlength="300" placeholder="למשל: ביקש/ה שלא נחזור" /></label>
-          </div>
-          <div id="contactNextTaskFields" class="wide form-grid-inline">
-            <label>סוג<select name="nextKind"><option value="call">שיחה</option><option value="meeting">פגישה</option><option value="intro">שיחת היכרות</option><option value="plan">תוכנית טיפול</option><option value="activation">הפעלת טיפול</option><option value="review">בירור</option><option value="other">אחר</option></select></label>
-            <label>כותרת (רשות)<input name="nextTitle" type="text" maxlength="160" placeholder="שיחה חוזרת עם …" /></label>
-            <label>אחראי/ת<select name="nextAssignee" id="contactNextAssignee"></select></label>
-          </div>
+      <div class="modal-card crm-contact-card">
+        <div class="modal-title">תיעוד שיחה · <span id="contactModalName"></span></div>
+        <p id="contactPeople" class="crm-na" hidden></p>
+        <p id="contactTaskHint" class="crm-na" hidden></p>
+        <form id="contactForm" class="form-grid crm-contact" novalidate>
+          <fieldset class="wide crm-fieldset crm-direction"><legend>סוג התיעוד *</legend>
+            <span id="contactDirections" class="crm-radios"></span>
+            <span class="crm-err" data-err="direction"></span>
+          </fieldset>
+          <div class="wide form-section-title">השיחה</div>
+          <label>תאריך *<input name="when" type="date" /><span class="crm-err" data-err="when"></span></label>
+          <label>שעה<input name="time" type="time" /><span class="crm-err" data-err="time"></span></label>
+          <label><span data-dir-text="who">מי תיעד/ה</span><input name="who" type="text" readonly /></label>
+          <label><span data-dir-text="withWhom">עם מי</span><input name="withWhom" type="text" maxlength="80" /><span class="crm-err" data-err="withWhom"></span></label>
+          <label>ערוץ *<select name="channel" id="contactChannel"></select><span class="crm-err" data-err="channel"></span></label>
+          <label>סיבת הפנייה<input name="reason" type="text" maxlength="200" /></label>
+          <label class="wide">תוצאה *<select name="outcome" id="contactOutcome"></select><span class="crm-err" data-err="outcome"></span></label>
+          <label class="wide">תקציר<textarea name="summary" rows="3" maxlength="1000"></textarea><span class="crm-err" data-err="summary"></span></label>
+          <fieldset class="wide crm-fieldset crm-next"><legend>קשר הבא *</legend>
+            <span id="contactNextChoices" class="crm-radios"></span>
+            <div class="crm-next-extra">
+              <label data-next-for="days" hidden>מספר ימים<input type="number" name="nextDays" min="1" max="365" /></label>
+              <label data-next-for="date" hidden>תאריך<input type="date" name="nextDate" /></label>
+              <label data-next-for="date" hidden>שעה<input type="time" name="nextTime" /></label>
+              <label data-next-for="none" class="wide" hidden><span>למה אין המשך <span data-none-req>*</span></span><input type="text" name="nextExplanation" maxlength="300" /></label>
+              <label data-next-for="task" class="wide" hidden>כותרת המשימה<input type="text" name="nextTitle" maxlength="160" placeholder="לחזור — (ברירת מחדל לפי התוצאה)" /></label>
+              <label data-next-for="task" hidden>אחראי<select name="nextAssignee" id="contactNextAssignee"></select></label>
+            </div>
+            <p class="crm-na" id="contactNextPreview">בחרי מועד — התאריך בפועל יוצג כאן.</p>
+            <span class="crm-err" data-err="next"></span>
+          </fieldset>
+          <div class="wide crm-err" data-err="_form"></div>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
-            <button type="submit" class="btn btn-primary" id="contactSubmit">שמור תיעוד</button>
+            <button type="submit" class="btn btn-primary" id="contactSubmit">שמירת השיחה</button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- CRM (OP-CRM-3B): manual task -->
+    <!-- CRM: «משימה חדשה» — what to do, who, a date and a time (Dashboard CRM form) -->
     <div id="taskModal" class="modal" hidden>
       <div class="modal-card">
         <div class="modal-title">משימה חדשה — <span id="taskModalName"></span></div>
-        <form id="taskForm" class="form-grid">
-          <label>סוג<select name="kind" id="taskKind" required></select></label>
-          <label>אחראי/ת<select name="assignee" id="taskAssignee" required></select></label>
-          <label class="wide">מה לעשות<input name="title" type="text" maxlength="160" required /></label>
-          <label>תאריך יעד<input name="dueDate" type="date" /></label>
-          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
-          <label class="wide">למה / הקשר (רשות)<input name="reason" type="text" maxlength="300" /></label>
+        <form id="taskForm" class="form-grid" novalidate>
+          <label>סוג<select name="kind" id="taskKind"></select><span class="crm-err" data-err="kind"></span></label>
+          <label>אחראי<select name="assignee" id="taskAssignee"></select></label>
+          <label class="wide">מה לעשות *<input name="title" type="text" maxlength="160" /><span class="crm-err" data-err="title"></span></label>
+          <label>תאריך *<input name="dueDate" type="date" /><span class="crm-err" data-err="dueDate"></span></label>
+          <label>שעה *<input name="dueTime" type="time" /><span class="crm-err" data-err="dueTime"></span></label>
+          <p class="wide crm-na">המשימה תופיע ב«היום» ביום שלה, ובכרטיס תחת «מה הלאה».</p>
+          <div class="wide crm-err" data-err="_form"></div>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
-            <button type="submit" class="btn btn-primary" id="taskSubmit">צור משימה</button>
+            <button type="submit" class="btn btn-primary" id="taskSubmit">יצירת משימה</button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- CRM (OP-CRM-3B): defer a task — the previous date is kept in the history -->
+    <!-- CRM: «שינוי מועד» — the previous date is kept in the history; a reason is required only
+         for a date promised in a contact -->
     <div id="deferModal" class="modal" hidden>
       <div class="modal-card">
-        <div class="modal-title">דחיית משימה</div>
-        <form id="deferForm" class="form-grid">
-          <label>מועד חדש<input name="dueDate" type="date" required /></label>
-          <label>שעה (רשות)<input name="dueTime" type="time" /></label>
-          <label class="wide">סיבת הדחייה<input name="reason" type="text" maxlength="300" required minlength="2" /></label>
+        <div class="modal-title">שינוי מועד — <span id="deferModalName"></span></div>
+        <form id="deferForm" class="form-grid" novalidate>
+          <label>תאריך<input name="dueDate" type="date" /><span class="crm-err" data-err="dueDate"></span></label>
+          <label>שעה<input name="dueTime" type="time" /><span class="crm-err" data-err="dueTime"></span></label>
+          <label class="wide"><span id="deferReasonLabel">סיבה</span><input name="reason" type="text" maxlength="300" /><span class="crm-err" data-err="reason"></span></label>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost" data-close>ביטול</button>
-            <button type="submit" class="btn btn-primary" id="deferSubmit">דחה</button>
+            <button type="submit" class="btn btn-primary" id="deferSubmit">שמירת המועד</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM: «סיום» of a task that is not a call -->
+    <div id="taskDoneModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">סיום משימה — <span id="taskDoneModalName"></span></div>
+        <form id="taskDoneForm" class="form-grid" novalidate>
+          <label class="wide">מה נעשה<input name="outcome" type="text" maxlength="300" /></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>ביטול</button>
+            <button type="submit" class="btn btn-primary" id="taskDoneSubmit">סימון כהושלם</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM: «עוד…» on a task — reassign, or cancel with a reason (the row stays) -->
+    <div id="taskMoreModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">משימה — <span id="taskMoreModalName"></span></div>
+        <form id="taskReassignForm" class="form-grid" novalidate>
+          <label class="wide">אחראי<select name="assignee" id="taskReassignAssignee"></select></label>
+          <div class="form-actions"><button type="submit" class="btn btn-primary" id="taskReassignSubmit">שיוך</button></div>
+        </form>
+        <form id="taskWithdrawForm" class="form-grid" novalidate>
+          <label class="wide">ביטול המשימה — סיבה *<input name="reason" type="text" maxlength="300" /><span class="crm-err" data-err="reason"></span></label>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>סגור</button>
+            <button type="submit" class="btn" id="taskWithdrawSubmit">ביטול המשימה</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CRM: «ביטול תיעוד» — a record entered by mistake is voided (never deleted); ורד only -->
+    <div id="voidContactModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-title">ביטול תיעוד</div>
+        <form id="voidContactForm" class="form-grid" novalidate>
+          <p class="wide crm-na" id="voidContactText"></p>
+          <label class="wide">סיבת הביטול *<input name="reason" type="text" maxlength="300" placeholder="למשל: הוזן פעמיים" /><span class="crm-err" data-err="reason"></span></label>
+          <p class="wide crm-na" id="voidContactNextNote" hidden></p>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" data-close>חזרה</button>
+            <button type="submit" class="btn btn-danger" id="voidContactSubmit">ביטול התיעוד</button>
           </div>
         </form>
       </div>

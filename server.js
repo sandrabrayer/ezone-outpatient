@@ -4,7 +4,7 @@ const path = require('path');
 const { checkPin } = require('./lib/pin');
 const { createLoginToken, verifySessionToken, readSessionUser, readSessionJti } = require('./lib/session');
 const { SESSION_USERS, RETIRED_SESSION_USERS } = require('./lib/users');
-const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, OFFER_DELETE_USERS, resolveUserPins } = require('./lib/users');
+const { CATALOG_ADMIN_USERS, PRICE_OVERRIDE_USERS, OFFER_DELETE_USERS, CONTACT_VOID_USERS, resolveUserPins } = require('./lib/users');
 const catalogAdmin = require('./lib/catalog-admin');
 const moneyScope = require('./lib/money-scope');
 const backendCaps = require('./lib/backend-capabilities');
@@ -516,6 +516,15 @@ app.post('/api/sheets', requireSession, async (req, res) => {
     // runContinuationSync), never a patient list typed by a browser.
     if (body.action === 'syncContinuationMilestones' || body.action === 'previewContinuationMilestones') {
       return res.status(403).json({ ok: false, error: 'forbidden_action' });
+    }
+    // Voiding a contact record (2026-11-21): CONTACT_VOID_USERS (ורד) only — decided from the SIGNED
+    // session name, never from the body; Apps Script re-checks (fail closed at both layers).
+    if (body.action === 'voidContact') {
+      const who = sessionUserFromRequest(req);
+      if (!who || CONTACT_VOID_USERS.indexOf(who) < 0 || RETIRED_SESSION_USERS.indexOf(who) >= 0) {
+        res.set('Cache-Control', 'no-store');
+        return res.status(403).json({ ok: false, error: 'contact_void_vered_only' });
+      }
     }
     for (const k of ['adminAssertion', 'actor', 'actorKey', 'actorRole', 'requesterKey', 'catalogAdmin', 'isAdmin', 'moneyScope']) {
       if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) {

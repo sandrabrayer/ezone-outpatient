@@ -35,7 +35,16 @@ var LEADS_HEADERS = [
   // _saveAll carries the on-sheet value for existing leads, so a browser
   // snapshot can never change or blank it. Follows the lead onto the client on
   // activation. Old rows read back blank.
-  'preferredHouse'
+  'preferredHouse',
+  // APPEND-ONLY (איש קשר / contact person, 2026-11-21, CHANGELOG-lead-contact-person.md):
+  // who called on behalf of the patient — a name, a phone and the relation to the
+  // patient. All three OPTIONAL and browser-owned (the lead form). contactPhone is
+  // a PHONE_COLUMNS member (text-forced, leading zero kept) but it is NEVER a
+  // cross-app match key: CROSS_APP_PHONE_SOURCES is untouched, the patient is
+  // matched by `phone` only. _saveAll validates every write (LEAD_CONTACT_COLUMNS)
+  // and keeps the on-sheet value when a tab loaded before these columns existed
+  // saves a lead without them. Old rows read back blank.
+  'contactName', 'contactPhone', 'contactRelation'
 ];
 
 /* Meta columns of the Leads sheet — identity + who/when audit, NOT content.
@@ -491,6 +500,11 @@ var REMOVED_LEADS_HEADERS = [
   'updatedAt', 'updatedBy',
   // APPEND-ONLY mirror of the Leads preferred house (preferredHouse).
   'preferredHouse'
+  // NOT mirrored (deliberate, 2026-11-21): the Leads contact person
+  // (contactName / contactPhone / contactRelation). This archive's header is the
+  // subject of the pending OP-03 operator correction (ops/removed-leads-header-
+  // correction.gs, exact cells S1:U1, schema-bound) — its width must not move
+  // under that procedure. A removed lead's contact person is not archived.
 ];
 
 /* Stop-treatment flags (StopFlags tab): the E-Zone Therapists app flags that a
@@ -568,7 +582,19 @@ var STOP_ALERT_TYPES = { stop: true, resume: true };
 /* Columns that hold phone numbers. Forced to plain-text ('@') format on write
  * so Google Sheets does not coerce a numeric-looking phone to a number and drop
  * the leading zero, and recovered on read for already-corrupted rows. */
-var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true, patientPhone: true };
+var PHONE_COLUMNS = { phone: true, treatmentContactPhone: true, payerPhone: true, patientPhone: true,
+  // 2026-11-21 (APPENDED): a lead's contact-person phone — text-forced like every phone, never a match key
+  contactPhone: true };
+
+/* The lead's contact person (2026-11-21): the three browser-owned columns and their write rule.
+ * name ≤ 80, relation ≤ 40 (control chars stripped); the phone must be a valid Israeli number
+ * (0 + 8–9 digits, mobile or landline) after leading-zero recovery, else it is stored blank —
+ * an invalid phone is never written. */
+var LEAD_CONTACT_COLUMNS = ['contactName', 'contactPhone', 'contactRelation'];
+function _leadContactValue(col, v) {
+  if (col === 'contactPhone') { var p = _recoverPhone(v); return /^0\d{8,9}$/.test(p) ? p : ''; }
+  return _sanitizeLeadText(v, col === 'contactName' ? 80 : 40);
+}
 
 /* Mirror of recoverPhone() in public/app.js — keep both in sync. Normalizes to
  * the leading-zero canonical form and restores a leading zero that Sheets
@@ -1954,6 +1980,14 @@ function _saveAll(payload) {
           ? (existingLead.preferredHouse == null ? '' : existingLead.preferredHouse)
           : (_preferredHouseOrNull(leads[li].preferredHouse) || '');
         _opsPreserveMoney(payload, leads[li], existingLead, OPS_LEAD_MONEY_KEYS); // OP-CRM-3A
+        // Contact person: a payload WITHOUT the key comes from a tab loaded before the columns
+        // existed — keep the sheet's value (never blank it); a sent value is validated.
+        for (var lc = 0; lc < LEAD_CONTACT_COLUMNS.length; lc++) {
+          var lcCol = LEAD_CONTACT_COLUMNS[lc];
+          leads[li][lcCol] = _hasOwn(leads[li], lcCol)
+            ? _leadContactValue(lcCol, leads[li][lcCol])
+            : (existingLead && existingLead[lcCol] != null ? existingLead[lcCol] : '');
+        }
       }
       var leadConflictCols = _staleConflictCols(_leadDiffCols, leads[li], existingLead);
       if (leadConflictCols) {
@@ -5320,13 +5354,28 @@ var CRM_TEXT_COLUMNS = {
 var TASK_KINDS = ['call', 'meeting', 'intro', 'plan', 'activation', 'continuity', 'collection', 'review', 'other'];
 var TASK_STATUSES = ['open', 'done', 'deferred', 'cancelled'];
 var TASK_SOURCES = ['manual', 'contact', 'derived'];
-var CONTACT_CHANNELS = ['phone', 'whatsapp', 'meeting', 'email', 'other'];
-var CONTACT_OUTCOMES = ['spoke_follow_up', 'no_answer', 'call_back_later', 'awaiting_decision', 'meeting_set', 'no_interest_now', 'bad_contact_details', 'stop_contact'];
+/* 2026-11-21 (APPENDED, CHANGELOG-crm-dashboard-parity.md): 'sms' / 'in_person' and the outcome
+ * 'spoke_no_follow_up' — the Dashboard CRM's lists. 'meeting' stays valid for rows already written. */
+var CONTACT_CHANNELS = ['phone', 'whatsapp', 'meeting', 'email', 'other', 'sms', 'in_person'];
+var CONTACT_OUTCOMES = ['spoke_follow_up', 'no_answer', 'call_back_later', 'awaiting_decision', 'meeting_set', 'no_interest_now', 'bad_contact_details', 'stop_contact', 'spoke_no_follow_up'];
 var CONTACT_OUTCOME_HE = {
   spoke_follow_up: 'התקיימה שיחה ונדרש המשך', no_answer: 'לא היה מענה', call_back_later: 'התבקשנו לחזור במועד',
   awaiting_decision: 'ממתינים להחלטה או למידע', meeting_set: 'נקבעה פגישה', no_interest_now: 'אין עניין כרגע',
-  bad_contact_details: 'פרטי הקשר אינם תקינים', stop_contact: 'התבקשה הפסקת פניות'
+  bad_contact_details: 'פרטי הקשר אינם תקינים', stop_contact: 'התבקשה הפסקת פניות',
+  spoke_no_follow_up: 'התקיימה שיחה — לא נדרש המשך'
 };
+/* The three kinds of a contact record (mirrors the Dashboard CRM): we called / they called / a plain
+ * record. Stored in the event's detailsJson — NO sheet column. A record without one (everything
+ * written before 2026-11-21, or a caller that sends none) is 'note': the kind is never guessed. */
+var CONTACT_DIRECTIONS = ['out', 'in', 'note'];
+var CONTACT_DIRECTION_HE = { out: 'שיחה יוצאת', in: 'שיחה נכנסת', note: 'תיעוד שיחה' };
+/* 'spoke_no_follow_up' IS the answer to «what next»: «ללא משימת המשך» needs no typed explanation. */
+var CONTACT_NO_FOLLOW_UP_OUTCOME = 'spoke_no_follow_up';
+var CONTACT_NO_FOLLOW_UP_TEXT = 'לא נדרש המשך';
+/* Who may void a contact record entered by mistake (lib/users.js CONTACT_VOID_USERS is the Node twin).
+ * `user` is the proxy-injected signed session name — never a browser field. Fail closed. */
+var CONTACT_VOID_USERS = ['ורד'];
+var CONTACT_EVENT_ID_RE = /^contact:[A-Za-z0-9_:-]{1,110}$/;
 var CRM_ID_RE = /^[A-Za-z0-9_:-]{1,120}$/;
 var CRM_TASK_MAX = 1000, CRM_ACTIVITY_MAX = 600;
 
@@ -5524,7 +5573,9 @@ function _deferTask(payload) {
     var d = _crmIso(payload.dueDate); if (!d) return _crmNo('bad_due');
     var tm = _crmTime(payload.dueTime); if (tm === null) return _crmNo('bad_due');
     var reason = _crmText(payload.reason, 300);
-    if (reason.length < 2) return _crmNo('missing_reason');
+    // A date promised to the patient / family in a contact needs a reason to move (Dashboard CRM
+    // rule, 2026-11-21); any other task may simply be re-dated.
+    if (String(t.source) === 'contact' && reason.length < 2) return _crmNo('missing_reason');
     var prev = t.dueDate;
     t.deferredFrom = prev || t.deferredFrom || ''; t.dueDate = d; t.dueTime = tm; t.status = 'deferred';
     return { ok: true, details: { prev: prev, next: d, reason: reason } };
@@ -5565,6 +5616,10 @@ function _logContact(payload) {
   if (CONTACT_OUTCOMES.indexOf(outcome) < 0) return _crmNo('bad_outcome');
   var channel = String(c.channel == null ? 'phone' : c.channel).trim() || 'phone';
   if (CONTACT_CHANNELS.indexOf(channel) < 0) return _crmNo('bad_channel');
+  // The kind of the record: allow-listed, fail closed BEFORE anything is written; none sent = 'note'.
+  var direction = String(c.direction == null ? '' : c.direction).trim() || 'note';
+  if (CONTACT_DIRECTIONS.indexOf(direction) < 0) return _crmNo('bad_direction');
+  var contactReason = _crmText(c.reason, 200);
   var summary = _crmText(c.summary, 1000);
   var nowIso = _crmNow();
   var occurredAt = nowIso;
@@ -5579,6 +5634,7 @@ function _logContact(payload) {
   var nextTask = null, noNext = '';
   if (n.none === true) {
     noNext = _crmText(n.explanation, 300);
+    if (noNext.length < 2 && outcome === CONTACT_NO_FOLLOW_UP_OUTCOME) noNext = CONTACT_NO_FOLLOW_UP_TEXT;
     if (noNext.length < 2) return _crmNo('missing_next_explanation');
   } else {
     var dueDate = n.dueDate ? _crmIso(n.dueDate) : '';
@@ -5600,8 +5656,8 @@ function _logContact(payload) {
   }
   var subject = { leadId: leadId, clientId: clientId };
   var ev = _activityEvent('contact_logged', subject, actor,
-    CONTACT_OUTCOME_HE[outcome] + (summary ? ' · ' + summary.slice(0, 150) : ''),
-    { channel: channel, withWhom: _crmText(c.withWhom, 80), outcome: outcome, summary: summary, taskId: _crmText(c.taskId, 120), nextTaskId: nextTask ? nextTask.id : '', noNext: noNext, money: !!(nextTask && _taskMoney(nextTask)) },
+    (direction === 'note' ? '' : CONTACT_DIRECTION_HE[direction] + ' · ') + CONTACT_OUTCOME_HE[outcome] + (summary ? ' · ' + summary.slice(0, 150) : ''),
+    { direction: direction, reason: contactReason, channel: channel, withWhom: _crmText(c.withWhom, 80), outcome: outcome, summary: summary, taskId: _crmText(c.taskId, 120), nextTaskId: nextTask ? nextTask.id : '', noNext: noNext, money: !!(nextTask && _taskMoney(nextTask)) },
     'contact:' + sid, { occurredAt: occurredAt, nextAction: nextTask ? nextTask.title : (noNext ? 'אין המשך: ' + noNext : ''), nextDate: nextTask ? nextTask.dueDate : '' });
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return _crmNo('busy');
@@ -5640,6 +5696,69 @@ function _logContact(payload) {
   } finally { try { lock.releaseLock(); } catch (_) {} }
 }
 
+
+/* { eventId: true } of every contact record a contact_voided event names (detailsJson.supersedesEventId). */
+function _contactVoidedIds(events) {
+  var out = {};
+  for (var i = 0; i < (events || []).length; i++) {
+    var e = events[i];
+    if (!e || String(e.kind) !== 'contact_voided') continue;
+    var d = {};
+    try { d = e.detailsJson ? JSON.parse(e.detailsJson) : {}; } catch (_) { d = {}; }
+    if (d && d.supersedesEventId) out[String(d.supersedesEventId)] = true;
+  }
+  return out;
+}
+
+/* POST action=voidContact { eventId, reason } — a contact record entered by mistake (CHANGELOG-crm-dashboard-parity.md).
+ * A record is NEVER edited or deleted: ONE new Activity event 'void:<eventId>' (kind contact_voided,
+ * detailsJson.supersedesEventId) with who / when / why; the record's own row is untouched. The follow-up
+ * task the record CREATED is cancelled only while it is still open and came from a contact; a task the
+ * record FULFILLED stays done. Idempotent. ורד only (CONTACT_VOID_USERS), fail closed. */
+function _voidContact(payload) {
+  var actor = _crmActor(payload);
+  if (CONTACT_VOID_USERS.indexOf(actor) < 0) return _crmNo('forbidden_user');
+  var eventId = String(payload && payload.eventId != null ? payload.eventId : '').trim();
+  if (!CONTACT_EVENT_ID_RE.test(eventId)) return _crmNo('bad_event_id');
+  var reason = _crmText(payload.reason, 300);
+  if (reason.length < 2) return _crmNo('missing_reason');
+  var nowIso = _crmNow();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return _crmNo('busy');
+  try {
+    if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _crmNo('recovery_pending');
+    var ash = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ACTIVITY_SHEET);
+    var events = ash ? _readAll(ash, ACTIVITY_HEADERS) : [], target = null;
+    for (var i = 0; i < events.length; i++) {
+      if (String(events[i].eventId) === eventId && String(events[i].kind) === 'contact_logged') { target = events[i]; break; }
+    }
+    if (!target) return _crmNo('not_found');
+    var td = {};
+    try { td = target.detailsJson ? JSON.parse(target.detailsJson) : {}; } catch (_) { td = {}; }
+    if (!td || typeof td !== 'object') td = {};
+    var nextId = String(td.nextTaskId == null ? '' : td.nextTaskId);
+    // the follow-up this record created: cancelled only while still open and contact-made
+    var cancelled = null;
+    if (nextId) {
+      var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
+      var rows = _tasksRead(sh);
+      for (var j = 0; j < rows.length; j++) {
+        var t = rows[j];
+        if (String(t.id) !== nextId) continue;
+        if (String(t.source) === 'contact' && (t.status === 'open' || t.status === 'deferred')) {
+          t.status = 'cancelled'; t.outcome = _crmText('התיעוד בוטל: ' + reason, 300); t.doneAt = nowIso; t.doneBy = actor;
+          t.updatedAt = nowIso; t.updatedBy = actor;
+          _writeAll(sh, TASKS_HEADERS, rows);
+          cancelled = _taskOut(t);
+        }
+        break;
+      }
+    }
+    var wrote = _activityAppend(ash, _activityEvent('contact_voided', { leadId: String(target.leadId || ''), clientId: String(target.clientId || '') }, actor,
+      'התיעוד בוטל: ' + reason, { supersedesEventId: eventId, reason: reason, cancelledTaskId: cancelled ? cancelled.id : '', money: td.money === true }, 'void:' + eventId));
+    return { ok: true, voided: { eventId: eventId, by: actor }, cancelledTask: cancelled, replayed: wrote.duplicate === true };
+  } finally { try { lock.releaseLock(); } catch (_) {} }
+}
 
 /* ===== Handoff status feed for the Dashboard (OP-CRM-2 / G2, Phase D) =======
  * CHANGELOG-crm-handoff-status.md. READ-ONLY, cross-app, fail-closed behind
@@ -5709,12 +5828,13 @@ function _getHandoffStatus(params) {
   var byLead = {}; // leadId -> client (activation)
   clients.forEach(function (c) { if (c.fromLead) byLead[String(c.fromLead)] = c; });
   var contacted = {}, lastAct = {}, nextTask = {};
+  var voidedContacts = _contactVoidedIds(events); // a record voided by mistake is not «contacted»
   events.forEach(function (e) {
     var keys = [e.leadId ? 'lead:' + e.leadId : '', e.clientId ? 'client:' + e.clientId : ''];
     keys.forEach(function (k) {
       if (!k) return;
       var d = String(e.occurredAt || '').slice(0, 10);
-      if (e.kind === 'contact_logged' && e.leadId) contacted['lead:' + e.leadId] = true;
+      if (e.kind === 'contact_logged' && e.leadId && !voidedContacts[String(e.eventId)]) contacted['lead:' + e.leadId] = true;
       if (!lastAct[k] || d > lastAct[k]) lastAct[k] = d;
     });
   });
@@ -8169,6 +8289,7 @@ var SOURCE_POST_AUTH = {
   reassignTask: 'OUTPATIENT_PROXY_SECRET',
   withdrawTask: 'OUTPATIENT_PROXY_SECRET',
   logContact: 'OUTPATIENT_PROXY_SECRET',
+  voidContact: 'OUTPATIENT_PROXY_SECRET',
   resolveStopFlag: 'resolveStopFlag',
   mergeClients: 'OUTPATIENT_PROXY_SECRET',
   getRemovedClients: 'OUTPATIENT_PROXY_SECRET',
@@ -8536,6 +8657,7 @@ function doPost(e) {
     if (action === 'reassignTask') return _json(_reassignTask(payload));
     if (action === 'withdrawTask') return _json(_withdrawTask(payload));
     if (action === 'logContact') return _json(_logContact(payload));
+    if (action === 'voidContact') return _json(_voidContact(payload));
     if (action === 'resolveStopFlag') {
       // A request carrying a secret is the secured therapists-app receiver
       // (resolve by canonical phone, fail-closed). Without a secret it is the

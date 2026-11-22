@@ -148,7 +148,9 @@ test('מסלול המשך CRM: one server sync, milestones from the entry date, 
   assert.equal(await page.textContent('#contactModalName'), 'נועה לוי');
   await page.selectOption('#contactOutcome', 'awaiting_decision');
   await page.fill('#contactForm [name="summary"]', 'הוצעה חבילת המשך');
-  await page.check('#contactForm [name="nextMode"][value="none"]');
+  // opened from the milestone TASK → «שיחה יוצאת» is pre-chosen (2026-11-21, Dashboard-CRM contact form)
+  assert.equal(await page.locator('#contactForm [name="direction"]:checked').inputValue(), 'out');
+  await page.check('#contactForm [name="next"][value="none"]');
   await page.fill('#contactForm [name="nextExplanation"]', 'ממתינים לתשובה');
   const logged = page.waitForResponse((r) => r.url().endsWith('/api/sheets') && /logContact/.test(r.request().postData() || ''));
   await page.click('#contactSubmit');
