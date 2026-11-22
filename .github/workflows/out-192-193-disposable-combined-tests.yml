@@ -62,6 +62,12 @@ jobs:
           const oldChoice = '#contactForm [name="nextMode"][value="none"]';
           if (!journey.includes(oldChoice)) throw new Error('unexpected old workflow test selector');
           journey = journey.replace(oldChoice, '#contactForm [name="next"][value="none"]');
+          // CRM parity adds a required contact direction; the older test fixture
+          // must pick one, just as a real user would. Diagnostic runner ONLY.
+          const contactOutcome = "await page.selectOption('#contactOutcome', 'meeting_set');";
+          if (!journey.includes(contactOutcome)) throw new Error('old OUT journey outcome anchor missing');
+          journey = journey.replace(contactOutcome,
+            "await page.check('#contactForm [name=\"direction\"][value=\"out\"]');\n  " + contactOutcome);
           fs.writeFileSync(journeyFile, journey);
           const app = fs.readFileSync('apps-script/Code.gs', 'utf8');
           for (const token of ['getTherapistsGroupContract', 'getTherapistsExtraContract', 'SESSION_OUTCOME_OP_SHEET', 'voidContact', 'contactRelation']) {
