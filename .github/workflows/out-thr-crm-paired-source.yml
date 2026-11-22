@@ -1,0 +1,64 @@
+name: Synthetic paired OUT192 plus CRM193 against THR171 — no release
+on:
+  push:
+    branches: [codex/out-thr-crm-paired-synthetic-20261122]
+permissions:
+  contents: read
+jobs:
+  paired-source-receiver:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout frozen OUT financial source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Create ephemeral OUT192+CRM193 source union without commit
+        shell: bash
+        run: |
+          set -eu
+          test "$GITHUB_REF_NAME" = "codex/out-thr-crm-paired-synthetic-20261122"
+          git cat-file -e d73d2d10114883352b203bd0bf1ae36003e83324^{commit}
+          git fetch --no-tags origin d2f917c05f8b63598c41f6bb2e71dd4ebf13043b
+          git config user.name "Disposable test"
+          git config user.email "e-zone-qa@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff d2f917c05f8b63598c41f6bb2e71dd4ebf13043b > /tmp/merge-output 2>&1
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          conflicts="$(git diff --name-only --diff-filter=U | LC_ALL=C sort)"
+          expected="$(printf '%s\n' CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs | LC_ALL=C sort)"
+          test "$conflicts" = "$expected"
+          git checkout --ours -- CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs
+          git add CHANGELOG.md public/sw.js test-support/financial-ui-fixture.cjs test-support/google-operational-drill-candidate.gs
+          node - <<'NODE'
+          const fs=require('fs');
+          const out=fs.readFileSync('apps-script/Code.gs','utf8');
+          ['getTherapistsGroupContract','getTherapistsExtraContract','SESSION_OUTCOME_OP_SHEET','voidContact','contactRelation'].forEach(k=>{if(!out.includes(k))throw Error('combined OUT source missing '+k)});
+          console.log('Synthetic OUT combined receiver has both protocol v1 and CRM feature markers; no clinical data requested');
+          NODE
+          echo 'DISPOSABLE MERGED TREE ONLY — no git commit, no push, no deployment'
+      - name: Checkout exact THR sender source separately
+        uses: actions/checkout@v4
+        with:
+          repository: sandrabrayer/ezone-therapists
+          ref: 6b693e27b063062ab462703c6e3a33475a4bf701
+          path: paired/therapists
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: paired/therapists/package-lock.json
+      - name: Install isolated THR test dependencies
+        working-directory: paired/therapists
+        run: npm ci --no-audit --no-fund
+      - name: Run actual THR + merged OUT Apps Script source, synthetic sheets & signed mock HTTP
+        working-directory: paired/therapists
+        env:
+          TZ: UTC
+        run: |
+          EZONE_OUT_REPO="$GITHUB_WORKSPACE" node --test --test-concurrency=1 test/paired-out-sync.test.js
+          echo 'No external accounts, no production endpoints, no real data, no release.'
