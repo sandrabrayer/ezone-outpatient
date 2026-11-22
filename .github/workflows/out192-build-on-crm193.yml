@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   generate-candidate:
-    if: ${{ !startsWith(github.event.head_commit.message, 'test: combined OUT192 on CRM193 QA candidate') }}
+    if: "${{ !startsWith(github.event.head_commit.message, 'test: combined OUT192 on CRM193 QA candidate') }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
