@@ -14,10 +14,10 @@
  *
  * CRITICAL checks (any failure -> exit 1, workflow goes red):
  *   a. GET APP_URL           -> 200 + HTML shell marker ("E-ZONE Outpatient").
- *   b. POST /api/verify-pin  -> 200 { ok:true }. This app is STATELESS: the PIN
- *      gate stores the role in the browser's sessionStorage and no session
- *      cookie is issued — any Set-Cookie is still captured and replayed
- *      defensively.
+ *   b. POST /api/verify-pin with {pin, user:SHARED_PIN_USER} ->
+ *      200 {ok:true} AND a signed named-session Set-Cookie. An unnamed
+ *      first-step PIN session is NOT authorized for /api/sheets.
+ *      Missing cookies fail closed without any live dataset requests.
  *   c. Every read the frontend's loadAll() fires in parallel (Promise.all in
  *      public/app.js): getData, getPayments, getCharges, getStopFlags,
  *      getExtraSessionRequests, getSettings, getMyStopAlerts
@@ -49,6 +49,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { SHARED_PIN_USER } = require('../lib/users');
 
 const DEFAULT_APP_URL = 'https://ezone-outpatient.up.railway.app';
 const HTML_SHELL_MARKER = 'E-ZONE Outpatient';
@@ -263,7 +264,7 @@ async function runHealthcheck(opts) {
     const login = await fetchWithRetry(fetchImpl, appUrl + '/api/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: appPin })
+      body: JSON.stringify({ pin: appPin, user: SHARED_PIN_USER })
     });
     const body = classifyBody(login.text);
     if (login.status === 200 && body.kind === 'json' && body.data && body.data.ok === true) {
@@ -272,7 +273,7 @@ async function runHealthcheck(opts) {
         cookieHeader = cookies.join('; ');
         notes.push('login: session cookie captured (' + cookies.length + ' cookie(s); values not logged)');
       } else {
-        notes.push('login: PIN accepted; no session cookie issued — this app is stateless by design (role lives in browser sessionStorage)');
+        criticals.push('login: PIN accepted but no named session cookie was issued — refusing protected dataset checks');
       }
     } else if (login.status === 401) {
       criticals.push('login: PIN rejected (401) — the APP_PIN secret does not match the deployed APP_PIN');
@@ -284,6 +285,10 @@ async function runHealthcheck(opts) {
   } catch (err) {
     criticals.push('login: request failed — ' + (err && err.message ? err.message : String(err)));
   }
+
+  // Do not blindly replay protected reads after a missing/failed named login.
+  // /api/sheets intentionally returns 401 for a preauth (nameless) cookie.
+  if (!cookieHeader) return { criticals, warnings, notes, stats };
 
   // ---- c+d. loadAll data endpoints ----------------------------------------
   const datasets = {};
