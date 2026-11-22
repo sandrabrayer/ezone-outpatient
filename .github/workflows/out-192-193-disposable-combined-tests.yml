@@ -46,6 +46,15 @@ jobs:
           if (!source.includes("var CACHE = 'ezone-outpatient-v43';")) throw new Error('unexpected SW source');
           source = source.replace("var CACHE = 'ezone-outpatient-v43';", "// SYNTHETIC UNION ONLY; final service-worker changelog/asset audit required\nvar CACHE = 'ezone-outpatient-v44';");
           fs.writeFileSync(sw, source);
+          // The financial fixture is generated from the real app functions.
+          // In this DISPOSABLE union, retain the billing safety helpers and
+          // include the new CRM contact helpers needed by activation tests.
+          const fixtureFile = 'test-support/financial-ui-fixture.cjs';
+          let fixture = fs.readFileSync(fixtureFile, 'utf8');
+          const before = "'complementaryTypeOrBlank', 'readPlanMeta', 'planMetaError',";
+          if (!fixture.includes(before)) throw new Error('unexpected financial fixture helper list');
+          fixture = fixture.replace(before, before + " 'leadContactText', 'leadContactNote',");
+          fs.writeFileSync(fixtureFile, fixture);
           const app = fs.readFileSync('apps-script/Code.gs', 'utf8');
           for (const token of ['getTherapistsGroupContract', 'getTherapistsExtraContract', 'SESSION_OUTCOME_OP_SHEET', 'voidContact', 'contactRelation']) {
             if (!app.includes(token)) throw new Error('Expected merged source marker missing: ' + token);
