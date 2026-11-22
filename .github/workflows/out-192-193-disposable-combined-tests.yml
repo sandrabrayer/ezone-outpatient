@@ -72,6 +72,12 @@ jobs:
             test/operational-recovery.test.js \
             test/source-proxy.test.js \
             test/paid-date-coverage.test.js
+      - name: Full synthetic suite on disposable union (not a releasable merge)
+        env:
+          TZ: UTC
+        run: |
+          npm test
+          echo "Full synthetic pass only; combined native Google and integrated THR/browser UAT still required."
       - name: Terminal safety statement
         if: always()
         run: |
