@@ -325,6 +325,9 @@ subscriptions, check-ins or unapproved production release.
   (`CROSS_APP_PHONE_SOURCES` unchanged; never copied to `treatmentContactPhone`). «לידים שהוסרו» is
   NOT widened (OP-03 header correction pending). `createLead` does not carry it yet.
   `CHANGELOG-lead-contact-person.md`.
+- **Nov 22 follow-up** (`CHANGELOG-task-time-optional.md`, browser-only, SW v43): a new task's date
+  and hour are OPTIONAL in Outpatient (the Dashboard CRM still requires both); a task with no date
+  is today's work on the card and on «היום».
 - Not done: optional name / phone on a lead, the billing-phone choice, the week-window follow-up,
   the 30-minute reminder. Details: `CHANGELOG-crm-dashboard-parity.md`,
   `CHANGELOG-dual-diagnosis-plan-type.md`.

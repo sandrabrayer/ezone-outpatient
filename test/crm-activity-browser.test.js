@@ -208,11 +208,13 @@ test('browser: the PATIENT card carries the same block — «משימה חדשה
   await page.selectOption('#taskKind', 'review');
   await page.fill('#taskForm [name="title"]', 'לברר אישור קופה');
   await page.fill('#taskForm [name="dueDate"]', FAR);
-  // no time → refused in the browser, nothing travels
-  await page.click('#taskSubmit');
-  assert.equal(await page.locator('#taskForm [data-err="dueTime"]').innerText(), 'בחרי שעה');
-  assert.equal(f.captured.filter((x) => x.payload.action === 'createTask').length, 0);
+  // 2026-11-22: the hour is optional — a time WITHOUT a date is the only combination refused
+  await page.fill('#taskForm [name="dueDate"]', '');
   await page.fill('#taskForm [name="dueTime"]', '09:30');
+  await page.click('#taskSubmit');
+  assert.equal(await page.locator('#taskForm [data-err="dueTime"]').innerText(), 'שעה דורשת תאריך');
+  assert.equal(f.captured.filter((x) => x.payload.action === 'createTask').length, 0);
+  await page.fill('#taskForm [name="dueDate"]', FAR);
   const made = posted(page, 'createTask');
   await page.click('#taskSubmit');
   const created = await (await made).json();
@@ -475,5 +477,57 @@ test('browser: a new lead with a contact person — optional, validated, shown o
   assert.equal(await page.inputValue('#contactForm [name="withWhom"]'), '');
   assert.equal(await page.locator('#contactPeople').innerText(), 'טלפון: ' + LEAD.phone);
   await page.click('#contactModal [data-close]');
+  assert.deepEqual(f.errors, []);
+});
+
+test('browser: a task with no hour, and a task with no date, are saved and are today\'s work — on the card and on «היום»', skipOpt, async (t) => {
+  const f = await fixture(t); if (!f) return;
+  const page = await f.login('ורד');
+  await page.click('.tab[data-view="clients"]');
+  const c = clientCard(page, CLIENT.name);
+  await c.locator('.crm-block').waitFor();
+  // 1) the form opens on TODAY with no hour; saving it as is works (Sandra 22/11/2026: the patient
+  //    asked for a meeting on Monday — the hour is not known yet)
+  await c.locator('[data-crm="task"]').click();
+  await page.waitForSelector('#taskModal:not([hidden])');
+  const todayIso = await page.inputValue('#taskForm [name="dueDate"]');
+  assert.match(todayIso, /^\d{4}-\d{2}-\d{2}$/, 'the date defaults to today');
+  assert.equal(await page.inputValue('#taskForm [name="dueTime"]'), '');
+  await page.selectOption('#taskKind', 'meeting');
+  await page.fill('#taskForm [name="title"]', 'מבקש להפגש עם דר נטליה ביום שני');
+  const made = posted(page, 'createTask');
+  await page.click('#taskSubmit');
+  const one = await (await made).json();
+  assert.equal(one.ok, true, JSON.stringify(one));
+  assert.equal(one.task.dueDate, todayIso); assert.equal(one.task.dueTime, '');
+  await page.waitForSelector('#taskModal[hidden]', { state: 'attached' });
+  await clientCard(page, CLIENT.name).locator('.next-steps').waitFor();
+  assert.match(await clientCard(page, CLIENT.name).locator('.next-steps').innerText(), /מבקש להפגש עם דר נטליה ביום שני — היום/);
+  // 2) no date at all
+  await clientCard(page, CLIENT.name).locator('[data-crm="task"]').click();
+  await page.waitForSelector('#taskModal:not([hidden])');
+  await page.fill('#taskForm [name="title"]', 'לברר שעה מול המרפאה');
+  await page.fill('#taskForm [name="dueDate"]', '');
+  const made2 = posted(page, 'createTask');
+  await page.click('#taskSubmit');
+  const two = await (await made2).json();
+  assert.equal(two.ok, true, JSON.stringify(two));
+  assert.equal(two.task.dueDate, ''); assert.equal(two.task.dueTime, '');
+  await page.waitForSelector('#taskModal[hidden]', { state: 'attached' });
+  await page.waitForFunction(() => document.querySelectorAll('#clientsList .crm-task').length === 2);
+  const steps = await clientCard(page, CLIENT.name).locator('.next-steps').innerText();
+  assert.match(steps, /לברר שעה מול המרפאה — לטיפול היום/);
+  assert.equal(await clientCard(page, CLIENT.name).locator('.next-steps.today').count(), 1, 'the box is edged as today\'s work');
+  assert.equal(await clientCard(page, CLIENT.name).locator('.crm-task .md-chip.st-undated').count(), 0, 'no grey «ללא תאריך» chip');
+  // 3) «היום»: both are in the dated-work section, none in «בהמשך השבוע»
+  await page.click('.tab[data-view="dashboard"]');
+  await page.locator('#myDay .md-head').waitFor();
+  const day = await page.locator('#myDay').innerText();
+  assert.ok(day.includes('מבקש להפגש עם דר נטליה ביום שני')); assert.ok(day.includes('לברר שעה מול המרפאה'));
+  const later = day.indexOf('בהמשך השבוע');
+  if (later >= 0) {
+    assert.ok(day.indexOf('לברר שעה מול המרפאה') < later, 'the undated task is above «בהמשך השבוע»');
+    assert.ok(day.indexOf('מבקש להפגש עם דר נטליה ביום שני') < later);
+  }
   assert.deepEqual(f.errors, []);
 });

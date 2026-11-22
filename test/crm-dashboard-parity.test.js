@@ -242,21 +242,26 @@ test('nextSteps («מה הלאה»): what · when (relative + date + weekday + h
     { id: 't-other', leadId: 'L2', status: 'open', kind: 'call', title: 'ליד אחר', dueDate: TODAY }
   ];
   const steps = CA.nextSteps({ leadId: 'L1' }, tasks, TODAY);
-  assert.deepEqual(steps.map((x) => x.id), ['t-late', 't-yest', 't-today', 't-tom', 't-wait', 't-none']);
-  assert.deepEqual(steps.map((x) => x.rel), ['באיחור של 2 ימים', 'באיחור של יום', 'היום', 'מחר', 'בעוד 3 ימים', 'ללא תאריך']);
+  // 2026-11-22: a task with NO date is today's work — after today's dated ones, ahead of future dates
+  assert.deepEqual(steps.map((x) => x.id), ['t-late', 't-yest', 't-today', 't-none', 't-tom', 't-wait']);
+  assert.deepEqual(steps.map((x) => x.rel), ['באיחור של 2 ימים', 'באיחור של יום', 'היום', 'לטיפול היום', 'מחר', 'בעוד 3 ימים']);
   assert.equal(steps[0].when, '19/11/2026 (חמישי) 09:00'); assert.equal(steps[0].assignee, 'ורד'); assert.equal(steps[0].state, 'late');
   assert.equal(steps[2].when, '21/11/2026 (שבת) 16:00');
-  assert.equal(steps[4].reason, 'ביקשה שבוע'); assert.equal(steps[5].when, '');
+  assert.equal(steps[5].reason, 'ביקשה שבוע'); assert.equal(steps[3].when, '');
   assert.deepEqual(CA.nextSteps({ clientId: 'C9' }, tasks, TODAY), []);
   assert.deepEqual(CA.nextSteps({ leadId: 'L1' }, null, TODAY), []);
 });
 
-test('newTaskErrors / rescheduleErrors: a new task needs a date (today or later) AND a time', () => {
+test('newTaskErrors / rescheduleErrors: a new task needs only what and who — the date and the time are optional (2026-11-22)', () => {
   const ok = { kind: 'call', title: 'לחזור', dueDate: TODAY, dueTime: '10:00' };
   assert.deepEqual(CA.newTaskErrors(ok, TODAY), {});
-  assert.deepEqual(Object.keys(CA.newTaskErrors({}, TODAY)).sort(), ['dueDate', 'dueTime', 'kind', 'title']);
-  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueDate: '2026-11-20' }), TODAY).dueDate, 'בחרי תאריך — היום או אחריו');
-  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueTime: '' }), TODAY).dueTime, 'בחרי שעה');
+  assert.deepEqual(Object.keys(CA.newTaskErrors({}, TODAY)).sort(), ['kind', 'title'], 'no date and no time is a valid task');
+  assert.deepEqual(CA.newTaskErrors(Object.assign({}, ok, { dueTime: '' }), TODAY), {}, 'a date with no hour: any time that day');
+  assert.deepEqual(CA.newTaskErrors(Object.assign({}, ok, { dueDate: '', dueTime: '' }), TODAY), {}, 'no date: handled today');
+  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueDate: '2026-11-20' }), TODAY).dueDate, 'תאריך — היום או אחריו');
+  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueDate: 'x' }), TODAY).dueDate, 'תאריך — היום או אחריו');
+  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueTime: '25:00' }), TODAY).dueTime, 'שעה בפורמט HH:MM');
+  assert.equal(CA.newTaskErrors(Object.assign({}, ok, { dueDate: '' }), TODAY).dueTime, 'שעה דורשת תאריך');
   assert.equal(CA.newTaskErrors(Object.assign({}, ok, { kind: 'payment' }), TODAY).kind, 'בחרי סוג');
   assert.deepEqual(CA.rescheduleErrors({ dueDate: '2026-11-25', dueTime: '' }, { source: 'manual' }), {});
   assert.equal(CA.rescheduleErrors({ dueDate: '2026-11-25' }, { source: 'contact' }).reason, 'מועד שהובטח בשיחה — חובה לציין סיבה');
@@ -277,6 +282,30 @@ test('«היום»: a lead whose only contact was voided is «ללא קשר רא
   assert.ok(rowB, 'the lead is listed'); assert.equal(rowB.lastContact, null);
   const rowA = Object.values(a.rowsBy).flat().find((r) => r.subjectId === 'L1');
   assert.ok(rowA && rowA.lastContact, 'before the void the contact shows');
+});
+
+test('a task with no hour, or with no date at all, is saved by the real source and is TODAY\'s work on «היום» — never «בהמשך השבוע»', () => {
+  const sb = sandbox();
+  const noTime = post(sb, { action: 'createTask', submissionId: 'nt1', task: { kind: 'meeting', clientId: 'C1', title: 'לתאם פגישה עם ד״ר נטליה ביום שני', assignee: 'ורד', dueDate: TODAY, dueTime: '' } });
+  assert.equal(noTime.ok, true, JSON.stringify(noTime));
+  assert.equal(noTime.task.dueDate, TODAY); assert.equal(noTime.task.dueTime, '');
+  const noDate = post(sb, { action: 'createTask', submissionId: 'nd1', task: { kind: 'meeting', clientId: 'C1', title: 'לברר שעה מול המרפאה', assignee: 'ורד', dueDate: '', dueTime: '' } });
+  assert.equal(noDate.ok, true, JSON.stringify(noDate));
+  assert.equal(noDate.task.dueDate, ''); assert.equal(noDate.task.status, 'open');
+  const tasks = sb.rows('Tasks').concat([{ id: 't-next', clientId: 'C1', status: 'open', kind: 'meeting', title: 'שבוע הבא', dueDate: '2026-11-29', dueTime: '', assignee: 'ורד' }]);
+  const m = MyDay.build({ leads: [], clients: [{ id: 'C1', name: 'מטופל', status: 'פעיל' }], stopFlags: [], extraRequests: [], continuation: [], activity: [], tasks, today: TODAY, user: 'ורד', renewalInfo: () => ({ status: 'ok' }) });
+  const by = Object.fromEntries(m.sections.map((x) => [x.id, x.rows.map((r) => r.action)]));
+  assert.deepEqual(by.dated, ['לתאם פגישה עם ד״ר נטליה ביום שני', 'לברר שעה מול המרפאה'], 'both sit with today\'s work, the dated one first');
+  assert.deepEqual(by.later, ['שבוע הבא']);
+  const undated = m.rowsBy.tasks.find((r) => r.taskId === 'task-nd1');
+  assert.equal(undated.state, 'undated'); assert.equal(undated.priority, 'today');
+  assert.equal(MyDay.stateText(undated), '● להיום');
+  // the card: «מה הלאה» says «לטיפול היום», and the row chip wears today\'s colour
+  assert.equal(CA.nextSteps({ clientId: 'C1' }, tasks, TODAY).find((x) => x.id === 'task-nd1').rel, 'לטיפול היום');
+  assert.match(APP, /escapeHtml\(st === 'undated' \? 'today' : st\)/);
+  assert.match(APP, /st === 'today' \|\| st === 'undated' \? 'להיום'/);
+  assert.match(APP, /'ללא תאריך — לטיפול היום'/);
+  assert.match(APP, /f\.elements\.dueDate\.value = today\(\); f\.elements\.dueDate\.min = today\(\);/, 'the form still opens on today');
 });
 
 /* ---------------- wiring / markup pins ---------------- */
@@ -311,7 +340,8 @@ test('wiring: the contact form — three kinds with none pre-chosen, the Dashboa
   assert.match(APP, /crmRadios\('next', CA\.NEXT_CHOICES, ''\)/, '«קשר הבא» has no default');
   assert.match(APP, /el\.textContent = k === '_form'/, 'errors are written with textContent');
   const task = HTML.slice(HTML.indexOf('id="taskForm"'), HTML.indexOf('id="deferModal"'));
-  for (const txt of ['מה לעשות *', 'תאריך *', 'שעה *', 'יצירת משימה']) assert.ok(task.includes(txt), txt);
+  for (const txt of ['מה לעשות *', 'לטיפול בתאריך', 'שעה (לא חובה)', 'יצירת משימה']) assert.ok(task.includes(txt), txt);
+  assert.equal(/תאריך \*|שעה \*/.test(task), false, 'neither the date nor the time is marked required (2026-11-22)');
   assert.equal(/name="reason"/.test(task), false, '«למה עכשיו» is gone from the new-task form');
   for (const id of ['taskDoneForm', 'taskReassignForm', 'taskWithdrawForm', 'voidContactForm', 'deferReasonLabel']) assert.ok(HTML.includes('id="' + id + '"'), id);
   assert.match(HTML, /<div class="modal-title">שינוי מועד — /);
