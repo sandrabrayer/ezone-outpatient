@@ -1,0 +1,31 @@
+name: HC-02 named-session healthcheck synthetic safety tests
+on:
+  push:
+    branches: [codex/healthcheck-named-cookie-20261122]
+  pull_request:
+    paths:
+      - 'scripts/healthcheck.js'
+      - 'test/weekly-healthcheck.test.js'
+      - '.github/workflows/hc02-named-cookie-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-auth-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies, no external credentials
+        run: npm ci --no-audit --no-fund
+      - name: Verify named session and fail-closed behavior with synthetic HTTP only
+        env:
+          TZ: UTC
+        run: |
+          node --test test/weekly-healthcheck.test.js
+          echo 'HC-02 accepted only as synthetic test evidence; no production credentials or calls.'
