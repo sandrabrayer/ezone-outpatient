@@ -55,6 +55,14 @@ jobs:
           if (!fixture.includes(before)) throw new Error('unexpected financial fixture helper list');
           fixture = fixture.replace(before, before + " 'leadContactText', 'leadContactNote',");
           fs.writeFileSync(fixtureFile, fixture);
+          // Restore the long OUT end-to-end journey against the combined new
+          // CRM radio name, keeping the exact same no-follow-up semantics.
+          const journeyFile = 'test/out-workflow-acceptance-browser.test.js';
+          let journey = fs.readFileSync(journeyFile, 'utf8');
+          const oldChoice = '#contactForm [name="nextMode"][value="none"]';
+          if (!journey.includes(oldChoice)) throw new Error('unexpected old workflow test selector');
+          journey = journey.replace(oldChoice, '#contactForm [name="next"][value="none"]');
+          fs.writeFileSync(journeyFile, journey);
           const app = fs.readFileSync('apps-script/Code.gs', 'utf8');
           for (const token of ['getTherapistsGroupContract', 'getTherapistsExtraContract', 'SESSION_OUTCOME_OP_SHEET', 'voidContact', 'contactRelation']) {
             if (!app.includes(token)) throw new Error('Expected merged source marker missing: ' + token);
