@@ -9135,7 +9135,7 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal, allowUncert
   }
   // For v3 the manifest alone is a PENDING artifact: an expired finalizer must
   // never turn an incomplete snapshot into a certified operational restore.
-  // Only finalizeNightlyIntegrityJob may skip this gate during its full
+  // Only the second-phase verifier may skip this gate during its full
   // independent post-publication readback, BEFORE writing the certificate.
   if (meta.schemaVersion === '3' && allowUncertified !== true) {
     var certificate = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + day);
@@ -9314,7 +9314,7 @@ function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
   if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) throw new Error('Recovery backup still pending');
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) throw new Error('Recovery backup still running');
     var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
     var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
@@ -9667,10 +9667,13 @@ function nightlyIntegrityJob() {
   // ---- persist the sentinel state for tomorrow's run — but only off a
   //      SUCCESSFUL Clients read: seeding count 0 after a failed read would
   //      fire a false full-loss alert tomorrow ----
-  if (clientsReadOk && !stagedMode) {
+  if (clientsReadOk) {
+    // v3 updates this sentinel ONLY once the independent verification passes.
+    if (!stagedMode) {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+    }
   }
   // Do not return a GREEN time-trigger invocation after catching a failed
   // backup. The existing email is best-effort; Apps Script execution failure
