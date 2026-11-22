@@ -237,3 +237,67 @@ for (const crash of ['charge_done','payment_written']) test('mixed-kind manifest
   assert.equal(restored.rows('FinancialOps')[0].state,'acknowledged');assert.equal(restored.rows('FinancialOps').length,2);
   assert.deepEqual(h.locks(),[false,false]);
 });
+
+
+test('group-credit journal survives typed backup → restore and retry without duplicate credits', () => {
+  // This covers the missing GROUP case in recovery acceptance. Existing finance
+  // round-trips above exercise non-group cases only. All Google services are synthetic.
+  const { sandbox } = require('../test-support/apps-script-sandbox');
+  const secret = 'synthetic-group-backup-secret';
+  const source = sandbox([], [{
+    id: 'group-recovery-client', name: 'Synthetic Group Participant', phone: '0500000166',
+    clinicalTreatmentType: 'קבוצה', serviceType: 'קבוצה',
+    creditsOwed: 0, sessionsPerWeek: '1'
+  }]);
+  source.props.SESSION_OUTCOME_SECRET = secret;
+  const request = {
+    action: 'recordSessionOutcome', secret,
+    sessionId: 'recovery-group-session-1', treatmentId: 'recovery-group-booking-1',
+    phone: '0500000166', therapist: 'Synthetic Group Therapist',
+    clinicalTreatmentType: 'קבוצה', date: '2026-11-20',
+    outcome: 'patient_cancelled_notice', reportRevision: '2026-11-20T12:00:00.000Z'
+  };
+  assert.equal(source.post(request).ok, true);
+  assert.equal(source.rows('SessionOutcomeOps').length, 1);
+  assert.equal(source.rows('SessionOutcomeOps')[0].state, 'committed');
+  assert.equal(Number(source.rows('Clients')[0].creditsOwed), 1);
+  source.seed('FinancialOps', source.ctx.FINANCIAL_OP_HEADERS, []);
+
+  const grids = Object.fromEntries(Object.entries(source.sheets).map(([name, sh]) => [name, sh.grid]));
+  const h = harness(grids);
+  h.props.FINANCIAL_OPS_CREATED = '1';
+  h.props.SESSION_OUTCOME_OPS_CREATED = '1';
+  h.ctx.nightlyIntegrityJob();
+  const day = h.ctx._integritySnapshotName(new Date()).slice('outpatient-'.length);
+  const captured = h.ctx._integrityValidateRestoreSet(h.backup, day, true);
+  const journal = captured.find(x => x.source === 'SessionOutcomeOps');
+  assert.ok(journal && !journal.absent && journal.grid.length === 2,
+    'a committed group operation must be present in the verified recovery set');
+  assert.equal(captured.find(x => x.source === 'SessionLog').grid.length, 2);
+
+  const target = sandbox();
+  for (const {source: name, grid, absent} of captured) {
+    if (absent || name === '__RecoveryMetadata') continue;
+    target.seed(name, grid[0], grid.slice(1).map(row =>
+      Object.fromEntries(grid[0].map((key, i) => [key, row[i]]))));
+  }
+  target.props.SESSION_OUTCOME_SECRET = secret;
+  target.props.SESSION_OUTCOME_OPS_CREATED = '1';
+  target.props.FINANCIAL_OPS_CREATED = '1';
+  const replay = target.post(request);
+  assert.equal(replay.ok, true, JSON.stringify(replay));
+  assert.equal(Number(target.rows('Clients')[0].creditsOwed), 1,
+    'the recovered group report cannot credit the participant a second time');
+  assert.equal(target.rows('SessionLog').length, 1);
+  assert.equal(target.rows('SessionOutcomeOps').length, 1);
+  assert.equal(target.rows('SessionOutcomeOps')[0].state, 'committed');
+
+  const snap = h.backup.getSheetByName('outpatient-' + journal.prefix + day);
+  const operationKeyColumn = journal.grid[0].indexOf('opKey') + 1;
+  assert.ok(operationKeyColumn > 0);
+  snap.getRange(2, operationKeyColumn).setValues([['tampered-operation-key']]);
+  assert.throws(() => h.ctx._integrityValidateRestoreSet(h.backup, day, true),
+    /snapshot mismatch|fingerprint|checksum/i,
+    'tampered actual journal snapshot must block future recovery certification');
+  assert.deepEqual(h.locks(), [false, false]);
+});
