@@ -223,3 +223,14 @@ test('disabling stage mode during an unfinished backup never reopens the old des
   assert.equal(h.props.INTEGRITY_PENDING_BACKUP, pending);
   assert.equal(h.events.filter(e => e[0] === 'write').length, writes);
 });
+
+test('independent finalizer keeps legacy nonempty-row sentinel semantics with malformed IDs', () => {
+  const h = staged({
+    Clients: [['id','name','phone'], ['client-1','Good','0500000001'], ['','Damaged-but-populated','']],
+    Leads: [['id','name'], ['lead-1','Synthetic']]
+  });
+  h.ctx.nightlyIntegrityJob();
+  assert.equal(h.ctx.finalizeNightlyIntegrityJob().ok, true);
+  assert.equal(h.props.INTEGRITY_LAST_COUNT, '2', 'nonempty damaged row is counted, as in _readAll');
+  assert.deepEqual(JSON.parse(h.props.INTEGRITY_LAST_IDS), ['client-1']);
+});
