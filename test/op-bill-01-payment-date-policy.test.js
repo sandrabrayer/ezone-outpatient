@@ -65,11 +65,21 @@ test('legacy compatibility: packagePaidState alone uses the stored next date, no
 test('new renewal contract is anchored to recorded payment date on UI and actual source', () => {
   assert.match(APP_SRC, /nextBillingDate: paidCoverage\.next/);
   assert.match(SOURCE_SRC, /function _finPaidDateCoverage\(paymentDate, cycleDate\)/);
-  assert.match(SOURCE_SRC, /_finPaidDateCoverage\(p\.paymentDate, intent\.cycleDate\)/);
+  assert.match(SOURCE_SRC, /_finPaidDateCoverage\(p\.paymentDate\)/);
+  assert.match(SOURCE_SRC, /_finLegacyPaidDateCoverage\(p\.paymentDate, intent\.cycleDate\)/);
   assert.match(SOURCE_SRC, /p\.coverageStart === paidWindow\.start/);
   assert.match(SOURCE_SRC, /patch\.nextBillingDate === paidWindow\.next/);
   // The old due-date guard remains ONLY for immutable stored operation replay.
   assert.match(SOURCE_SRC, /var legacyReplay = !!stored/);
+  const f = fixture();
+  f.request.coverageIntent = 'ordinary';
+  f.request.payment.coverageStart = '2026-02-25';
+  f.request.payment.coverageEnd = '2026-03-24';
+  f.request.patch.nextBillingDate = '2026-03-25';
+  assert.equal(f.reserve().operation.state, 'prepared');
+  assert.equal(f.apply().operation.state, 'done');
+  assert.equal(f.sb.rows('Payments')[0].coverageStart, '2026-02-25');
+  assert.equal(f.sb.rows('Clients')[0].nextBillingDate, '2026-03-25');
 });
 
 test('one-time charge and partial/unpaid receipts are NOT an ordinary month-paid proof', () => {
@@ -108,9 +118,8 @@ test('OP-BILL-01: persisted source, card and revenue agree on paid-date renewal 
     assert.equal(JSON.stringify({ clients, payments }), before, 'read models must not rewrite history');
   }
 
-  // Paid Feb 25 for the Feb 28 cycle: an EARLY payment advances from its due
-  // date (B1 rule, max(paymentDate, cycleDate)) — 28 service days Feb 28
-  // through Mar 27, next collection Mar 28 (a LATER month key than the cycle).
+  // Explicitly chosen advance: paid Feb 25 for Feb 28–Mar 27, next Mar 28.
+  // Ordinary early payment is checked above and starts on the actual paid date.
   verify(f.sb, '2026-03-01', '2026-03-27', '2026-03-28', [
     ['2026-02', 21.43, 1, 28], ['2026-03', 578.57, 27, 28]
   ]);

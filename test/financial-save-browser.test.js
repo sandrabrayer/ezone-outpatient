@@ -323,7 +323,7 @@ test('browser: successful renewal records verified paid-date coverage and next c
   assert.equal(await clientCard(page).locator('.chip-payment-review').count(), 0);
   assert.match(await clientCard(page).locator('.chip-paid').textContent(), /15\/11/);
   const p = fx.sb.rows('Payments')[0];
-  assert.equal(p.id, 'pay::fixture-client::base::2026-10');
+  assert.equal(p.id, 'pay::fixture-client::base::2026-10-01');
   assert.equal(p.paymentDate, '2026-10-16');
   assert.equal(p.coverageStart, '2026-10-16');
   assert.equal(p.coverageEnd, '2026-11-15');
@@ -536,6 +536,11 @@ for (const width of [1280, 360]) {
     await page.fill('#renewForm [name="renewDate"]', '2026-10-16');
     const before = JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments'), fx.sb.rows('FinancialOps')]);
     const messages = [];
+    await page.click('#renewSubmit');
+    await page.getByText('תשלום נוסף באותו תאריך דורש בחירה מפורשת במקדמה ובתקופת הכיסוי שלה.', { exact: true }).waitFor();
+    assert.equal(fx.captured.filter(x => x.payload.action === 'reserveRenewal').length, 0);
+    assert.equal(JSON.stringify([fx.sb.rows('Clients'), fx.sb.rows('Payments'), fx.sb.rows('FinancialOps')]), before);
+    await page.selectOption('#renewForm [name="renewCoverageIntent"]', 'advance');
     page.once('dialog', async d => { messages.push(d.message()); await d.dismiss(); });
     await page.click('#renewSubmit');
     await page.getByText('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', { exact: true }).waitFor();
@@ -546,11 +551,12 @@ for (const width of [1280, 360]) {
     assert.equal(await page.isDisabled('#renewSubmit'), false);
     page.once('dialog', async d => { messages.push(d.message()); await d.accept(); });
     await page.click('#renewSubmit');
-    await page.locator('#renewResume').getByText('אישור וסגירה', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'אישור וסגירה', exact: true }).waitFor();
     assert.equal(messages.length, 2);
     const reserve = fx.captured.filter(x => x.payload.action === 'reserveRenewal');
     assert.equal(reserve.length, 1);
     assert.equal(reserve[0].payload.advanceConfirmed, true);
+    assert.equal(reserve[0].payload.coverageIntent, 'advance');
     assert.equal(JSON.parse(fx.sb.rows('FinancialOps')[0].intent).advanceConfirmed, true);
     assert.equal(fx.sb.rows('Payments').length, 1);
     assert.equal(fx.sb.rows('Payments')[0].coverageStart, '2026-11-01');
@@ -562,6 +568,7 @@ for (const width of [1280, 360]) {
     // now December with a NEW operation ID, so op-ID idempotency alone is insufficient.
     await openRenew(page);
     await page.fill('#renewForm [name="renewDate"]', '2026-10-16');
+    await page.selectOption('#renewForm [name="renewCoverageIntent"]', 'advance');
     page.once('dialog', async d => { messages.push(d.message()); await d.dismiss(); });
     await page.click('#renewSubmit');
     await page.getByText('לא נוצר תשלום נוסף. יש לבדוק את התשלום הקודם בגבייה.', { exact: true }).waitFor();

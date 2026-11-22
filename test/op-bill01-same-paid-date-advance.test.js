@@ -29,13 +29,15 @@ function renewal(sb, opId, paidDate, explicitAdvance) {
   assert.equal(state.ok, true, JSON.stringify(state));
   assert.equal(state.operation, undefined, 'only fully closed operations permit a new renewal');
   const cycle = state.cycleDate;
-  const window = CL.paymentDateCoverage(paidDate, cycle);
+  // These cases deliberately purchase the selected future cycle. Ordinary
+  // early-payment behavior is covered separately and must not be inferred here.
+  const window = CL.paymentDateCoverage(cycle);
   const request = {
     action: 'reserveRenewal', opId, clientId: customer.id,
-    snapshot: state.snapshot, cycleDate: cycle,
+    snapshot: state.snapshot, cycleDate: cycle, coverageIntent: 'advance',
     patch: { pricePerSession: 15000, paymentDate: paidDate, nextBillingDate: window.next },
     payment: {
-      id: 'pay::fixture-client::base::' + cycle.slice(0, 7),
+      id: state.paymentId,
       clientId: customer.id, clientName: 'Synthetic', billingType: 'monthly',
       dueDate: cycle, amountDue: 15000, amountPaid: 15000, status: 'paid',
       paymentDate: paidDate, coverageStart: window.start, coverageEnd: window.end
@@ -61,7 +63,8 @@ function firstReceipt(sb) {
 async function submitFutureRenewal(confirmResult, paidDate = '2026-10-25') {
   const sb = mk();
   firstReceipt(sb);
-  const f = fixture({ renewAmount: '15000', renewDate: paidDate, renewNotes: '' });
+  const f = fixture({ renewAmount: '15000', renewDate: paidDate, renewNotes: '',
+    renewCoverageIntent: 'advance', renewCoverageStart: '2026-12-01', renewCoverageEnd: '2026-12-31' });
   const confirmations = [], actions = [];
   Object.assign(f.ctx, {
     today: () => '2026-11-01', renewLoadToken: 1,
@@ -76,7 +79,7 @@ async function submitFutureRenewal(confirmResult, paidDate = '2026-10-25') {
   });
   vm.runInContext(named('submitDurableRenewal'), f.ctx);
   const before = JSON.stringify([sb.rows('Clients'), sb.rows('Payments'), sb.rows('FinancialOps')]);
-  await f.ctx.submitDurableRenewal({ querySelectorAll: () => [] });
+  await f.ctx.submitDurableRenewal(f.form);
   return { sb, f, before, actions, confirmations };
 }
 
@@ -165,6 +168,6 @@ test('UI: warns with exact cycle and sends the advance marker only after confirm
   assert.match(app, /advanceConfirmed = confirm\(/);
   assert.match(app, /if \(!advanceConfirmed\) \{ toast\('לא נוצר תשלום נוסף/);
   assert.match(app, /if \(advanceConfirmed\) request\.advanceConfirmed = true/);
-  assert.match(source, /intent\.advanceConfirmed !== true\) return 'renewal_advance_confirmation_required'/);
+  assert.match(source, /intent\.advanceConfirmed !== true \|\| intent\.coverageIntent === 'ordinary'/);
   assert.match(source, /if \(!stored && c\.paymentDate/);
 });

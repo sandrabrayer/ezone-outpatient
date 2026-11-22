@@ -349,7 +349,7 @@ test('deriveNextBillingDate parity: derived value equals nextCycleDueDateAfter(a
 test('basePaymentPaidOn stamps the explicit paid date, not today', () => {
   const client = { id: 'abc', name: 'ליאור' };
   const row = basePaymentPaidOn(client, '2026-06-01', 2000, '2026-06-22', '');
-  assert.equal(row.id, 'pay::abc::base::2026-06');
+  assert.equal(row.id, 'pay::abc::base::2026-06-01');
   assert.equal(row.status, 'paid');
   assert.equal(row.amountDue, 2000);
   assert.equal(row.amountPaid, 2000);
@@ -358,23 +358,24 @@ test('basePaymentPaidOn stamps the explicit paid date, not today', () => {
   assert.equal(row.paymentDate, '2026-06-22');
 });
 
-test('basePaymentPaidOn keys the row by due-month so the chip reads the same row', () => {
+test('basePaymentPaidOn gives different due cycles in one month distinct IDs', () => {
   const client = { id: 'abc', name: 'ליאור' };
-  // Same client+month always upserts the same id (idempotent backdate edits).
+  // The original cycle date is the key; a new cycle in that month cannot collide.
   const a = basePaymentPaidOn(client, '2026-06-01', 2000, '2026-06-22', '');
   const b = basePaymentPaidOn(client, '2026-06-28', 2000, '2026-06-10', 'note');
-  assert.equal(a.id, b.id);
+  assert.notEqual(a.id, b.id);
+  assert.equal(a.id, basePaymentPaidOn(client, '2026-06-01', 2000, '2026-06-10', '').id);
   assert.equal(b.notes, 'note');
 });
 
 /* ===== Bug C: renew modal feeds paid-date + notes; re-anchors nextBillingDate ===== */
 
-test('renew payment carries the modal paid-date + notes, keyed to the renewal month', () => {
+test('renew payment carries the modal paid-date + notes, keyed to the exact renewal date', () => {
   const client = { id: 'abc', name: 'ליאור' };
   const renewalDate = '2026-07-22';
   const paidDate = '2026-06-28';
   const pay = basePaymentPaidOn(client, renewalDate, 1800, paidDate, 'מזומן');
-  assert.equal(pay.id, 'pay::abc::base::2026-07'); // billed month = renewal month
+  assert.equal(pay.id, 'pay::abc::base::2026-07-22');
   assert.equal(pay.dueDate, renewalDate);
   assert.equal(pay.status, 'paid');
   assert.equal(pay.amountDue, 1800);

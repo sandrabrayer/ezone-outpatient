@@ -27,11 +27,12 @@ function fixture() {
   return { sb, send, row, credits };
 }
 
-test('header: reportRevision is appended last', () => {
+test('header: group treatmentId appended without shifting previous fields', () => {
   const { sb } = fixture();
   const H = JSON.parse(JSON.stringify(sb.ctx.SESSION_LOG_HEADERS));
-  assert.equal(H[H.length - 1], 'reportRevision');
-  assert.equal(H[H.length - 2], 'oneTimeSessionId');
+  assert.equal(H[H.length - 1], 'treatmentId');
+  assert.equal(H[H.length - 2], 'reportRevision');
+  assert.equal(H[H.length - 3], 'oneTimeSessionId');
 });
 
 test('newer report B recorded, older A arrives late → refused; row, pay and credits untouched', () => {

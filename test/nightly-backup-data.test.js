@@ -106,7 +106,7 @@ test('misconfigured live workbook as backup is rejected before any write', () =>
 
 test('retention matches registered typed snapshot families, including one-time sessions, never unrelated sheets', () => {
   const h = harness();
-  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-', 'payments-', 'charges-', 'credits-', 'financial-ops-', 'one-time-sessions-', 'manifest-']) {
+  for (const family of ['', 'leads-', 'leads-removed-', 'clients-removed-', 'payments-', 'charges-', 'credits-', 'financial-ops-', 'session-outcome-ops-', 'one-time-sessions-', 'manifest-']) {
     assert.equal(h.ctx._integrityIsExpiredSnapshot('outpatient-'+family+'2026-01-01','outpatient-2026-10-09',30),true);
   }
   for (const name of ['outpatient-pending-2026-01-01','outpatient-previous-2026-01-01','outpatient-payments-manual-2026-01-01','outpatient-one-time-sessions-manual-2026-01-01','dashboard-2026-01-01','outpatient-leads-2026-1-1','manual']) {

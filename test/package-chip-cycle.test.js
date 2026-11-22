@@ -35,7 +35,7 @@ const {
   nextCycleDueDateAfter,
   nextRenewalDueDate,
   dueItemsOn,
-  paymentId,
+  cyclePaymentId,
   basePaymentPaidOn,
 } = require('../public/charges-logic.js');
 
@@ -167,13 +167,22 @@ test('cyclePaymentDueDate: due anchor (past/today) -> the anchor; else the month
 test('parity: the chip mark writes the SAME Payments row id as חידוש ותשלום', () => {
   const env = appEnv(SEPT1);
   const c = { id: 'ido', name: 'עידו', billingDay: 30, nextBillingDate: '2026-08-30' };
-  // chip: the cycle row for the due anchor
-  const chipRowId = paymentId(c.id, env.cyclePaymentDueDate(c, SEPT1), 'base');
+  // The real chip handler delegates NEW receipts to the journal-backed form.
+  // It cannot independently persist a month-key payment or advance the client.
+  let opened = null;
+  const mark = new Function('state', 'openRenewModal', 'persistPayment', 'persistClientChange',
+    fnSource('setCurrentMonthPaid') + '; return setCurrentMonthPaid;')(
+    { role: 'editor' }, client => { opened = client; },
+    () => assert.fail('chip must not write a payment directly'),
+    () => assert.fail('chip must not advance the client directly'));
+  mark(c, true);
+  assert.equal(opened, c);
+  const chipRowId = cyclePaymentId(c.id, env.cyclePaymentDueDate(c, SEPT1));
   // renew modal: renewalDate = nextRenewalDueDate(c) || currentMonthBaseDueDate(c)
   const renewalDate = nextRenewalDueDate(c) || env.currentMonthBaseDueDate(c);
   const renewRowId = basePaymentPaidOn(c, renewalDate, 4000, '2026-08-31', '').id;
   assert.equal(chipRowId, renewRowId);
-  assert.equal(chipRowId, 'pay::ido::base::2026-08');
+  assert.equal(chipRowId, 'pay::ido::base::2026-08-30');
 });
 
 test('parity: the edit-modal propagation writes the same cycle row as the chip', () => {
@@ -187,7 +196,7 @@ test('parity: the edit-modal propagation writes the same cycle row as the chip',
   const c = { id: 'ido', name: 'עידו', billingDay: 30, nextBillingDate: '2026-08-30' };
   const due = env.cyclePaymentDueDate(c, SEPT1);
   assert.equal(basePaymentPaidOn(c, due, 4000, SEPT1, '').id,
-    paymentId(c.id, due, 'base'));
+    cyclePaymentId(c.id, due));
 });
 
 test('mark advances the anchor per the #94 rule (עידו: settle 30/08 -> next 30/09)', () => {

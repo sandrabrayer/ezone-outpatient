@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Candidate: monthly payment coverage and full OUT workflow (2026-11-20)
+- Explicit ordinary versus advance renewal intent; ordinary new monthly receipts cover the actual paid date through one clamped calendar month. Exact-date cycle IDs prevent same-month cycle collisions while preserving recorded IDs/periods and legacy journal replay.
+- Refuse duplicate admission from a stale tab; preserve original referral status after conversion and reload; enforce persisted financial-task visibility on replay; refuse ambiguous shared-payer deactivation.
+- Actual-source and HTTP journey regressions plus mandatory browser coverage for offering, scheduling and the complete workflow. SW v42; verified live v41. Draft only, no history repair or deployment. See CHANGELOG-out-payment-workflow.md and docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md.
+
 ### Contact record, tasks and «היום» — the same as the Dashboard CRM (2026-11-21)
 - Lead cards AND patient cards carry one activity block: «⏰ מה הלאה» (what · when · who), «שיחות אחרונות» (kind chip), open tasks, «📞 תיעוד שיחה» / «➕ משימה חדשה», history.
 - «תיעוד שיחה»: three kinds (שיחה יוצאת / שיחה נכנסת / תיעוד שיחה — none pre-chosen), the Dashboard's fields, new outcome «התקיימה שיחה — לא נדרש המשך», «קשר הבא» with no default and the real date shown. Stored in `detailsJson` — no sheet column.

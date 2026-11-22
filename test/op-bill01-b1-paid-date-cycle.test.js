@@ -26,23 +26,23 @@ function renewal(sb, opId, paidDate, extra = {}) {
   assert.equal(st.ok, true, JSON.stringify(st));
   const cycle = st.cycleDate;
   const win = CL.paymentDateCoverage(paidDate, cycle);
-  const request = { action: 'reserveRenewal', opId, clientId: client.id, snapshot: st.snapshot, cycleDate: cycle,
+  const request = { action: 'reserveRenewal', opId, clientId: client.id, snapshot: st.snapshot, cycleDate: cycle, coverageIntent: 'ordinary',
     patch: { pricePerSession: 500, paymentDate: paidDate, nextBillingDate: win.next },
-    payment: { id: 'pay::C1::base::' + cycle.slice(0, 7), clientId: client.id, clientName: client.name,
+    payment: { id: st.paymentId, clientId: client.id, clientName: client.name,
       billingType: 'monthly', dueDate: cycle, amountDue: 500, amountPaid: 500, status: 'paid',
       paymentDate: paidDate, coverageStart: win.start, coverageEnd: win.end, notes: '' }, ...extra };
   return { cycle, win, request, reserve: () => sb.post(request), apply: () => sb.post({ action: 'applyRenewal', opId }) };
 }
 
-test('B1 rule: browser and Apps Script agree — early = advance from the due cycle, late = month from payment, clamp kept', () => {
+test('ordinary browser and Apps Script coverage starts on actual payment, including early payment and month-end clamp', () => {
   const gs = sandbox().ctx;
   const cases = [
     // [paymentDate, cycleDate, start, end, next]
     ['2026-10-25', '2026-10-25', '2026-10-25', '2026-11-24', '2026-11-25'], // Sandra's example
-    ['2026-10-28', '2026-11-01', '2026-11-01', '2026-11-30', '2026-12-01'], // early: advance from due
+    ['2026-10-28', '2026-11-01', '2026-10-28', '2026-11-27', '2026-11-28'], // ordinary early receipt
     ['2026-11-10', '2026-11-01', '2026-11-10', '2026-12-09', '2026-12-10'], // late: from payment
     ['2026-10-25', '', '2026-10-25', '2026-11-24', '2026-11-25'],           // no cycle: payment date
-    ['2026-01-15', '2026-01-31', '2026-01-31', '2026-02-27', '2026-02-28'], // clamp on the due cycle
+    ['2026-01-15', '2026-01-31', '2026-01-15', '2026-02-14', '2026-02-15'],
     ['2028-01-31', '2028-01-15', '2028-01-31', '2028-02-28', '2028-02-29'], // leap clamp on late payment
     ['2026-12-31', '2026-12-05', '2026-12-31', '2027-01-30', '2027-01-31']
   ];
@@ -67,34 +67,34 @@ test('B1: two consecutive renewals succeed when the first payment is in an earli
   assert.equal(first.cycle, '2026-11-01');
   assert.equal(first.reserve().ok, true);
   assert.equal(first.apply().operation.state, 'done');
-  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-12-01');
+  assert.equal(sb.rows('Clients')[0].nextBillingDate, '2026-11-28');
   assert.equal(sb.post({ action: 'acknowledgeRenewal', opId: first.request.opId }).ok, true);
 
   const second = renewal(sb, 'renew-b1-second-00001', '2026-12-03');
-  assert.equal(second.cycle, '2026-12-01');
+  assert.equal(second.cycle, '2026-11-28');
   const reserved = second.reserve();
   assert.equal(reserved.ok, true, JSON.stringify(reserved));
   assert.equal(second.apply().operation.state, 'done');
   assert.equal(sb.rows('Clients')[0].nextBillingDate, '2027-01-03');
   const ids = sb.rows('Payments').map((p) => p.id + '|' + p.coverageStart + '|' + p.coverageEnd);
-  assert.deepEqual(ids, ['pay::C1::base::2026-11|2026-11-01|2026-11-30', 'pay::C1::base::2026-12|2026-12-03|2027-01-02']);
+  assert.deepEqual(ids, ['pay::C1::base::2026-11-01|2026-10-28|2026-11-27', 'pay::C1::base::2026-11-28|2026-12-03|2027-01-02']);
 });
 
-test('B1: the source refuses a new renewal that still uses the pure paid-date window for an early payment', () => {
+test('source refuses silently treating a new ordinary early payment as a due-cycle advance', () => {
   const sb = mk();
   const r = renewal(sb, 'renew-b1-oldwin-00001', '2026-10-28');
-  r.request.payment.coverageStart = '2026-10-28';
-  r.request.payment.coverageEnd = '2026-11-27';
-  r.request.patch.nextBillingDate = '2026-11-28';
+  r.request.payment.coverageStart = '2026-11-01';
+  r.request.payment.coverageEnd = '2026-11-30';
+  r.request.patch.nextBillingDate = '2026-12-01';
   assert.equal(r.reserve().error, 'renewal_period_changed');
   assert.equal(sb.rows('FinancialOps').length, 0);
 });
 
-test('B1: an early payment is accepted even though its covered window starts after today', () => {
+test('ordinary early receipt starts today and a future actual payment date remains refused', () => {
   const sb = sandbox([], [{ ...client }]);
   sb.ctx._todayISODate = () => '2026-10-28';
   const r = renewal(sb, 'renew-b1-early-000001', '2026-10-28');
-  assert.equal(r.win.start, '2026-11-01');
+  assert.equal(r.win.start, '2026-10-28');
   assert.equal(r.reserve().ok, true);
   assert.equal(r.apply().operation.state, 'done');
   // A payment dated in the future is still refused.

@@ -13,8 +13,8 @@ function op03Drill_(phase) {
       ScriptApp.getScriptId() !== expectedScriptId) throw new Error('Wrong isolated script project');
   // A bound project can be an application. This drill requires a standalone one.
   if (SpreadsheetApp.getActiveSpreadsheet()) throw new Error('Standalone test project required');
-  var metadata = {"sourceCodeSHA256":"994ba5ee13583eae0c76fdd8714b117e3345cca956793e169cae0c5ead8f42c3","helperSHA256":"1d70b25db5fa50cc9d422fd3a5f11e8d0d5d9af931de7a13f06c782f4defe240","drillDefinitionSHA256":"efdf52865dc153e4c0a8318e4aecd0d740b4f6a7e94ca6398936a7cbcead0d3f","helpers":["ACTIVITY_HEADERS","ACTIVITY_SHEET","AUDIT_LOG_HEADERS","AUDIT_LOG_SHEET","BILLING_PRICES","CARE_ASSIGNEES_OK","CHARGES_HEADERS","CLIENTS_DATA_VERSION_PROP","CLIENTS_HEADERS","CLIENTS_REMOVED_HEADERS","CLINICAL_TO_BILLING","CONTACT_CHANNELS","CONTACT_DIRECTIONS","CONTACT_DIRECTION_HE","CONTACT_NO_FOLLOW_UP_OUTCOME","CONTACT_NO_FOLLOW_UP_TEXT","CONTACT_OUTCOMES","CONTACT_OUTCOME_HE","CONTINUATION_HEADERS","CONTINUATION_SHEET","COVERAGE_MAX_DAYS","CREDIT_COLUMNS","CREDIT_GRANTING_OUTCOMES","CRM_ID_RE","CRM_TEXT_COLUMNS","DAY_CENTER_BILLING","DAY_CENTER_MONTHLY_BY_FREQ","EXTRA_SESSION_HEADERS","FINANCIAL_OP_HEADERS","FINANCIAL_OP_STATES","GLOBAL_RATE_WORD","GROUP_BILLING","INTEGRITY_APPROVED_MANUAL_POLICY_SHA256","INTEGRITY_DATA_SNAPSHOT_RE","INTEGRITY_SNAPSHOT_PREFIX","LEADS_HEADERS","ONE_TIME_MAX_OPLOG","ONE_TIME_OUTCOME_STATUS","ONE_TIME_SESSIONS_SHEET","ONE_TIME_SESSION_HEADERS","ONE_TIME_TEXT_COLUMNS","PACKAGE_CATALOG_HEADERS","PACKAGE_REQUEST_HEADERS","PACKAGE_TEXT_COLUMNS","PACKAGE_UUID_RE","PAYMENTS_HEADERS","PAYMENT_TEXT_COLUMNS","PHONE_COLUMNS","PREFERRED_HOUSES","PREFERRED_HOUSE_MAX_LEN","PSYCHIATRIST_RATES","REMOVED_LEADS_HEADERS","REPAIR_PLAN_HEADERS","REPAIR_PLAN_SHEET","SESSION_LOG_HEADERS","SESSION_STATUS_BY_OUTCOME","SETTINGS_HEADERS","STAMP_COLUMNS","STOP_ALERTS_HEADERS","STOP_ALERTS_SHEET","STOP_FLAGS_HEADERS","TASKS_HEADERS","TASKS_SHEET","TASK_KINDS","TASK_SOURCES","THERAPIST_FLAT_RATES","THERAPIST_NAME_ALIASES","THERAPIST_RATES_HEADERS","THERAPIST_RATES_SHEET","_activityAppend","_activityEvent","_applyExtraCharge","_applyRenewal","_asISODate","_billingPrice","_bumpDataVersion","_canonicalTherapistName","_clampDayIso","_clinicalToBilling","_computeSessionPay","_computeSessionValue","_coverageDateISO","_coveragePeriodError","_crmActor","_crmAssignee","_crmIso","_crmNo","_crmNow","_crmOps","_crmSubmissionId","_crmText","_crmTime","_crmToday","_ensurePaymentsSheet","_ensureSheet","_extraAppend","_extraIntent","_extraIntentV1Error","_extraObservationMatches","_extraReadback","_extraRows","_extraSame","_finActive","_finAddMonth","_finClient","_finDue","_finGuard","_finGuardRewrite","_finIntent","_finIntentError","_finIntentWithoutPrior","_finJournal","_finNext","_finPaidDateCoverage","_finPaymentOwner","_finPayments","_finPinPrior","_finPriorMismatch","_finRow","_finSnapshot","_finSummary","_finWrite","_formatPhoneColumns","_happenedInMonth","_hasOwn","_integrityCaptureData","_integrityFingerprint","_integrityManualPolicyRows","_integrityOtherPrefix","_integrityRecoveryMetadata","_integritySourceSpecs","_integrityValidateCrmGrid_","_integrityValidateRestoreSet","_integrityVerifyGrid","_integrityVerifyManualPolicy","_integrityVerifyManualTarget","_integrityVerifyRecoveredWorkbook","_integrityWriteSnapshot","_isContinuationDate","_isDayCenterBilling","_isGlobalRate","_isOpsScope","_isRealCalendarDate","_isTextForcedColumn","_loadTherapistRates","_logContact","_markForwarded","_monthKey","_nextCycleDueDate","_otsFindIndex","_otsHasOp","_otsMoneyScopeOps","_otsOpLog","_otsPushOp","_otsRecordOutcome","_otsView","_otsWriteRow","_outcomeGrantsCredit","_payoutMonthOf","_pkgInt","_pkgLock","_pkgRowToCells","_pkgUnlock","_planMonthlyQuota","_preferredHouseOrNull","_readAll","_readDataVersion","_recordSessionOutcome","_recoverPhone","_reportRevisionCell","_reportRevisionMs","_requestUser","_reserveRenewal","_sanitizeLeadText","_sessionReportOrder","_setPreferredHouse","_ss","_stampClientRowAt","_stampRow","_taskClean","_taskMoney","_taskOut","_taskVisible","_tasksRead","_therapistAliasKey","_therapistPay","_therapistPayModel","_toCredits","_toNumberOrZero","_todayISODate","_writeAll","_writeCreditsOwed","_writePreferredHouse","beginOutpatientRecovery","finishOutpatientRecovery"]};
-  var fixture = {"grids":{"Leads":[["id","name","phone","serviceType","location","note","stage","sessionsPerWeek","pricePerSession","startDate","created","introDateTime","house_of_origin","not_relevant_reason","not_relevant_note","assignedTo","updatedAt","updatedBy","preferredHouse","contactName","contactPhone","contactRelation"]],"Clients":[["id","name","serviceType","location","sessionsPerWeek","pricePerSession","startDate","status","exitDate","fromLead","source","notes","billingType","billingDay","bundleSize","bundlePrice","sessionsUsed","bundlePaid","house_of_origin","responsiblePerson","serviceScope","treatmentContactPhone","payerName","payerPhone","paymentLink","phone","paymentStatus","paymentDate","nextBillingDate","creditsOwed","clinicalTreatmentType","packageChangeDate","assignedTo","paymentAmountOverrides","updatedAt","updatedBy","plannedExitDate","preferredHouse","billingMode","complementaryType","privateTherapists","patientTypeOverride"],["journal-client","בדיקת חידוש","פרטני","","{\"פרטני\":1}",600,"2026-01-31","פעיל","","","","","",31,"","","","","","","","","","","","0500000001","","2026-02-25","2026-03-28","","","","","","2026-10-20T10:00:00.000Z","","","","","","",""],["drill-session-client","בדיקת שחזור סינתטית","","","1","","","פעיל","","","","","","","","","","","","","","","","","","0500000099","","","",1,"","","","","2026-10-20T10:00:00.000Z","","","רמות השבים","","","",""]],"FinancialOps":[["id","clientId","cycleDate","paymentId","intent","state","before","after","createdAt","updatedAt","updatedBy","resolution"],["renewal-fixture-0001","journal-client","2026-02-28","pay::journal-client::base::2026-02","{\"opId\":\"renewal-fixture-0001\",\"clientId\":\"journal-client\",\"snapshot\":\"{\\\"headers\\\":[\\\"id\\\",\\\"name\\\",\\\"serviceType\\\",\\\"location\\\",\\\"sessionsPerWeek\\\",\\\"pricePerSession\\\",\\\"startDate\\\",\\\"status\\\",\\\"exitDate\\\",\\\"fromLead\\\",\\\"source\\\",\\\"notes\\\",\\\"billingType\\\",\\\"billingDay\\\",\\\"bundleSize\\\",\\\"bundlePrice\\\",\\\"sessionsUsed\\\",\\\"bundlePaid\\\",\\\"house_of_origin\\\",\\\"responsiblePerson\\\",\\\"serviceScope\\\",\\\"treatmentContactPhone\\\",\\\"payerName\\\",\\\"payerPhone\\\",\\\"paymentLink\\\",\\\"phone\\\",\\\"paymentStatus\\\",\\\"paymentDate\\\",\\\"nextBillingDate\\\",\\\"creditsOwed\\\",\\\"clinicalTreatmentType\\\",\\\"packageChangeDate\\\",\\\"assignedTo\\\",\\\"paymentAmountOverrides\\\",\\\"updatedAt\\\",\\\"updatedBy\\\",\\\"plannedExitDate\\\",\\\"preferredHouse\\\",\\\"billingMode\\\",\\\"complementaryType\\\",\\\"privateTherapists\\\",\\\"patientTypeOverride\\\"],\\\"values\\\":[\\\"journal-client\\\",\\\"בדיקת חידוש\\\",\\\"פרטני\\\",\\\"\\\",\\\"{\\\\\\\"פרטני\\\\\\\":1}\\\",\\\"500\\\",\\\"2026-01-31\\\",\\\"פעיל\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"31\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"0500000001\\\",\\\"\\\",\\\"2026-01-31\\\",\\\"2026-02-28\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\"]}\",\"cycleDate\":\"2026-02-28\",\"patch\":{\"pricePerSession\":\"600\",\"paymentDate\":\"2026-02-25\",\"nextBillingDate\":\"2026-03-28\"},\"payment\":{\"id\":\"pay::journal-client::base::2026-02\",\"clientId\":\"journal-client\",\"clientName\":\"בדיקת חידוש\",\"billingType\":\"monthly\",\"dueDate\":\"2026-02-28\",\"amountDue\":\"600\",\"amountPaid\":\"600\",\"status\":\"paid\",\"paymentDate\":\"2026-02-25\",\"method\":\"\",\"notes\":\"תשלום לבדיקה\",\"bundleSize\":\"\",\"sessionsUsed\":\"\",\"coverageStart\":\"2026-02-28\",\"coverageEnd\":\"2026-03-27\"}}","acknowledged","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"600\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-02-25\",\"2026-03-28\",\"\",\"\",\"\",\"\",\"\",\"2026-10-20T10:00:00.000Z\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","","completion_seen"],["extra-fixture-operation","journal-client","2026-10-31","pay::journal-client::chg-extra-fixture-charge::once","{\"kind\":\"extra_charge\",\"version\":1,\"opId\":\"extra-fixture-operation\",\"clientId\":\"journal-client\",\"snapshot\":\"{\\\"headers\\\":[\\\"id\\\",\\\"name\\\",\\\"serviceType\\\",\\\"location\\\",\\\"sessionsPerWeek\\\",\\\"pricePerSession\\\",\\\"startDate\\\",\\\"status\\\",\\\"exitDate\\\",\\\"fromLead\\\",\\\"source\\\",\\\"notes\\\",\\\"billingType\\\",\\\"billingDay\\\",\\\"bundleSize\\\",\\\"bundlePrice\\\",\\\"sessionsUsed\\\",\\\"bundlePaid\\\",\\\"house_of_origin\\\",\\\"responsiblePerson\\\",\\\"serviceScope\\\",\\\"treatmentContactPhone\\\",\\\"payerName\\\",\\\"payerPhone\\\",\\\"paymentLink\\\",\\\"phone\\\",\\\"paymentStatus\\\",\\\"paymentDate\\\",\\\"nextBillingDate\\\",\\\"creditsOwed\\\",\\\"clinicalTreatmentType\\\",\\\"packageChangeDate\\\",\\\"assignedTo\\\",\\\"paymentAmountOverrides\\\",\\\"updatedAt\\\",\\\"updatedBy\\\",\\\"plannedExitDate\\\",\\\"preferredHouse\\\",\\\"billingMode\\\",\\\"complementaryType\\\",\\\"privateTherapists\\\",\\\"patientTypeOverride\\\"],\\\"values\\\":[\\\"journal-client\\\",\\\"בדיקת חידוש\\\",\\\"פרטני\\\",\\\"\\\",\\\"{\\\\\\\"פרטני\\\\\\\":1}\\\",\\\"500\\\",\\\"2026-01-31\\\",\\\"פעיל\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"31\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"0500000001\\\",\\\"\\\",\\\"2026-01-31\\\",\\\"2026-02-28\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\"]}\",\"cycleDate\":\"2026-10-31\",\"chargeHeaders\":[\"id\",\"clientId\",\"description\",\"amount\",\"billingType\",\"chargeDate\",\"billingDay\",\"active\",\"notes\",\"created\",\"treatmentType\",\"frequencyPerWeek\"],\"paymentHeaders\":[\"id\",\"clientId\",\"clientName\",\"billingType\",\"dueDate\",\"amountDue\",\"amountPaid\",\"status\",\"paymentDate\",\"method\",\"notes\",\"bundleSize\",\"sessionsUsed\",\"coverageStart\",\"coverageEnd\"],\"charge\":{\"id\":\"extra-fixture-charge\",\"clientId\":\"journal-client\",\"description\":\"טיפול לבדיקה\",\"amount\":\"500\",\"billingType\":\"one_time\",\"chargeDate\":\"2026-09-01\",\"billingDay\":\"\",\"active\":\"true\",\"notes\":\"בדיקה בלבד\",\"created\":\"2026-10-31\",\"treatmentType\":\"פרטני CBT\",\"frequencyPerWeek\":\"\"},\"payment\":{\"id\":\"pay::journal-client::chg-extra-fixture-charge::once\",\"clientId\":\"journal-client\",\"clientName\":\"בדיקת חידוש\",\"billingType\":\"extra\",\"dueDate\":\"2026-10-31\",\"amountDue\":\"500\",\"amountPaid\":\"500\",\"status\":\"paid\",\"paymentDate\":\"2026-10-31\",\"method\":\"\",\"notes\":\"\",\"bundleSize\":\"0\",\"sessionsUsed\":\"0\",\"coverageStart\":\"2026-10-31\",\"coverageEnd\":\"2026-11-29\"}}","acknowledged","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","fixture-editor","completion_seen"]],"Payments":[["id","clientId","clientName","billingType","dueDate","amountDue","amountPaid","status","paymentDate","method","notes","bundleSize","sessionsUsed","coverageStart","coverageEnd"],["pay::journal-client::base::2026-02","journal-client","בדיקת חידוש","monthly","2026-02-28",600,600,"paid","2026-02-25","","תשלום לבדיקה","","","2026-02-28","2026-03-27"],["pay::journal-client::chg-extra-fixture-charge::once","journal-client","בדיקת חידוש","extra","2026-10-31",500,500,"paid","2026-10-31","","",0,0,"2026-10-31","2026-11-29"]],"ClientCharges":[["id","clientId","description","amount","billingType","chargeDate","billingDay","active","notes","created","treatmentType","frequencyPerWeek"],["extra-fixture-charge","journal-client","טיפול לבדיקה",500,"one_time","2026-09-01","","true","בדיקה בלבד","2026-10-31","פרטני CBT",""]],"Settings":[["key","value"],["drill","synthetic-only"]],"TherapistRates":[["name","flatRate","intakeRate","followupRate"],["מעיין דלומי",777,"",""]],"SessionLog":[["sessionId","phone","patientName","clientId","therapist","clinicalTreatmentType","billingType","date","outcome","therapistPay","clientSessionValue","sessionStatus","matchStatus","recordedAt","creditStatus","forwardedToPayroll","payModel","oneTimeSessionId","reportRevision"],["drill-cancelled-session","0500000099","בדיקת שחזור סינתטית","drill-session-client","מעיין דלומי","פרטני CBT","פרטני CBT","2026-10-19","therapist_cancelled",0,500,"credited","matched","2026-10-20T10:00:00.000Z","credit_added","","","",""],["drill-forwarded-session","0500000099","בדיקת שחזור סינתטית","drill-session-client","מעיין דלומי","פרטני CBT","פרטני CBT","2026-10-19","happened",777,500,"consumed","matched","2026-10-20T10:00:00.000Z","within_quota","2026-10","","",""]],"PackageCatalog":[["id","key","version","epoch","family","tier","unit","sessions","sessionMinutes","allowedMonths","pricePerSessionAgorot","priceTotalAgorot","monthlyPriceAgorot","priceMinAgorot","priceMaxAgorot","vatBasis","vatRateBp","active","sortOrder","sourceRef","validFromIso","createdAtIso","createdBy"],["day_track_basic@v1","day_track_basic",1,1,"day_track","basic","per_month",0,0,"1","","",1500000,"","","inclusive",1800,1,10,"PDF p3: מסלול בסיסי, 3 days/week, 15,000 ₪ per month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["day_track_extended@v1","day_track_extended",1,1,"day_track","extended","per_month",0,0,"1","","",1800000,"","","inclusive",1800,1,20,"PDF p3: מסלול מורחב, 5 days/week, 18,000 ₪ per month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_core@v1","emdr_core",1,1,"emdr","core","per_session_pack",4,60,"",85000,"","","","","inclusive",1800,1,30,"PDF p5: EMDR Core, 4 sessions, 3,400 ₪ total, 850 ₪ per session","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_standard@v1","emdr_standard",1,1,"emdr","standard","per_session_pack",8,60,"",85000,"","","","","inclusive",1800,1,40,"PDF p5: EMDR Standard, 8 sessions, 6,800 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_complex@v1","emdr_complex",1,1,"emdr","complex","per_session_pack",16,60,"",85000,"","","","","inclusive",1800,1,50,"PDF p5: EMDR Complex, 16 sessions, 13,600 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_single@v1","emdr_single",1,1,"emdr","single","per_session_pack",1,60,"",85000,"","","","","inclusive",1800,1,60,"PDF p5: single EMDR session 850 ₪ (30-day conversion credit NOT modelled)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_core@v1","cbt_core",1,1,"cbt","core","per_session_pack",6,50,"",50000,"","","","","inclusive",1800,1,70,"PDF p6: CBT Core, 6 sessions, 3,000 ₪ total, 500 ₪ per session","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_standard@v1","cbt_standard",1,1,"cbt","standard","per_session_pack",12,50,"",50000,"","","","","inclusive",1800,1,80,"PDF p6: CBT Standard, 12 sessions, 6,000 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_complex@v1","cbt_complex",1,1,"cbt","complex","per_session_pack",20,50,"",50000,"","","","","inclusive",1800,1,90,"PDF p6: CBT Complex, 20 sessions, 10,000 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_single@v1","cbt_single",1,1,"cbt","single","per_session_pack",1,50,"",50000,"","","","","inclusive",1800,1,100,"PDF p6: single CBT session 500 ₪ (30-day conversion credit NOT modelled)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_cbt_combined@v1","emdr_cbt_combined",1,1,"emdr_cbt","combined","flat",12,0,"","",850000,"","","","inclusive",1800,1,110,"PDF p6: combined EMDR+CBT, 12 sessions, flat 8,500 ₪ (not 12 x a per-session rate)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["continuation_monthly@v1","continuation_monthly",1,1,"continuation","monthly","per_month",4,50,"1","","",200000,"","","inclusive",1800,1,120,"PDF p7: טיפולי המשך, 4 sessions per month, 2,000 ₪ per month, month-to-month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_consult@v1","psychiatric_consult",1,1,"psychiatric","consult","per_session_pack",1,0,"",90000,"","","","","inclusive",1800,1,130,"PDF p7: ייעוץ פסיכיאטרי 900 ₪ per meeting (distinct from the 1,100 ₪ מעקב פסיכיאטרי billing price)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_diagnosis@v1","psychiatric_diagnosis",1,1,"psychiatric","diagnosis","flat",1,0,"","",250000,"","","","inclusive",1800,1,140,"PDF p7: אבחון פסיכיאטרי, one-time 2,500 ₪ incl. written report (distinct from the 2,300 ₪ אינטייק billing price)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["solo_housing@v1","solo_housing",1,1,"solo_housing","range","per_month_range",0,0,"3","","","",800000,1000000,"inclusive",1800,1,150,"PDF p8: Solo, 8,000–10,000 ₪ per month, 3 months (extension by clinical judgment). Vered must select the monthly price","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_followup@v1","psychiatric_followup",1,1,"psychiatric","followup","per_session_pack",1,0,"",110000,"","","","","inclusive",1800,1,160,"Owner decision 2026-11-16: מעקב פסיכיאטרי 1,100 ₪ per meeting (the billing price; not in the PDF)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_intake@v1","psychiatric_intake",1,1,"psychiatric","intake","flat",1,0,"","",230000,"","","","inclusive",1800,1,170,"Owner decision 2026-11-16: אינטייק פסיכיאטרי, one-time 2,300 ₪ (the billing price; not in the PDF)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"]],"PackageRequests":[["id","payloadHash","status","revision","requesterKey","patientName","patientPhone","packageKey","months","catalogRowId","catalogEpoch","selectedMonthlyAgorot","quoteSnapshot","adjustedTotalAgorot","adjustReason","adjustLog","approvedTotalAgorot","approvedSnapshot","approvedAtIso","approvedBy","attachedType","attachedId","attachedAtIso","attachedBy","opLog","createdAtIso","updatedAt","updatedBy","items","validUntil","assignee","notes","followUpDate","sentAtIso","sentTo","decisionAtIso","createdFrom"],["11111111-2222-4333-8444-555555555555","8b679c3660133133c7070c6a24a55f5bcc699d64a3668dcbeca61b25c46de388","priced",2,"oren","בדיקת שחזור סינתטית","0500000099","emdr_core",0,"emdr_core@v1",1,"","{\"rowId\":\"emdr_core@v1\",\"key\":\"emdr_core\",\"version\":1,\"epoch\":1,\"family\":\"emdr\",\"tier\":\"core\",\"unit\":\"per_session_pack\",\"sessions\":4,\"months\":0,\"monthlyAgorot\":null,\"commitmentMonths\":null,\"grossAgorot\":340000,\"netAgorot\":288136,\"vatAgorot\":51864,\"vatBasis\":\"inclusive\",\"vatRateBp\":1800,\"needsSelection\":false,\"computedAtIso\":\"2026-10-20T10:00:00.000Z\"}","","","[]",340000,"{\"rowId\":\"emdr_core@v1\",\"key\":\"emdr_core\",\"version\":1,\"epoch\":1,\"family\":\"emdr\",\"tier\":\"core\",\"unit\":\"per_session_pack\",\"sessions\":4,\"months\":0,\"monthlyAgorot\":null,\"commitmentMonths\":null,\"grossAgorot\":340000,\"netAgorot\":288136,\"vatAgorot\":51864,\"vatBasis\":\"inclusive\",\"vatRateBp\":1800,\"needsSelection\":false,\"computedAtIso\":\"2026-10-20T10:00:00.000Z\",\"adjusted\":false,\"finalGrossAgorot\":340000,\"finalNetAgorot\":288136,\"finalVatAgorot\":51864,\"approvedAtIso\":\"2026-10-20T10:00:00.000Z\"}","2026-10-20T10:00:00.000Z","ורד","","","","","[\"99999999-2222-4333-8444-555555555555\"]","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד","","","","","","","","",""]],"Tasks":[["id","kind","leadId","clientId","title","reason","assignee","dueDate","dueTime","status","source","createdAt","createdBy","updatedAt","updatedBy","doneAt","doneBy","outcome","deferredFrom","contactEventId","submissionId","money"],["task-drill-contact-next","call","","drill-session-client","שיחה חוזרת","לא היה מענה","דנה","2026-10-25","","open","contact","2026-10-20T10:00:00.000Z","ורד","2026-10-20T10:00:00.000Z","ורד","","","","","","drill-contact-next",""]],"Activity":[["eventId","occurredAt","recordedAt","kind","source","actorName","leadId","clientId","summary","detailsJson","nextAction","nextDate"],["contact:drill-contact","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","contact_logged","manual","ורד","","drill-session-client","לא היה מענה · Synthetic recovery contact","{\"direction\":\"note\",\"reason\":\"\",\"channel\":\"phone\",\"withWhom\":\"\",\"outcome\":\"no_answer\",\"summary\":\"Synthetic recovery contact\",\"taskId\":\"\",\"nextTaskId\":\"task-drill-contact-next\",\"noNext\":\"\",\"money\":false}","שיחה חוזרת","2026-10-25"]],"AuditLog":[["timestamp","action","fn","rowKey","name","details","literal","leadingZero","flag","amount","instant"],["2026-10-20","drill","fixture","synthetic","synthetic","not production","=1+1","000123",true,777.25,{"drillDate":"2026-10-20T10:11:12.000Z"}]]},"event":{"sessionId":"drill-cancelled-session","phone":"0500000099","patientName":"בדיקת שחזור סינתטית","therapist":"מעיין דלומי","clinicalTreatmentType":"פרטני CBT","date":"2026-10-19","outcome":"therapist_cancelled","secret":"synthetic-drill-session-secret-not-a-credential"},"paidEvent":{"sessionId":"drill-forwarded-session","phone":"0500000099","patientName":"בדיקת שחזור סינתטית","therapist":"מעיין דלומי","clinicalTreatmentType":"פרטני CBT","date":"2026-10-19","outcome":"happened","secret":"synthetic-drill-session-secret-not-a-credential"},"preferredHouse":"רמות השבים","renewalId":"renewal-fixture-0001","extraId":"extra-fixture-operation","crmContact":{"action":"logContact","user":"ורד","moneyScope":"full","submissionId":"drill-contact","contact":{"clientId":"drill-session-client","outcome":"no_answer","summary":"Synthetic recovery contact"},"next":{"dueDate":"2026-10-25","assignee":"דנה"}},"expectedSources":["Clients","Leads","לידים שהוסרו","Clients-removed","Payments","ClientCharges","Credits","FinancialOps","SessionLog","OneTimeSessions","TherapistRates","Settings","StopFlags","ExtraSessionRequests","מסלול המשך","התראות עצירת טיפול","AuditLog","RepairPlan","PackageCatalog","PackageRequests","Tasks","Activity","__RecoveryMetadata"]};
+  var metadata = {"sourceCodeSHA256":"1fdb61d8d03f9793dd207440f3b470a936fe8684550ca4b34d9a52a0a481d1b6","helperSHA256":"80b8a36ae8c230bb01d861d64d56642ad926289d194a8629401aad8870ff697c","drillDefinitionSHA256":"d3b848753942fbc46e52f082e826b548a72fb2d246666ebeec08e4ce6e6b1c8d","helpers":["ACTIVITY_HEADERS","ACTIVITY_SHEET","AUDIT_LOG_HEADERS","AUDIT_LOG_SHEET","BILLING_PRICES","CARE_ASSIGNEES_OK","CHARGES_HEADERS","CLIENTS_DATA_VERSION_PROP","CLIENTS_HEADERS","CLIENTS_REMOVED_HEADERS","CLINICAL_TO_BILLING","CONTACT_CHANNELS","CONTACT_DIRECTIONS","CONTACT_DIRECTION_HE","CONTACT_NO_FOLLOW_UP_OUTCOME","CONTACT_NO_FOLLOW_UP_TEXT","CONTACT_OUTCOMES","CONTACT_OUTCOME_HE","CONTINUATION_HEADERS","CONTINUATION_SHEET","COVERAGE_MAX_DAYS","CREDIT_COLUMNS","CREDIT_GRANTING_OUTCOMES","CRM_ID_RE","CRM_TEXT_COLUMNS","DAY_CENTER_BILLING","DAY_CENTER_MONTHLY_BY_FREQ","EXTRA_SESSION_HEADERS","FINANCIAL_OP_HEADERS","FINANCIAL_OP_STATES","GLOBAL_RATE_WORD","GROUP_BILLING","INTEGRITY_APPROVED_MANUAL_POLICY_SHA256","INTEGRITY_DATA_SNAPSHOT_RE","INTEGRITY_SNAPSHOT_PREFIX","LEADS_HEADERS","ONE_TIME_MAX_OPLOG","ONE_TIME_OUTCOME_STATUS","ONE_TIME_SESSIONS_SHEET","ONE_TIME_SESSION_HEADERS","ONE_TIME_TEXT_COLUMNS","PACKAGE_CATALOG_HEADERS","PACKAGE_REQUEST_HEADERS","PACKAGE_TEXT_COLUMNS","PACKAGE_UUID_RE","PAYMENTS_HEADERS","PAYMENT_TEXT_COLUMNS","PHONE_COLUMNS","PREFERRED_HOUSES","PREFERRED_HOUSE_MAX_LEN","PSYCHIATRIST_RATES","REMOVED_LEADS_HEADERS","REPAIR_PLAN_HEADERS","REPAIR_PLAN_SHEET","SESSION_LOG_HEADERS","SESSION_OUTCOME_OP_HEADERS","SESSION_OUTCOME_OP_SHEET","SESSION_OUTCOME_ROW_STAMP_KEYS","SESSION_STATUS_BY_OUTCOME","SETTINGS_HEADERS","STAMP_COLUMNS","STOP_ALERTS_HEADERS","STOP_ALERTS_SHEET","STOP_FLAGS_HEADERS","TASKS_HEADERS","TASKS_SHEET","TASK_KINDS","TASK_SOURCES","THERAPIST_FLAT_RATES","THERAPIST_NAME_ALIASES","THERAPIST_RATES_HEADERS","THERAPIST_RATES_SHEET","_activityAppend","_activityEvent","_applyExtraCharge","_applyRenewal","_asISODate","_billingPrice","_bumpDataVersion","_canonicalTherapistName","_clampDayIso","_clinicalToBilling","_computeSessionPay","_computeSessionValue","_coverageDateISO","_coveragePeriodError","_crmActor","_crmAssignee","_crmIso","_crmNo","_crmNow","_crmOps","_crmSubmissionId","_crmText","_crmTime","_crmToday","_ensurePaymentsSheet","_ensureSheet","_extraAppend","_extraIntent","_extraIntentV1Error","_extraObservationMatches","_extraReadback","_extraRows","_extraSame","_finActive","_finAddMonth","_finClient","_finCyclePaymentId","_finDayAfter","_finDue","_finGuard","_finGuardRewrite","_finIntent","_finIntentError","_finIntentWithoutPrior","_finJournal","_finLegacyPaidDateCoverage","_finNext","_finPaidDateCoverage","_finPaymentOwner","_finPayments","_finPinPrior","_finPriorMismatch","_finRow","_finSnapshot","_finSummary","_finWrite","_formatPhoneColumns","_happenedInMonth","_hasOwn","_integrityCaptureData","_integrityFingerprint","_integrityManualPolicyRows","_integrityOtherPrefix","_integrityRecoveryMetadata","_integritySourceSpecs","_integrityValidateCrmGrid_","_integrityValidateRestoreSet","_integrityVerifyGrid","_integrityVerifyManualPolicy","_integrityVerifyManualTarget","_integrityVerifyRecoveredWorkbook","_integrityWriteSnapshot","_isContinuationDate","_isDayCenterBilling","_isGlobalRate","_isOpsScope","_isRealCalendarDate","_isTextForcedColumn","_loadTherapistRates","_logContact","_markForwarded","_monthKey","_nextCycleDueDate","_otsFindIndex","_otsHasOp","_otsMoneyScopeOps","_otsOpLog","_otsPushOp","_otsRecordOutcome","_otsView","_otsWriteRow","_outcomeGrantsCredit","_payoutMonthOf","_pkgInt","_pkgLock","_pkgRowToCells","_pkgUnlock","_planMonthlyQuota","_preferredHouseOrNull","_readAll","_readDataVersion","_recordSessionOutcome","_recoverPhone","_reportRevisionCell","_reportRevisionMs","_requestUser","_reserveRenewal","_sanitizeLeadText","_sessionReportOrder","_setPreferredHouse","_soAck","_soCommitGroup","_soEventKey","_soJournalRows","_soLiveCredit","_soLiveRow","_soOpenJournal","_soPayloadStamp","_soPendingGroup","_soRecoveryHold","_soResumeOp","_soRowStamp","_soWriteLog","_ss","_stampClientRowAt","_stampRow","_taskClean","_taskMoney","_taskOut","_taskVisible","_tasksRead","_therapistAliasKey","_therapistPay","_therapistPayModel","_toCredits","_toNumberOrZero","_todayISODate","_writeAll","_writeCreditsOwed","_writePreferredHouse","beginOutpatientRecovery","finishOutpatientRecovery"]};
+  var fixture = {"grids":{"Leads":[["id","name","phone","serviceType","location","note","stage","sessionsPerWeek","pricePerSession","startDate","created","introDateTime","house_of_origin","not_relevant_reason","not_relevant_note","assignedTo","updatedAt","updatedBy","preferredHouse","contactName","contactPhone","contactRelation"]],"Clients":[["id","name","serviceType","location","sessionsPerWeek","pricePerSession","startDate","status","exitDate","fromLead","source","notes","billingType","billingDay","bundleSize","bundlePrice","sessionsUsed","bundlePaid","house_of_origin","responsiblePerson","serviceScope","treatmentContactPhone","payerName","payerPhone","paymentLink","phone","paymentStatus","paymentDate","nextBillingDate","creditsOwed","clinicalTreatmentType","packageChangeDate","assignedTo","paymentAmountOverrides","updatedAt","updatedBy","plannedExitDate","preferredHouse","billingMode","complementaryType","privateTherapists","patientTypeOverride"],["journal-client","בדיקת חידוש","פרטני","","{\"פרטני\":1}",600,"2026-01-31","פעיל","","","","","",31,"","","","","","","","","","","","0500000001","","2026-02-25","2026-03-28","","","","","","2026-10-20T10:00:00.000Z","","","","","","",""],["drill-session-client","בדיקת שחזור סינתטית","","","1","","","פעיל","","","","","","","","","","","","","","","","","","0500000099","","","",1,"","","","","2026-10-20T10:00:00.000Z","","","רמות השבים","","","",""]],"FinancialOps":[["id","clientId","cycleDate","paymentId","intent","state","before","after","createdAt","updatedAt","updatedBy","resolution"],["renewal-fixture-0001","journal-client","2026-02-28","pay::journal-client::base::2026-02-28","{\"opId\":\"renewal-fixture-0001\",\"clientId\":\"journal-client\",\"snapshot\":\"{\\\"headers\\\":[\\\"id\\\",\\\"name\\\",\\\"serviceType\\\",\\\"location\\\",\\\"sessionsPerWeek\\\",\\\"pricePerSession\\\",\\\"startDate\\\",\\\"status\\\",\\\"exitDate\\\",\\\"fromLead\\\",\\\"source\\\",\\\"notes\\\",\\\"billingType\\\",\\\"billingDay\\\",\\\"bundleSize\\\",\\\"bundlePrice\\\",\\\"sessionsUsed\\\",\\\"bundlePaid\\\",\\\"house_of_origin\\\",\\\"responsiblePerson\\\",\\\"serviceScope\\\",\\\"treatmentContactPhone\\\",\\\"payerName\\\",\\\"payerPhone\\\",\\\"paymentLink\\\",\\\"phone\\\",\\\"paymentStatus\\\",\\\"paymentDate\\\",\\\"nextBillingDate\\\",\\\"creditsOwed\\\",\\\"clinicalTreatmentType\\\",\\\"packageChangeDate\\\",\\\"assignedTo\\\",\\\"paymentAmountOverrides\\\",\\\"updatedAt\\\",\\\"updatedBy\\\",\\\"plannedExitDate\\\",\\\"preferredHouse\\\",\\\"billingMode\\\",\\\"complementaryType\\\",\\\"privateTherapists\\\",\\\"patientTypeOverride\\\"],\\\"values\\\":[\\\"journal-client\\\",\\\"בדיקת חידוש\\\",\\\"פרטני\\\",\\\"\\\",\\\"{\\\\\\\"פרטני\\\\\\\":1}\\\",\\\"500\\\",\\\"2026-01-31\\\",\\\"פעיל\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"31\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"0500000001\\\",\\\"\\\",\\\"2026-01-31\\\",\\\"2026-02-28\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\"]}\",\"cycleDate\":\"2026-02-28\",\"patch\":{\"pricePerSession\":\"600\",\"paymentDate\":\"2026-02-25\",\"nextBillingDate\":\"2026-03-28\"},\"payment\":{\"id\":\"pay::journal-client::base::2026-02-28\",\"clientId\":\"journal-client\",\"clientName\":\"בדיקת חידוש\",\"billingType\":\"monthly\",\"dueDate\":\"2026-02-28\",\"amountDue\":\"600\",\"amountPaid\":\"600\",\"status\":\"paid\",\"paymentDate\":\"2026-02-25\",\"method\":\"\",\"notes\":\"תשלום לבדיקה\",\"bundleSize\":\"\",\"sessionsUsed\":\"\",\"coverageStart\":\"2026-02-28\",\"coverageEnd\":\"2026-03-27\"},\"coverageIntent\":\"advance\"}","acknowledged","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"600\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-02-25\",\"2026-03-28\",\"\",\"\",\"\",\"\",\"\",\"2026-10-20T10:00:00.000Z\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","","completion_seen"],["extra-fixture-operation","journal-client","2026-10-31","pay::journal-client::chg-extra-fixture-charge::once","{\"kind\":\"extra_charge\",\"version\":1,\"opId\":\"extra-fixture-operation\",\"clientId\":\"journal-client\",\"snapshot\":\"{\\\"headers\\\":[\\\"id\\\",\\\"name\\\",\\\"serviceType\\\",\\\"location\\\",\\\"sessionsPerWeek\\\",\\\"pricePerSession\\\",\\\"startDate\\\",\\\"status\\\",\\\"exitDate\\\",\\\"fromLead\\\",\\\"source\\\",\\\"notes\\\",\\\"billingType\\\",\\\"billingDay\\\",\\\"bundleSize\\\",\\\"bundlePrice\\\",\\\"sessionsUsed\\\",\\\"bundlePaid\\\",\\\"house_of_origin\\\",\\\"responsiblePerson\\\",\\\"serviceScope\\\",\\\"treatmentContactPhone\\\",\\\"payerName\\\",\\\"payerPhone\\\",\\\"paymentLink\\\",\\\"phone\\\",\\\"paymentStatus\\\",\\\"paymentDate\\\",\\\"nextBillingDate\\\",\\\"creditsOwed\\\",\\\"clinicalTreatmentType\\\",\\\"packageChangeDate\\\",\\\"assignedTo\\\",\\\"paymentAmountOverrides\\\",\\\"updatedAt\\\",\\\"updatedBy\\\",\\\"plannedExitDate\\\",\\\"preferredHouse\\\",\\\"billingMode\\\",\\\"complementaryType\\\",\\\"privateTherapists\\\",\\\"patientTypeOverride\\\"],\\\"values\\\":[\\\"journal-client\\\",\\\"בדיקת חידוש\\\",\\\"פרטני\\\",\\\"\\\",\\\"{\\\\\\\"פרטני\\\\\\\":1}\\\",\\\"500\\\",\\\"2026-01-31\\\",\\\"פעיל\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"31\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"0500000001\\\",\\\"\\\",\\\"2026-01-31\\\",\\\"2026-02-28\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\",\\\"\\\"]}\",\"cycleDate\":\"2026-10-31\",\"chargeHeaders\":[\"id\",\"clientId\",\"description\",\"amount\",\"billingType\",\"chargeDate\",\"billingDay\",\"active\",\"notes\",\"created\",\"treatmentType\",\"frequencyPerWeek\"],\"paymentHeaders\":[\"id\",\"clientId\",\"clientName\",\"billingType\",\"dueDate\",\"amountDue\",\"amountPaid\",\"status\",\"paymentDate\",\"method\",\"notes\",\"bundleSize\",\"sessionsUsed\",\"coverageStart\",\"coverageEnd\"],\"charge\":{\"id\":\"extra-fixture-charge\",\"clientId\":\"journal-client\",\"description\":\"טיפול לבדיקה\",\"amount\":\"500\",\"billingType\":\"one_time\",\"chargeDate\":\"2026-09-01\",\"billingDay\":\"\",\"active\":\"true\",\"notes\":\"בדיקה בלבד\",\"created\":\"2026-10-31\",\"treatmentType\":\"פרטני CBT\",\"frequencyPerWeek\":\"\"},\"payment\":{\"id\":\"pay::journal-client::chg-extra-fixture-charge::once\",\"clientId\":\"journal-client\",\"clientName\":\"בדיקת חידוש\",\"billingType\":\"extra\",\"dueDate\":\"2026-10-31\",\"amountDue\":\"500\",\"amountPaid\":\"500\",\"status\":\"paid\",\"paymentDate\":\"2026-10-31\",\"method\":\"\",\"notes\":\"\",\"bundleSize\":\"0\",\"sessionsUsed\":\"0\",\"coverageStart\":\"2026-10-31\",\"coverageEnd\":\"2026-11-29\"}}","acknowledged","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","{\"headers\":[\"id\",\"name\",\"serviceType\",\"location\",\"sessionsPerWeek\",\"pricePerSession\",\"startDate\",\"status\",\"exitDate\",\"fromLead\",\"source\",\"notes\",\"billingType\",\"billingDay\",\"bundleSize\",\"bundlePrice\",\"sessionsUsed\",\"bundlePaid\",\"house_of_origin\",\"responsiblePerson\",\"serviceScope\",\"treatmentContactPhone\",\"payerName\",\"payerPhone\",\"paymentLink\",\"phone\",\"paymentStatus\",\"paymentDate\",\"nextBillingDate\",\"creditsOwed\",\"clinicalTreatmentType\",\"packageChangeDate\",\"assignedTo\",\"paymentAmountOverrides\",\"updatedAt\",\"updatedBy\",\"plannedExitDate\",\"preferredHouse\",\"billingMode\",\"complementaryType\",\"privateTherapists\",\"patientTypeOverride\"],\"values\":[\"journal-client\",\"בדיקת חידוש\",\"פרטני\",\"\",\"{\\\"פרטני\\\":1}\",\"500\",\"2026-01-31\",\"פעיל\",\"\",\"\",\"\",\"\",\"\",\"31\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"0500000001\",\"\",\"2026-01-31\",\"2026-02-28\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"]}","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","fixture-editor","completion_seen"]],"Payments":[["id","clientId","clientName","billingType","dueDate","amountDue","amountPaid","status","paymentDate","method","notes","bundleSize","sessionsUsed","coverageStart","coverageEnd"],["pay::journal-client::base::2026-02-28","journal-client","בדיקת חידוש","monthly","2026-02-28",600,600,"paid","2026-02-25","","תשלום לבדיקה","","","2026-02-28","2026-03-27"],["pay::journal-client::chg-extra-fixture-charge::once","journal-client","בדיקת חידוש","extra","2026-10-31",500,500,"paid","2026-10-31","","",0,0,"2026-10-31","2026-11-29"]],"ClientCharges":[["id","clientId","description","amount","billingType","chargeDate","billingDay","active","notes","created","treatmentType","frequencyPerWeek"],["extra-fixture-charge","journal-client","טיפול לבדיקה",500,"one_time","2026-09-01","","true","בדיקה בלבד","2026-10-31","פרטני CBT",""]],"Settings":[["key","value"],["drill","synthetic-only"]],"TherapistRates":[["name","flatRate","intakeRate","followupRate"],["מעיין דלומי",777,"",""]],"SessionLog":[["sessionId","phone","patientName","clientId","therapist","clinicalTreatmentType","billingType","date","outcome","therapistPay","clientSessionValue","sessionStatus","matchStatus","recordedAt","creditStatus","forwardedToPayroll","payModel","oneTimeSessionId","reportRevision","treatmentId"],["drill-cancelled-session","0500000099","בדיקת שחזור סינתטית","drill-session-client","מעיין דלומי","פרטני CBT","פרטני CBT","2026-10-19","therapist_cancelled",0,500,"credited","matched","2026-10-20T10:00:00.000Z","credit_added","","","","",""],["drill-forwarded-session","0500000099","בדיקת שחזור סינתטית","drill-session-client","מעיין דלומי","פרטני CBT","פרטני CBT","2026-10-19","happened",777,500,"consumed","matched","2026-10-20T10:00:00.000Z","within_quota","2026-10","","","",""]],"PackageCatalog":[["id","key","version","epoch","family","tier","unit","sessions","sessionMinutes","allowedMonths","pricePerSessionAgorot","priceTotalAgorot","monthlyPriceAgorot","priceMinAgorot","priceMaxAgorot","vatBasis","vatRateBp","active","sortOrder","sourceRef","validFromIso","createdAtIso","createdBy"],["day_track_basic@v1","day_track_basic",1,1,"day_track","basic","per_month",0,0,"1","","",1500000,"","","inclusive",1800,1,10,"PDF p3: מסלול בסיסי, 3 days/week, 15,000 ₪ per month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["day_track_extended@v1","day_track_extended",1,1,"day_track","extended","per_month",0,0,"1","","",1800000,"","","inclusive",1800,1,20,"PDF p3: מסלול מורחב, 5 days/week, 18,000 ₪ per month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_core@v1","emdr_core",1,1,"emdr","core","per_session_pack",4,60,"",85000,"","","","","inclusive",1800,1,30,"PDF p5: EMDR Core, 4 sessions, 3,400 ₪ total, 850 ₪ per session","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_standard@v1","emdr_standard",1,1,"emdr","standard","per_session_pack",8,60,"",85000,"","","","","inclusive",1800,1,40,"PDF p5: EMDR Standard, 8 sessions, 6,800 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_complex@v1","emdr_complex",1,1,"emdr","complex","per_session_pack",16,60,"",85000,"","","","","inclusive",1800,1,50,"PDF p5: EMDR Complex, 16 sessions, 13,600 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_single@v1","emdr_single",1,1,"emdr","single","per_session_pack",1,60,"",85000,"","","","","inclusive",1800,1,60,"PDF p5: single EMDR session 850 ₪ (30-day conversion credit NOT modelled)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_core@v1","cbt_core",1,1,"cbt","core","per_session_pack",6,50,"",50000,"","","","","inclusive",1800,1,70,"PDF p6: CBT Core, 6 sessions, 3,000 ₪ total, 500 ₪ per session","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_standard@v1","cbt_standard",1,1,"cbt","standard","per_session_pack",12,50,"",50000,"","","","","inclusive",1800,1,80,"PDF p6: CBT Standard, 12 sessions, 6,000 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_complex@v1","cbt_complex",1,1,"cbt","complex","per_session_pack",20,50,"",50000,"","","","","inclusive",1800,1,90,"PDF p6: CBT Complex, 20 sessions, 10,000 ₪ total","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["cbt_single@v1","cbt_single",1,1,"cbt","single","per_session_pack",1,50,"",50000,"","","","","inclusive",1800,1,100,"PDF p6: single CBT session 500 ₪ (30-day conversion credit NOT modelled)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["emdr_cbt_combined@v1","emdr_cbt_combined",1,1,"emdr_cbt","combined","flat",12,0,"","",850000,"","","","inclusive",1800,1,110,"PDF p6: combined EMDR+CBT, 12 sessions, flat 8,500 ₪ (not 12 x a per-session rate)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["continuation_monthly@v1","continuation_monthly",1,1,"continuation","monthly","per_month",4,50,"1","","",200000,"","","inclusive",1800,1,120,"PDF p7: טיפולי המשך, 4 sessions per month, 2,000 ₪ per month, month-to-month","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_consult@v1","psychiatric_consult",1,1,"psychiatric","consult","per_session_pack",1,0,"",90000,"","","","","inclusive",1800,1,130,"PDF p7: ייעוץ פסיכיאטרי 900 ₪ per meeting (distinct from the 1,100 ₪ מעקב פסיכיאטרי billing price)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_diagnosis@v1","psychiatric_diagnosis",1,1,"psychiatric","diagnosis","flat",1,0,"","",250000,"","","","inclusive",1800,1,140,"PDF p7: אבחון פסיכיאטרי, one-time 2,500 ₪ incl. written report (distinct from the 2,300 ₪ אינטייק billing price)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["solo_housing@v1","solo_housing",1,1,"solo_housing","range","per_month_range",0,0,"3","","","",800000,1000000,"inclusive",1800,1,150,"PDF p8: Solo, 8,000–10,000 ₪ per month, 3 months (extension by clinical judgment). Vered must select the monthly price","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_followup@v1","psychiatric_followup",1,1,"psychiatric","followup","per_session_pack",1,0,"",110000,"","","","","inclusive",1800,1,160,"Owner decision 2026-11-16: מעקב פסיכיאטרי 1,100 ₪ per meeting (the billing price; not in the PDF)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"],["psychiatric_intake@v1","psychiatric_intake",1,1,"psychiatric","intake","flat",1,0,"","",230000,"","","","inclusive",1800,1,170,"Owner decision 2026-11-16: אינטייק פסיכיאטרי, one-time 2,300 ₪ (the billing price; not in the PDF)","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד"]],"PackageRequests":[["id","payloadHash","status","revision","requesterKey","patientName","patientPhone","packageKey","months","catalogRowId","catalogEpoch","selectedMonthlyAgorot","quoteSnapshot","adjustedTotalAgorot","adjustReason","adjustLog","approvedTotalAgorot","approvedSnapshot","approvedAtIso","approvedBy","attachedType","attachedId","attachedAtIso","attachedBy","opLog","createdAtIso","updatedAt","updatedBy","items","validUntil","assignee","notes","followUpDate","sentAtIso","sentTo","decisionAtIso","createdFrom"],["11111111-2222-4333-8444-555555555555","8b679c3660133133c7070c6a24a55f5bcc699d64a3668dcbeca61b25c46de388","priced",2,"oren","בדיקת שחזור סינתטית","0500000099","emdr_core",0,"emdr_core@v1",1,"","{\"rowId\":\"emdr_core@v1\",\"key\":\"emdr_core\",\"version\":1,\"epoch\":1,\"family\":\"emdr\",\"tier\":\"core\",\"unit\":\"per_session_pack\",\"sessions\":4,\"months\":0,\"monthlyAgorot\":null,\"commitmentMonths\":null,\"grossAgorot\":340000,\"netAgorot\":288136,\"vatAgorot\":51864,\"vatBasis\":\"inclusive\",\"vatRateBp\":1800,\"needsSelection\":false,\"computedAtIso\":\"2026-10-20T10:00:00.000Z\"}","","","[]",340000,"{\"rowId\":\"emdr_core@v1\",\"key\":\"emdr_core\",\"version\":1,\"epoch\":1,\"family\":\"emdr\",\"tier\":\"core\",\"unit\":\"per_session_pack\",\"sessions\":4,\"months\":0,\"monthlyAgorot\":null,\"commitmentMonths\":null,\"grossAgorot\":340000,\"netAgorot\":288136,\"vatAgorot\":51864,\"vatBasis\":\"inclusive\",\"vatRateBp\":1800,\"needsSelection\":false,\"computedAtIso\":\"2026-10-20T10:00:00.000Z\",\"adjusted\":false,\"finalGrossAgorot\":340000,\"finalNetAgorot\":288136,\"finalVatAgorot\":51864,\"approvedAtIso\":\"2026-10-20T10:00:00.000Z\"}","2026-10-20T10:00:00.000Z","ורד","","","","","[\"99999999-2222-4333-8444-555555555555\"]","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","ורד","","","","","","","","",""]],"Tasks":[["id","kind","leadId","clientId","title","reason","assignee","dueDate","dueTime","status","source","createdAt","createdBy","updatedAt","updatedBy","doneAt","doneBy","outcome","deferredFrom","contactEventId","submissionId","money"],["task-drill-contact-next","call","","drill-session-client","שיחה חוזרת","לא היה מענה","דנה","2026-10-25","","open","contact","2026-10-20T10:00:00.000Z","ורד","2026-10-20T10:00:00.000Z","ורד","","","","","","drill-contact-next",""]],"Activity":[["eventId","occurredAt","recordedAt","kind","source","actorName","leadId","clientId","summary","detailsJson","nextAction","nextDate"],["contact:drill-contact","2026-10-20T10:00:00.000Z","2026-10-20T10:00:00.000Z","contact_logged","manual","ורד","","drill-session-client","לא היה מענה · Synthetic recovery contact","{\"direction\":\"note\",\"reason\":\"\",\"channel\":\"phone\",\"withWhom\":\"\",\"outcome\":\"no_answer\",\"summary\":\"Synthetic recovery contact\",\"taskId\":\"\",\"nextTaskId\":\"task-drill-contact-next\",\"noNext\":\"\",\"money\":false}","שיחה חוזרת","2026-10-25"]],"AuditLog":[["timestamp","action","fn","rowKey","name","details","literal","leadingZero","flag","amount","instant"],["2026-10-20","drill","fixture","synthetic","synthetic","not production","=1+1","000123",true,777.25,{"drillDate":"2026-10-20T10:11:12.000Z"}]]},"event":{"sessionId":"drill-cancelled-session","phone":"0500000099","patientName":"בדיקת שחזור סינתטית","therapist":"מעיין דלומי","clinicalTreatmentType":"פרטני CBT","date":"2026-10-19","outcome":"therapist_cancelled","secret":"synthetic-drill-session-secret-not-a-credential"},"paidEvent":{"sessionId":"drill-forwarded-session","phone":"0500000099","patientName":"בדיקת שחזור סינתטית","therapist":"מעיין דלומי","clinicalTreatmentType":"פרטני CBT","date":"2026-10-19","outcome":"happened","secret":"synthetic-drill-session-secret-not-a-credential"},"preferredHouse":"רמות השבים","renewalId":"renewal-fixture-0001","extraId":"extra-fixture-operation","crmContact":{"action":"logContact","user":"ורד","moneyScope":"full","submissionId":"drill-contact","contact":{"clientId":"drill-session-client","outcome":"no_answer","summary":"Synthetic recovery contact"},"next":{"dueDate":"2026-10-25","assignee":"דנה"}},"expectedSources":["Clients","Leads","לידים שהוסרו","Clients-removed","Payments","ClientCharges","Credits","FinancialOps","SessionLog","SessionOutcomeOps","OneTimeSessions","TherapistRates","Settings","StopFlags","ExtraSessionRequests","מסלול המשך","התראות עצירת טיפול","AuditLog","RepairPlan","PackageCatalog","PackageRequests","Tasks","Activity","__RecoveryMetadata"]};
   var phaseStartedAt = Date.now();
   var nativeSheets = SpreadsheetApp, nativeProps = PropertiesService.getScriptProperties();
   var stateKey = 'OP03_DRILL_STATE', prefix = 'OP03_DRILL_FIXTURE_';
@@ -148,7 +148,7 @@ var DAY_CENTER_BILLING = "ליווי יומי בקהילה";
 
 var DAY_CENTER_MONTHLY_BY_FREQ = {"3":15000,"5":18000};
 
-var EXTRA_SESSION_HEADERS = ["id","phone","patientName","treatmentType","therapist","monthKey","quota","used","requestedBy","note","requestedAt","status","approvedBy","approvedAt"];
+var EXTRA_SESSION_HEADERS = ["id","phone","patientName","treatmentType","therapist","monthKey","quota","used","requestedBy","note","requestedAt","status","approvedBy","approvedAt","bookingRowId"];
 
 var FINANCIAL_OP_HEADERS = ["id","clientId","cycleDate","paymentId","intent","state","before","after","createdAt","updatedAt","updatedBy","resolution"];
 
@@ -160,7 +160,7 @@ var GROUP_BILLING = "קבוצה";
 
 var INTEGRITY_APPROVED_MANUAL_POLICY_SHA256 = "";
 
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|session-outcome-ops|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 var INTEGRITY_SNAPSHOT_PREFIX = "outpatient-";
 
@@ -202,7 +202,13 @@ var REPAIR_PLAN_HEADERS = ["sheet","row","column","newValue","action","approved"
 
 var REPAIR_PLAN_SHEET = "RepairPlan";
 
-var SESSION_LOG_HEADERS = ["sessionId","phone","patientName","clientId","therapist","clinicalTreatmentType","billingType","date","outcome","therapistPay","clientSessionValue","sessionStatus","matchStatus","recordedAt","creditStatus","forwardedToPayroll","payModel","oneTimeSessionId","reportRevision"];
+var SESSION_LOG_HEADERS = ["sessionId","phone","patientName","clientId","therapist","clinicalTreatmentType","billingType","date","outcome","therapistPay","clientSessionValue","sessionStatus","matchStatus","recordedAt","creditStatus","forwardedToPayroll","payModel","oneTimeSessionId","reportRevision","treatmentId"];
+
+var SESSION_OUTCOME_OP_HEADERS = ["opKey","payloadStamp","sessionId","treatmentId","clientId","fromCredits","toCredits","oldRowStamp","newRowStamp","newRowJson","state","createdAt"];
+
+var SESSION_OUTCOME_OP_SHEET = "SessionOutcomeOps";
+
+var SESSION_OUTCOME_ROW_STAMP_KEYS = ["sessionId","treatmentId","phone","clientId","therapist","clinicalTreatmentType","billingType","date","outcome","therapistPay","clientSessionValue","sessionStatus","matchStatus","creditStatus","payModel","forwardedToPayroll","oneTimeSessionId","reportRevision"];
 
 var SESSION_STATUS_BY_OUTCOME = {"happened":"consumed","therapist_cancelled":"credited","patient_no_show":"forfeited","patient_cancelled_notice":"credited"};
 
@@ -307,7 +313,7 @@ function _applyRenewal(payload) {
     var storedHeaders = JSON.parse(op.before).headers;
     var storedIntent = JSON.parse(op.intent);
     var current = _finSnapshot(c.client, storedHeaders), p = storedIntent.payment;
-    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     if (op.state === 'prepared') {
       if (current !== op.before || _finPriorMismatch(storedIntent, payments)) return review('source_changed_before_apply');
       _finWrite(journal, op, 'client_writing', user);
@@ -354,7 +360,7 @@ function _applyRenewal(payload) {
         return p[h];
       });
       sh.getRange(row, 1, 1, PAYMENTS_HEADERS.length).setValues([paymentValues]);
-      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     }
     if (payments.length !== 1 || JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(p, PAYMENTS_HEADERS))) {
       return review('payment_write_uncertain_or_changed');
@@ -670,6 +676,13 @@ function _finClient(id) {
   return hits[0];
 }
 
+function _finCyclePaymentId(clientId, cycle) { return 'pay::' + clientId + '::base::' + cycle; }
+
+function _finDayAfter(value) {
+  var p = String(value).split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2] + 1);
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
 function _finDue(c) {
   if (c.nextBillingDate) return _asISODate(c.nextBillingDate);
   var anchor = c.packageChangeDate || c.paymentDate || c.startDate;
@@ -709,6 +722,10 @@ function _finIntent(payload) {
   var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
   var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
     snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  if (_hasOwn(payload, 'coverageIntent')) {
+    if (payload.coverageIntent !== 'ordinary' && payload.coverageIntent !== 'advance') throw new Error('invalid_renewal_coverage_intent');
+    intent.coverageIntent = payload.coverageIntent;
+  }
   // A follow-on future-cycle receipt on the SAME paid date needs an explicit
   // separate-advance decision. Otherwise a lost reply followed by a fresh
   // renewal can silently settle the next month with the original receipt.
@@ -737,6 +754,7 @@ function _finIntent(payload) {
 
 function _finIntentError(intent, c, stored) {
   var p = intent.payment, patch = intent.patch;
+  if (!stored && !intent.coverageIntent) return 'renewal_coverage_intent_required';
   if (!intent.cycleDate || _coverageDateISO(intent.cycleDate) !== intent.cycleDate ||
       (!stored && intent.cycleDate !== _finDue(c))) return 'renewal_period_changed';
   // An already-acknowledged operation is no longer active, so the next
@@ -745,16 +763,20 @@ function _finIntentError(intent, c, stored) {
   // confirmed second advance; existing stored journals replay unchanged.
   if (!stored && c.paymentDate && _asISODate(c.paymentDate) === p.paymentDate &&
       intent.cycleDate > _todayISODate() && p.paymentDate < intent.cycleDate &&
-      intent.advanceConfirmed !== true) return 'renewal_advance_confirmation_required';
+      (intent.advanceConfirmed !== true || intent.coverageIntent === 'ordinary')) return 'renewal_advance_confirmation_required';
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.
-  // B1: the window starts on max(paymentDate, cycleDate) — see _finPaidDateCoverage.
-  var paidWindow = _finPaidDateCoverage(p.paymentDate, intent.cycleDate);
+  // Only stored unmarked intents use B1's former max(paymentDate, cycleDate).
+  var paidWindow = intent.coverageIntent ? _finPaidDateCoverage(p.paymentDate) : _finLegacyPaidDateCoverage(p.paymentDate, intent.cycleDate);
   var newPolicy = paidWindow &&
       p.coverageStart === paidWindow.start && p.coverageEnd === paidWindow.end &&
       patch.nextBillingDate === paidWindow.next;
-  var legacyReplay = !!stored && patch.nextBillingDate === _finNext(c, intent.cycleDate);
+  if (intent.coverageIntent === 'advance') newPolicy = !!paidWindow && !!p.coverageStart && !!p.coverageEnd &&
+      !_coveragePeriodError(p.coverageStart, p.coverageEnd) && p.coverageStart === _coverageDateISO(p.coverageStart) &&
+      p.coverageEnd === _coverageDateISO(p.coverageEnd) && patch.nextBillingDate === _finDayAfter(p.coverageEnd) &&
+      (p.coverageStart >= p.paymentDate || !!intent.priorExpected);
+  var legacyReplay = !!stored && !intent.coverageIntent && patch.nextBillingDate === _finNext(c, intent.cycleDate);
   if (!newPolicy && !legacyReplay) return 'renewal_period_changed';
   // The PAYMENT may not be dated in the future; the window itself may start
   // later than today when an early payment advances from its due cycle.
@@ -763,7 +785,7 @@ function _finIntentError(intent, c, stored) {
   if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
       p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
       Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||
-      p.id !== 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7) ||
+      p.id !== (intent.coverageIntent ? (intent.priorExpected ? intent.priorExpected.id : _finCyclePaymentId(intent.clientId, intent.cycleDate)) : 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7)) ||
       p.clientId !== intent.clientId || p.dueDate !== intent.cycleDate || p.status !== 'paid' ||
       p.billingType !== 'monthly' || p.amountDue !== patch.pricePerSession || p.amountPaid !== patch.pricePerSession ||
       (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
@@ -852,6 +874,12 @@ function _finJournal() {
   return { sheet: sh, ops: ops };
 }
 
+function _finLegacyPaidDateCoverage(paymentDate, cycleDate) {
+  var paid = _finPaidDateCoverage(paymentDate), cycle = _coverageDateISO(cycleDate);
+  if (!paid) return null;
+  return cycle && String(cycleDate) === cycle && cycle > paymentDate ? _finPaidDateCoverage(cycle) : paid;
+}
+
 function _finNext(c, due) {
   var p = due.split('-').map(Number), m = p[1] + 1, y = p[0];
   if (m > 12) { m = 1; y++; }
@@ -861,8 +889,7 @@ function _finNext(c, due) {
 function _finPaidDateCoverage(paymentDate, cycleDate) {
   var iso = _coverageDateISO(paymentDate);
   if (!iso || String(paymentDate) !== iso) return null;
-  var cycle = _coverageDateISO(cycleDate);
-  var start = (cycle && String(cycleDate) === cycle && cycle > iso) ? cycle : iso;
+  var start = iso;
   var next = _finAddMonth(start), p = next.split('-').map(Number);
   if (!next || p.length !== 3) return null;
   var prior = new Date(p[0], p[1] - 1, p[2] - 1);
@@ -876,10 +903,15 @@ function _finPaymentOwner(id) {
   return m ? m[1] : '';
 }
 
-function _finPayments(paymentId, clientId, cycle) {
+function _finPayments(paymentId, clientId, cycle, exactCycle) {
   var sh = _ss().getSheetByName('Payments');
   if (!sh) return [];
   return _readAll(sh, PAYMENTS_HEADERS).filter(function (p) {
+    if (exactCycle) {
+      var legacyMonth = ['pay::' + clientId + '::base::' + cycle.slice(0, 7), 'pay::' + clientId + '::' + cycle.slice(0, 7), 'payment::' + clientId + '::' + cycle.slice(0, 7)].indexOf(String(p.id)) >= 0;
+      return String(p.id) === paymentId || (legacyMonth && (!_coverageDateISO(p.dueDate) || _coverageDateISO(p.dueDate) === cycle)) ||
+        (String(p.clientId) === clientId && String(p.id).indexOf('::chg-') < 0 && _asISODate(p.dueDate) === cycle && String(p.billingType) === 'monthly');
+    }
     return String(p.id) === paymentId || String(p.id) === 'pay::' + clientId + '::' + cycle.slice(0, 7);
   });
 }
@@ -893,7 +925,12 @@ function _finPinPrior(intent, payments) {
   if (status === 'paid' || exp.status !== status || exp.amountPaid !== String(row.amountPaid == null ? '' : row.amountPaid)) {
     return 'prior_payment_changed';
   }
-  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0) return 'prior_payment_changed';
+  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0 ||
+      (intent.coverageIntent && _asISODate(row.dueDate) !== intent.cycleDate)) return 'prior_payment_changed';
+  if (intent.coverageIntent === 'advance' && p.coverageStart < p.paymentDate &&
+      (p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
+  if (intent.coverageIntent && (String(row.coverageStart || '').trim() || String(row.coverageEnd || '').trim()) &&
+      (_coveragePeriodError(row.coverageStart, row.coverageEnd) || p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
   intent.prior = _finRow(row, PAYMENTS_HEADERS);
   return '';
 }
@@ -981,7 +1018,8 @@ function _integrityCaptureData(sourceSs) {
     var captured = specs.map(function (spec) {
       known[spec.source] = true;
       var sh = sourceSs.getSheetByName(spec.source);
-      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired))) {
+      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired) ||
+          (spec.source === SESSION_OUTCOME_OP_SHEET && !!props.getProperty('SESSION_OUTCOME_OPS_CREATED')))) {
         throw new Error('Missing backup source: ' + spec.source);
       }
       var range = sh ? sh.getDataRange() : null;
@@ -1078,6 +1116,9 @@ function _integritySourceSpecs() {
     { source: 'Credits', prefix: 'credits-', key: 'id', headers: CREDIT_COLUMNS },
     { source: 'FinancialOps', prefix: 'financial-ops-', key: 'id', headers: FINANCIAL_OP_HEADERS },
     { source: 'SessionLog', prefix: 'session-log-', key: 'sessionId', headers: SESSION_LOG_HEADERS },
+    // Recover the credit write-ahead journal together with Clients/SessionLog.
+    // Optional on pre-upgrade workbooks, mandatory once a grouped credit exists.
+    { source: SESSION_OUTCOME_OP_SHEET, prefix: 'session-outcome-ops-', key: 'opKey', headers: SESSION_OUTCOME_OP_HEADERS },
     // One-time sessions own their schedule, charge link and source outcome; typed
     // backup/restore must preserve the full append-only schema and stable ID.
     // Optional until the first OTS booking creates the sheet; then tracked like
@@ -1800,6 +1841,13 @@ function _recordSessionOutcome(payload, source) {
     return { ok: false, reason: 'unknown_type' };
   }
   var billingType = _clinicalToBilling(clinical);
+  // A group session has one shared sessionId but MANY per-patient outcome rows.
+  // An immutable booking row ID is required; absent IDs cannot safely upsert.
+  var treatmentId = String(payload && payload.treatmentId == null ? '' : payload.treatmentId).trim();
+  if (billingType === GROUP_BILLING &&
+      (!treatmentId || !/^[A-Za-z0-9_.:-]{4,160}$/.test(treatmentId))) {
+    return { ok: false, reason: treatmentId ? 'invalid_treatment_id' : 'missing_treatment_id' };
+  }
   // A listed roster misspelling resolves to its TherapistRates name (explicit list only —
   // THERAPIST_NAME_ALIASES); the row is priced and stored under that one name.
   var therapist = _canonicalTherapistName(String((payload && payload.therapist) || '').trim());
@@ -1859,9 +1907,16 @@ function _recordSessionOutcome(payload, source) {
         matchStatus = 'multi_match';
       }
     }
+    // A group result belongs to exactly ONE participant. Logging success while
+    // their identity is ambiguous would silently skip participant credit updates.
+    if (billingType === GROUP_BILLING && matchStatus !== 'matched') {
+      return { ok: false, reason: matchStatus === 'multi_match' ?
+        'ambiguous_group_participant' : 'group_participant_not_found' };
+    }
 
     var rowObj = {
       sessionId:          sessionId,
+      treatmentId:        treatmentId,
       phone:              phone,
       patientName:        patientName,
       clientId:           clientId,
@@ -1895,7 +1950,36 @@ function _recordSessionOutcome(payload, source) {
     var logRows = _readAll(sh, SESSION_LOG_HEADERS);
     var oldRow = null;
     for (var lr = 0; lr < logRows.length; lr++) {
-      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+      var candidate = logRows[lr];
+      if (String(candidate.sessionId) !== sessionId) continue;
+      // Never reinterpret a legacy shared group row as one participant or let
+      // a package event overwrite a group event with the same session ID.
+      if (billingType === GROUP_BILLING) {
+        if (String(candidate.billingType) !== GROUP_BILLING) return { ok: false, reason: 'source_outcome_conflict' };
+        var priorTreatmentId = String(candidate.treatmentId == null ? '' : candidate.treatmentId).trim();
+        if (!priorTreatmentId) return { ok: false, reason: 'legacy_group_identity_review' };
+        if (priorTreatmentId === treatmentId) {
+          if (oldRow) return { ok: false, reason: 'duplicate_group_identity_review' };
+          if (String(candidate.clientId || '') !== clientId ||
+              _recoverPhone(candidate.phone) !== phone) return { ok: false, reason: 'participant_identity_conflict' };
+          oldRow = candidate;
+        } else if (clientId && String(candidate.clientId) === clientId) {
+          return { ok: false, reason: 'duplicate_group_participant' };
+        }
+      } else {
+        if (String(candidate.billingType) === GROUP_BILLING || oldRow) return { ok: false, reason: 'source_outcome_conflict' };
+        oldRow = candidate;
+      }
+    }
+    // Recover a partially committed GROUP outcome before checking the saved
+    // report revision. A partially written log must not ACK while its journal
+    // remains pending, even if its revision now appears equal.
+    var soJournal = null;
+    if (billingType === GROUP_BILLING) {
+      soJournal = _soOpenJournal();
+      var previousGroupAttempt = _soPendingGroup(
+        soJournal, rowObj, incomingRev, source, clientsSh, sh, _requestUser(payload));
+      if (previousGroupAttempt) return previousGroupAttempt;
     }
     // ---- Report order (2026-11-15) -----------------------------------------
     // Inside the lock and BEFORE any write: an approved push that carries an OLDER
@@ -1976,7 +2060,11 @@ function _recordSessionOutcome(payload, source) {
         matchedClient.creditsOwed = balance;
         // who/when: '' for the cross-app receiver; the internal
         // correctSessionOutcome path carries the proxy-injected user.
-        _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        // GROUP writes go through SessionOutcomeOps first; non-group keeps its
+        // existing credit engine until the cross-app protocol is extended.
+        if (billingType !== GROUP_BILLING) {
+          _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        }
       }
       rowObj.creditsOwed = balance;
     } else if (outcome === 'happened' || _outcomeGrantsCredit(outcome)) {
@@ -1989,13 +2077,20 @@ function _recordSessionOutcome(payload, source) {
       var v = rowObj[h];
       return (v === undefined || v === null) ? '' : v;
     });
+    if (billingType === GROUP_BILLING) {
+      // Complete both side effects through a durable intent/recovery protocol.
+      return _soCommitGroup(soJournal, clientsSh, sh, rowObj, oldRow,
+        origCredits, rowObj.creditsOwed, incomingRev, source, _requestUser(payload));
+    }
     var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
     var lastRow = sh.getLastRow();
     var upserted = false;
     if (lastRow > 1) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var r = 0; r < ids.length; r++) {
-        if (String(ids[r][0]) === sessionId) {
+        if (String(ids[r][0]) === sessionId &&
+            (billingType !== GROUP_BILLING ||
+              String(sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('treatmentId') + 1).getValue() || '') === treatmentId)) {
           sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
           sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
           upserted = true;
@@ -2020,6 +2115,9 @@ function _recordSessionOutcome(payload, source) {
       sessionStatus: sessionStatus,
       creditStatus: rowObj.creditStatus
     };
+    if (billingType === GROUP_BILLING) result.treatmentId = treatmentId;
+    // The sender must be able to match the ACK to the approved report version.
+    if (incomingRev !== null) result.reportRevision = rowObj.reportRevision;
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
@@ -2091,7 +2189,7 @@ function _reserveRenewal(payload) {
     if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'renewal_snapshot_changed' };
     var invalid = _finIntentError(intent, c);
     if (invalid) return { ok: false, error: invalid };
-    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate));
+    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate, !!intent.coverageIntent));
     if (priorError) return { ok: false, error: priorError };
     canonical = JSON.stringify(intent);
     var after = Object.assign({}, c, patch);
@@ -2125,6 +2223,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   // Equal revision is a replay only when the stored result/identity agree.
   // Name is a display field; current pay rates/other sessions must not reprice a retry.
   var keys = ['sessionId', 'phone', 'clientId', 'therapist', 'clinicalTreatmentType', 'billingType', 'date', 'outcome', 'sessionStatus'];
+  if (incomingRow.billingType === GROUP_BILLING) keys.push('treatmentId');
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     var a = String(oldRow[key] == null ? '' : oldRow[key]).trim();
@@ -2148,6 +2247,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   return { ok: true, replay: {
     ok: true, sessionId: String(oldRow.sessionId), therapistPay: pay,
     clientSessionValue: value, sessionStatus: String(oldRow.sessionStatus),
+    treatmentId: String(oldRow.treatmentId == null ? '' : oldRow.treatmentId),
     creditStatus: String(oldRow.creditStatus == null ? '' : oldRow.creditStatus),
     upserted: true, replayed: true, reportRevision: new Date(stored).toISOString()
   } };
@@ -2174,6 +2274,225 @@ function _setPreferredHouse(payload) {
     return { ok: true, preferredHouse: value };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function _soAck(op, row, replayed) {
+  var result = {
+    ok: true, sessionId: String(op.sessionId), treatmentId: String(op.treatmentId),
+    therapistPay: _toNumberOrZero(row.therapistPay),
+    clientSessionValue: row.clientSessionValue === '' ? null : Number(row.clientSessionValue),
+    sessionStatus: String(row.sessionStatus), creditStatus: String(row.creditStatus || ''),
+    creditsOwed: Number(op.toCredits)
+  };
+  if (row.reportRevision) result.reportRevision = String(row.reportRevision);
+  if (op.oldRowStamp !== '!none') result.upserted = true;
+  else result.appended = true;
+  if (replayed) result.replayed = true;
+  return result;
+}
+
+function _soCommitGroup(journalSh, clientsSh, logSh, row, oldRow,
+                        fromCredits, toCredits, incomingRev, source, user) {
+  var key = _soEventKey(row, incomingRev, source);
+  var prior = _soJournalRows(journalSh);
+  for (var i = 0; i < prior.length; i++) {
+    if (String(prior[i].opKey) === key) return _soRecoveryHold();
+    if (String(prior[i].state) !== 'committed' &&
+        String(prior[i].clientId) === String(row.clientId)) return _soRecoveryHold();
+  }
+  var op = {
+    opKey: key, payloadStamp: _soPayloadStamp(row, incomingRev, source),
+    sessionId: String(row.sessionId), treatmentId: String(row.treatmentId),
+    clientId: String(row.clientId), fromCredits: fromCredits, toCredits: toCredits,
+    oldRowStamp: _soRowStamp(oldRow), newRowStamp: _soRowStamp(row),
+    newRowJson: JSON.stringify(row), state: 'pending', createdAt: new Date().toISOString()
+  };
+  op._sheetRow = journalSh.getLastRow() + 1;
+  journalSh.appendRow(SESSION_OUTCOME_OP_HEADERS.map(function(h) { return op[h]; }));
+  return _soResumeOp(op, journalSh, clientsSh, logSh, user, false);
+}
+
+function _soEventKey(row, incomingRev, source) {
+  var stamp = _soPayloadStamp(row, incomingRev, source);
+  // Manual corrections do not carry a server-approved reportRevision.
+  // Their input fingerprint is the stable key, not a client-supplied UUID.
+  return JSON.stringify([row.sessionId, row.treatmentId,
+    incomingRev === null ? 'manual:' + stamp : new Date(incomingRev).toISOString()]);
+}
+
+function _soJournalRows(sh) {
+  var last = sh.getLastRow(), out = [], seen = Object.create(null);
+  if (last < 2) return out;
+  var all = sh.getRange(2, 1, last - 1, SESSION_OUTCOME_OP_HEADERS.length).getValues();
+  for (var i = 0; i < all.length; i++) {
+    var row = {};
+    for (var j = 0; j < SESSION_OUTCOME_OP_HEADERS.length; j++) {
+      row[SESSION_OUTCOME_OP_HEADERS[j]] = all[i][j];
+    }
+    if (!String(row.opKey || '').trim()) {
+      if (SESSION_OUTCOME_OP_HEADERS.some(function(h) { return row[h] !== '' && row[h] != null; }))
+        throw new Error('session_credit_journal_corrupt');
+      continue;
+    }
+    var key = String(row.opKey), intended;
+    try { intended = JSON.parse(String(row.newRowJson || '')); } catch (_) {
+      throw new Error('session_credit_journal_corrupt');
+    }
+    if (seen[key] || ['pending','committed'].indexOf(String(row.state)) < 0 ||
+        !String(row.clientId || '') || !String(row.sessionId || '') ||
+        !String(row.treatmentId || '') ||
+        !intended || String(intended.clientId) !== String(row.clientId) ||
+        String(intended.sessionId) !== String(row.sessionId) ||
+        String(intended.treatmentId) !== String(row.treatmentId) ||
+        _soRowStamp(intended) !== String(row.newRowStamp) ||
+        !isFinite(Number(row.fromCredits)) || !isFinite(Number(row.toCredits)))
+      throw new Error('session_credit_journal_corrupt');
+    seen[key] = true;
+    row._sheetRow = i + 2; out.push(row);
+  }
+  return out;
+}
+
+function _soLiveCredit(clientsSh, clientId) {
+  var rows = _readAll(clientsSh, CLIENTS_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id) !== clientId) continue;
+    if (hit) return null; // duplicate identity is not a safe balance
+    hit = rows[i];
+  }
+  return hit ? _toCredits(hit.creditsOwed) : null;
+}
+
+function _soLiveRow(logSh, sessionId, treatmentId) {
+  var rows = _readAll(logSh, SESSION_LOG_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].sessionId) !== sessionId) continue;
+    if (String(rows[i].treatmentId || '') !== treatmentId) continue;
+    if (hit) return { ambiguous: true };
+    hit = rows[i];
+  }
+  return { row: hit };
+}
+
+function _soOpenJournal() {
+  var ss = _ss(), props = PropertiesService.getScriptProperties();
+  var sh = ss.getSheetByName(SESSION_OUTCOME_OP_SHEET);
+  if (!sh) {
+    if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) throw new Error('session_credit_journal_missing');
+    sh = _ensureSheet(SESSION_OUTCOME_OP_SHEET, SESSION_OUTCOME_OP_HEADERS);
+    props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    return sh;
+  }
+  var headers = sh.getRange(1, 1, 1, SESSION_OUTCOME_OP_HEADERS.length).getValues()[0];
+  if (sh.getLastColumn() !== SESSION_OUTCOME_OP_HEADERS.length ||
+      JSON.stringify(headers) !== JSON.stringify(SESSION_OUTCOME_OP_HEADERS))
+    throw new Error('session_credit_journal_headers');
+  if (!props.getProperty('SESSION_OUTCOME_OPS_CREATED')) props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+  return sh;
+}
+
+function _soPayloadStamp(row, incomingRev, source) {
+  return JSON.stringify([
+    row.sessionId, row.treatmentId, row.clientId, row.phone,
+    row.therapist, row.clinicalTreatmentType, row.billingType,
+    row.date, row.outcome,
+    incomingRev === null ? '' : new Date(incomingRev).toISOString(),
+    source === 'outpatient' ? 'outpatient' : 'therapists'
+  ]);
+}
+
+function _soPendingGroup(journalSh, row, incomingRev, source, clientsSh, logSh, user) {
+  var ops = _soJournalRows(journalSh), key = _soEventKey(row, incomingRev, source);
+  var stamp = _soPayloadStamp(row, incomingRev, source), found = null;
+  for (var i = 0; i < ops.length; i++) {
+    var op = ops[i];
+    var sameKey = String(op.opKey) === key;
+    var pendingForClient = String(op.state) !== 'committed' &&
+      (String(op.clientId) === String(row.clientId) ||
+        (String(op.sessionId) === String(row.sessionId) &&
+         String(op.treatmentId) === String(row.treatmentId)));
+    if (sameKey && String(op.state) === 'committed') {
+      // The log, not a stale journal entry, owns replay decisions.
+      continue;
+    }
+    if (!pendingForClient && !(sameKey && String(op.state) !== 'committed')) continue;
+    if (found || !sameKey || String(op.payloadStamp) !== stamp) return _soRecoveryHold();
+    found = op;
+  }
+  return found ? _soResumeOp(found, journalSh, clientsSh, logSh, user, true) : null;
+}
+
+function _soRecoveryHold() { return { ok: false, reason: 'session_credit_recovery_pending' }; }
+
+function _soResumeOp(op, journalSh, clientsSh, logSh, user, replayed) {
+  var from = Number(op.fromCredits), to = Number(op.toCredits);
+  if (!isFinite(from) || !isFinite(to) || from < 0 || to < 0) return _soRecoveryHold();
+  var row;
+  try { row = JSON.parse(String(op.newRowJson || '')); } catch (_) { return _soRecoveryHold(); }
+  if (!row || String(row.sessionId) !== String(op.sessionId) ||
+      String(row.treatmentId) !== String(op.treatmentId) ||
+      String(row.clientId) !== String(op.clientId) ||
+      _soRowStamp(row) !== String(op.newRowStamp)) return _soRecoveryHold();
+  var current = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+  if (current.ambiguous) return _soRecoveryHold();
+  var stamp = _soRowStamp(current.row), oldStamp = String(op.oldRowStamp);
+  var oldStillThere = stamp === oldStamp, newAlreadyThere = stamp === String(op.newRowStamp);
+  var balance = _soLiveCredit(clientsSh, String(op.clientId));
+  if ((!oldStillThere && !newAlreadyThere) || balance === null ||
+      (balance !== from && balance !== to)) return _soRecoveryHold();
+  // A row that committed while its credit did not is NOT safe to replay.
+  // It might have been changed by a different writer; require reconciliation.
+  if (newAlreadyThere && balance !== to) return _soRecoveryHold();
+  if (oldStillThere && !newAlreadyThere) {
+    if (balance === from && from !== to) {
+      if (!_writeCreditsOwed(clientsSh, String(op.clientId), to, user))
+        throw new Error('session_credit_client_not_found');
+      if (_soLiveCredit(clientsSh, String(op.clientId)) !== to)
+        throw new Error('session_credit_write_unverified');
+    }
+    // If the credit was already applied before a lost response, never add it
+    // again: persist ONLY the still-missing log row.
+    _soWriteLog(logSh, row, oldStamp !== '!none');
+    var logged = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+    if (logged.ambiguous || _soRowStamp(logged.row) !== String(op.newRowStamp))
+      throw new Error('session_outcome_write_unverified');
+  }
+  if (_soLiveCredit(clientsSh, String(op.clientId)) !== to) return _soRecoveryHold();
+  journalSh.getRange(op._sheetRow, SESSION_OUTCOME_OP_HEADERS.indexOf('state') + 1).setValue('committed');
+  return _soAck(op, row, replayed);
+}
+
+function _soRowStamp(row) {
+  if (!row) return '!none';
+  return JSON.stringify(SESSION_OUTCOME_ROW_STAMP_KEYS.map(function(k) {
+    return String(row[k] == null ? '' : row[k]).trim();
+  }));
+}
+
+function _soWriteLog(logSh, row, oldRowExists) {
+  var arr = SESSION_LOG_HEADERS.map(function(h) {
+    return row[h] == null ? '' : row[h];
+  });
+  var index = SESSION_LOG_HEADERS.indexOf('treatmentId') + 1;
+  var last = logSh.getLastRow();
+  if (oldRowExists) {
+    var ids = logSh.getRange(2, 1, last - 1, 1).getValues(), found = 0;
+    for (var r = 0; r < ids.length; r++) {
+      if (String(ids[r][0]) !== String(row.sessionId) ||
+          String(logSh.getRange(r + 2, index).getValue() || '') !== String(row.treatmentId)) continue;
+      found++;
+      if (found > 1) throw new Error('group_outcome_duplicate_identity');
+      logSh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+      logSh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([arr]);
+    }
+    if (found !== 1) throw new Error('group_outcome_row_disappeared');
+  } else {
+    var next = last + 1;
+    if (typeof logSh.getMaxRows === 'function' && next > logSh.getMaxRows())
+      logSh.insertRowsAfter(logSh.getMaxRows(), next - logSh.getMaxRows());
+    logSh.getRange(next, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+    logSh.appendRow(arr);
   }
 }
 
@@ -2368,6 +2687,15 @@ function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
     var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
     var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
+    var groupJournal = _ss().getSheetByName(SESSION_OUTCOME_OP_SHEET);
+    if (groupJournal) {
+      var groupOps = _soJournalRows(groupJournal);
+      if (groupOps.some(function(op) { return op.state !== 'committed'; }))
+        throw new Error('session_credit_recovery_pending');
+      props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    } else if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) {
+      throw new Error('session_credit_journal_missing');
+    }
     try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
     if (result.journalRequired) props.setProperty('FINANCIAL_OPS_CREATED', '1');
     else if (props.getProperty('FINANCIAL_OPS_CREATED')) throw new Error('Restore journal required');

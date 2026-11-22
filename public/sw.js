@@ -117,7 +117,9 @@
 //   (CHANGELOG-crm-dashboard-parity.md, CHANGELOG-dual-diagnosis-plan-type.md, CHANGELOG-lead-contact-person.md —
 //   the lead form's contact-person section). Bumped from the repo value v41; the
 //   LIVE /sw.js was NOT reachable from this session — confirm production still serves v41 before release.
-var CACHE = 'ezone-outpatient-v42';
+// v43-v44 candidate: combined paid-date billing and participant-specific group outcomes, plus CRM parity.
+// This is NOT yet released. Keep both UI generations in one monotonic cache.
+var CACHE = 'ezone-outpatient-v44';
 var SHELL = [
   './',
   './index.html',
