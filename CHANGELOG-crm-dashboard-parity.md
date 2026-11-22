@@ -50,7 +50,8 @@ change — is `note` («תיעוד שיחה»): the kind is never guessed. An un
 ## 3. Tasks
 
 - **«משימה חדשה»**: סוג, מה לעשות *, אחראי, **תאריך *** (today by default, not in the past) and
-  **שעה ***. «למה / הקשר» is gone.
+  **שעה ***. «למה / הקשר» is gone. *(Superseded on 2026-11-22: the date and the hour are optional —
+  CHANGELOG-task-time-optional.md.)*
 - **A call closes only through «תיעוד שיחה»** (kinds `call`, `collection`): no bare «סיום». Any other
   kind has «סיום» (an in-app form, «מה נעשה»).
 - **«שינוי מועד»** (was «דחייה»): date + time; a reason is required only when the date was promised in

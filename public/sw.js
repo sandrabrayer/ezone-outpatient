@@ -117,7 +117,9 @@
 //   (CHANGELOG-crm-dashboard-parity.md, CHANGELOG-dual-diagnosis-plan-type.md, CHANGELOG-lead-contact-person.md —
 //   the lead form's contact-person section). Bumped from the repo value v41; the
 //   LIVE /sw.js was NOT reachable from this session — confirm production still serves v41 before release.
-var CACHE = 'ezone-outpatient-v42';
+// v43 (2026-11-22, task date/time optional): index.html (the «משימה חדשה» form), app.js, crm-activity.js and
+//   my-day.js changed (CHANGELOG-task-time-optional.md). Bumped from the repo value v42.
+var CACHE = 'ezone-outpatient-v43';
 var SHELL = [
   './',
   './index.html',

@@ -124,7 +124,7 @@
       rowsBy.tasks.push({ id: 'task:' + s(t.id), kind: 'task', taskId: s(t.id), taskKind: s(t.kind), subjectKind: isCont ? 'continuation' : subjectKind, subjectId: subjectId,
         leadId: s(t.leadId), clientId: s(t.clientId), name: nameOf[subjectKind + ':' + subjectId] || s(t.subjectName) || '—', sub: (isCont ? 'מסלול המשך · ' : '') + (TASK_KIND_HE[s(t.kind)] || s(t.kind)),
         owner: s(t.assignee), action: s(t.title), why: s(t.reason) || (t.status === 'deferred' ? 'נדחתה מ-' + fmtDate(t.deferredFrom) : ''),
-        when: d, time: tm, state: st, priority: st === 'late' ? 'late' : (st === 'today' && tm ? 'binding' : st), open: isCont ? 'continuation' : subjectKind, money: isMoneyTask(t) });
+        when: d, time: tm, state: st, priority: st === 'late' ? 'late' : (st === 'today' && tm ? 'binding' : st === 'undated' ? 'today' : st), open: isCont ? 'continuation' : subjectKind, money: isMoneyTask(t) });
     });
 
     (leads || []).forEach(function (l) {
@@ -248,7 +248,7 @@
     // commitment (continuation offers, follow-ups, contacts, today's tasks) sits right below it.
     var sections = [
       { id: 'overdue_payments', label: 'תשלומים באיחור', rows: take(function (r) { return isOverduePayment(r); }) },
-      { id: 'dated', label: 'מעקבים ומשימות במועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || ((r.kind === 'task' || r.kind === 'one_time_today') && r.state === 'today'); }) },
+      { id: 'dated', label: 'מעקבים ומשימות במועד', rows: take(function (r) { return r.state === 'late' || r.priority === 'binding' || ((r.kind === 'task' || r.kind === 'one_time_today') && r.state === 'today') || (r.kind === 'task' && r.state === 'undated'); }) }, // a task with no date is today's work (22/11/2026), never «בהמשך השבוע»
       { id: 'calls', label: 'שיחות להיום', rows: take(function (r) { return isCall(r) && r.state === 'today'; }) },
       { id: 'intros', label: 'שיחות היכרות היום', rows: take(function (r) { return r.kind === 'intro_scheduled' && r.state === 'today'; }) },
       { id: 'undecided', label: 'היכרויות שעברו ללא החלטה', rows: take(function (r) { return r.kind === 'intro_passed'; }) },
@@ -272,7 +272,7 @@
     if (r.priority === 'exception') return '⚠ חריג';
     if (r.state === 'late') return '⏰ באיחור';
     if (r.state === 'today') return '● להיום';
-    if (r.state === 'undated') return '◷ ללא מועד';
+    if (r.state === 'undated') return r.kind === 'task' ? '● להיום' : '◷ ללא מועד';
     return '◷ ממתין';
   }
 
