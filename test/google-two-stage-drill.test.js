@@ -71,3 +71,14 @@ test('legacy native five-function drill remains a separate unchanged path', () =
   assert.match(original,/function verifyManualTabDrill/);
   assert.doesNotMatch(original,/function captureTwoStageDrill/);
 });
+
+test('sandbox deploy refuses occupied remote project before any force push', () => {
+  const wf = fs.readFileSync(path.join(root,'.github/workflows/sandbox-drill-push.yml'),'utf8');
+  const inspect = wf.indexOf('clasp pull >/dev/null');
+  const refuse = wf.indexOf('target project already contains non-starter code');
+  const write = wf.indexOf('clasp push -f');
+  assert.ok(inspect > 0 && refuse > inspect && write > refuse,
+    'remote project must be read-only inspected and refused before any overwrite');
+  assert.match(wf,/get remote target is a fresh EMPTY starter project|Fail closed unless remote target is a fresh EMPTY starter project/);
+  assert.match(wf,/codeFiles.length > 1/);
+});
