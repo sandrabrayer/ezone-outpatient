@@ -64,6 +64,12 @@ function withGroupJournal(base) {
   if (sandbox().ctx.SESSION_OUTCOME_OP_SHEET !== 'SessionOutcomeOps') return base;
   const s = sandbox([], [{ id: 'native-group-client', name: 'Synthetic group participant', phone: '0500000098',
     clinicalTreatmentType: 'קבוצה', serviceType: 'קבוצה', status: 'פעיל', sessionsPerWeek: '1', creditsOwed: 0 }]);
+  // Deterministic build: the same fixed clock as the shared fixture.
+  class FixtureDate extends Date {
+    constructor(...args) { super(...(args.length ? args : ['2026-10-20T10:00:00.000Z'])); }
+    static now() { return Date.parse('2026-10-20T10:00:00.000Z'); }
+  }
+  s.ctx.Date = FixtureDate;
   s.props.SESSION_OUTCOME_SECRET = 'synthetic-native-group-secret-not-a-credential';
   const groupEvent = { sessionId: 'native-group-session', treatmentId: 'native-group-booking', phone: '0500000098',
     therapist: 'Synthetic Group Therapist', clinicalTreatmentType: 'קבוצה', date: '2026-10-19',

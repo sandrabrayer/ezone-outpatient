@@ -171,3 +171,7 @@ test('combined source: native Gate 0 fixture carries ONE committed group journal
   assert.equal(JSON.stringify(fixture()), JSON.stringify(base), 'shared historical fixture never mutated');
   assert.equal(out.groupEvent.secret, undefined, 'no secret in the generated fixture');
 });
+
+test('combined source: the group fixture is deterministic (reproducible definition hash)', { skip }, () => {
+  assert.equal(JSON.stringify(withGroupJournal(fixture())), JSON.stringify(withGroupJournal(fixture())));
+});
