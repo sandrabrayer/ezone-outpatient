@@ -164,10 +164,16 @@ __HELPERS__
 
       if (phase === 'prepare') {
         var tabs = Object.keys(fixture.grids);
-        if (tabs.length > 29) throw new Error('Unexpected source fixture count');
+        if (tabs.length > 29 || tabs.indexOf('Sheet1') >= 0)
+          throw new Error('Unexpected source fixture count or manual-tab collision');
+        // A newly created Google Sheet's first tab is localized. Pin the exact
+        // manual-tab name before capture, regardless of the owner's locale.
+        var initialSourceSheet = books.source.getSheets()[0];
+        check(books.source.getSheets().length === 1, 'Fresh source sheet inventory required');
+        initialSourceSheet.setName('Sheet1');
         tabs.forEach(function(name, index) { seedSource(name, fixture.grids[name], index); });
-        // The initial Sheet1 is an opaque manual source and must survive.
-        books.source.getSheetByName('Sheet1').getRange(1,1,2,1)
+        // The original Sheet1 is an opaque manual source and must survive.
+        initialSourceSheet.getRange(1,1,2,1)
           .setNumberFormat('@').setValues([['manual'],['synthetic notes']]);
         seedSource('Copy of Clients', [['id','note'],['drill-archive','=literal']], tabs.length);
         var clientRows = [], leadRows = [], paymentRows = [], logRows = [];
