@@ -1,0 +1,309 @@
+// OP-03 Gate 0: native Google A/B test, ISOLATED STANDALONE SCRIPT ONLY.
+// This file is generated from the exact candidate source. It must NOT be
+// deployed to any live application, attached to production, or authorized to
+// open production sheets. prepareTwoStageDrill self-creates all three workbooks.
+// No pre-created workbooks, triggers, Script Properties or secrets are needed.
+function prepareTwoStageDrill() { return op03NativeTwoStage_('prepare'); }
+function expandTwoStageInventoryDrill() { return op03NativeTwoStage_('scale'); }
+function captureTwoStageDrill() { return op03NativeTwoStage_('capture'); }
+function verifyTwoStageDrill() { return op03NativeTwoStage_('verify'); }
+function restoreTwoStageDrill() { return op03NativeTwoStage_('restore'); }
+
+function op03NativeTwoStage_(phase) {
+  var expectedScriptId = __SCRIPT_ID_JSON__;
+  if (expectedScriptId === 'ISOLATED_SCRIPT_ID_REQUIRED' ||
+      ScriptApp.getScriptId() !== expectedScriptId)
+    throw new Error('Wrong isolated Apps Script project');
+  if (SpreadsheetApp.getActiveSpreadsheet())
+    throw new Error('A NEW standalone (not spreadsheet-bound) script is mandatory');
+
+  var meta = __METADATA_JSON__;
+  var fixture = __FIXTURE_JSON__;
+  var clockStarted = Date.now();
+  var nativeSheets = SpreadsheetApp, nativeProperties = PropertiesService.getScriptProperties();
+  var stateKey = 'OP03_NATIVE_V3_STATE', propPrefix = 'OP03_NATIVE_V3_';
+  var nativeLock = LockService.getScriptLock();
+  var transitions = { prepare: '', scale: 'prepared', capture: 'prepared',
+                      verify: 'captured', restore: 'verified' };
+  if (!Object.prototype.hasOwnProperty.call(transitions, phase))
+    throw new Error('Invalid isolated drill phase');
+
+  var state;
+  nativeLock.waitLock(30000);
+  try {
+    var raw = nativeProperties.getProperty(stateKey);
+    state = raw ? JSON.parse(raw) : null;
+    if (phase === 'prepare') {
+      // Inspect property NAMES only, never secret contents. A project that has
+      // already been used cannot be co-opted as a fresh QA environment.
+      if (state || nativeProperties.getKeys().length !== 0)
+        throw new Error('A fresh empty standalone project is required');
+      state = { tag: Utilities.getUuid(), phase: '', running: true, failed: false,
+        ids: {}, scaleTabs: 0, expectedSourceHash: meta.sourceCodeSHA256,
+        expectedHelperHash: meta.helperSHA256, expectedDrillHash: meta.drillDefinitionSHA256,
+        day: Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM-dd') };
+    } else {
+      if (!state || state.running || state.failed ||
+          state.phase !== transitions[phase] ||
+          state.expectedSourceHash !== meta.sourceCodeSHA256 ||
+          state.expectedHelperHash !== meta.helperSHA256 ||
+          state.expectedDrillHash !== meta.drillDefinitionSHA256)
+        throw new Error('Isolated phase, state or frozen source hash mismatch');
+      state.running = true;
+    }
+    nativeProperties.setProperty(stateKey, JSON.stringify(state));
+  } finally { nativeLock.releaseLock(); }
+
+  var books = null;
+  function bookName(role) {
+    return 'OP03 TWO-STAGE SYNTHETIC ONLY ' + state.tag + ' ' + role;
+  }
+  function openBooks() {
+    var seen = {}, found = {};
+    ['source','backup','target'].forEach(function(role) {
+      var id = state.ids[role];
+      if (!id || seen[id]) throw new Error('Invalid isolated workbook inventory');
+      seen[id] = true;
+      var ss = nativeSheets.openById(id);
+      if (ss.getName() !== bookName(role)) throw new Error('Wrong isolated workbook identity');
+      found[role] = ss;
+    });
+    return found;
+  }
+  function saveState() { nativeProperties.setProperty(stateKey, JSON.stringify(state)); }
+  function check(condition, reason) { if (!condition) throw new Error(reason); }
+  function appendReport(result, detail) {
+    if (!books || !books.backup) return;
+    var report = books.backup.getSheetByName('_DrillReport');
+    if (!report) throw new Error('Missing synthetic evidence sheet');
+    var row = [new Date().toISOString(), phase, result, detail,
+      meta.sourceCodeSHA256, meta.helperSHA256, meta.drillDefinitionSHA256,
+      String(Date.now() - clockStarted)];
+    report.getRange(report.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@')
+      .setValues([row.map(function(x) { return "'" + String(x); })]);
+  }
+  var currentBook;
+  var sheetFacade = {
+    getActiveSpreadsheet: function() { return currentBook; },
+    openById: function(id) {
+      for (var key in books)
+        if (books[key].getId() === id) return books[key];
+      throw new Error('Refusing workbook OUTSIDE this isolated test');
+    },
+    create: function() { throw new Error('Unexpected source-created workbook'); },
+    flush: function() { nativeSheets.flush(); }
+  };
+  // The product code operates under namespaced, synthetic Script Properties.
+  // Never expose or mutate the native production names from the product code.
+  var propsFacade = { getScriptProperties: function() { return {
+    getProperty: function(key) { return nativeProperties.getProperty(propPrefix + key); },
+    setProperty: function(key,val) { nativeProperties.setProperty(propPrefix + key,String(val)); },
+    deleteProperty: function(key) { nativeProperties.deleteProperty(propPrefix + key); }
+  }; } };
+  var mailFacade = { sendEmail: function() {
+    throw new Error('Mail suppressed in native synthetic drill');
+  } };
+
+  try {
+    if (phase === 'prepare') {
+      books = {};
+      ['source','backup','target'].forEach(function(role) {
+        var ss = nativeSheets.create(bookName(role));
+        state.ids[role] = ss.getId();
+        books[role] = ss;
+        saveState();
+      });
+      books.backup.getSheets()[0].setName('_DrillReport')
+        .getRange(1,1,1,8).setValues([[
+          'at','phase','result','detail','sourceSHA256','helperSHA256',
+          'drillSHA256','durationMs'
+        ]]);
+    } else books = openBooks();
+    currentBook = books.source;
+
+    var result = (function(SpreadsheetApp, PropertiesService, MailApp) {
+      // THESE are the verbatim production entrypoints and their exact
+      // transitive dependencies; the three IO service facades are isolated.
+__HELPERS__
+
+      function revive(grid) {
+        return grid.map(function(row) { return row.map(function(v) {
+          return v && typeof v === 'object' && v.drillDate
+            ? new Date(v.drillDate) : v;
+        }); });
+      }
+      function seedSource(name, values, index) {
+        var date = '2099-01-' + ('0' + (index + 1)).slice(-2);
+        var created = _integrityWriteSnapshot(books.source,
+          'outpatient-' + date, revive(values));
+        created.setName(name);
+      }
+      function addSyntheticRows(sheetName, rows) {
+        var sh = books.source.getSheetByName(sheetName);
+        if (!sh) throw new Error('Missing synthetic source ' + sheetName);
+        var head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+        var start = sh.getLastRow() + 1;
+        if (start + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(),
+          start + rows.length - 1 - sh.getMaxRows());
+        var values = rows.map(function(obj) {
+          return head.map(function(key) { return obj[key] == null ? '' : obj[key]; });
+        });
+        // All generated IDs, dates, phone strings and currency samples are
+        // literal values; never let formulas from a fixture execute.
+        sh.getRange(start,1,values.length,head.length).setNumberFormat('@')
+          .setValues(values.map(function(row) { return row.map(function(v) {
+            return typeof v === 'string' && v ? "'" + v : v;
+          }); }));
+      }
+      function assertSnapshot(h, suffix) {
+        return !!books.backup.getSheetByName('outpatient-' + suffix + '-' + state.day);
+      }
+      function nativeReadback() {
+        return _integrityValidateRestoreSet(books.backup, state.day, true);
+      }
+
+      if (phase === 'prepare') {
+        var tabs = Object.keys(fixture.grids);
+        if (tabs.length > 29 || tabs.indexOf('Sheet1') >= 0)
+          throw new Error('Unexpected source fixture count or manual-tab collision');
+        // A newly created Google Sheet's first tab is localized. Pin the exact
+        // manual-tab name before capture, regardless of the owner's locale.
+        var initialSourceSheet = books.source.getSheets()[0];
+        check(books.source.getSheets().length === 1, 'Fresh source sheet inventory required');
+        if (initialSourceSheet.getName() !== 'Sheet1') initialSourceSheet.setName('Sheet1');
+        tabs.forEach(function(name, index) { seedSource(name, fixture.grids[name], index); });
+        // The original Sheet1 is an opaque manual source and must survive.
+        initialSourceSheet.getRange(1,1,2,1)
+          .setNumberFormat('@').setValues([['manual'],['synthetic notes']]);
+        seedSource('Copy of Clients', [['id','note'],['drill-archive','=literal']], tabs.length);
+        var clientRows = [], leadRows = [], paymentRows = [], logRows = [];
+        for (var i=0;i<300;i++) {
+          var id = 'native-fixture-client-' + i;
+          clientRows.push({id:id,name:'Synthetic person '+i,phone:'050'+('0000000'+i).slice(-7),
+                           status:'פעיל',sessionsPerWeek:'1'});
+          leadRows.push({id:'native-fixture-lead-'+i,name:'Synthetic lead '+i,
+                         phone:'050'+('1000000'+i).slice(-7)});
+          paymentRows.push({id:'pay::'+id+'::base::2026-11',clientId:id,
+                            clientName:'Synthetic person '+i,status:'paid',amountPaid:300});
+          logRows.push({sessionId:'native-fixture-session-'+i,clientId:id,
+                       patientName:'Synthetic person '+i,phone:'050'+('0000000'+i).slice(-7),
+                       billingType:'פרטני',outcome:'happened',date:'2026-11-01'});
+        }
+        addSyntheticRows('Clients',clientRows);
+        addSyntheticRows('Leads',leadRows);
+        addSyntheticRows('Payments',paymentRows);
+        addSyntheticRows('SessionLog',logRows);
+        return { phase: 'prepared', detail: 'Source with 300 typed synthetic records per core family and two opaque tabs' };
+      }
+      if (phase === 'scale') {
+        // Optional but REQUIRED for realistic Gate 0 signoff. Repeated calls
+        // add no more than 20 compact synthetic tabs to the backup workbook,
+        // without touching source/patient data. The last 20 are old expired OUT
+        // families that Phase B must prune after certification.
+        var total = 350, n = Math.min(20,total-state.scaleTabs);
+        for (var j=0;j<n;j++) {
+          var index = state.scaleTabs + j;
+          var name = index < 330
+            ? 'dashboard-synthetic-' + ('000'+index).slice(-3)
+            : 'outpatient-leads-2020-01-' + ('0'+(index-329)).slice(-2);
+          var sh = books.backup.insertSheet(name);
+          // Compact to avoid Google's 10M allocated-cell quota.
+          if (sh.getMaxRows() > 2) sh.deleteRows(3,sh.getMaxRows()-2);
+          if (sh.getMaxColumns() > 2) sh.deleteColumns(3,sh.getMaxColumns()-2);
+          sh.getRange(1,1,2,2).setValues([['synthetic','only'],['source',String(index)]]);
+        }
+        state.scaleTabs += n;
+        return { phase:'prepared', detail:'Synthetic destination inventory '+state.scaleTabs+'/350 compact tabs' };
+      }
+      if (phase === 'capture') {
+        check(state.scaleTabs === 350, 'Run expandTwoStageInventoryDrill until 350/350 before time trial');
+        var props = PropertiesService.getScriptProperties();
+        props.setProperty('INTEGRITY_BACKUP_SSID', books.backup.getId());
+        props.setProperty('FINANCIAL_OPS_CREATED','1');
+        props.setProperty('INTEGRITY_TWO_STAGE_ENABLED','1');
+        var before = Date.now();
+        nightlyIntegrityJob(); // ACTUAL product Phase A, not a helper-only approximation
+        var elapsed = Date.now()-before;
+        check(!!props.getProperty('INTEGRITY_PENDING_BACKUP'), 'No pending marker after A');
+        check(assertSnapshot(null,'pending-manifest'), 'Pending manifest absent after A');
+        check(!assertSnapshot(null,'manifest') && !assertSnapshot(null,'verified'),
+          'Phase A was incorrectly certified');
+        check(!props.getProperty('INTEGRITY_LAST_COUNT'), 'Phase A advanced sentinel');
+        check(elapsed < 300000, 'Phase A exceeded five-minute safety budget');
+        return { phase:'captured',detail:'Actual Phase A '+elapsed+' ms; pending only; 350-tab synthetic destination' };
+      }
+      if (phase === 'verify') {
+        var props = PropertiesService.getScriptProperties();
+        var before = Date.now();
+        var finalized = finalizeNightlyIntegrityJob(); // ACTUAL product Phase B
+        var elapsed = Date.now()-before;
+        check(finalized && finalized.ok, 'Real finalizer refused');
+        check(!props.getProperty('INTEGRITY_PENDING_BACKUP'), 'Finalizer failed to drain pending');
+        check(assertSnapshot(null,'manifest') && assertSnapshot(null,'verified'),
+          'Missing final manifest or certificate after B');
+        var inventory = nativeReadback(); // second independent native readback
+        check(inventory.some(function(item) { return item.source === 'Sheet1'; }) &&
+              inventory.some(function(item) { return item.source === 'Copy of Clients'; }),
+              'Opaque manual tabs not captured');
+        check(inventory.some(function(item) { return item.source === 'FinancialOps' && !item.absent; }),
+              'Financial journal missing');
+        check(inventory.some(function(item) { return item.source === 'SessionLog' && !item.absent; }),
+              'Session log missing');
+        check(elapsed < 300000, 'Phase B exceeded five-minute safety budget');
+        return {phase:'verified',detail:'Actual Phase B '+elapsed+' ms; certified '+inventory.length+' families'};
+      }
+      if (phase === 'restore') {
+        var inventory = nativeReadback();
+        var target = books.target, original = target.getSheets()[0];
+        check(target.getSheets().length === 1 && original.getLastRow() === 0,
+              'A fresh empty synthetic restore target is required');
+        original.setName('__DrillEmptyTarget');
+        var copied = [];
+        inventory.forEach(function(item) {
+          if (item.absent || item.source === '__RecoveryMetadata') return;
+          var snap = books.backup.getSheetByName('outpatient-' + item.prefix + state.day);
+          if (!snap) throw new Error('Missing exact snapshot ' + item.source);
+          var targetSheet = snap.copyTo(target);
+          targetSheet.setName(item.source);
+          _integrityVerifyGrid(item.grid,targetSheet.getDataRange().getValues());
+          copied.push(item.source);
+        });
+        target.deleteSheet(original);
+        check(copied.indexOf('Sheet1') >= 0 &&
+              copied.indexOf('Copy of Clients') >= 0, 'Manual tabs lost during physical copy');
+        // Unknown sources deliberately block operational cutover until a
+        // separately reviewed manual policy is pinned. Prove that refusal;
+        // do not silently omit archives or forge a manual recovery approval.
+        var refused=false;
+        try { _integrityVerifyRecoveredWorkbook(books.backup,state.day,target,true); }
+        catch(err) { refused=/Unclassified sheets require/.test(String(err)); }
+        check(refused,'Operational restore MUST remain held for manual archive policy');
+        return {phase:'restored_readback',
+                detail:'Full native typed/opaque copy '+copied.length+
+                  ' tables; manual-policy operational cutover deliberately refused'};
+      }
+      throw new Error('Unsupported Gate 0 stage');
+    })(sheetFacade,propsFacade,mailFacade);
+
+    state.phase = result.phase;
+    appendReport('PASS',result.detail);
+    saveState();
+    Logger.log(JSON.stringify({
+      phase:phase, result:'PASS', elapsedMs:Date.now()-clockStarted,
+      sourceCodeSHA256:meta.sourceCodeSHA256, drillDefinitionSHA256:meta.drillDefinitionSHA256,
+      syntheticWorkbookIds:state.ids, scaleTabs:state.scaleTabs,
+      productionCertified:false, fullOperationalRecoveryCertified:false
+    }));
+    return {ok:true,stage:state.phase,scaleTabs:state.scaleTabs,
+            durationMs:Date.now()-clockStarted,productionCertified:false};
+  } catch(err) {
+    state.failed = true;
+    try { saveState(); appendReport('FAIL',String(err).slice(0,500)); }
+    catch(reportError) { Logger.log('Gate 0 evidence append failed: '+String(reportError).slice(0,200)); }
+    throw err;
+  } finally {
+    nativeLock.waitLock(30000);
+    try { state.running=false; saveState(); }
+    finally { nativeLock.releaseLock(); }
+  }
+}
