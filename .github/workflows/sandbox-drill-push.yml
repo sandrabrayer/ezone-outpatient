@@ -4,10 +4,10 @@ name: Sandbox Drill Push
 # Script test project so nobody has to move a 137 KB file through a browser
 # clipboard. It never deploys anything, never touches the production project
 # (the builder rejects the production script ID), and the drill itself refuses
-# to run anywhere but the project ID it was built for. The five phases
-# (prepare → capture → restore → verify → manual) are then run from the Apps
-# Script editor against synthetic workbooks only; the report lands in the
-# synthetic backup workbook's _DrillReport tab.
+# to run anywhere but the project ID it was built for.
+# Default Gate 0 runs the ACTUAL two-stage product entrypoints in an isolated
+# script, against three self-created synthetic workbooks. Historical legacy
+# five-phase drill stays available via explicit drill_kind: legacy.
 
 on:
   workflow_dispatch:
@@ -20,6 +20,14 @@ on:
         description: 'Full 40-character SHA of the candidate being drilled (must equal the dispatched ref)'
         required: true
         type: string
+      drill_kind:
+        description: 'Which isolated drill to upload (two-stage is required for OP-03 Gate 0)'
+        required: true
+        type: choice
+        default: two-stage
+        options:
+          - two-stage
+          - legacy
 
 concurrency:
   group: sandbox-drill-push
@@ -64,14 +72,27 @@ jobs:
           SANDBOX_ID: ${{ inputs.sandbox_script_id }}
         run: |
           set -eu
-          node test-support/build-google-operational-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
           mkdir -p /tmp/drill
-          cp test-support/google-operational-drill-candidate.gs /tmp/drill/Code.gs
-          printf '%s\n' '{"timeZone":"Asia/Jerusalem","exceptionLogging":"STACKDRIVER","runtimeVersion":"V8"}' > /tmp/drill/appsscript.json
+          case "${{ inputs.drill_kind }}" in
+            two-stage)
+              node test-support/build-google-two-stage-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
+              cp test-support/google-two-stage-drill-candidate.gs /tmp/drill/Code.gs
+              ;;
+            legacy)
+              node test-support/build-google-operational-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
+              cp test-support/google-operational-drill-candidate.gs /tmp/drill/Code.gs
+              ;;
+            *) echo "::error::Unsupported drill_kind"; exit 1 ;;
+          esac
+          printf '%s\n' '{"timeZone":"Asia/Jerusalem","exceptionLogging":"STACKDRIVER","runtimeVersion":"V8","oauthScopes":["https://www.googleapis.com/auth/spreadsheets"]}' > /tmp/drill/appsscript.json
           printf '{"scriptId":"%s","rootDir":"."}\n' "$SANDBOX_ID" > /tmp/drill/.clasp.json
           sha256sum /tmp/drill/Code.gs
           if grep -q "$(node -p "require('./.clasp.json').scriptId")" /tmp/drill/Code.gs; then
             echo "::error::Generated drill references the production script ID."; exit 1
+          fi
+          if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+            grep -q 'function nightlyIntegrityJob(' /tmp/drill/Code.gs
+            grep -q 'function finalizeNightlyIntegrityJob(' /tmp/drill/Code.gs
           fi
 
       - name: Verify clasp credential secret is present
@@ -105,7 +126,11 @@ jobs:
             echo
             echo '```json'; cat drill-metadata.json; echo '```'
             echo
-            echo 'Next: in the isolated project run prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill, once each, in order. The report is the `_DrillReport` tab of the synthetic backup workbook.'
+            if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+              echo 'Next: prepareTwoStageDrill ONCE (creates 3 synthetic workbooks), expandTwoStageInventoryDrill until 350/350, captureTwoStageDrill, verifyTwoStageDrill, restoreTwoStageDrill. Never create sheets/properties manually. Real A/B elapsed times are logged. Manual archives deliberately BLOCK operational cutover.'
+            else
+              echo 'LEGACY only: prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill.'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove credentials from the runner
