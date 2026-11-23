@@ -51,7 +51,14 @@ GitHub Actions → **Sandbox Drill Push** → **Run workflow**. Select
 The workflow refuses an unexpected commit, missing/production Script ID and
 disallowed characters, generates only an isolated Code.gs with the **real**
 `nightlyIntegrityJob()` and `finalizeNightlyIntegrityJob()`, checks its source
-hash, and does **clasp push only** to the specified empty test project. It does
+hash, and does **clasp push only** to the specified empty test project.
+**Before any force-push**, it also performs a read-only `clasp pull` of the
+supplied target into a private disposable runner folder. It rejects additional
+files or existing code beyond Google's default empty `myFunction` starter;
+the retrieved remote code is never printed or published. A wrong or already
+used project ID therefore blocks the upload rather than overwriting another
+application. The owner must still verify that this is a truly new project with
+no Script Properties/triggers. It does
 NOT deploy a web app, install triggers, change a live workbook, use patient data,
 or send email. Consent should request only the `spreadsheets` scope; inspect
 the consent screen and stop on any extra capability. The existing repository
