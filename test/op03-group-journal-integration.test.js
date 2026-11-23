@@ -150,3 +150,24 @@ test('a group journal snapshot tampered between A and B is caught before the cer
   assert.equal(h.backup.getSheetByName('outpatient-verified-' + dayOf(h)), null);
   assert.ok(h.props.INTEGRITY_PENDING_BACKUP);
 });
+
+// Native Gate 0 fixture: the two-stage builder adds the group journal ONLY on
+// combined sources; the shared, evidence-pinned historical fixture is untouched.
+const { withGroupJournal } = require('../test-support/build-google-two-stage-drill.cjs');
+const { fixture } = require('../test-support/build-google-operational-drill.cjs');
+
+test('#199-only source: native fixture is returned unchanged (same definition hash)', { skip: integrated ? 'combined source' : false }, () => {
+  const base = fixture();
+  assert.strictEqual(withGroupJournal(base), base);
+});
+
+test('combined source: native Gate 0 fixture carries ONE committed group journal row', { skip }, () => {
+  const base = fixture(), out = withGroupJournal(base);
+  const ops = out.grids.SessionOutcomeOps;
+  assert.equal(ops.length, 2);
+  assert.equal(ops[1][ops[0].indexOf('state')], 'committed');
+  assert.equal(out.grids.Clients.length, base.grids.Clients.length + 1);
+  assert.equal(out.grids.SessionLog.length, base.grids.SessionLog.length + 1);
+  assert.equal(JSON.stringify(fixture()), JSON.stringify(base), 'shared historical fixture never mutated');
+  assert.equal(out.groupEvent.secret, undefined, 'no secret in the generated fixture');
+});

@@ -55,6 +55,33 @@ function extract() {
     throw Error('Unapproved service or HTTP handler in native Gate 0 closure');
   return { source, helpers, names };
 }
+// Combined OUT #195 source only: add ONE committed group-credit journal row
+// (SessionOutcomeOps) so native Gate 0 on the release candidate covers a
+// NONEMPTY group journal. The shared historical fixture is NOT changed: its
+// bytes are pinned by the frozen Oct 2026 drill evidence. On a source without
+// the journal this returns the fixture unchanged (identical definition hash).
+function withGroupJournal(base) {
+  if (sandbox().ctx.SESSION_OUTCOME_OP_SHEET !== 'SessionOutcomeOps') return base;
+  const s = sandbox([], [{ id: 'native-group-client', name: 'Synthetic group participant', phone: '0500000098',
+    clinicalTreatmentType: 'קבוצה', serviceType: 'קבוצה', status: 'פעיל', sessionsPerWeek: '1', creditsOwed: 0 }]);
+  s.props.SESSION_OUTCOME_SECRET = 'synthetic-native-group-secret-not-a-credential';
+  const groupEvent = { sessionId: 'native-group-session', treatmentId: 'native-group-booking', phone: '0500000098',
+    therapist: 'Synthetic Group Therapist', clinicalTreatmentType: 'קבוצה', date: '2026-10-19',
+    outcome: 'patient_cancelled_notice', reportRevision: '2026-10-19T12:00:00.000Z' };
+  const reply = s.post({ action: 'recordSessionOutcome', secret: s.props.SESSION_OUTCOME_SECRET, ...groupEvent });
+  const ops = s.sheets.SessionOutcomeOps && s.sheets.SessionOutcomeOps.grid;
+  if (!reply.ok || !ops || ops.length !== 2 || ops[1][ops[0].indexOf('state')] !== 'committed')
+    throw Error('Synthetic group journal fixture failed');
+  const out = JSON.parse(JSON.stringify(base));
+  for (const name of ['Clients', 'SessionLog']) {
+    const grid = s.sheets[name].grid;
+    if (JSON.stringify(out.grids[name][0]) !== JSON.stringify(grid[0])) throw Error('Group fixture header drift: ' + name);
+    out.grids[name] = out.grids[name].concat(JSON.parse(JSON.stringify(grid.slice(1))));
+  }
+  out.grids.SessionOutcomeOps = JSON.parse(JSON.stringify(ops));
+  out.groupEvent = groupEvent;
+  return out;
+}
 function build({ scriptId = PLACEHOLDER } = {}) {
   const productionId = JSON.parse(fs.readFileSync(path.join(root, '.clasp.json'), 'utf8')).scriptId;
   if (scriptId !== PLACEHOLDER &&
@@ -62,7 +89,7 @@ function build({ scriptId = PLACEHOLDER } = {}) {
     throw Error('Use a NEW standalone isolated Apps Script project ID, never production');
   const { source, helpers, names } = extract();
   const template = fs.readFileSync(path.join(__dirname, 'google-two-stage-drill-template.txt'), 'utf8');
-  const fixtures = JSON.stringify(fixture()); // existing, source-derived synthetic data only
+  const fixtures = JSON.stringify(withGroupJournal(fixture())); // source-derived synthetic data only
   const metadata = {
     sourceCodeSHA256: sha(source), helperSHA256: sha(helpers),
     drillDefinitionSHA256: sha(JSON.stringify([template, fixtures, helpers, scriptId])),
@@ -94,4 +121,4 @@ if (require.main === module) {
     ...result.metadata, bytes: Buffer.byteLength(result.output), runnable: Boolean(args[1])
   }));
 }
-module.exports = { build, extract, ENTRYPOINTS, PLACEHOLDER };
+module.exports = { build, extract, withGroupJournal, ENTRYPOINTS, PLACEHOLDER };
