@@ -170,7 +170,7 @@ __HELPERS__
         // manual-tab name before capture, regardless of the owner's locale.
         var initialSourceSheet = books.source.getSheets()[0];
         check(books.source.getSheets().length === 1, 'Fresh source sheet inventory required');
-        initialSourceSheet.setName('Sheet1');
+        if (initialSourceSheet.getName() !== 'Sheet1') initialSourceSheet.setName('Sheet1');
         tabs.forEach(function(name, index) { seedSource(name, fixture.grids[name], index); });
         // The original Sheet1 is an opaque manual source and must survive.
         initialSourceSheet.getRange(1,1,2,1)
