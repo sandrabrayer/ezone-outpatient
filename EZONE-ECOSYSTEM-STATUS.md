@@ -4,7 +4,7 @@ Two-stage backup (#199): native Gate 0 passed 23 Nov on a scaled synthetic fixtu
 (A 106.8 s, B 20.8 s, restore 15/15). This round adds finalizer refusal alerts, an
 owner-decided exit for an interrupted run, a read-only Sheet1/Copy of Clients policy
 draft helper, v3 manual-policy tests and #195 `SessionOutcomeOps` integration tests
-(combined tree: 2,623 pass / 0 fail). Live: Railway `b7de864`, Apps Script `62da2e2`
+(combined tree: 2,624 pass / 0 fail). Live: Railway `b7de864`, Apps Script `62da2e2`
 (same Code.gs), legacy v2 nightly, 25-entry 23 Nov manifest (structure only; checksum
 and restore of the real backup not yet proven). **Production NO-GO** until native Gate 0
 on the combined #195 candidate, a read-only production Executions/triggers/properties

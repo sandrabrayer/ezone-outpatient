@@ -56,17 +56,19 @@ Evidence levels used below — never mixed:
 ## 2. Task (b) — integration with OUT #195 (`SessionOutcomeOps`)
 
 **Integrated tree (exact):** local merge of #195 head `d4a4f4638091a78b41af13ac5eec344696f8ada3`
-with #199 head (this round) + regenerated drill artifact. Tree
-`9cc7aac85f20c1f666c66f61ed96ab33985a0552`, `apps-script/Code.gs` blob
-`b9e37e86a60d6ee2c42a137369fb64a4baf7b571`. Code.gs merges with no conflict; the only
-conflict is the **generated** `test-support/google-operational-drill-candidate.gs`
-(resolve by regenerating). Result: **2,624 tests, 2,623 pass, 0 fail, 1 skip** (the
-#199-only no-op check, skipped by design). #195 itself was not changed.
+with #199 code head `abcab1bc4da587615f58aaff257492b9d925841e` + regenerated drill artifact.
+Tree `0632c17d5a219f7d8bc7e33d4db3c8709bd90b0d`, `apps-script/Code.gs` blob
+`c58440b82bfbe1e80a31a9f3ba4b8b581bb4907c`. Code.gs merges with no conflict; conflicts
+are only the **generated** `test-support/google-operational-drill-candidate.gs`
+(regenerate) and `CHANGELOG.md` (keep both entries). Result: **2,625 tests, 2,624 pass,
+0 fail, 1 skip** (the #199-only no-op check, skipped by design); `npm audit` 0.
+#195 itself was not changed.
 
 Already covered in #195 (`49db6f2`, `2c33b4f`): committed group journal round-trip
 (v2 and v3), tamper refusal, retry after restore without double credit.
 
-New (`test/op03-group-journal-integration.test.js`, U, 10 tests; skip on #199-only):
+New (`test/op03-group-journal-integration.test.js`, U, 10 tests; skip on #199-only).
+#199 alone: **2,563 tests, 2,554 pass, 0 fail, 9 skip** (these integration checks).
 
 | Requirement | Result on integrated tree |
 | --- | --- |
@@ -125,7 +127,7 @@ alerts (weekly public healthcheck cannot see backups). Native timing is for a sc
 synthetic fixture, not the production volume.
 
 **Native evidence and this round's code delta:** Gate 0 ran on `Code.gs` blob
-`792603c`. This round changes `Code.gs` (→ `535bb04` on #199): the finalizer's
+`792603c`. This round changes `Code.gs` (→ `0736b49` on #199): the finalizer's
 admission-refusal path gains an alert call; two new editor-only functions are added.
 `nightlyIntegrityJob` is unchanged and the finalizer's success path is unchanged, so
 the measured A/B durations remain representative — but the release candidate is the
