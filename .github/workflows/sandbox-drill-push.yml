@@ -113,6 +113,34 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))"
 
+      - name: Fail closed unless remote target is a fresh EMPTY starter project
+        run: |
+          set -eu
+          # A mistyped Script ID could refer to an unrelated production app.
+          # Pull is read-only and the remote code is NEVER printed or uploaded.
+          # Refuse any project containing more than Google's new-script stub.
+          mkdir -p /tmp/op03-remote-preflight
+          cp /tmp/drill/.clasp.json /tmp/op03-remote-preflight/.clasp.json
+          cd /tmp/op03-remote-preflight
+          clasp pull >/dev/null
+          node <<'NODE'
+          const fs = require('fs');
+          const files = fs.readdirSync('.').filter(f => f !== '.clasp.json');
+          if (files.some(f => !['Code.gs','Code.js','appsscript.json'].includes(f)))
+            throw Error('Refusing: target has non-starter script files');
+          const codeFiles = files.filter(f => f === 'Code.gs' || f === 'Code.js');
+          if (codeFiles.length > 1)
+            throw Error('Refusing: multiple remote source files');
+          const code = codeFiles.length ? fs.readFileSync(codeFiles[0], 'utf8') : '';
+          if (code.trim() && !/^function\\s+myFunction\\s*\\(\\s*\\)\\s*\\{\\s*\\}\\s*;?$/.test(code.trim()))
+            throw Error('Refusing: target project already contains non-starter code');
+          if (!files.includes('appsscript.json'))
+            throw Error('Refusing: remote Apps Script manifest missing');
+          process.stdout.write('Isolated target has only a fresh starter template\\n');
+          NODE
+          cd /
+          rm -rf /tmp/op03-remote-preflight
+
       - name: Push the drill to the isolated project (no deploy)
         working-directory: /tmp/drill
         run: clasp push -f
