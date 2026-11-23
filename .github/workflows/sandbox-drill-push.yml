@@ -10,6 +10,11 @@ name: Sandbox Drill Push
 # five-phase drill stays available via explicit drill_kind: legacy.
 
 on:
+  # ONE-OFF, owner-authorized upload. The job below additionally requires the
+  # exact marker commit message: later pushes can never upload automatically.
+  push:
+    branches:
+      - codex/op03-two-stage-backup-20261122
   workflow_dispatch:
     inputs:
       sandbox_script_id:
@@ -38,7 +43,16 @@ permissions:
 
 jobs:
   push-drill:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/codex/op03-two-stage-backup-20261122' &&
+       github.event.head_commit.message == 'qa(op03): one-time isolated native drill upload approved')
     runs-on: ubuntu-latest
+    env:
+      OP03_SANDBOX_ID: ${{ github.event_name == 'push' && '11d4ChGT-ex_-JTCWR4OTyf_LWTCnaq111vtIpLMpTbERuHjcT6T-w5z5' || inputs.sandbox_script_id }}
+      OP03_EXPECTED_SHA: ${{ github.event_name == 'push' && github.sha || inputs.expected_commit }}
+      OP03_DRILL_KIND: ${{ github.event_name == 'push' && 'two-stage' || inputs.drill_kind }}
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -54,8 +68,8 @@ jobs:
 
       - name: Refuse anything but the exact candidate and an isolated project
         env:
-          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
-          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          SANDBOX_ID: ${{ env.OP03_SANDBOX_ID }}
+          EXPECTED_COMMIT: ${{ env.OP03_EXPECTED_SHA }}
         run: |
           set -eu
           if [ "$GITHUB_SHA" != "$EXPECTED_COMMIT" ]; then
@@ -69,11 +83,11 @@ jobs:
 
       - name: Build the bound drill from this exact source
         env:
-          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
+          SANDBOX_ID: ${{ env.OP03_SANDBOX_ID }}
         run: |
           set -eu
           mkdir -p /tmp/drill
-          case "${{ inputs.drill_kind }}" in
+          case "${{ env.OP03_DRILL_KIND }}" in
             two-stage)
               node test-support/build-google-two-stage-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
               cp test-support/google-two-stage-drill-candidate.gs /tmp/drill/Code.gs
@@ -90,7 +104,7 @@ jobs:
           if grep -q "$(node -p "require('./.clasp.json').scriptId")" /tmp/drill/Code.gs; then
             echo "::error::Generated drill references the production script ID."; exit 1
           fi
-          if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+          if [ "${{ env.OP03_DRILL_KIND }}" = two-stage ]; then
             grep -q 'function nightlyIntegrityJob(' /tmp/drill/Code.gs
             grep -q 'function finalizeNightlyIntegrityJob(' /tmp/drill/Code.gs
           fi
@@ -154,7 +168,7 @@ jobs:
             echo
             echo '```json'; cat drill-metadata.json; echo '```'
             echo
-            if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+            if [ "${{ env.OP03_DRILL_KIND }}" = two-stage ]; then
               echo 'Next: prepareTwoStageDrill ONCE (creates 3 synthetic workbooks), expandTwoStageInventoryDrill until 350/350, captureTwoStageDrill, verifyTwoStageDrill, restoreTwoStageDrill. Never create sheets/properties manually. Real A/B elapsed times are logged. Manual archives deliberately BLOCK operational cutover.'
             else
               echo 'LEGACY only: prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill.'
