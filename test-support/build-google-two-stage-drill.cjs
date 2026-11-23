@@ -36,7 +36,7 @@ function extract() {
     if (typeof ctx[name] !== 'function') return;
     const body = ctx[name].toString();
     if (!source.includes(body)) throw Error('Source helper is not verbatim: ' + name);
-    const tokens = new Set(body.match(/[A-Za-z_$][\\w$]*/g) || []);
+    const tokens = new Set(body.match(/[A-Za-z_$][\w$]*/g) || []);
     for (const dep of available) if (tokens.has(dep)) include(dep);
   }
   ENTRYPOINTS.forEach(include);
@@ -51,7 +51,7 @@ function extract() {
     ? ctx[name].toString() : 'var ' + name + ' = ' + literal(ctx[name]) + ';').join('\n\n');
   // Only the explicitly sandboxed native services may be referenced. MailApp
   // is always injected as a no-send facade, even on a failing capture.
-  if (/\\b(?:UrlFetchApp|DriveApp|GmailApp|ScriptApp|doGet|doPost|XmlService)\\b/.test(helpers))
+  if (/\b(?:UrlFetchApp|DriveApp|GmailApp|ScriptApp|doGet|doPost|XmlService)\b/.test(helpers))
     throw Error('Unapproved service or HTTP handler in native Gate 0 closure');
   return { source, helpers, names };
 }
