@@ -132,11 +132,11 @@ jobs:
           if (codeFiles.length > 1)
             throw Error('Refusing: multiple remote source files');
           const code = codeFiles.length ? fs.readFileSync(codeFiles[0], 'utf8') : '';
-          if (code.trim() && !/^function\\s+myFunction\\s*\\(\\s*\\)\\s*\\{\\s*\\}\\s*;?$/.test(code.trim()))
+          if (code.trim() && !/^function\s+myFunction\s*\(\s*\)\s*\{\s*\}\s*;?$/.test(code.trim()))
             throw Error('Refusing: target project already contains non-starter code');
           if (!files.includes('appsscript.json'))
             throw Error('Refusing: remote Apps Script manifest missing');
-          process.stdout.write('Isolated target has only a fresh starter template\\n');
+          process.stdout.write('Isolated target has only a fresh starter template\n');
           NODE
           cd /
           rm -rf /tmp/op03-remote-preflight
