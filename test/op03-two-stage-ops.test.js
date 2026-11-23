@@ -38,11 +38,31 @@ test('abandon requires a real reason, an existing pending run and its EXACT run 
   assert.throws(() => fresh.ctx.abandonPendingIntegrityBackup('1', 'nothing is pending here'), /no_pending_backup/);
 });
 
-test('abandon refuses while any execution is active (never races a running phase)', () => {
+test('abandon refuses while an execution may still be alive (other run, or same run < 30 min)', () => {
   const h = interrupted(), id = pendingId(h);
-  h.props.INTEGRITY_ACTIVE_BACKUP = JSON.stringify({ id: 'other', startedAt: new Date().toISOString() });
-  assert.throws(() => h.ctx.abandonPendingIntegrityBackup(id, 'phase A was killed at 360 s'), /backup_busy/);
+  const reason = 'phase A was killed at 360 s';
+  h.props.INTEGRITY_ACTIVE_BACKUP = JSON.stringify({ id: 'other', startedAt: new Date(Date.now() - 3600e3).toISOString() });
+  assert.throws(() => h.ctx.abandonPendingIntegrityBackup(id, reason), /backup_busy/);
+  h.props.INTEGRITY_ACTIVE_BACKUP = JSON.stringify({ id, startedAt: new Date(Date.now() - 60e3).toISOString() });
+  assert.throws(() => h.ctx.abandonPendingIntegrityBackup(id, reason), /backup_busy/);
+  h.props.INTEGRITY_ACTIVE_BACKUP = 'not-json';
+  assert.throws(() => h.ctx.abandonPendingIntegrityBackup(id, reason), /backup_busy/);
   assert.ok(h.props.INTEGRITY_PENDING_BACKUP);
+  assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, 'not-json');
+});
+
+test('hard-killed run: its own stale ACTIVE marker (> 30 min) is cleared together with pending', () => {
+  for (const marker of [id => ({ id, startedAt: new Date(Date.now() - 31 * 60e3).toISOString() }),
+                        id => ({ id: 'verify-exec', phase: 'verify', pendingId: id, startedAt: new Date(Date.now() - 31 * 60e3).toISOString() })]) {
+    const h = interrupted(), id = pendingId(h);
+    h.props.INTEGRITY_ACTIVE_BACKUP = JSON.stringify(marker(id));
+    assert.equal(h.ctx.abandonPendingIntegrityBackup(id, 'phase killed at 360 s; owner decision').ok, true);
+    assert.equal(h.props.INTEGRITY_PENDING_BACKUP, undefined);
+    assert.equal(h.props.INTEGRITY_ACTIVE_BACKUP, undefined);
+    assert.equal(JSON.parse(h.props.INTEGRITY_LAST_ABANDONED_BACKUP).clearedDeadActive, true);
+    h.ctx.nightlyIntegrityJob();
+    assert.equal(h.ctx.finalizeNightlyIntegrityJob().state, 'verified');
+  }
 });
 
 test('abandon refuses a day that already has a certificate: finalize again instead', () => {

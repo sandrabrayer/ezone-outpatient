@@ -15,3 +15,11 @@
 **Not proven.** Native Apps Script timing and restore in an isolated project — see `docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md` (Gate 0). No production backup is certified by this PR.
 
 **Security.** No secrets in code or logs; property names only; fail-closed on every inconsistency.
+
+## 23 Nov 2026 — task 2 completion round (still DRAFT, not released)
+
+- **Monitoring fix:** finalizer refusals previously threw without an alert e-mail (a missing Phase A was silent). Every refusal except an intentional recovery hold now alerts. Markers are still never cleared automatically.
+- **Interrupted run:** `abandonPendingIntegrityBackup(runId, reason)` — editor-only, exact run ID, reason 10–500 chars. Refuses when an execution may be alive (ACTIVE of another run, or of this run < 30 min) and when the day is already certified. Clears a hard-killed run's own stale ACTIVE marker (> 30 min). Deletes no sheet, advances no sentinel/inventory, records `INTEGRITY_LAST_ABANDONED_BACKUP`, alerts.
+- **Manual tabs:** `draftOutpatientManualPolicy(backupId, day)` — read-only draft from a certified set; v3 policy path tested (certificate required, pending run blocks, archive overwrite/drop refused).
+- **#195 integration:** `test/op03-group-journal-integration.test.js` (skips on #199-only trees, runs on the combined tree): pending group intent certified as-is, cutover refused while pending, single resume after restore, missing journal refused, tamper caught. Gate 0 builder seeds one committed group row on combined sources; shared historical fixture unchanged.
+- **Tests:** `test/op03-v3-manual-policy.test.js` (10), `test/op03-two-stage-ops.test.js` (9), integration (10). Native Gate 0 not re-run (`nightlyIntegrityJob` and the finalizer success path unchanged); one native run on the combined candidate is required before release.

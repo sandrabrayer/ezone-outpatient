@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 task 2: manual-tab policy on v3, interrupted-run exit, finalizer alerts, #195 integration — DRAFT #199 (2026-11-23)
+- `finalizeNightlyIntegrityJob` now e-mails the integrity alert on every refusal (missing Phase A, stranded/invalid marker, lock, flag left after rollback); a recovery hold stays silent. Success path unchanged.
+- New editor-only `abandonPendingIntegrityBackup(runId, reason)` (owner-decided exit from an interrupted run; deletes nothing, certifies nothing) and read-only `draftOutpatientManualPolicy(backupId, day)` (Sheet1 / Copy of Clients policy draft; attestations stay null). Production manual-policy pin stays blank.
+- Native Gate 0 fixture seeds one committed `SessionOutcomeOps` row on the combined #195 source only. No production change. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-RELEASE-READINESS-20261123.md.
+
 ### OP-03 two-stage nightly backup + recovery certificate — DRAFT, dormant until `setupIntegrityTwoStage()` (2026-11-22)
 - Phase A (existing 02:00 job) captures and publishes a pending-only set; Phase B (one 03:00 finalizer) independently re-reads every snapshot, certifies `outpatient-verified-<day>`, then runs retention/sentinel. v3 restore refuses an uncertified set; v2 stays readable. Includes #198's single-inventory retention. No behaviour change in production until the operator activates staged mode. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md (isolated native rehearsal still required).
 

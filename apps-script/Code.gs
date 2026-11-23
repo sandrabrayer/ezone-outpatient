@@ -9850,17 +9850,18 @@ function setupIntegrityTwoStage() {
  * 360 s kill after INTEGRITY_PENDING_BACKUP was recorded). It never runs from a
  * trigger or HTTP route and never deletes or edits any backup sheet: partial
  * same-day snapshots stay as evidence and age out by normal retention. It
- * refuses while any execution is active, when the exact run ID is not supplied,
- * or when that day already carries a certificate (finalize again instead).
+ * refuses while an execution may still be alive (any ACTIVE marker of another
+ * run, or of this run younger than 30 min), when the exact run ID is not
+ * supplied, or when that day already carries a certificate (finalize instead).
  * Sentinels and INTEGRITY_REQUIRED_SOURCES are NOT advanced: an abandoned set is
  * never a recovery point. The pending marker is cleared LAST. */
+var INTEGRITY_DEAD_EXECUTION_MS = 30 * 60 * 1000; // 5x the 6-minute Apps Script hard limit
 function abandonPendingIntegrityBackup(expectedRunId, reason) {
   var why = String(reason == null ? '' : reason).trim();
   if (why.length < 10 || why.length > 500) throw new Error('abandon_reason_required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
     var props = PropertiesService.getScriptProperties();
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('backup_busy');
     var raw = props.getProperty('INTEGRITY_PENDING_BACKUP');
     if (!raw) throw new Error('no_pending_backup');
     var pending = null;
@@ -9869,15 +9870,31 @@ function abandonPendingIntegrityBackup(expectedRunId, reason) {
       throw new Error('pending_run_mismatch');
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(pending.day)) || !pending.backupId) throw new Error('invalid_pending_backup');
+    // A hard 360 s kill also strands INTEGRITY_ACTIVE_BACKUP. Clear it ONLY when
+    // it belongs to this same run (Phase A id or Phase B pendingId) and started
+    // more than 30 minutes ago: no Apps Script execution can still be alive.
+    var activeRaw = props.getProperty('INTEGRITY_ACTIVE_BACKUP'), active = null;
+    if (activeRaw) {
+      try { active = JSON.parse(activeRaw); } catch (_) { active = null; }
+      var started = active ? Date.parse(active.startedAt) : NaN;
+      if (!active || (String(active.id) !== String(pending.id) && String(active.pendingId) !== String(pending.id)) ||
+          !isFinite(started) || new Date().getTime() - started < INTEGRITY_DEAD_EXECUTION_MS) {
+        throw new Error('backup_busy');
+      }
+    }
     var backupSs = SpreadsheetApp.openById(pending.backupId);
     if (backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day)) {
       throw new Error('pending_set_certified; run finalizeNightlyIntegrityJob instead');
     }
     var record = JSON.stringify({ id: String(pending.id), day: String(pending.day),
-      abandonedAt: new Date().toISOString(), reason: why });
+      abandonedAt: new Date().toISOString(), reason: why, clearedDeadActive: !!activeRaw });
     props.setProperty('INTEGRITY_LAST_ABANDONED_BACKUP', record);
     if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== raw) throw new Error('pending_run_changed');
     props.deleteProperty('INTEGRITY_PENDING_BACKUP');
+    if (activeRaw) {
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') !== activeRaw) throw new Error('active_run_changed');
+      props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    }
   } finally { lock.releaseLock(); }
   _integritySendAlert('OUT pending backup ' + pending.day + ' was ABANDONED by an operator (not certified, ' +
     'no sheet deleted). Reason: ' + why);

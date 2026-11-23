@@ -161,3 +161,25 @@ phase packets; they do not establish that permissions stayed unchanged between
 observations or that an operator's pause attestation is true. Its four-minute
 cooperative phase budget checks immediately before hold deletion, while leaving
 an in-flight service call or hard Google termination outside its control.
+
+## Two-stage (v3) sets and the policy draft helper — 23 Nov 2026
+
+The verifier is unchanged and applies to v3 sets: `_integrityValidateRestoreSet`
+first requires the `outpatient-verified-<day>` certificate (missing or forged ⇒
+refused, policy or not), and a pending run blocks cutover. The policy's
+`manifestSha256` covers the final manifest, which the certificate binds to the run.
+
+`draftOutpatientManualPolicy(backupId, day)` (editor only, read-only) returns
+`{ approved:false, schemaVersion, policy }` for the current isolated target
+(`_ss()`), computed from a certified/valid set: IDs, day, manifest/metadata
+hashes and each unknown tab's prefix, grid hash, rows/columns and the target's
+allocated bounds. **Evidence fields, `role` and `sheetId` are `null`**: they are
+operator attestations and must be filled from the private evidence packet and
+reviewed. A draft cannot pass the verifier even if its digest is pinned.
+
+Decision for `Sheet1` / `Copy of Clients` (OP-03 task 2a): preserve both verbatim,
+never merge, refresh or drop them; `Sheet1` = `structural-empty` only while every
+captured cell is empty, `Copy of Clients` = `retained-archive`. The production pin
+stays blank until a real recovery with its own evidence record. Tests:
+`test/op03-v3-manual-policy.test.js`. Release context:
+[OP03-RELEASE-READINESS-20261123.md](OP03-RELEASE-READINESS-20261123.md).
