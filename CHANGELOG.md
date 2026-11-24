@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 task 2: manual-tab policy on v3, interrupted-run exit, finalizer alerts, #195 integration — DRAFT #199 (2026-11-23)
+- `finalizeNightlyIntegrityJob` now e-mails the integrity alert on every refusal (missing Phase A, stranded/invalid marker, lock, flag left after rollback); a recovery hold stays silent. Success path unchanged.
+- New editor-only `abandonPendingIntegrityBackup(runId, reason)` (owner-decided exit from an interrupted run; deletes nothing, certifies nothing) and read-only `draftOutpatientManualPolicy(backupId, day)` (Sheet1 / Copy of Clients policy draft; attestations stay null). Production manual-policy pin stays blank.
+- Native Gate 0 fixture seeds one committed `SessionOutcomeOps` row on the combined #195 source only. No production change. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-RELEASE-READINESS-20261123.md.
 ### OUT #195 release candidate now also carries the two-stage backup (#199) — DRAFT (2026-11-22)
 - Draft-only integration: finance / group receiver + deployed CRM/monitor + OP-03 two-stage backup in one tree. `INTEGRITY_DATA_SNAPSHOT_RE` recognises both the `session-outcome-ops` family and the new `pending-manifest` / `verified` families. QA-only branch push triggers removed from `test.yml`. New synthetic test: a committed GROUP `SessionOutcomeOps` row travels through Phase A → Phase B into the certified set, replay after restore credits once, a tampered journal fails closed. Release order and rollback: docs/OUT-195-RELEASE-RUNBOOK-20261122.md. Native isolated Google run still required.
 

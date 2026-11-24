@@ -10159,7 +10159,10 @@ function _integrityCertificateGrid(day, runId, manifestGrid) {
 function finalizeNightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) throw new Error('backup_busy');
+  if (!lock.tryLock(5000)) {
+    _integritySendAlert('OUT backup finalizer did not start: script lock unavailable; no certificate was written. Operator review required.');
+    throw new Error('backup_busy');
+  }
   var ownedMarker = '', pending, markerBefore;
   try {
     if (props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') !== '1')
@@ -10177,6 +10180,15 @@ function finalizeNightlyIntegrityJob() {
     ownedMarker = JSON.stringify({ id: Utilities.getUuid(), phase: 'verify',
                                     pendingId: pending.id, startedAt: new Date().toISOString() });
     props.setProperty('INTEGRITY_ACTIVE_BACKUP', ownedMarker);
+  } catch (refusal) {
+    // A refused finalizer means this night's set is NOT certified (missing
+    // Phase A, stranded marker, leftover trigger after rollback...). Only an
+    // intentional recovery hold is silent; nothing is auto-cleared here.
+    if (String(refusal && refusal.message) !== 'recovery_pending') {
+      _integritySendAlert('OUT backup finalizer refused (' + String(refusal && refusal.message) +
+        '); no certificate was written and no marker was cleared. Operator review required.');
+    }
+    throw refusal;
   } finally { lock.releaseLock(); }
   try {
     var backupSs = SpreadsheetApp.openById(pending.backupId);
@@ -10264,6 +10276,95 @@ function setupIntegrityTwoStage() {
     props.setProperty('INTEGRITY_TWO_STAGE_ENABLED', '1');
     return { ok: true, nightly: '02:00 existing', finalizer: '03:00', enabled: true };
   } finally { lock.releaseLock(); }
+}
+
+/* Editor-only, owner-decided exit from an INTERRUPTED Phase A (e.g. a hard
+ * 360 s kill after INTEGRITY_PENDING_BACKUP was recorded). It never runs from a
+ * trigger or HTTP route and never deletes or edits any backup sheet: partial
+ * same-day snapshots stay as evidence and age out by normal retention. It
+ * refuses while an execution may still be alive (any ACTIVE marker of another
+ * run, or of this run younger than 30 min), when the exact run ID is not
+ * supplied, or when that day already carries a certificate (finalize instead).
+ * Sentinels and INTEGRITY_REQUIRED_SOURCES are NOT advanced: an abandoned set is
+ * never a recovery point. The pending marker is cleared LAST. */
+var INTEGRITY_DEAD_EXECUTION_MS = 30 * 60 * 1000; // 5x the 6-minute Apps Script hard limit
+function abandonPendingIntegrityBackup(expectedRunId, reason) {
+  var why = String(reason == null ? '' : reason).trim();
+  if (why.length < 10 || why.length > 500) throw new Error('abandon_reason_required');
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var raw = props.getProperty('INTEGRITY_PENDING_BACKUP');
+    if (!raw) throw new Error('no_pending_backup');
+    var pending = null;
+    try { pending = JSON.parse(raw); } catch (_) { pending = null; }
+    if (!pending || !pending.id || String(expectedRunId == null ? '' : expectedRunId) !== String(pending.id)) {
+      throw new Error('pending_run_mismatch');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(pending.day)) || !pending.backupId) throw new Error('invalid_pending_backup');
+    // A hard 360 s kill also strands INTEGRITY_ACTIVE_BACKUP. Clear it ONLY when
+    // it belongs to this same run (Phase A id or Phase B pendingId) and started
+    // more than 30 minutes ago: no Apps Script execution can still be alive.
+    var activeRaw = props.getProperty('INTEGRITY_ACTIVE_BACKUP'), active = null;
+    if (activeRaw) {
+      try { active = JSON.parse(activeRaw); } catch (_) { active = null; }
+      var started = active ? Date.parse(active.startedAt) : NaN;
+      if (!active || (String(active.id) !== String(pending.id) && String(active.pendingId) !== String(pending.id)) ||
+          !isFinite(started) || new Date().getTime() - started < INTEGRITY_DEAD_EXECUTION_MS) {
+        throw new Error('backup_busy');
+      }
+    }
+    var backupSs = SpreadsheetApp.openById(pending.backupId);
+    if (backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day)) {
+      throw new Error('pending_set_certified; run finalizeNightlyIntegrityJob instead');
+    }
+    var record = JSON.stringify({ id: String(pending.id), day: String(pending.day),
+      abandonedAt: new Date().toISOString(), reason: why, clearedDeadActive: !!activeRaw });
+    props.setProperty('INTEGRITY_LAST_ABANDONED_BACKUP', record);
+    if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== raw) throw new Error('pending_run_changed');
+    props.deleteProperty('INTEGRITY_PENDING_BACKUP');
+    if (activeRaw) {
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') !== activeRaw) throw new Error('active_run_changed');
+      props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    }
+  } finally { lock.releaseLock(); }
+  _integritySendAlert('OUT pending backup ' + pending.day + ' was ABANDONED by an operator (not certified, ' +
+    'no sheet deleted). Reason: ' + why);
+  return { ok: true, state: 'abandoned', day: String(pending.day), certified: false };
+}
+
+/* Read-only helper for the manual-tab (Sheet1 / Copy of Clients) recovery
+ * policy. It computes ONLY the facts the code can recompute from a CERTIFIED
+ * (v3) or valid v2 set and the current isolated target (_ss()). Operator
+ * attestations, roles and source sheet IDs stay null, so a draft can never pass
+ * _integrityVerifyManualPolicy unchanged, and nothing is pinned or written.
+ * A reviewed commit must fill evidence/roles and pin the canonical digest. */
+function draftOutpatientManualPolicy(backupId, day) {
+  var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
+  var captured = _integrityValidateRestoreSet(backupSs, day, false), meta = _integrityRecoveryMetadata(captured);
+  if (targetSs.getId() === backupSs.getId() || targetSs.getId() === meta.sourceSpreadsheetId) {
+    throw new Error('Recovery requires an isolated target');
+  }
+  var unknown = JSON.parse(meta.unclassifiedSources);
+  if (!unknown.length) throw new Error('No unclassified sheets; no manual policy needed');
+  var manifest = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day).getDataRange().getValues();
+  var metadata = captured.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
+  var evidence = {};
+  ['recordPath', 'sha256', 'operator', 'captureStartedAt', 'captureEndedAt', 'beforeInventorySha256',
+   'afterInventorySha256', 'nativeCopyId', 'directWritesPaused', 'formulasAbsent', 'nativePropertiesVerified',
+   'targetCreatedAt', 'targetInitiallyEmpty', 'targetOwnerOnly'].forEach(function (k) { evidence[k] = null; });
+  var tabs = unknown.map(function (name) {
+    var item = captured.filter(function (x) { return x.source === name; })[0];
+    if (!item || item.absent) throw new Error('Unclassified sheet missing from certified set: ' + name);
+    var sh = targetSs.getSheetByName(name);
+    return { source: name, sheetId: null, prefix: item.prefix, absent: false, role: null,
+      sha256: _integrityFingerprint(item.grid), rows: item.grid.length, columns: item.grid[0].length,
+      allocatedRows: sh ? sh.getMaxRows() : null, allocatedColumns: sh ? sh.getMaxColumns() : null };
+  });
+  return { approved: false, schemaVersion: meta.schemaVersion,
+    policy: { version: 1, sourceId: meta.sourceSpreadsheetId, backupId: backupSs.getId(), day: day,
+      targetId: targetSs.getId(), manifestSha256: _integrityFingerprint(manifest),
+      metadataSha256: _integrityFingerprint(metadata.grid), evidence: evidence, tabs: tabs } };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

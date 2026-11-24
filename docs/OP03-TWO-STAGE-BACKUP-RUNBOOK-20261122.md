@@ -116,7 +116,9 @@ retention failures and missing required source; those must all fail closed.
   independently read back; a full operational restore remains **NO-GO** until
   the separate reviewed/pinned manual recovery policy is accepted, then exercised
   in another isolated test. Never drop or auto-whitelist those tabs.
-- **Combined OUT #195 group journal**: this PR #199 branch is based on deployed
+- **Combined OUT #195 group journal**: on a combined source the two-stage
+  builder now seeds ONE committed `SessionOutcomeOps` row (the shared historical
+  fixture stays byte-identical). This PR #199 branch is based on deployed
   source and does **not** by itself carry the unmerged group-credit journal
   `SessionOutcomeOps`. Run a source-hash-pinned isolated A/B and restore again
   against the **combined #195 candidate** when the harness is present there,
@@ -139,9 +141,15 @@ retention failures and missing required source; those must all fail closed.
 
 - **Before `setupIntegrityTwoStage()`**: nothing to roll back; code is dormant.
 - **After activation, no pending set**: delete the `finalizeNightlyIntegrityJob` trigger, delete `INTEGRITY_TWO_STAGE_ENABLED`. Legacy job resumes next night. Certified v3 sets stay readable.
-- **After activation, pending set exists** (Phase B failed): do NOT clear `INTEGRITY_PENDING_BACKUP` blindly. First re-run `finalizeNightlyIntegrityJob` once; if it fails again, inspect the failure, keep the last certified set as the recovery point, then clear the marker only with the owner's explicit decision and record it on #124.
+- **After activation, pending set exists** (Phase A interrupted or Phase B failed): never clear `INTEGRITY_PENDING_BACKUP` by hand. First re-run `finalizeNightlyIntegrityJob` once. If it fails again (e.g. `pending_manifest_missing` after a hard 360 s kill), keep the last certified set as the recovery point and, **only on the owner's explicit decision**, run `abandonPendingIntegrityBackup('<run id from the property>', '<reason ≥10 chars>')` from the editor. It refuses while an execution may still be alive (an ACTIVE marker of another run, or of this run started < 30 min ago) or when that day already has a certificate (finalize instead); a hard-killed run's own stale ACTIVE marker (> 30 min) is cleared with the pending marker. It deletes no sheet, advances no sentinel, records `INTEGRITY_LAST_ABANDONED_BACKUP` and sends an alert. Record the decision on #124.
+- **Monitoring**: every finalizer refusal except an intentional recovery hold sends the integrity alert e-mail (`INTEGRITY_ALERT_EMAIL`), including `no_pending_backup` (Phase A did not run) and `two_stage_not_enabled` (finalizer trigger left after a rollback — delete it).
 - **Code rollback**: redeploy the previous Apps Script version on the existing deployment (never a new deployment). Any v3 set already certified remains valid for v2-style inspection.
 
 ## Sheets invariants
 
 Headers append-only; snapshot families only ever added (`pending-manifest`, `verified` are new names matched by `INTEGRITY_DATA_SNAPSHOT_RE`). Manual tabs (`Sheet1`, `Copy of Clients`) are captured as `other-<hash>` and never deleted by retention.
+
+## 23 Nov 2026 follow-up
+
+Release readiness, the manual-tab policy decision, #195 integration results and
+the read-only audit of the real 23 Nov backup: [OP03-RELEASE-READINESS-20261123.md](OP03-RELEASE-READINESS-20261123.md).
