@@ -10,9 +10,9 @@ function fixture() {
   const state = sb.post({ action: 'getRenewalState', clientId: client.id });
   assert.equal(state.ok, true);
   const request = { action: 'reserveRenewal', opId: 'renewal-fixture-0001', clientId: client.id,
-    snapshot: state.snapshot, cycleDate: state.cycleDate,
+    snapshot: state.snapshot, cycleDate: state.cycleDate, coverageIntent: 'advance',
     patch: { pricePerSession: 600, paymentDate: '2026-02-25', nextBillingDate: '2026-03-28' },
-    payment: { id: 'pay::journal-client::base::2026-02', clientId: client.id, clientName: client.name,
+    payment: { id: state.paymentId, clientId: client.id, clientName: client.name,
       billingType: 'monthly', dueDate: '2026-02-28', amountDue: 600, amountPaid: 600,
       status: 'paid', paymentDate: '2026-02-25', coverageStart: '2026-02-28', coverageEnd: '2026-03-27',
       notes: 'תשלום לבדיקה' } };

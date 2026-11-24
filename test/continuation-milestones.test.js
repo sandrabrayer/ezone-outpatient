@@ -103,10 +103,23 @@ test('linking roster patients to outpatient records: phone only, exactly one mat
 function syncWith(sb, patients, user) {
   return sb.post({ action: 'syncContinuationMilestones', user: user || 'ורד', patients, rosterComplete: true });
 }
+// These historical workflow fixtures assert specific November 2026 due dates.
+// Pin their simulated Apps Script clock rather than letting a CI run tomorrow
+// retroactively expire milestones. Time-relative previews use the live clock.
+function milestoneSandbox() {
+  const sb = sandbox();
+  const at = '2026-11-19T12:00:00.000Z';
+  class FixedDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [at])); }
+    static now() { return Date.parse(at); }
+  }
+  sb.ctx.Date = FixedDate;
+  return sb;
+}
 const openIds = (sb) => sb.rows('Tasks').filter((t) => t.status === 'open').map((t) => t.id).sort();
 
 test('sync: creates the three milestone tasks once (idempotent), under the stable subject, owner ורד, never money', () => {
-  const sb = sandbox();
+  const sb = milestoneSandbox();
   const r1 = syncWith(sb, [{ name: 'נועה', house: 'ramot', entryDate: '2026-10-20', phone: '050-1234567' }]);
   assert.equal(r1.ok, true); assert.equal(r1.created, 3);
   const r2 = syncWith(sb, [{ name: 'נועה', house: 'ramot', entryDate: '2026-10-20', phone: '0501234567' }]);
@@ -128,7 +141,7 @@ test('sync: creates the three milestone tasks once (idempotent), under the stabl
 });
 
 test('sync: no entry date → no task («חסר תאריך כניסה»); no id/phone → no task; a milestone already in the past is not opened', () => {
-  const sb = sandbox();
+  const sb = milestoneSandbox();
   const r = syncWith(sb, [
     { name: 'א', house: 'ramot', entryDate: '', phone: '0501111111' },
     { name: 'ב', house: 'ramot', entryDate: '2026-10-20' },               // name only
@@ -140,7 +153,7 @@ test('sync: no entry date → no task («חסר תאריך כניסה»); no id/
 });
 
 test('sync: a corrected entry date MOVES the open tasks (same count, new ids/dates) instead of duplicating; done tasks stay', () => {
-  const sb = sandbox();
+  const sb = milestoneSandbox();
   syncWith(sb, [{ name: 'נועה', house: 'ramot', entryDate: '2026-10-20', phone: '0501234567' }]);
   // Vered already handled month 1
   const m1 = 'cont::phone:0501234567::2026-10-20::m1';
@@ -160,7 +173,7 @@ test('sync: a corrected entry date MOVES the open tasks (same count, new ids/dat
 });
 
 test('sync: discharge (left the roster) and terminal CRM status close the open tasks; an incomplete roster never cancels', () => {
-  const sb = sandbox();
+  const sb = milestoneSandbox();
   syncWith(sb, [{ name: 'א', house: 'ramot', entryDate: '2026-10-20', phone: '0501111111' }, { name: 'ב', house: 'asher', entryDate: '2026-10-22', phone: '0502222222' }]);
   assert.equal(openIds(sb).length, 6);
   // partial / failed roster: rosterComplete false → nothing cancelled
@@ -207,7 +220,7 @@ test('saveContinuation: CRM columns validated fail-closed, kept when a legacy pa
 });
 
 test('a contact logged on a milestone task closes it, is filed under the stable subject and keeps the other milestones open', () => {
-  const sb = sandbox();
+  const sb = milestoneSandbox();
   syncWith(sb, [{ name: 'נועה', house: 'ramot', entryDate: '2026-10-20', phone: '0501234567' }]);
   const m1 = 'cont::phone:0501234567::2026-10-20::m1';
   const r = sb.post({ action: 'logContact', user: 'ורד', submissionId: 'sub-cont-1', contact: { clientId: 'cont:phone:0501234567', channel: 'phone', outcome: 'awaiting_decision', summary: 'הוצעה חבילת המשך', taskId: m1 }, next: { none: true, explanation: 'ממתינים לתשובה עד אבן הדרך הבאה' } });

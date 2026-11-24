@@ -523,7 +523,9 @@ var STOP_FLAGS_HEADERS = [
 var EXTRA_SESSION_HEADERS = [
   'id', 'phone', 'patientName', 'treatmentType', 'therapist',
   'monthKey', 'quota', 'used', 'requestedBy', 'note',
-  'requestedAt', 'status', 'approvedBy', 'approvedAt'
+  'requestedAt', 'status', 'approvedBy', 'approvedAt',
+  // V2 append-only: stable Therapists booking row ID for retry-safe requests.
+  'bookingRowId'
 ];
 
 /* Continuation-track (מסלול המשך) workflow state. Yarden works over the roster of
@@ -1752,6 +1754,27 @@ function _saveAll(payload) {
         existingById[eid] = existing[e];
       }
     }
+    // One saved client owns a lead conversion. Check under the same lock,
+    // before journal/tombstone/row writes: a stale tab can generate a new
+    // client id for the lead another tab has already admitted.
+    var conversionOwners = Object.create(null);
+    existing.forEach(function (c) {
+      if (c.fromLead) conversionOwners[String(c.fromLead)] = String(c.id);
+    });
+    for (var ci = 0; ci < clients.length; ci++) {
+      var candidate = clients[ci], candidateId = String(candidate.id || '');
+      var savedCandidate = existingById[candidateId];
+      // The original referral remains attached to its saved client, including
+      // when an older browser omits the field. Never silently move that link.
+      if (savedCandidate && savedCandidate.fromLead) candidate.fromLead = savedCandidate.fromLead;
+      var candidateLead = String(candidate.fromLead || '');
+      if (!candidateLead) continue;
+      var unchangedOwner = savedCandidate && String(savedCandidate.fromLead || '') === candidateLead;
+      if (!unchangedOwner && conversionOwners[candidateLead] && conversionOwners[candidateLead] !== candidateId) {
+        return { ok: false, error: 'lead_already_converted', existingClientId: conversionOwners[candidateLead] };
+      }
+      conversionOwners[candidateLead] = candidateId;
+    }
     var stampedClients = 0;
     // Stale-save conflict refusal (PR 2): rows another person changed after
     // this tab loaded them are refused ONE BY ONE — the sheet row is written
@@ -2538,12 +2561,20 @@ function _upsertPayment(payment) {
       for (var i = 0; i < ids.length; i++) {
         if (String(ids[i][0]) === String(payment.id)) {
           _finGuard([sh.getRange(i + 2, PAYMENTS_HEADERS.indexOf('clientId') + 1).getValue()]);
+          // An exact ID must not select one of multiple receipts for this
+          // cycle. Historical verification requires an unambiguous source row.
+          if (String(payment.billingType || '') === 'monthly' && String(payment.id || '').indexOf('::chg-') < 0 &&
+              _finPayments(String(payment.id), String(payment.clientId), _coverageDateISO(payment.dueDate) || '', true).length > 1) return { ok: false, error: 'duplicate_monthly_cycle' };
           _forcePaymentTextCells(sh, i + 2);
           sh.getRange(i + 2, 1, 1, PAYMENTS_HEADERS.length).setValues([row]);
           return { ok: true, payment: payment, updated: true };
         }
       }
     }
+    // New IDs never duplicate an existing logical cycle, including old clients
+    // submitting an unpaid/partial month-key row beside a date-key receipt.
+    if (String(payment.billingType || '') === 'monthly' && String(payment.id || '').indexOf('::chg-') < 0 &&
+        _finPayments(String(payment.id), String(payment.clientId), _coverageDateISO(payment.dueDate) || '', true).length) return { ok: false, error: 'duplicate_monthly_cycle' };
     // OP-BILL-01: fail closed on NEW fully-paid base-month receipts. Existing
     // historical rows are left unchanged on read and are not migrated here.
     // A custom explicit coverage period can differ from paid-date (advance),
@@ -3788,7 +3819,9 @@ var SESSION_LOG_HEADERS = [
   // whose revision is OLDER than the stored one (`stale_report_revision`) — two approved
   // pushes of one session that cross in flight can no longer leave the older result.
   // '' = recorded before this column / entered in Outpatient itself.
-  'reportRevision'
+  'reportRevision',
+  // V2 append-only: one outcome per participant in a shared group session.
+  'treatmentId'
 ];
 
 /* Exact report instant: null = genuinely absent; NaN = present but invalid.
@@ -3837,6 +3870,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   // Equal revision is a replay only when the stored result/identity agree.
   // Name is a display field; current pay rates/other sessions must not reprice a retry.
   var keys = ['sessionId', 'phone', 'clientId', 'therapist', 'clinicalTreatmentType', 'billingType', 'date', 'outcome', 'sessionStatus'];
+  if (incomingRow.billingType === GROUP_BILLING) keys.push('treatmentId');
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     var a = String(oldRow[key] == null ? '' : oldRow[key]).trim();
@@ -3860,6 +3894,7 @@ function _sessionReportOrder(oldRow, incomingRow, incomingRev, source, payload) 
   return { ok: true, replay: {
     ok: true, sessionId: String(oldRow.sessionId), therapistPay: pay,
     clientSessionValue: value, sessionStatus: String(oldRow.sessionStatus),
+    treatmentId: String(oldRow.treatmentId == null ? '' : oldRow.treatmentId),
     creditStatus: String(oldRow.creditStatus == null ? '' : oldRow.creditStatus),
     upserted: true, replayed: true, reportRevision: new Date(stored).toISOString()
   } };
@@ -3912,6 +3947,233 @@ function _computeSessionValue(billingType, freqPerWeek) {
   return _billingPrice(billingType, freqPerWeek);
 }
 
+
+/* Durable participant-credit journal. Apps Script cannot atomically set a
+ * Clients cell and a SessionLog row in separate Sheets. Every GROUP outcome,
+ * including a manual correction, records its immutable intent under ScriptLock
+ * before either financial side effect. A retry inspects both persisted effects,
+ * resumes only from an exact known state and otherwise holds for reconciliation.
+ * In particular it NEVER writes a guessed balance over later client activity. */
+var SESSION_OUTCOME_OP_HEADERS = [
+  'opKey', 'payloadStamp', 'sessionId', 'treatmentId', 'clientId',
+  'fromCredits', 'toCredits', 'oldRowStamp', 'newRowStamp',
+  'newRowJson', 'state', 'createdAt'
+];
+var SESSION_OUTCOME_OP_SHEET = 'SessionOutcomeOps';
+var SESSION_OUTCOME_ROW_STAMP_KEYS = [
+  'sessionId', 'treatmentId', 'phone', 'clientId', 'therapist',
+  'clinicalTreatmentType', 'billingType', 'date', 'outcome',
+  'therapistPay', 'clientSessionValue', 'sessionStatus',
+  'matchStatus', 'creditStatus', 'payModel',
+  'forwardedToPayroll', 'oneTimeSessionId', 'reportRevision'
+];
+function _soRowStamp(row) {
+  if (!row) return '!none';
+  return JSON.stringify(SESSION_OUTCOME_ROW_STAMP_KEYS.map(function(k) {
+    return String(row[k] == null ? '' : row[k]).trim();
+  }));
+}
+function _soPayloadStamp(row, incomingRev, source) {
+  return JSON.stringify([
+    row.sessionId, row.treatmentId, row.clientId, row.phone,
+    row.therapist, row.clinicalTreatmentType, row.billingType,
+    row.date, row.outcome,
+    incomingRev === null ? '' : new Date(incomingRev).toISOString(),
+    source === 'outpatient' ? 'outpatient' : 'therapists'
+  ]);
+}
+function _soEventKey(row, incomingRev, source) {
+  var stamp = _soPayloadStamp(row, incomingRev, source);
+  // Manual corrections do not carry a server-approved reportRevision.
+  // Their input fingerprint is the stable key, not a client-supplied UUID.
+  return JSON.stringify([row.sessionId, row.treatmentId,
+    incomingRev === null ? 'manual:' + stamp : new Date(incomingRev).toISOString()]);
+}
+function _soOpenJournal() {
+  var ss = _ss(), props = PropertiesService.getScriptProperties();
+  var sh = ss.getSheetByName(SESSION_OUTCOME_OP_SHEET);
+  if (!sh) {
+    if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) throw new Error('session_credit_journal_missing');
+    sh = _ensureSheet(SESSION_OUTCOME_OP_SHEET, SESSION_OUTCOME_OP_HEADERS);
+    props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    return sh;
+  }
+  var headers = sh.getRange(1, 1, 1, SESSION_OUTCOME_OP_HEADERS.length).getValues()[0];
+  if (sh.getLastColumn() !== SESSION_OUTCOME_OP_HEADERS.length ||
+      JSON.stringify(headers) !== JSON.stringify(SESSION_OUTCOME_OP_HEADERS))
+    throw new Error('session_credit_journal_headers');
+  if (!props.getProperty('SESSION_OUTCOME_OPS_CREATED')) props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+  return sh;
+}
+function _soJournalRows(sh) {
+  var last = sh.getLastRow(), out = [], seen = Object.create(null);
+  if (last < 2) return out;
+  var all = sh.getRange(2, 1, last - 1, SESSION_OUTCOME_OP_HEADERS.length).getValues();
+  for (var i = 0; i < all.length; i++) {
+    var row = {};
+    for (var j = 0; j < SESSION_OUTCOME_OP_HEADERS.length; j++) {
+      row[SESSION_OUTCOME_OP_HEADERS[j]] = all[i][j];
+    }
+    if (!String(row.opKey || '').trim()) {
+      if (SESSION_OUTCOME_OP_HEADERS.some(function(h) { return row[h] !== '' && row[h] != null; }))
+        throw new Error('session_credit_journal_corrupt');
+      continue;
+    }
+    var key = String(row.opKey), intended;
+    try { intended = JSON.parse(String(row.newRowJson || '')); } catch (_) {
+      throw new Error('session_credit_journal_corrupt');
+    }
+    if (seen[key] || ['pending','committed'].indexOf(String(row.state)) < 0 ||
+        !String(row.clientId || '') || !String(row.sessionId || '') ||
+        !String(row.treatmentId || '') ||
+        !intended || String(intended.clientId) !== String(row.clientId) ||
+        String(intended.sessionId) !== String(row.sessionId) ||
+        String(intended.treatmentId) !== String(row.treatmentId) ||
+        _soRowStamp(intended) !== String(row.newRowStamp) ||
+        !isFinite(Number(row.fromCredits)) || !isFinite(Number(row.toCredits)))
+      throw new Error('session_credit_journal_corrupt');
+    seen[key] = true;
+    row._sheetRow = i + 2; out.push(row);
+  }
+  return out;
+}
+function _soLiveRow(logSh, sessionId, treatmentId) {
+  var rows = _readAll(logSh, SESSION_LOG_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].sessionId) !== sessionId) continue;
+    if (String(rows[i].treatmentId || '') !== treatmentId) continue;
+    if (hit) return { ambiguous: true };
+    hit = rows[i];
+  }
+  return { row: hit };
+}
+function _soLiveCredit(clientsSh, clientId) {
+  var rows = _readAll(clientsSh, CLIENTS_HEADERS), hit = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id) !== clientId) continue;
+    if (hit) return null; // duplicate identity is not a safe balance
+    hit = rows[i];
+  }
+  return hit ? _toCredits(hit.creditsOwed) : null;
+}
+function _soWriteLog(logSh, row, oldRowExists) {
+  var arr = SESSION_LOG_HEADERS.map(function(h) {
+    return row[h] == null ? '' : row[h];
+  });
+  var index = SESSION_LOG_HEADERS.indexOf('treatmentId') + 1;
+  var last = logSh.getLastRow();
+  if (oldRowExists) {
+    var ids = logSh.getRange(2, 1, last - 1, 1).getValues(), found = 0;
+    for (var r = 0; r < ids.length; r++) {
+      if (String(ids[r][0]) !== String(row.sessionId) ||
+          String(logSh.getRange(r + 2, index).getValue() || '') !== String(row.treatmentId)) continue;
+      found++;
+      if (found > 1) throw new Error('group_outcome_duplicate_identity');
+      logSh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+      logSh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([arr]);
+    }
+    if (found !== 1) throw new Error('group_outcome_row_disappeared');
+  } else {
+    var next = last + 1;
+    if (typeof logSh.getMaxRows === 'function' && next > logSh.getMaxRows())
+      logSh.insertRowsAfter(logSh.getMaxRows(), next - logSh.getMaxRows());
+    logSh.getRange(next, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
+    logSh.appendRow(arr);
+  }
+}
+function _soAck(op, row, replayed) {
+  var result = {
+    ok: true, sessionId: String(op.sessionId), treatmentId: String(op.treatmentId),
+    therapistPay: _toNumberOrZero(row.therapistPay),
+    clientSessionValue: row.clientSessionValue === '' ? null : Number(row.clientSessionValue),
+    sessionStatus: String(row.sessionStatus), creditStatus: String(row.creditStatus || ''),
+    creditsOwed: Number(op.toCredits)
+  };
+  if (row.reportRevision) result.reportRevision = String(row.reportRevision);
+  if (op.oldRowStamp !== '!none') result.upserted = true;
+  else result.appended = true;
+  if (replayed) result.replayed = true;
+  return result;
+}
+function _soRecoveryHold() { return { ok: false, reason: 'session_credit_recovery_pending' }; }
+function _soResumeOp(op, journalSh, clientsSh, logSh, user, replayed) {
+  var from = Number(op.fromCredits), to = Number(op.toCredits);
+  if (!isFinite(from) || !isFinite(to) || from < 0 || to < 0) return _soRecoveryHold();
+  var row;
+  try { row = JSON.parse(String(op.newRowJson || '')); } catch (_) { return _soRecoveryHold(); }
+  if (!row || String(row.sessionId) !== String(op.sessionId) ||
+      String(row.treatmentId) !== String(op.treatmentId) ||
+      String(row.clientId) !== String(op.clientId) ||
+      _soRowStamp(row) !== String(op.newRowStamp)) return _soRecoveryHold();
+  var current = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+  if (current.ambiguous) return _soRecoveryHold();
+  var stamp = _soRowStamp(current.row), oldStamp = String(op.oldRowStamp);
+  var oldStillThere = stamp === oldStamp, newAlreadyThere = stamp === String(op.newRowStamp);
+  var balance = _soLiveCredit(clientsSh, String(op.clientId));
+  if ((!oldStillThere && !newAlreadyThere) || balance === null ||
+      (balance !== from && balance !== to)) return _soRecoveryHold();
+  // A row that committed while its credit did not is NOT safe to replay.
+  // It might have been changed by a different writer; require reconciliation.
+  if (newAlreadyThere && balance !== to) return _soRecoveryHold();
+  if (oldStillThere && !newAlreadyThere) {
+    if (balance === from && from !== to) {
+      if (!_writeCreditsOwed(clientsSh, String(op.clientId), to, user))
+        throw new Error('session_credit_client_not_found');
+      if (_soLiveCredit(clientsSh, String(op.clientId)) !== to)
+        throw new Error('session_credit_write_unverified');
+    }
+    // If the credit was already applied before a lost response, never add it
+    // again: persist ONLY the still-missing log row.
+    _soWriteLog(logSh, row, oldStamp !== '!none');
+    var logged = _soLiveRow(logSh, String(op.sessionId), String(op.treatmentId));
+    if (logged.ambiguous || _soRowStamp(logged.row) !== String(op.newRowStamp))
+      throw new Error('session_outcome_write_unverified');
+  }
+  if (_soLiveCredit(clientsSh, String(op.clientId)) !== to) return _soRecoveryHold();
+  journalSh.getRange(op._sheetRow, SESSION_OUTCOME_OP_HEADERS.indexOf('state') + 1).setValue('committed');
+  return _soAck(op, row, replayed);
+}
+function _soPendingGroup(journalSh, row, incomingRev, source, clientsSh, logSh, user) {
+  var ops = _soJournalRows(journalSh), key = _soEventKey(row, incomingRev, source);
+  var stamp = _soPayloadStamp(row, incomingRev, source), found = null;
+  for (var i = 0; i < ops.length; i++) {
+    var op = ops[i];
+    var sameKey = String(op.opKey) === key;
+    var pendingForClient = String(op.state) !== 'committed' &&
+      (String(op.clientId) === String(row.clientId) ||
+        (String(op.sessionId) === String(row.sessionId) &&
+         String(op.treatmentId) === String(row.treatmentId)));
+    if (sameKey && String(op.state) === 'committed') {
+      // The log, not a stale journal entry, owns replay decisions.
+      continue;
+    }
+    if (!pendingForClient && !(sameKey && String(op.state) !== 'committed')) continue;
+    if (found || !sameKey || String(op.payloadStamp) !== stamp) return _soRecoveryHold();
+    found = op;
+  }
+  return found ? _soResumeOp(found, journalSh, clientsSh, logSh, user, true) : null;
+}
+function _soCommitGroup(journalSh, clientsSh, logSh, row, oldRow,
+                        fromCredits, toCredits, incomingRev, source, user) {
+  var key = _soEventKey(row, incomingRev, source);
+  var prior = _soJournalRows(journalSh);
+  for (var i = 0; i < prior.length; i++) {
+    if (String(prior[i].opKey) === key) return _soRecoveryHold();
+    if (String(prior[i].state) !== 'committed' &&
+        String(prior[i].clientId) === String(row.clientId)) return _soRecoveryHold();
+  }
+  var op = {
+    opKey: key, payloadStamp: _soPayloadStamp(row, incomingRev, source),
+    sessionId: String(row.sessionId), treatmentId: String(row.treatmentId),
+    clientId: String(row.clientId), fromCredits: fromCredits, toCredits: toCredits,
+    oldRowStamp: _soRowStamp(oldRow), newRowStamp: _soRowStamp(row),
+    newRowJson: JSON.stringify(row), state: 'pending', createdAt: new Date().toISOString()
+  };
+  op._sheetRow = journalSh.getLastRow() + 1;
+  journalSh.appendRow(SESSION_OUTCOME_OP_HEADERS.map(function(h) { return op[h]; }));
+  return _soResumeOp(op, journalSh, clientsSh, logSh, user, false);
+}
+
 function _recordSessionOutcome(payload, source) {
   var sessionId = String((payload && payload.sessionId) || '').trim();
   if (!sessionId) return { ok: false, reason: 'missing_session_id' };
@@ -3928,6 +4190,13 @@ function _recordSessionOutcome(payload, source) {
     return { ok: false, reason: 'unknown_type' };
   }
   var billingType = _clinicalToBilling(clinical);
+  // A group session has one shared sessionId but MANY per-patient outcome rows.
+  // An immutable booking row ID is required; absent IDs cannot safely upsert.
+  var treatmentId = String(payload && payload.treatmentId == null ? '' : payload.treatmentId).trim();
+  if (billingType === GROUP_BILLING &&
+      (!treatmentId || !/^[A-Za-z0-9_.:-]{4,160}$/.test(treatmentId))) {
+    return { ok: false, reason: treatmentId ? 'invalid_treatment_id' : 'missing_treatment_id' };
+  }
   // A listed roster misspelling resolves to its TherapistRates name (explicit list only —
   // THERAPIST_NAME_ALIASES); the row is priced and stored under that one name.
   var therapist = _canonicalTherapistName(String((payload && payload.therapist) || '').trim());
@@ -3987,9 +4256,16 @@ function _recordSessionOutcome(payload, source) {
         matchStatus = 'multi_match';
       }
     }
+    // A group result belongs to exactly ONE participant. Logging success while
+    // their identity is ambiguous would silently skip participant credit updates.
+    if (billingType === GROUP_BILLING && matchStatus !== 'matched') {
+      return { ok: false, reason: matchStatus === 'multi_match' ?
+        'ambiguous_group_participant' : 'group_participant_not_found' };
+    }
 
     var rowObj = {
       sessionId:          sessionId,
+      treatmentId:        treatmentId,
       phone:              phone,
       patientName:        patientName,
       clientId:           clientId,
@@ -4023,7 +4299,36 @@ function _recordSessionOutcome(payload, source) {
     var logRows = _readAll(sh, SESSION_LOG_HEADERS);
     var oldRow = null;
     for (var lr = 0; lr < logRows.length; lr++) {
-      if (String(logRows[lr].sessionId) === sessionId) { oldRow = logRows[lr]; break; }
+      var candidate = logRows[lr];
+      if (String(candidate.sessionId) !== sessionId) continue;
+      // Never reinterpret a legacy shared group row as one participant or let
+      // a package event overwrite a group event with the same session ID.
+      if (billingType === GROUP_BILLING) {
+        if (String(candidate.billingType) !== GROUP_BILLING) return { ok: false, reason: 'source_outcome_conflict' };
+        var priorTreatmentId = String(candidate.treatmentId == null ? '' : candidate.treatmentId).trim();
+        if (!priorTreatmentId) return { ok: false, reason: 'legacy_group_identity_review' };
+        if (priorTreatmentId === treatmentId) {
+          if (oldRow) return { ok: false, reason: 'duplicate_group_identity_review' };
+          if (String(candidate.clientId || '') !== clientId ||
+              _recoverPhone(candidate.phone) !== phone) return { ok: false, reason: 'participant_identity_conflict' };
+          oldRow = candidate;
+        } else if (clientId && String(candidate.clientId) === clientId) {
+          return { ok: false, reason: 'duplicate_group_participant' };
+        }
+      } else {
+        if (String(candidate.billingType) === GROUP_BILLING || oldRow) return { ok: false, reason: 'source_outcome_conflict' };
+        oldRow = candidate;
+      }
+    }
+    // Recover a partially committed GROUP outcome before checking the saved
+    // report revision. A partially written log must not ACK while its journal
+    // remains pending, even if its revision now appears equal.
+    var soJournal = null;
+    if (billingType === GROUP_BILLING) {
+      soJournal = _soOpenJournal();
+      var previousGroupAttempt = _soPendingGroup(
+        soJournal, rowObj, incomingRev, source, clientsSh, sh, _requestUser(payload));
+      if (previousGroupAttempt) return previousGroupAttempt;
     }
     // ---- Report order (2026-11-15) -----------------------------------------
     // Inside the lock and BEFORE any write: an approved push that carries an OLDER
@@ -4104,7 +4409,11 @@ function _recordSessionOutcome(payload, source) {
         matchedClient.creditsOwed = balance;
         // who/when: '' for the cross-app receiver; the internal
         // correctSessionOutcome path carries the proxy-injected user.
-        _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        // GROUP writes go through SessionOutcomeOps first; non-group keeps its
+        // existing credit engine until the cross-app protocol is extended.
+        if (billingType !== GROUP_BILLING) {
+          _writeCreditsOwed(clientsSh, clientId, balance, _requestUser(payload));
+        }
       }
       rowObj.creditsOwed = balance;
     } else if (outcome === 'happened' || _outcomeGrantsCredit(outcome)) {
@@ -4117,13 +4426,20 @@ function _recordSessionOutcome(payload, source) {
       var v = rowObj[h];
       return (v === undefined || v === null) ? '' : v;
     });
+    if (billingType === GROUP_BILLING) {
+      // Complete both side effects through a durable intent/recovery protocol.
+      return _soCommitGroup(soJournal, clientsSh, sh, rowObj, oldRow,
+        origCredits, rowObj.creditsOwed, incomingRev, source, _requestUser(payload));
+    }
     var idIdx = SESSION_LOG_HEADERS.indexOf('sessionId');
     var lastRow = sh.getLastRow();
     var upserted = false;
     if (lastRow > 1) {
       var ids = sh.getRange(2, idIdx + 1, lastRow - 1, 1).getValues();
       for (var r = 0; r < ids.length; r++) {
-        if (String(ids[r][0]) === sessionId) {
+        if (String(ids[r][0]) === sessionId &&
+            (billingType !== GROUP_BILLING ||
+              String(sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('treatmentId') + 1).getValue() || '') === treatmentId)) {
           sh.getRange(r + 2, SESSION_LOG_HEADERS.indexOf('reportRevision') + 1).setNumberFormat('@');
           sh.getRange(r + 2, 1, 1, SESSION_LOG_HEADERS.length).setValues([rowArr]);
           upserted = true;
@@ -4148,6 +4464,9 @@ function _recordSessionOutcome(payload, source) {
       sessionStatus: sessionStatus,
       creditStatus: rowObj.creditStatus
     };
+    if (billingType === GROUP_BILLING) result.treatmentId = treatmentId;
+    // The sender must be able to match the ACK to the approved report version.
+    if (incomingRev !== null) result.reportRevision = rowObj.reportRevision;
     if (rowObj.creditsOwed !== undefined) result.creditsOwed = rowObj.creditsOwed;
     if (upserted) result.upserted = true; else result.appended = true;
     return result;
@@ -4259,7 +4578,13 @@ function _payrollGroup(subset) {
     var name = _payrollStr(row.therapist);
     if (!by[name]) { by[name] = { therapist: name, paidCount: 0, preVatTotal: 0, months: [] }; order.push(name); }
     var t = by[name];
-    if (PAYROLL_PAID_OUTCOMES[_payrollStr(row.outcome)] === true) { t.paidCount++; t.preVatTotal += _payrollNum(row.therapistPay); }
+    // Group participants remain separate reports, but zero-rate attendance
+    // cannot multiply paid-session counts. Historical nonzero money is retained.
+    var groupZero = _payrollStr(row.billingType) === GROUP_BILLING &&
+      _payrollNum(row.therapistPay) === 0;
+    if (PAYROLL_PAID_OUTCOMES[_payrollStr(row.outcome)] === true && !groupZero) {
+      t.paidCount++; t.preVatTotal += _payrollNum(row.therapistPay);
+    }
     var m = _payoutMonthOf(row.date);
     if (m && t.months.indexOf(m) === -1) t.months.push(m);
   }
@@ -4519,9 +4844,13 @@ function _deactivateClient(payload) {
     var payerIdx   = CLIENTS_HEADERS.indexOf('payerPhone');
     var statusIdx  = CLIENTS_HEADERS.indexOf('status');
     var rows = sh.getRange(2, 1, lastRow - 1, CLIENTS_HEADERS.length).getValues();
-    _finGuard(rows.filter(function (r) { return _recoverPhone(r[phoneIdx]) === phone ||
+    var matchingRows = rows.filter(function (r) { return _recoverPhone(r[phoneIdx]) === phone ||
       _recoverPhone(r[contactIdx]) === phone || _recoverPhone(r[payerIdx]) === phone;
-    }).map(function (r) { return r[0]; }));
+    });
+    // A payer/contact may belong to several patients. A phone-only request
+    // cannot select an identity in that case, even if one is already inactive.
+    if (matchingRows.length > 1) return { ok: false, error: 'ambiguous_client', reason: 'ambiguous_client', deactivated: 0 };
+    _finGuard(matchingRows.map(function (r) { return r[0]; }));
     var deactivated = 0;
     for (var i = 0; i < rows.length; i++) {
       if (_recoverPhone(rows[i][phoneIdx]) !== phone &&
@@ -4555,16 +4884,49 @@ function _requestExtraSession(payload) {
   if (!_extraSessionAuthOk(payload)) return { ok: false, error: 'unauthorized' };
   var phone = _recoverPhone(payload && payload.phone);
   if (!phone || !/^0\d{8,9}$/.test(phone)) return { ok: false, error: 'invalid_phone' };
-
+  // The sender must supply the immutable Schedule row ID. Guessing a key from
+  // phone/month/type would collapse two legitimately distinct bookings.
+  var bookingRowId = String(payload && payload.bookingRowId == null ? '' : payload.bookingRowId).trim();
+  if (!bookingRowId) return { ok: false, error: 'missing_booking_row_id' };
+  if (!/^[A-Za-z0-9_.:-]{6,160}$/.test(bookingRowId)) return { ok: false, error: 'invalid_booking_row_id' };
+  var identity = {
+    phone: phone,
+    patientName: String(payload.patientName == null ? '' : payload.patientName),
+    treatmentType: String(payload.treatmentType == null ? '' : payload.treatmentType),
+    therapist: String(payload.therapist == null ? '' : payload.therapist),
+    monthKey: String(payload.monthKey == null ? '' : payload.monthKey),
+    quota: Number(payload.quota) || 0,
+    used: Number(payload.used) || 0,
+    requestedBy: String(payload.requestedBy == null ? '' : payload.requestedBy),
+    note: String(payload.note == null ? '' : payload.note)
+  };
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('recovery_pending');
     var sh = _ensureSheet('ExtraSessionRequests', EXTRA_SESSION_HEADERS);
-    var id = 'esr_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1000);
+    var existing = _readAll(sh, EXTRA_SESSION_HEADERS);
+    for (var e = 0; e < existing.length; e++) {
+      if (String(existing[e].bookingRowId || '') !== bookingRowId) continue;
+      for (var key in identity) {
+        if (!Object.prototype.hasOwnProperty.call(identity, key)) continue;
+        var prior = existing[e][key];
+        var current = identity[key];
+        if (key === 'quota' || key === 'used') {
+          if ((Number(prior) || 0) !== current) return { ok: false, error: 'booking_row_conflict' };
+        } else if (String(prior == null ? '' : prior) !== String(current)) {
+          return { ok: false, error: 'booking_row_conflict' };
+        }
+      }
+      // Including approved requests: a lost reply never creates a new pending row.
+      return { ok: true, requestId: String(existing[e].id),
+        bookingRowId: bookingRowId, status: String(existing[e].status), replayed: true };
+    }
+    var id = 'esr_' + Utilities.getUuid();
     var row = EXTRA_SESSION_HEADERS.map(function (h) {
       switch (h) {
         case 'id': return id;
+        case 'bookingRowId': return bookingRowId;
         case 'phone': return phone;
         case 'patientName': return String(payload.patientName == null ? '' : payload.patientName);
         case 'treatmentType': return String(payload.treatmentType == null ? '' : payload.treatmentType);
@@ -4581,8 +4943,9 @@ function _requestExtraSession(payload) {
         default: return '';
       }
     });
+    sh.getRange(sh.getLastRow() + 1, EXTRA_SESSION_HEADERS.indexOf('bookingRowId') + 1).setNumberFormat('@');
     sh.appendRow(row);
-    return { ok: true, requestId: id };
+    return { ok: true, requestId: id, bookingRowId: bookingRowId, status: 'pending' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -5521,7 +5884,12 @@ function _createTask(payload) {
     if (PropertiesService.getScriptProperties().getProperty('OUTPATIENT_RECOVERY_HOLD')) return _crmNo('recovery_pending');
     var sh = _ensureSheet(TASKS_SHEET, TASKS_HEADERS);
     var rows = _tasksRead(sh);
-    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === v.task.id) return { ok: true, task: _taskOut(rows[i]), created: false, replayed: true };
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === v.task.id) {
+      // A harmless replacement payload must not reveal a previously saved
+      // financial task through the idempotency key.
+      if (!_taskVisible(rows[i], payload)) return _crmNo('not_found');
+      return { ok: true, task: _taskOut(rows[i]), created: false, replayed: true };
+    }
     rows.push(v.task);
     _writeAll(sh, TASKS_HEADERS, rows);
     _activityAppend(_ensureSheet(ACTIVITY_SHEET, ACTIVITY_HEADERS),
@@ -5770,7 +6138,7 @@ function _voidContact(payload) {
  * once PR #137 is live; absent columns simply never match). Never by name or
  * phone. The answer carries operational state only: no prices, payments,
  * clinical type, notes or phone. */
-var HANDOFF_STATES = ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant'];
+var HANDOFF_STATES = ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant', 'unknown'];
 function _handoffStatusAuthOk(params) {
   var expected = PropertiesService.getScriptProperties().getProperty('HANDOFF_STATUS_SECRET');
   if (!expected) return false; // not configured -> reject
@@ -5825,8 +6193,13 @@ function _getHandoffStatus(params) {
   var wantOut = {}, wantDash = {};
   outIds.forEach(function (x) { wantOut[x] = true; });
   dashIds.forEach(function (x) { wantDash[x] = true; });
-  var byLead = {}; // leadId -> client (activation)
-  clients.forEach(function (c) { if (c.fromLead) byLead[String(c.fromLead)] = c; });
+  var byLead = Object.create(null), ambiguousLead = Object.create(null);
+  clients.forEach(function (c) {
+    if (!c.fromLead) return;
+    var id = String(c.fromLead);
+    if (byLead[id] && String(byLead[id].id) !== String(c.id)) ambiguousLead[id] = true;
+    byLead[id] = c;
+  });
   var contacted = {}, lastAct = {}, nextTask = {};
   var voidedContacts = _contactVoidedIds(events); // a record voided by mistake is not «contacted»
   events.forEach(function (e) {
@@ -5859,14 +6232,24 @@ function _getHandoffStatus(params) {
     };
   }
   var results = [], seen = {};
+  function ambiguity(id) {
+    // No arbitrary patient's status or fields when historical duplicates exist.
+    if (seen['ambiguous:' + id]) return;
+    results.push({ outpatientId: id, entity: 'lead', state: 'unknown', reason: 'ambiguous_conversion',
+      stateDate: '', dashboardPatientId: '', assignedTo: '', nextAction: '', nextActionDate: '', lastActionDate: '', updatedAt: '' });
+    seen['ambiguous:' + id] = true;
+  }
   leads.forEach(function (l) {
     if (!match(l)) return;
+    if (ambiguousLead[String(l.id)]) { ambiguity(String(l.id)); return; }
     var c = byLead[String(l.id)];
     if (c) { results.push(out('client', c, _handoffClientState(c))); seen[String(c.id)] = true; return; }
     results.push(out('lead', l, _handoffLeadState(l, !!contacted['lead:' + l.id])));
   });
   clients.forEach(function (c) {
-    if (seen[String(c.id)] || !match(c)) return;
+    var originalMatch = c.fromLead && wantOut[String(c.fromLead)];
+    if (originalMatch && ambiguousLead[String(c.fromLead)]) { ambiguity(String(c.fromLead)); originalMatch = false; }
+    if (seen[String(c.id)] || (!match(c) && !originalMatch)) return;
     results.push(out('client', c, _handoffClientState(c)));
   });
   return { ok: true, sourceApp: 'ezone-outpatient', states: HANDOFF_STATES, results: results };
@@ -6001,10 +6384,15 @@ function _finClient(id) {
   if (hits.length !== 1) throw new Error(hits.length ? 'duplicate_client' : 'client_not_found');
   return hits[0];
 }
-function _finPayments(paymentId, clientId, cycle) {
+function _finPayments(paymentId, clientId, cycle, exactCycle) {
   var sh = _ss().getSheetByName('Payments');
   if (!sh) return [];
   return _readAll(sh, PAYMENTS_HEADERS).filter(function (p) {
+    if (exactCycle) {
+      var legacyMonth = ['pay::' + clientId + '::base::' + cycle.slice(0, 7), 'pay::' + clientId + '::' + cycle.slice(0, 7), 'payment::' + clientId + '::' + cycle.slice(0, 7)].indexOf(String(p.id)) >= 0;
+      return String(p.id) === paymentId || (legacyMonth && (!_coverageDateISO(p.dueDate) || _coverageDateISO(p.dueDate) === cycle)) ||
+        (String(p.clientId) === clientId && String(p.id).indexOf('::chg-') < 0 && _asISODate(p.dueDate) === cycle && String(p.billingType) === 'monthly');
+    }
     return String(p.id) === paymentId || String(p.id) === 'pay::' + clientId + '::' + cycle.slice(0, 7);
   });
 }
@@ -6038,19 +6426,12 @@ function _finNext(c, due) {
   if (m > 12) { m = 1; y++; }
   return _nextCycleDueDate(c, y + '-' + ('0' + m).slice(-2) + '-01') || _finAddMonth(due);
 }
-/* OP-BILL-01: NEW verified monthly receipt default, independent of the old
- * billing-cycle anchor. Existing journal operations still use _finNext.
- * B1: coverage starts on max(paymentDate, cycleDate) — an early payment is an
- * advance from the due cycle, a late one covers a month from the actual
- * payment — so the next collection always lands in a LATER month key than the
- * cycle it settled. EXACT MIRROR of paymentDateCoverage() in
- * public/credits-ledger.js (parity-tested). An invalid/blank cycleDate falls
- * back to the payment date. */
+/* New ordinary receipts cover one calendar month from actual payment.
+ * Explicit advances and old immutable journal intents are handled separately. */
 function _finPaidDateCoverage(paymentDate, cycleDate) {
   var iso = _coverageDateISO(paymentDate);
   if (!iso || String(paymentDate) !== iso) return null;
-  var cycle = _coverageDateISO(cycleDate);
-  var start = (cycle && String(cycleDate) === cycle && cycle > iso) ? cycle : iso;
+  var start = iso;
   var next = _finAddMonth(start), p = next.split('-').map(Number);
   if (!next || p.length !== 3) return null;
   var prior = new Date(p[0], p[1] - 1, p[2] - 1);
@@ -6058,6 +6439,16 @@ function _finPaidDateCoverage(paymentDate, cycleDate) {
     '-' + ('0' + prior.getDate()).slice(-2);
   return { start: start, end: end, next: next };
 }
+function _finLegacyPaidDateCoverage(paymentDate, cycleDate) {
+  var paid = _finPaidDateCoverage(paymentDate), cycle = _coverageDateISO(cycleDate);
+  if (!paid) return null;
+  return cycle && String(cycleDate) === cycle && cycle > paymentDate ? _finPaidDateCoverage(cycle) : paid;
+}
+function _finDayAfter(value) {
+  var p = String(value).split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2] + 1);
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+function _finCyclePaymentId(clientId, cycle) { return 'pay::' + clientId + '::base::' + cycle; }
 function _finIntent(payload) {
   var p = payload.payment || {}, patch = payload.patch || {}, out = {};
   var fields = ['pricePerSession', 'paymentDate', 'nextBillingDate', 'sessionsPerWeek', 'packageChangeDate'];
@@ -6066,6 +6457,10 @@ function _finIntent(payload) {
   var payment = {}; PAYMENTS_HEADERS.forEach(function (h) { payment[h] = String(p[h] == null ? '' : p[h]); });
   var intent = { opId: String(payload.opId || ''), clientId: String(payload.clientId || ''),
     snapshot: String(payload.snapshot || ''), cycleDate: String(payload.cycleDate || ''), patch: out, payment: payment };
+  if (_hasOwn(payload, 'coverageIntent')) {
+    if (payload.coverageIntent !== 'ordinary' && payload.coverageIntent !== 'advance') throw new Error('invalid_renewal_coverage_intent');
+    intent.coverageIntent = payload.coverageIntent;
+  }
   // A follow-on future-cycle receipt on the SAME paid date needs an explicit
   // separate-advance decision. Otherwise a lost reply followed by a fresh
   // renewal can silently settle the next month with the original receipt.
@@ -6122,12 +6517,18 @@ function _finPinPrior(intent, payments) {
   if (status === 'paid' || exp.status !== status || exp.amountPaid !== String(row.amountPaid == null ? '' : row.amountPaid)) {
     return 'prior_payment_changed';
   }
-  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0) return 'prior_payment_changed';
+  if (String(row.clientId) !== intent.clientId || String(row.id).indexOf('::chg-') >= 0 ||
+      (intent.coverageIntent && _asISODate(row.dueDate) !== intent.cycleDate)) return 'prior_payment_changed';
+  if (intent.coverageIntent === 'advance' && p.coverageStart < p.paymentDate &&
+      (p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
+  if (intent.coverageIntent && (String(row.coverageStart || '').trim() || String(row.coverageEnd || '').trim()) &&
+      (_coveragePeriodError(row.coverageStart, row.coverageEnd) || p.coverageStart !== _coverageDateISO(row.coverageStart) || p.coverageEnd !== _coverageDateISO(row.coverageEnd))) return 'renewal_recorded_coverage_changed';
   intent.prior = _finRow(row, PAYMENTS_HEADERS);
   return '';
 }
 function _finIntentError(intent, c, stored) {
   var p = intent.payment, patch = intent.patch;
+  if (!stored && !intent.coverageIntent) return 'renewal_coverage_intent_required';
   if (!intent.cycleDate || _coverageDateISO(intent.cycleDate) !== intent.cycleDate ||
       (!stored && intent.cycleDate !== _finDue(c))) return 'renewal_period_changed';
   // An already-acknowledged operation is no longer active, so the next
@@ -6136,16 +6537,20 @@ function _finIntentError(intent, c, stored) {
   // confirmed second advance; existing stored journals replay unchanged.
   if (!stored && c.paymentDate && _asISODate(c.paymentDate) === p.paymentDate &&
       intent.cycleDate > _todayISODate() && p.paymentDate < intent.cycleDate &&
-      intent.advanceConfirmed !== true) return 'renewal_advance_confirmation_required';
+      (intent.advanceConfirmed !== true || intent.coverageIntent === 'ordinary')) return 'renewal_advance_confirmation_required';
   // A NEW reservation must carry real paid-date coverage and next collection
   // together. A stored OP-02 intent may have the old due-date contract:
   // retain it for immutable recovery only, never allow a NEW legacy reserve.
-  // B1: the window starts on max(paymentDate, cycleDate) — see _finPaidDateCoverage.
-  var paidWindow = _finPaidDateCoverage(p.paymentDate, intent.cycleDate);
+  // Only stored unmarked intents use B1's former max(paymentDate, cycleDate).
+  var paidWindow = intent.coverageIntent ? _finPaidDateCoverage(p.paymentDate) : _finLegacyPaidDateCoverage(p.paymentDate, intent.cycleDate);
   var newPolicy = paidWindow &&
       p.coverageStart === paidWindow.start && p.coverageEnd === paidWindow.end &&
       patch.nextBillingDate === paidWindow.next;
-  var legacyReplay = !!stored && patch.nextBillingDate === _finNext(c, intent.cycleDate);
+  if (intent.coverageIntent === 'advance') newPolicy = !!paidWindow && !!p.coverageStart && !!p.coverageEnd &&
+      !_coveragePeriodError(p.coverageStart, p.coverageEnd) && p.coverageStart === _coverageDateISO(p.coverageStart) &&
+      p.coverageEnd === _coverageDateISO(p.coverageEnd) && patch.nextBillingDate === _finDayAfter(p.coverageEnd) &&
+      (p.coverageStart >= p.paymentDate || !!intent.priorExpected);
+  var legacyReplay = !!stored && !intent.coverageIntent && patch.nextBillingDate === _finNext(c, intent.cycleDate);
   if (!newPolicy && !legacyReplay) return 'renewal_period_changed';
   // The PAYMENT may not be dated in the future; the window itself may start
   // later than today when an early payment advances from its due cycle.
@@ -6154,7 +6559,7 @@ function _finIntentError(intent, c, stored) {
   if (!patch.paymentDate || _coverageDateISO(patch.paymentDate) !== patch.paymentDate ||
       p.paymentDate !== patch.paymentDate || !isFinite(Number(patch.pricePerSession)) ||
       Number(patch.pricePerSession) <= 0 || String(Number(patch.pricePerSession)) !== patch.pricePerSession ||
-      p.id !== 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7) ||
+      p.id !== (intent.coverageIntent ? (intent.priorExpected ? intent.priorExpected.id : _finCyclePaymentId(intent.clientId, intent.cycleDate)) : 'pay::' + intent.clientId + '::base::' + intent.cycleDate.slice(0, 7)) ||
       p.clientId !== intent.clientId || p.dueDate !== intent.cycleDate || p.status !== 'paid' ||
       p.billingType !== 'monthly' || p.amountDue !== patch.pricePerSession || p.amountPaid !== patch.pricePerSession ||
       (p.bundleSize !== '' && p.bundleSize !== '0') || (p.sessionsUsed !== '' && p.sessionsUsed !== '0') ||
@@ -6187,7 +6592,11 @@ function _getRenewalState(payload) {
       return { ok: true, protocol: 1, operation: summary };
     }
     var c = _finClient(id).client;
-    return { ok: true, protocol: 1, client: c, snapshot: _finSnapshot(c), cycleDate: _finDue(c) };
+    var cycle = _finDue(c), paymentId = _finCyclePaymentId(id, cycle), rows = _finPayments(paymentId, id, cycle, true);
+    if (rows.length > 1) return { ok: false, error: 'renewal_duplicate_cycle' };
+    if (rows.length && (String(rows[0].clientId) !== id || _coverageDateISO(rows[0].dueDate) !== cycle)) return { ok: false, error: 'renewal_cycle_requires_review' };
+    return { ok: true, protocol: 1, coveragePolicy: 'payment-date-v2', client: c, snapshot: _finSnapshot(c), cycleDate: cycle,
+      paymentId: rows.length ? rows[0].id : paymentId, priorPayment: rows.length ? rows[0] : null };
   } finally { lock.releaseLock(); }
 }
 function _reserveRenewal(payload) {
@@ -6208,7 +6617,7 @@ function _reserveRenewal(payload) {
     if (_finSnapshot(c) !== intent.snapshot) return { ok: false, error: 'renewal_snapshot_changed' };
     var invalid = _finIntentError(intent, c);
     if (invalid) return { ok: false, error: invalid };
-    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate));
+    var priorError = _finPinPrior(intent, _finPayments(p.id, intent.clientId, intent.cycleDate, !!intent.coverageIntent));
     if (priorError) return { ok: false, error: priorError };
     canonical = JSON.stringify(intent);
     var after = Object.assign({}, c, patch);
@@ -6239,7 +6648,7 @@ function _applyRenewal(payload) {
     var storedHeaders = JSON.parse(op.before).headers;
     var storedIntent = JSON.parse(op.intent);
     var current = _finSnapshot(c.client, storedHeaders), p = storedIntent.payment;
-    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     if (op.state === 'prepared') {
       if (current !== op.before || _finPriorMismatch(storedIntent, payments)) return review('source_changed_before_apply');
       _finWrite(journal, op, 'client_writing', user);
@@ -6286,7 +6695,7 @@ function _applyRenewal(payload) {
         return p[h];
       });
       sh.getRange(row, 1, 1, PAYMENTS_HEADERS.length).setValues([paymentValues]);
-      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+      payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!storedIntent.coverageIntent);
     }
     if (payments.length !== 1 || JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(p, PAYMENTS_HEADERS))) {
       return review('payment_write_uncertain_or_changed');
@@ -6302,7 +6711,7 @@ function _finReviewReadback(op) {
   if (JSON.parse(op.intent).kind === 'extra_charge') return _extraReadback(op);
   var client = null, clientError = '';
   try { client = _finClient(op.clientId).client; } catch (err) { clientError = String(err); }
-  var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+  var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!JSON.parse(op.intent).coverageIntent);
   var token = JSON.stringify({ client: client ? _finSnapshot(client) : null, clientError: clientError,
     payments: payments.map(function (p) { return _finRow(p, PAYMENTS_HEADERS); }) });
   return { token: token, clientExists: !!client, nextBillingDate: client ? _asISODate(client.nextBillingDate) : '',
@@ -6345,10 +6754,10 @@ function _finishRenewal(payload, cancel) {
     if (!cancel && op.state !== 'done') return { ok: false, error: 'renewal_not_complete' };
     var c = null;
     try { c = _finClient(op.clientId).client; } catch (_) { /* below: make the missing/duplicate client reviewable */ }
-    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate);
+    var payments = _finPayments(op.paymentId, op.clientId, op.cycleDate, !!JSON.parse(op.intent).coverageIntent);
     var expected = cancel ? op.before : op.after;
     if (cancel && op.state !== 'prepared') return { ok: false, error: 'renewal_requires_review' };
-    if ((cancel ? op.state !== 'prepared' || payments.length : op.state !== 'done' || payments.length !== 1 ||
+    if ((cancel ? op.state !== 'prepared' || _finPriorMismatch(JSON.parse(op.intent), payments) : op.state !== 'done' || payments.length !== 1 ||
         JSON.stringify(_finRow(payments[0], PAYMENTS_HEADERS)) !== JSON.stringify(_finRow(JSON.parse(op.intent).payment, PAYMENTS_HEADERS))) ||
         !c || _finSnapshot(c, JSON.parse(op.before).headers) !== expected) {
       _finWrite(journal, op, 'review', _requestUser(payload), 'source_changed_before_' + terminal);
@@ -8209,6 +8618,10 @@ var SOURCE_GET_AUTH = {
   getCharges: 'OUTPATIENT_PROXY_SECRET',
   getSettings: 'OUTPATIENT_PROXY_SECRET',
   getExtraSessionRequests: 'OUTPATIENT_PROXY_SECRET',
+  // Data-free authenticated rollout probes. Old OUT sources reject these
+  // actions, so THR cannot mistakenly send v2 clinical/extra writes to v1.
+  getTherapistsGroupContract: 'SESSION_OUTCOME_SECRET',
+  getTherapistsExtraContract: 'EXTRA_SESSION_SECRET',
   getWinbackSource: 'WINBACK_SECRET',
   getDebtStatus: 'DEBT_STATUS_SECRET',
   getTreatmentPlans: 'TREATMENT_PLANS_SECRET',
@@ -8375,6 +8788,12 @@ function doGet(e) {
     if (action === 'getCharges')   return _json(_getCharges());
     if (action === 'getSettings')  return _json(_getSettings());
     if (action === 'getExtraSessionRequests') return _json(_getExtraSessionRequests());
+    if (action === 'getTherapistsGroupContract') return _json({
+      ok: true, protocol: 'out-thr-group-v1', participantKey: true, revisionAck: true
+    });
+    if (action === 'getTherapistsExtraContract') return _json({
+      ok: true, protocol: 'out-thr-extra-v1', bookingRowId: true, replaySafe: true
+    });
     if (action === 'getWinbackSource') {
       if (!_winbackAuthOk(e && e.parameter)) {
         return _json({ ok: false, error: 'unauthorized' });
@@ -8809,7 +9228,7 @@ var INTEGRITY_SNAPSHOT_PREFIX = 'outpatient-';
 var INTEGRITY_SNAPSHOT_RE = /^outpatient-(\d{4})-(\d{2})-(\d{2})$/;
 // Clients keep their existing names for sentinel lookup and old backups.
 // Only these exact daily families are eligible for this job's retention.
-var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
+var INTEGRITY_DATA_SNAPSHOT_RE = /^outpatient-(?:(?:leads|leads-removed|clients-removed|payments|charges|credits|financial-ops|session-log|session-outcome-ops|one-time-sessions|therapist-rates|settings|stop-flags|extra-sessions|continuation|stop-alerts|audit-log|repair-plan|package-catalog|package-requests|tasks|activity|recovery-meta|other-[a-f0-9]{64}|pending-manifest|verified|manifest)-)?(\d{4})-(\d{2})-(\d{2})$/;
 
 /* ---- pure helpers (no GAS services — exercised directly by node --test) ---- */
 
@@ -8936,6 +9355,9 @@ function _integritySourceSpecs() {
     { source: 'Credits', prefix: 'credits-', key: 'id', headers: CREDIT_COLUMNS },
     { source: 'FinancialOps', prefix: 'financial-ops-', key: 'id', headers: FINANCIAL_OP_HEADERS },
     { source: 'SessionLog', prefix: 'session-log-', key: 'sessionId', headers: SESSION_LOG_HEADERS },
+    // Recover the credit write-ahead journal together with Clients/SessionLog.
+    // Optional on pre-upgrade workbooks, mandatory once a grouped credit exists.
+    { source: SESSION_OUTCOME_OP_SHEET, prefix: 'session-outcome-ops-', key: 'opKey', headers: SESSION_OUTCOME_OP_HEADERS },
     // One-time sessions own their schedule, charge link and source outcome; typed
     // backup/restore must preserve the full append-only schema and stable ID.
     // Optional until the first OTS booking creates the sheet; then tracked like
@@ -8993,7 +9415,8 @@ function _integrityCaptureData(sourceSs) {
     var captured = specs.map(function (spec) {
       known[spec.source] = true;
       var sh = sourceSs.getSheetByName(spec.source);
-      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired))) {
+      if (!sh && (spec.required || (spec.source === 'FinancialOps' && journalRequired) ||
+          (spec.source === SESSION_OUTCOME_OP_SHEET && !!props.getProperty('SESSION_OUTCOME_OPS_CREATED')))) {
         throw new Error('Missing backup source: ' + spec.source);
       }
       var range = sh ? sh.getDataRange() : null;
@@ -9018,12 +9441,18 @@ function _integrityCaptureData(sourceSs) {
     });
     // No credentials, auth secrets or PINs are copied from Script Properties.
     // Inventory is hashed along with the datasets and published last in manifest.
-    var meta = [['key', 'value'], ['schemaVersion', '2'],
+    // A v3 capture is NOT a recovery certificate until the independent
+    // finalizer writes its own verified marker into the BACKUP workbook.
+    var staged = props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1';
+    var active = staged ? JSON.parse(props.getProperty('INTEGRITY_ACTIVE_BACKUP') || '{}') : null;
+    if (staged && (!active || !active.id)) throw new Error('Two-stage capture needs active run identity');
+    var meta = [['key', 'value'], ['schemaVersion', staged ? '3' : '2'],
       ['sourceSpreadsheetId', sourceSs.getId()], ['capturedAt', new Date().toISOString()],
       ['financialOpsCreated', journalRequired ? '1' : '0'],
       ['inventory', JSON.stringify(captured.map(function (x) { return [x.source, x.prefix, x.absent ? '1' : '0']; }))],
       ['knownSources', JSON.stringify(specs.map(function (x) { return x.source; }))],
       ['unclassifiedSources', JSON.stringify(unknown)]];
+    if (staged) meta.push(['backupRunId', String(active.id)]);
     captured.push({ source: '__RecoveryMetadata', prefix: 'recovery-meta-', absent: false, grid: meta, formats: null });
     return captured;
   } finally { lock.releaseLock(); }
@@ -9067,7 +9496,7 @@ function _integrityValidateCrmGrid_(source, grid) {
     seen[raw] = true;
   }
 }
-function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
+function _integrityValidateRestoreSet(backupSs, day, requireJournal, allowUncertified) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw new Error('Invalid restore date');
   var sh = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day);
   if (!sh) throw new Error('Restore manifest missing');
@@ -9127,6 +9556,16 @@ function _integrityValidateRestoreSet(backupSs, day, requireJournal) {
   if (meta.financialOpsCreated === '1' && result.some(function (x) { return x.source === 'FinancialOps' && x.absent; })) {
     throw new Error('Restore journal required');
   }
+  // For v3 the manifest alone is a PENDING artifact: an expired finalizer must
+  // never turn an incomplete snapshot into a certified operational restore.
+  // Only the second-phase verifier may skip this gate during its full
+  // independent post-publication readback, BEFORE writing the certificate.
+  if (meta.schemaVersion === '3' && allowUncertified !== true) {
+    var certificate = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + day);
+    if (!certificate) throw new Error('Two-stage restore set not certified');
+    _integrityVerifyGrid(_integrityCertificateGrid(day, meta.backupRunId, rows),
+                         certificate.getDataRange().getValues());
+  }
   return result;
 }
 
@@ -9134,13 +9573,17 @@ function _integrityRecoveryMetadata(captured) {
   var item = captured.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
   if (!item || item.absent) throw new Error('Legacy backup is not a full operational recovery set');
   var grid = item.grid, meta = {};
+  var version = grid[1] && grid[1][0] === 'schemaVersion' ? grid[1][1] : '';
   var fields = ['schemaVersion', 'sourceSpreadsheetId', 'capturedAt', 'financialOpsCreated', 'inventory', 'knownSources', 'unclassifiedSources'];
+  if (version === '3') fields.push('backupRunId');
   if (JSON.stringify(grid[0]) !== JSON.stringify(['key', 'value']) || grid.length !== fields.length + 1) throw new Error('Invalid recovery metadata');
   grid.slice(1).forEach(function (r) {
     if (r.length !== 2 || fields.indexOf(r[0]) < 0 || _hasOwn(meta, r[0]) || typeof r[1] !== 'string') throw new Error('Invalid recovery metadata');
     meta[r[0]] = r[1];
   });
-  if (meta.schemaVersion !== '2' || !meta.sourceSpreadsheetId || !isFinite(Date.parse(meta.capturedAt)) ||
+  if (['2', '3'].indexOf(meta.schemaVersion) < 0 ||
+      (meta.schemaVersion === '3' && (!meta.backupRunId || meta.backupRunId.length > 128)) ||
+      !meta.sourceSpreadsheetId || !isFinite(Date.parse(meta.capturedAt)) ||
       ['0', '1'].indexOf(meta.financialOpsCreated) < 0 ||
       !Array.isArray(JSON.parse(meta.inventory)) || !Array.isArray(JSON.parse(meta.knownSources)) ||
       !Array.isArray(JSON.parse(meta.unclassifiedSources))) throw new Error('Invalid recovery metadata');
@@ -9156,7 +9599,7 @@ function beginOutpatientRecovery() {
     props.setProperty('OUTPATIENT_RECOVERY_HOLD', '1');
     // Freeze new admissions now, but do not authorize cutover while a job
     // admitted before this hold can still publish or update its sentinels.
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) return { ok: false, error: 'backup_draining', state: 'recovery_pending' };
     return { ok: true, state: 'recovery_pending' };
   } finally { lock.releaseLock(); }
 }
@@ -9294,10 +9737,19 @@ function finishOutpatientRecovery(backupId, day, configVerified, manualPolicy) {
   if (props.getProperty('OUTPATIENT_RECOVERY_HOLD') !== '1') throw new Error('Recovery hold required');
   var lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
-    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) throw new Error('Recovery backup still running');
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP')) throw new Error('Recovery backup still running');
     var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
     var result = _integrityVerifyRecoveredWorkbook(backupSs, day, targetSs, configVerified, manualPolicy);
     if (_ss().getSheetByName('FinancialOps')) _finJournal(); // Validate both operation kinds before reopening writers.
+    var groupJournal = _ss().getSheetByName(SESSION_OUTCOME_OP_SHEET);
+    if (groupJournal) {
+      var groupOps = _soJournalRows(groupJournal);
+      if (groupOps.some(function(op) { return op.state !== 'committed'; }))
+        throw new Error('session_credit_recovery_pending');
+      props.setProperty('SESSION_OUTCOME_OPS_CREATED', '1');
+    } else if (props.getProperty('SESSION_OUTCOME_OPS_CREATED')) {
+      throw new Error('session_credit_journal_missing');
+    }
     try { CacheService.getScriptCache().remove('therapistRates_v1'); } catch (_) { throw new Error('Recovery rate cache invalidation failed'); }
     if (result.journalRequired) props.setProperty('FINANCIAL_OPS_CREATED', '1');
     else if (props.getProperty('FINANCIAL_OPS_CREATED')) throw new Error('Restore journal required');
@@ -9379,13 +9831,16 @@ function _integrityWriteSnapshot(backupSs, snapName, grid, formats) {
  * name-matched via _integrityIsExpiredSnapshot; never deletes the last
  * remaining sheet (Sheets requires >= 1). */
 function _integrityApplyRetention(backupSs, todayName, retentionDays) {
+  // A single source inventory avoids 400+ remote getSheets() calls per
+  // retention pass. Preserve the last worksheet and unknown/manual tabs.
   var sheets = backupSs.getSheets();
-  var deleted = [];
+  var remaining = sheets.length, deleted = [];
   for (var i = 0; i < sheets.length; i++) {
-    if (backupSs.getSheets().length <= 1) break;
+    if (remaining <= 1) break;
     var name = sheets[i].getName();
     if (_integrityIsExpiredSnapshot(name, todayName, retentionDays)) {
       backupSs.deleteSheet(sheets[i]);
+      remaining--;
       deleted.push(name);
     }
   }
@@ -9446,6 +9901,7 @@ function _integritySendAlert(body) {
  * failure never silences the others; internal errors join the alert. */
 function nightlyIntegrityJob() {
   var props = PropertiesService.getScriptProperties();
+  var stagedMode = props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1';
   var admission = LockService.getScriptLock();
   if (!admission.tryLock(5000)) {
     _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
@@ -9456,7 +9912,8 @@ function nightlyIntegrityJob() {
   var runMarker = '', admissionError = '';
   try {
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
-    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP')) admissionError = 'backup_busy';
+    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') ||
+             props.getProperty('INTEGRITY_PENDING_BACKUP')) admissionError = 'backup_busy';
     else {
       runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
       props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
@@ -9566,6 +10023,14 @@ function nightlyIntegrityJob() {
   try {
     if (clientsReadOk && clientsGrid && clientsGrid.length) {
       var sourceSs = _ss();
+      // Verify duplicate-day admission BEFORE touching the same-day families.
+      // This also prevents a manual retry from overwriting a certified set.
+      var proposedDay = _integritySnapshotName(new Date()).slice(INTEGRITY_SNAPSHOT_PREFIX.length);
+      if (stagedMode && backupSs &&
+          (backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + proposedDay) ||
+           backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + proposedDay))) {
+        throw new Error('Two-stage backup day already published; operator review required');
+      }
       var captured = _integrityCaptureData(sourceSs);
       if (!backupSs) {
         backupSs = SpreadsheetApp.create(INTEGRITY_BACKUP_NAME);
@@ -9574,6 +10039,15 @@ function nightlyIntegrityJob() {
       if (backupSs.getId() === sourceSs.getId()) throw new Error('Backup destination is the live spreadsheet');
       var todayName = _integritySnapshotName(new Date());
       var day = todayName.slice(INTEGRITY_SNAPSHOT_PREFIX.length);
+      if (stagedMode) {
+        // Durable admission BEFORE the first external write; on timeout or
+        // interrupted upload the pending marker remains fail-closed.
+        var admitted = JSON.parse(runMarker);
+        props.setProperty('INTEGRITY_PENDING_BACKUP', JSON.stringify({
+          id: admitted.id, day: day, backupId: backupSs.getId(),
+          startedAt: admitted.startedAt
+        }));
+      }
       for (var b = 0; b < captured.length; b++) {
         var item = captured[b];
         _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day, item.grid, item.formats);
@@ -9587,17 +10061,25 @@ function nightlyIntegrityJob() {
         manifest.push([entry.source, entry.source, INTEGRITY_SNAPSHOT_PREFIX + entry.prefix + day,
           entry.absent ? '1' : '0', _integrityFingerprint(entry.grid)]);
       });
-      _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
-      _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
-      backupPublished = true; // only after a coherent, checksum-verified snapshot set
-      // Once observed, disappearing operational/manual tables are a backup
-      // failure, not a new legitimate empty baseline that ages out good history.
-      props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
-        return !x.absent && x.source !== '__RecoveryMetadata';
-      }).map(function (x) { return x.source; })));
-      // Retention runs only after every data snapshot and the manifest verify.
-      var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
-      if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
+      if (stagedMode) {
+        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'pending-manifest-' + day, manifest);
+        // NOT a certified snapshot. The second trigger has to publish the final
+        // manifest, independently re-read every sheet, and write the certificate.
+        backupPublished = true;
+        Logger.log('nightlyIntegrityJob: staged only; independent finalization PENDING (%s)', day);
+      } else {
+        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day, manifest);
+        _integrityValidateRestoreSet(backupSs, day, !!props.getProperty('FINANCIAL_OPS_CREATED'));
+        backupPublished = true; // only after a coherent, checksum-verified snapshot set
+        // Once observed, disappearing operational/manual tables are a backup
+        // failure, not a new legitimate empty baseline that ages out good history.
+        props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(captured.filter(function (x) {
+          return !x.absent && x.source !== '__RecoveryMetadata';
+        }).map(function (x) { return x.source; })));
+        // Retention runs only after every data snapshot and the manifest verify.
+        var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
+        if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
+      }
     }
   } catch (err) { errors.push('הגיבוי היומי נכשל: ' + err); }
 
@@ -9610,7 +10092,7 @@ function nightlyIntegrityJob() {
       prevCount: prevCountRaw === null ? '?' : String(prevCountRaw),
       currentCount: String(clients.length)
     }));
-  } else {
+  } else if (!stagedMode) {
     Logger.log('nightlyIntegrityJob: ok (clients=%s, payments=%s)', String(clients.length), String(payments.length));
   }
 
@@ -9618,9 +10100,12 @@ function nightlyIntegrityJob() {
   //      SUCCESSFUL Clients read: seeding count 0 after a failed read would
   //      fire a false full-loss alert tomorrow ----
   if (clientsReadOk) {
+    // v3 updates this sentinel ONLY once the independent verification passes.
+    if (!stagedMode) {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
     props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds));
     props.setProperty(INTEGRITY_PROP_LAST_RUN, new Date().toISOString());
+    }
   }
   // Do not return a GREEN time-trigger invocation after catching a failed
   // backup. The existing email is best-effort; Apps Script execution failure
@@ -9657,6 +10142,229 @@ function setupIntegrityTrigger() {
   }
   ScriptApp.newTrigger('nightlyIntegrityJob').timeBased().everyDays(1).atHour(2).create();
   return { ok: true, installed: 'nightlyIntegrityJob @ 02:00' };
+}
+
+/* Two-stage certificate: stored in the backup workbook, not just Script Properties.
+ * Strictly binds the independently scanned manifest and immutable run identity.
+ * v2 legacy sets are still inspectable; v3 sets MUST carry this certificate. */
+function _integrityCertificateGrid(day, runId, manifestGrid) {
+  return [['key', 'value'], ['day', day], ['backupRunId', String(runId)],
+          ['manifestSha256', _integrityFingerprint(manifestGrid)]];
+}
+
+/* SECOND trigger. Does not touch the live workbook, Google editor credentials,
+ * trigger configuration or patient records. Only the existing backup target.
+ * A failed/cancelled finalize keeps INTEGRITY_PENDING_BACKUP for a safe retry;
+ * a dead execution may also strand ACTIVE and must NEVER be auto-cleared. */
+function finalizeNightlyIntegrityJob() {
+  var props = PropertiesService.getScriptProperties();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    _integritySendAlert('OUT backup finalizer did not start: script lock unavailable; no certificate was written. Operator review required.');
+    throw new Error('backup_busy');
+  }
+  var ownedMarker = '', pending, markerBefore;
+  try {
+    if (props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') !== '1')
+      throw new Error('two_stage_not_enabled');
+    if (props.getProperty('OUTPATIENT_RECOVERY_HOLD'))
+      throw new Error('recovery_pending');
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP'))
+      throw new Error('backup_busy');
+    markerBefore = props.getProperty('INTEGRITY_PENDING_BACKUP');
+    if (!markerBefore) throw new Error('no_pending_backup; inspect previous capture');
+    try { pending = JSON.parse(markerBefore); } catch (_) { throw new Error('invalid_pending_backup'); }
+    if (!pending || !pending.id || !/^\d{4}-\d{2}-\d{2}$/.test(pending.day) ||
+        !pending.backupId || pending.backupId !== props.getProperty(INTEGRITY_PROP_BACKUP_SSID))
+      throw new Error('invalid_pending_backup');
+    ownedMarker = JSON.stringify({ id: Utilities.getUuid(), phase: 'verify',
+                                    pendingId: pending.id, startedAt: new Date().toISOString() });
+    props.setProperty('INTEGRITY_ACTIVE_BACKUP', ownedMarker);
+  } catch (refusal) {
+    // A refused finalizer means this night's set is NOT certified (missing
+    // Phase A, stranded marker, leftover trigger after rollback...). Only an
+    // intentional recovery hold is silent; nothing is auto-cleared here.
+    if (String(refusal && refusal.message) !== 'recovery_pending') {
+      _integritySendAlert('OUT backup finalizer refused (' + String(refusal && refusal.message) +
+        '); no certificate was written and no marker was cleared. Operator review required.');
+    }
+    throw refusal;
+  } finally { lock.releaseLock(); }
+  try {
+    var backupSs = SpreadsheetApp.openById(pending.backupId);
+    if (backupSs.getId() !== pending.backupId) throw new Error('backup_target_mismatch');
+    var stagedName = INTEGRITY_SNAPSHOT_PREFIX + 'pending-manifest-' + pending.day;
+    var stagedSheet = backupSs.getSheetByName(stagedName);
+    if (!stagedSheet) throw new Error('pending_manifest_missing; operator review');
+    var manifest = stagedSheet.getDataRange().getValues();
+    if (!manifest.length || JSON.stringify(manifest[0]) !==
+        JSON.stringify(['id', 'source', 'snapshot', 'absent', 'sha256']))
+      throw new Error('pending_manifest_invalid');
+    // The verified marker is only published AFTER the final manifest and the
+    // unchanged full independent readback, including all typed/unknown tabs.
+    _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + pending.day, manifest);
+    var result = _integrityValidateRestoreSet(backupSs, pending.day,
+                   !!props.getProperty('FINANCIAL_OPS_CREATED'), true);
+    var meta = _integrityRecoveryMetadata(result);
+    if (meta.schemaVersion !== '3' || meta.backupRunId !== String(pending.id) ||
+        meta.sourceSpreadsheetId === backupSs.getId()) throw new Error('pending_run_identity_mismatch');
+    var certificate = _integrityCertificateGrid(pending.day, pending.id, manifest);
+    _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day, certificate);
+    // Read the tiny certificate back once, with strict source+date+manifest hash.
+    var written = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day);
+    _integrityVerifyGrid(certificate, written.getDataRange().getValues());
+    // Only after certificate, update the source history from the independently
+    // verified inventory (never from the current, possibly changed live source).
+    var inventory = JSON.parse(meta.inventory), required = inventory.filter(function (entry) {
+      return entry[2] === '0';
+    }).map(function (entry) { return entry[0]; });
+    props.setProperty('INTEGRITY_REQUIRED_SOURCES', JSON.stringify(required));
+    // Complete retention after certification; a failure keeps pending so the
+    // finalizer can recheck and resume, without allowing tomorrow's capture.
+    _integrityApplyRetention(backupSs, INTEGRITY_SNAPSHOT_PREFIX + pending.day, INTEGRITY_RETENTION_DAYS);
+    var clients = result.filter(function (x) { return x.source === 'Clients'; })[0];
+    if (!clients || clients.absent) throw new Error('certified_clients_missing');
+    var idCol = clients.grid[0].indexOf('id');
+    if (idCol < 0) throw new Error('certified_clients_id_missing');
+    var populated = clients.grid.slice(1).filter(function (row) {
+      return row.some(function (v) { return v !== '' && v !== null; });
+    });
+    var ids = populated.map(function (row) { return String(row[idCol] || ''); })
+      .filter(function (id) { return !!id; });
+    // Match _readAll's historic nonempty-row count, even when a damaged row
+    // has no id. The sentinel's separate ID list keeps only nonblank IDs.
+    props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(populated.length));
+    props.setProperty(INTEGRITY_PROP_LAST_IDS, JSON.stringify(ids));
+    // The sentinel timestamp is the CAPTURE instant, not a later retry day.
+    // Never make an old pending backup appear fresh merely by finalizing it.
+    props.setProperty(INTEGRITY_PROP_LAST_RUN, String(meta.capturedAt));
+    var doneLock = LockService.getScriptLock(); doneLock.waitLock(30000);
+    try {
+      if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== markerBefore)
+        throw new Error('pending_run_changed');
+      props.deleteProperty('INTEGRITY_PENDING_BACKUP');
+    } finally { doneLock.releaseLock(); }
+    Logger.log('finalizeNightlyIntegrityJob: VERIFIED (%s, %s sources)', pending.day, result.length);
+    return { ok: true, state: 'verified', day: pending.day, sources: result.length };
+  } catch (err) {
+    _integritySendAlert('Independent OUT backup finalization failed; pending marker retained; operator review: ' + String(err));
+    throw err;
+  } finally {
+    var completion = LockService.getScriptLock(); completion.waitLock(30000);
+    try {
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') === ownedMarker)
+        props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    } finally { completion.releaseLock(); }
+  }
+}
+
+/* Approval-gated one-time INSTALLER, never called by source handlers or tests.
+ * Existing 02:00 nightly trigger remains unchanged. Create ONE independent
+ * 03:00 finalizer trigger; enable staged mode LAST only if both are present.
+ * The owner MUST review Executions/properties before invoking in production. */
+function setupIntegrityTwoStage() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') || props.getProperty('INTEGRITY_PENDING_BACKUP') ||
+        props.getProperty('OUTPATIENT_RECOVERY_HOLD')) throw new Error('backup_or_recovery_pending');
+    var triggers = ScriptApp.getProjectTriggers();
+    var nightly = triggers.filter(function (t) { return t.getHandlerFunction() === 'nightlyIntegrityJob'; });
+    var second = triggers.filter(function (t) { return t.getHandlerFunction() === 'finalizeNightlyIntegrityJob'; });
+    if (nightly.length !== 1 || second.length > 1) throw new Error('unexpected_integrity_trigger_inventory');
+    if (!second.length) ScriptApp.newTrigger('finalizeNightlyIntegrityJob').timeBased().everyDays(1).atHour(3).create();
+    props.setProperty('INTEGRITY_TWO_STAGE_ENABLED', '1');
+    return { ok: true, nightly: '02:00 existing', finalizer: '03:00', enabled: true };
+  } finally { lock.releaseLock(); }
+}
+
+/* Editor-only, owner-decided exit from an INTERRUPTED Phase A (e.g. a hard
+ * 360 s kill after INTEGRITY_PENDING_BACKUP was recorded). It never runs from a
+ * trigger or HTTP route and never deletes or edits any backup sheet: partial
+ * same-day snapshots stay as evidence and age out by normal retention. It
+ * refuses while an execution may still be alive (any ACTIVE marker of another
+ * run, or of this run younger than 30 min), when the exact run ID is not
+ * supplied, or when that day already carries a certificate (finalize instead).
+ * Sentinels and INTEGRITY_REQUIRED_SOURCES are NOT advanced: an abandoned set is
+ * never a recovery point. The pending marker is cleared LAST. */
+var INTEGRITY_DEAD_EXECUTION_MS = 30 * 60 * 1000; // 5x the 6-minute Apps Script hard limit
+function abandonPendingIntegrityBackup(expectedRunId, reason) {
+  var why = String(reason == null ? '' : reason).trim();
+  if (why.length < 10 || why.length > 500) throw new Error('abandon_reason_required');
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var raw = props.getProperty('INTEGRITY_PENDING_BACKUP');
+    if (!raw) throw new Error('no_pending_backup');
+    var pending = null;
+    try { pending = JSON.parse(raw); } catch (_) { pending = null; }
+    if (!pending || !pending.id || String(expectedRunId == null ? '' : expectedRunId) !== String(pending.id)) {
+      throw new Error('pending_run_mismatch');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(pending.day)) || !pending.backupId) throw new Error('invalid_pending_backup');
+    // A hard 360 s kill also strands INTEGRITY_ACTIVE_BACKUP. Clear it ONLY when
+    // it belongs to this same run (Phase A id or Phase B pendingId) and started
+    // more than 30 minutes ago: no Apps Script execution can still be alive.
+    var activeRaw = props.getProperty('INTEGRITY_ACTIVE_BACKUP'), active = null;
+    if (activeRaw) {
+      try { active = JSON.parse(activeRaw); } catch (_) { active = null; }
+      var started = active ? Date.parse(active.startedAt) : NaN;
+      if (!active || (String(active.id) !== String(pending.id) && String(active.pendingId) !== String(pending.id)) ||
+          !isFinite(started) || new Date().getTime() - started < INTEGRITY_DEAD_EXECUTION_MS) {
+        throw new Error('backup_busy');
+      }
+    }
+    var backupSs = SpreadsheetApp.openById(pending.backupId);
+    if (backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'verified-' + pending.day)) {
+      throw new Error('pending_set_certified; run finalizeNightlyIntegrityJob instead');
+    }
+    var record = JSON.stringify({ id: String(pending.id), day: String(pending.day),
+      abandonedAt: new Date().toISOString(), reason: why, clearedDeadActive: !!activeRaw });
+    props.setProperty('INTEGRITY_LAST_ABANDONED_BACKUP', record);
+    if (props.getProperty('INTEGRITY_PENDING_BACKUP') !== raw) throw new Error('pending_run_changed');
+    props.deleteProperty('INTEGRITY_PENDING_BACKUP');
+    if (activeRaw) {
+      if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') !== activeRaw) throw new Error('active_run_changed');
+      props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+    }
+  } finally { lock.releaseLock(); }
+  _integritySendAlert('OUT pending backup ' + pending.day + ' was ABANDONED by an operator (not certified, ' +
+    'no sheet deleted). Reason: ' + why);
+  return { ok: true, state: 'abandoned', day: String(pending.day), certified: false };
+}
+
+/* Read-only helper for the manual-tab (Sheet1 / Copy of Clients) recovery
+ * policy. It computes ONLY the facts the code can recompute from a CERTIFIED
+ * (v3) or valid v2 set and the current isolated target (_ss()). Operator
+ * attestations, roles and source sheet IDs stay null, so a draft can never pass
+ * _integrityVerifyManualPolicy unchanged, and nothing is pinned or written.
+ * A reviewed commit must fill evidence/roles and pin the canonical digest. */
+function draftOutpatientManualPolicy(backupId, day) {
+  var backupSs = SpreadsheetApp.openById(backupId), targetSs = _ss();
+  var captured = _integrityValidateRestoreSet(backupSs, day, false), meta = _integrityRecoveryMetadata(captured);
+  if (targetSs.getId() === backupSs.getId() || targetSs.getId() === meta.sourceSpreadsheetId) {
+    throw new Error('Recovery requires an isolated target');
+  }
+  var unknown = JSON.parse(meta.unclassifiedSources);
+  if (!unknown.length) throw new Error('No unclassified sheets; no manual policy needed');
+  var manifest = backupSs.getSheetByName(INTEGRITY_SNAPSHOT_PREFIX + 'manifest-' + day).getDataRange().getValues();
+  var metadata = captured.filter(function (x) { return x.source === '__RecoveryMetadata'; })[0];
+  var evidence = {};
+  ['recordPath', 'sha256', 'operator', 'captureStartedAt', 'captureEndedAt', 'beforeInventorySha256',
+   'afterInventorySha256', 'nativeCopyId', 'directWritesPaused', 'formulasAbsent', 'nativePropertiesVerified',
+   'targetCreatedAt', 'targetInitiallyEmpty', 'targetOwnerOnly'].forEach(function (k) { evidence[k] = null; });
+  var tabs = unknown.map(function (name) {
+    var item = captured.filter(function (x) { return x.source === name; })[0];
+    if (!item || item.absent) throw new Error('Unclassified sheet missing from certified set: ' + name);
+    var sh = targetSs.getSheetByName(name);
+    return { source: name, sheetId: null, prefix: item.prefix, absent: false, role: null,
+      sha256: _integrityFingerprint(item.grid), rows: item.grid.length, columns: item.grid[0].length,
+      allocatedRows: sh ? sh.getMaxRows() : null, allocatedColumns: sh ? sh.getMaxColumns() : null };
+  });
+  return { approved: false, schemaVersion: meta.schemaVersion,
+    policy: { version: 1, sourceId: meta.sourceSpreadsheetId, backupId: backupSs.getId(), day: day,
+      targetId: targetSs.getId(), manifestSha256: _integrityFingerprint(manifest),
+      metadataSha256: _integrityFingerprint(metadata.grid), evidence: evidence, tabs: tabs } };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 combined Gate 0 harness: pending group intent + one-click run — DRAFT #199 (2026-11-24)
+- Native isolated drill on the combined #195 source now certifies a committed AND a pending `SessionOutcomeOps` intent and resumes the pending one exactly once after restore. `runTwoStageDrillAuto` runs all phases from one click in the sandbox project. No production change. See CHANGELOG-op03-two-stage-backup.md.
+
+### OP-03 task 2: manual-tab policy on v3, interrupted-run exit, finalizer alerts, #195 integration — DRAFT #199 (2026-11-23)
+- `finalizeNightlyIntegrityJob` now e-mails the integrity alert on every refusal (missing Phase A, stranded/invalid marker, lock, flag left after rollback); a recovery hold stays silent. Success path unchanged.
+- New editor-only `abandonPendingIntegrityBackup(runId, reason)` (owner-decided exit from an interrupted run; deletes nothing, certifies nothing) and read-only `draftOutpatientManualPolicy(backupId, day)` (Sheet1 / Copy of Clients policy draft; attestations stay null). Production manual-policy pin stays blank.
+- Native Gate 0 fixture seeds one committed `SessionOutcomeOps` row on the combined #195 source only. No production change. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-RELEASE-READINESS-20261123.md.
+### OUT #195 release candidate now also carries the two-stage backup (#199) — DRAFT (2026-11-22)
+- Draft-only integration: finance / group receiver + deployed CRM/monitor + OP-03 two-stage backup in one tree. `INTEGRITY_DATA_SNAPSHOT_RE` recognises both the `session-outcome-ops` family and the new `pending-manifest` / `verified` families. QA-only branch push triggers removed from `test.yml`. New synthetic test: a committed GROUP `SessionOutcomeOps` row travels through Phase A → Phase B into the certified set, replay after restore credits once, a tampered journal fails closed. Release order and rollback: docs/OUT-195-RELEASE-RUNBOOK-20261122.md. Native isolated Google run still required.
+
+### Carry production optional task date/time into OUT195 (2026-11-22)
+- Preserve live new-task date/hour optional and undated tasks in «היום», alongside pending finance/group settlement. Candidate SW v45; neither deployed nor merged. No Apps Script, backup or therapist changes in this compatibility patch.
+
+### Candidate: monthly payment coverage and full OUT workflow (2026-11-20)
+- Explicit ordinary versus advance renewal intent; ordinary new monthly receipts cover the actual paid date through one clamped calendar month. Exact-date cycle IDs prevent same-month cycle collisions while preserving recorded IDs/periods and legacy journal replay.
+- Refuse duplicate admission from a stale tab; preserve original referral status after conversion and reload; enforce persisted financial-task visibility on replay; refuse ambiguous shared-payer deactivation.
+- Actual-source and HTTP journey regressions plus mandatory browser coverage for offering, scheduling and the complete workflow. SW v42; verified live v41. Draft only, no history repair or deployment. See CHANGELOG-out-payment-workflow.md and docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md.
+
+### OP-03 two-stage nightly backup + recovery certificate — DRAFT, dormant until `setupIntegrityTwoStage()` (2026-11-22)
+- Phase A (existing 02:00 job) captures and publishes a pending-only set; Phase B (one 03:00 finalizer) independently re-reads every snapshot, certifies `outpatient-verified-<day>`, then runs retention/sentinel. v3 restore refuses an uncertified set; v2 stays readable. Includes #198's single-inventory retention. No behaviour change in production until the operator activates staged mode. See CHANGELOG-op03-two-stage-backup.md and docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md (isolated native rehearsal still required).
+
 ### «משימה חדשה»: date and hour optional; a task with no date is today's work (2026-11-22)
 - The new-task form no longer refuses a task without an hour («בחרי שעה»): only what and who are required. The date («לטיפול בתאריך») opens on today and may be cleared.
 - A task with no date shows as «להיום» on the card («מה הלאה»: «לטיפול היום») and in today's section of «היום», instead of «בהמשך השבוע» / «ללא מועד». Browser-only; no Apps Script release. SW cache v42 → v43. See CHANGELOG-task-time-optional.md.

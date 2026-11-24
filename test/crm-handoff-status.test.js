@@ -61,7 +61,7 @@ test('states: referred / contacted / intro_scheduled / intro_passed / plan / not
   assert.equal(by['C-adm'].state, 'admitted');
   assert.equal(by['C-end'].state, 'ended'); assert.equal(by['C-end'].stateDate, '2026-09-30');
   assert.equal(by['nope'], undefined);
-  assert.deepEqual(r.states, ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant']);
+  assert.deepEqual(r.states, ['referred', 'contacted', 'intro_scheduled', 'intro_passed', 'plan', 'admitted', 'active', 'ended', 'not_relevant', 'unknown']);
   // contacted: a new-stage lead with a logged contact
   sb.post({ action: 'logContact', user: 'ורד', moneyScope: 'full', submissionId: 'k2', contact: { leadId: 'L-new', outcome: 'no_answer' }, next: { days: 3 } });
   const r2 = get(sb, { action: 'getHandoffStatus', secret: SECRET, outpatientIds: 'L-new' });

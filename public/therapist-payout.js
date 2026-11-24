@@ -103,8 +103,12 @@
       }
       var t = byTherapist[name];
       var outcome = str(row.outcome);
-      var isPaid = PAID_OUTCOMES[outcome] === true;
       var pay = num(row.therapistPay);
+      // A zero-rate group attendee is a clinical result, not a separate paid
+      // therapist session. Preserve any historical nonzero payout as recorded.
+      var unpaidGroupMember = (str(row.billingType) === 'קבוצה' ||
+        str(row.clinicalTreatmentType) === 'קבוצה') && pay === 0;
+      var isPaid = PAID_OUTCOMES[outcome] === true && !unpaidGroupMember;
       var rowMonth = monthOf(row.date);
 
       t.sessionCount++;
@@ -115,6 +119,7 @@
 
       t.sessions.push({
         sessionId: str(row.sessionId),
+        treatmentId: str(row.treatmentId),  // exact group participant for correction
         date: str(row.date),
         month: rowMonth,
         phone: str(row.phone),          // carried for the correction path (credit re-run)

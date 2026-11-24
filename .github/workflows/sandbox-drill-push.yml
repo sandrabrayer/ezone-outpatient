@@ -4,10 +4,10 @@ name: Sandbox Drill Push
 # Script test project so nobody has to move a 137 KB file through a browser
 # clipboard. It never deploys anything, never touches the production project
 # (the builder rejects the production script ID), and the drill itself refuses
-# to run anywhere but the project ID it was built for. The five phases
-# (prepare → capture → restore → verify → manual) are then run from the Apps
-# Script editor against synthetic workbooks only; the report lands in the
-# synthetic backup workbook's _DrillReport tab.
+# to run anywhere but the project ID it was built for.
+# Default Gate 0 runs the ACTUAL two-stage product entrypoints in an isolated
+# script, against three self-created synthetic workbooks. Historical legacy
+# five-phase drill stays available via explicit drill_kind: legacy.
 
 on:
   workflow_dispatch:
@@ -20,6 +20,14 @@ on:
         description: 'Full 40-character SHA of the candidate being drilled (must equal the dispatched ref)'
         required: true
         type: string
+      drill_kind:
+        description: 'Which isolated drill to upload (two-stage is required for OP-03 Gate 0)'
+        required: true
+        type: choice
+        default: two-stage
+        options:
+          - two-stage
+          - legacy
 
 concurrency:
   group: sandbox-drill-push
@@ -64,14 +72,27 @@ jobs:
           SANDBOX_ID: ${{ inputs.sandbox_script_id }}
         run: |
           set -eu
-          node test-support/build-google-operational-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
           mkdir -p /tmp/drill
-          cp test-support/google-operational-drill-candidate.gs /tmp/drill/Code.gs
-          printf '%s\n' '{"timeZone":"Asia/Jerusalem","exceptionLogging":"STACKDRIVER","runtimeVersion":"V8"}' > /tmp/drill/appsscript.json
+          case "${{ inputs.drill_kind }}" in
+            two-stage)
+              node test-support/build-google-two-stage-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
+              cp test-support/google-two-stage-drill-candidate.gs /tmp/drill/Code.gs
+              ;;
+            legacy)
+              node test-support/build-google-operational-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
+              cp test-support/google-operational-drill-candidate.gs /tmp/drill/Code.gs
+              ;;
+            *) echo "::error::Unsupported drill_kind"; exit 1 ;;
+          esac
+          printf '%s\n' '{"timeZone":"Asia/Jerusalem","exceptionLogging":"STACKDRIVER","runtimeVersion":"V8","oauthScopes":["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/script.scriptapp"]}' > /tmp/drill/appsscript.json
           printf '{"scriptId":"%s","rootDir":"."}\n' "$SANDBOX_ID" > /tmp/drill/.clasp.json
           sha256sum /tmp/drill/Code.gs
           if grep -q "$(node -p "require('./.clasp.json').scriptId")" /tmp/drill/Code.gs; then
             echo "::error::Generated drill references the production script ID."; exit 1
+          fi
+          if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+            grep -q 'function nightlyIntegrityJob(' /tmp/drill/Code.gs
+            grep -q 'function finalizeNightlyIntegrityJob(' /tmp/drill/Code.gs
           fi
 
       - name: Verify clasp credential secret is present
@@ -92,6 +113,34 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           node -e "JSON.parse(require('fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))"
 
+      - name: Fail closed unless remote target is a fresh EMPTY starter project
+        run: |
+          set -eu
+          # A mistyped Script ID could refer to an unrelated production app.
+          # Pull is read-only and the remote code is NEVER printed or uploaded.
+          # Refuse any project containing more than Google's new-script stub.
+          mkdir -p /tmp/op03-remote-preflight
+          cp /tmp/drill/.clasp.json /tmp/op03-remote-preflight/.clasp.json
+          cd /tmp/op03-remote-preflight
+          clasp pull >/dev/null
+          node <<'NODE'
+          const fs = require('fs');
+          const files = fs.readdirSync('.').filter(f => f !== '.clasp.json');
+          if (files.some(f => !['Code.gs','Code.js','appsscript.json'].includes(f)))
+            throw Error('Refusing: target has non-starter script files');
+          const codeFiles = files.filter(f => f === 'Code.gs' || f === 'Code.js');
+          if (codeFiles.length > 1)
+            throw Error('Refusing: multiple remote source files');
+          const code = codeFiles.length ? fs.readFileSync(codeFiles[0], 'utf8') : '';
+          if (code.trim() && !/^function\s+myFunction\s*\(\s*\)\s*\{\s*\}\s*;?$/.test(code.trim()))
+            throw Error('Refusing: target project already contains non-starter code');
+          if (!files.includes('appsscript.json'))
+            throw Error('Refusing: remote Apps Script manifest missing');
+          process.stdout.write('Isolated target has only a fresh starter template\n');
+          NODE
+          cd /
+          rm -rf /tmp/op03-remote-preflight
+
       - name: Push the drill to the isolated project (no deploy)
         working-directory: /tmp/drill
         run: clasp push -f
@@ -105,7 +154,11 @@ jobs:
             echo
             echo '```json'; cat drill-metadata.json; echo '```'
             echo
-            echo 'Next: in the isolated project run prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill, once each, in order. The report is the `_DrillReport` tab of the synthetic backup workbook.'
+            if [ "${{ inputs.drill_kind }}" = two-stage ]; then
+              echo 'One click: run runTwoStageDrillAuto ONCE (it schedules the next phase itself, one per minute, ~25 min, stops on first failure). Or manually: prepareTwoStageDrill ONCE (creates 3 synthetic workbooks), expandTwoStageInventoryDrill until 350/350, captureTwoStageDrill, verifyTwoStageDrill, restoreTwoStageDrill. Never create sheets/properties manually. Real A/B elapsed times are logged. Manual archives deliberately BLOCK operational cutover.'
+            else
+              echo 'LEGACY only: prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill.'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove credentials from the runner

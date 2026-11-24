@@ -280,6 +280,11 @@
   function legacyBasePaymentId(clientId, dueDateISO) {
     return 'pay::' + clientId + '::' + monthKey(dueDateISO);
   }
+  // New cycles have a date identity: two legitimate cycles can share a month.
+  // Existing month-key rows keep their stored IDs when settled.
+  function cyclePaymentId(clientId, dueDateISO) {
+    return 'pay::' + clientId + '::base::' + dueDateISO;
+  }
 
   // Build a fully-paid base monthly payment row for dueDateISO, stamped with an
   // explicit paidDateISO (NOT today) so a backdated payment round-trips unchanged.
@@ -287,7 +292,7 @@
   // edit-modal paid-date propagation (Bug A) and renew-and-pay (Bug C).
   function basePaymentPaidOn(client, dueDateISO, amount, paidDateISO, notes) {
     return {
-      id: paymentId(client.id, dueDateISO, 'base'),
+      id: cyclePaymentId(client.id, dueDateISO),
       clientId: client.id, clientName: client.name || '',
       billingType: 'monthly', dueDate: dueDateISO,
       amountDue: amount, amountPaid: amount, status: 'paid',
@@ -441,6 +446,7 @@
     dayOfMonth: dayOfMonth,
     lastDayOfMonth: lastDayOfMonth,
     paymentId: paymentId,
+    cyclePaymentId: cyclePaymentId,
     basePaymentPaidOn: basePaymentPaidOn,
     legacyBasePaymentId: legacyBasePaymentId,
     isLegacyBasePaymentId: isLegacyBasePaymentId,

@@ -57,9 +57,12 @@ function runtime(output, scriptId) {
     waitLock() { if(held)throw Error('Lock reentered');held=true; },
     tryLock() { if(held)return false;held=true;return true; },releaseLock() { if(!held)throw Error('Unowned lock');held=false; }
   }; }
-  const scriptLock=mutex(),userLock=mutex();
+  const scriptLock=mutex(),userLock=mutex(),triggers=[];
   const ctx={Date,JSON,Error,Object,Array,Number,String,Boolean,Math,RegExp,isFinite,isNaN,parseInt,parseFloat,
-    ScriptApp:{getScriptId:()=>scriptId},SpreadsheetApp:{getActiveSpreadsheet:()=>bound,
+    ScriptApp:{getScriptId:()=>scriptId,
+      getProjectTriggers:()=>triggers.slice(),
+      deleteTrigger(t){const i=triggers.indexOf(t);if(i<0)throw Error('Unknown trigger');triggers.splice(i,1);},
+      newTrigger(handler){return {timeBased:()=>({after:ms=>({create(){const t={getHandlerFunction:()=>handler,ms};triggers.push(t);return t;}})})};}},SpreadsheetApp:{getActiveSpreadsheet:()=>bound,
       create(title) { const id='synthetic-book-'+(++seq);events.push(['create',id]);return books[id]=book(id,title); },
       openById(id) { events.push(['open',id]);if(!books[id])throw Error('No such fixture workbook');return books[id]; },flush(){}},
     PropertiesService:{getScriptProperties:()=>({getKeys:()=>Object.keys(props),getProperty:k=>props[k]??null,
@@ -71,6 +74,6 @@ function runtime(output, scriptId) {
       formatDate:(d,tz,f)=>d.toISOString().slice(0,f==='yyyy-MM'?7:10)},
     Session:{getScriptTimeZone:()=> 'Asia/Jerusalem'},Logger:{log:v=>logs.push(v)}};
   vm.createContext(ctx);vm.runInContext(output,ctx);
-  return {ctx,books,props,logs,events,faults,bind:()=>{bound={};},state:()=>JSON.parse(props.OP03_DRILL_STATE||'null')};
+  return {ctx,books,props,logs,events,faults,triggers,bind:()=>{bound={};},state:()=>JSON.parse(props.OP03_DRILL_STATE||'null')};
 }
 module.exports={runtime};

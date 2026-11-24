@@ -316,14 +316,9 @@
    * historical rows; callers must opt in explicitly at the new-write boundary.
    * A coverage period is inclusive; the next collection is the following day.
    *
-   * OP-BILL-01 B1: coverage starts on max(paymentDate, cycleDate). A payment
-   * made BEFORE its due cycle is an advance from the due date (due 1 Nov, paid
-   * 28 Oct -> 1 Nov–30 Nov, next 1 Dec); a payment on/after the due date covers
-   * one month from the actual payment (due 1 Nov, paid 10 Nov -> 10 Nov–9 Dec,
-   * next 10 Dec). Without this, an early payment's next collection lands in the
-   * SAME month key as the cycle it settled, and the following renewal is
-   * refused forever (pay::<id>::base::<YYYY-MM> already exists). `cycleDate`
-   * is optional: an invalid or blank cycle falls back to the payment date.
+   * Ordinary receipts start on the actual paid date, even before a scheduled
+   * cycle. Explicit advances carry their chosen recorded period separately.
+   * Date-specific new cycle IDs avoid collisions when two cycles share a month.
    * EXACT MIRROR of _finPaidDateCoverage() in apps-script/Code.gs. */
   function paymentDateCoverage(value, cycleDate) {
     var iso = coverageDateISO(value);
@@ -332,11 +327,19 @@
     if (typeof value !== 'string' || value !== iso) return null;
     var d = iso && localDateFromISO(iso);
     if (!d) return null;
-    var cycle = typeof cycleDate === 'string' && cycleDate === coverageDateISO(cycleDate) ? cycleDate : '';
-    var startIso = cycle && cycle > iso ? cycle : iso;
+    var startIso = iso;
     var next = addMonthsClamped(localDateFromISO(startIso), 1);
     return { start: startIso, end: isoFromLocalDate(addDays(next, -1)),
       next: isoFromLocalDate(next) };
+  }
+
+  // Compatibility for read-only review of old B1 rows and retroactive flows.
+  // This is never the default for a newly selected ordinary receipt.
+  function legacyPaymentDateCoverage(value, cycleDate) {
+    var paid = paymentDateCoverage(value);
+    if (!paid) return null;
+    var cycle = coverageDateISO(cycleDate);
+    return cycle && cycle === cycleDate && cycle > value ? paymentDateCoverage(cycle) : paid;
   }
 
   function withDefaultCoverage(payment, options) {
@@ -349,7 +352,7 @@
       str(payment.status) === 'paid' && str(payment.billingType) === 'monthly' &&
       Number(payment.amountDue) > 0 &&
       Number(payment.amountPaid) >= Number(payment.amountDue);
-    // The row's own dueDate is its cycle: an early payment advances from it.
+    // Only the new receipt date selects the ordinary default.
     var win = newPaid && paymentDateCoverage(payment.paymentDate, coverageDateISO(payment.dueDate) || '');
     if (win) return assign({}, payment, {
       coverageStart: win.start, coverageEnd: win.end
@@ -376,10 +379,10 @@
     function asWindow(start, end) {
       return start && end ? { start: isoFromLocalDate(start), end: isoFromLocalDate(end) } : null;
     }
-    // The ordinary-month window a receipt would get under the write policy:
-    // max(paymentDate, dueDate) + 1 calendar month - 1 day (B1 rule).
+    // Preserve the historical B1 interpretation during read-only review.
+    // New ordinary writes already carry their actual paid-date recorded pair.
     function fromPaidDate(v, due) {
-      var w = paymentDateCoverage(coverageDateISO(v) || '', coverageDateISO(due) || '');
+      var w = legacyPaymentDateCoverage(coverageDateISO(v) || '', coverageDateISO(due) || '');
       return w ? { start: w.start, end: w.end } : null;
     }
     function nextDay(iso) {
@@ -854,6 +857,7 @@
     recordedCoverage: recordedCoverage,
     paymentCoverage: paymentCoverage,
     paymentDateCoverage: paymentDateCoverage,
+    legacyPaymentDateCoverage: legacyPaymentDateCoverage,
     paidThroughReview: paidThroughReview,
     coverageDiffersFromDefault: coverageDiffersFromDefault,
     withDefaultCoverage: withDefaultCoverage,

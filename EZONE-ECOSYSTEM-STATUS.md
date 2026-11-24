@@ -1,3 +1,15 @@
+# Outpatient — OP-03 task 2 backups/recovery status, 2026-11-23 (DRAFT #199, not released)
+
+Two-stage backup (#199): native Gate 0 passed 23 Nov on a scaled synthetic fixture
+(A 106.8 s, B 20.8 s, restore 15/15). This round adds finalizer refusal alerts, an
+owner-decided exit for an interrupted run, a read-only Sheet1/Copy of Clients policy
+draft helper, v3 manual-policy tests and #195 `SessionOutcomeOps` integration tests
+(combined tree: 2,624 pass / 0 fail). Live: Railway `b7de864`, Apps Script `62da2e2`
+(same Code.gs), legacy v2 nightly, 25-entry 23 Nov manifest (structure only; checksum
+and restore of the real backup not yet proven). **Production NO-GO** until native Gate 0
+on the combined #195 candidate, a read-only production Executions/triggers/properties
+check and Sandra's approvals. See docs/OP03-RELEASE-READINESS-20261123.md.
+
 # Outpatient — therapist name alias for ד"ר מיכאל שפרינץ, 2026-11-17
 
 The therapists roster (from staffing) spells him `ד" מיכאל שפרינץ`; `TherapistRates` has
@@ -300,6 +312,10 @@ workflow, logic, missing information/features, privacy, integrity/recovery,
 backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
+
+## Outpatient: combined release candidate #195 — finance/group receiver + two-stage backup (Nov 22, 2026 — DRAFT, not released)
+
+One candidate tree on `codex/out192-on-live-crm193-candidate-20261122`, aligned with deployed `b7de864f`, containing the per-participant group settlement / over-quota receiver (THR #171 pair), deployed CRM #193/#196 and monitor #197, and the OP-03 two-stage backup (#199, dormant until `setupIntegrityTwoStage()`). SW v45 (live v43). Order: OUT Node → OUT Apps Script → THR probe → THR #171. Gates still open: isolated native Google A/B + restore rehearsal, a verified current production backup (#124, last manifest 17 Nov), operator probe and UAT, Sandra's exact-SHA approval. See `docs/OUT-195-RELEASE-RUNBOOK-20261122.md`, `docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md`.
 
 ## Outpatient: contact record / tasks / «היום» aligned with the Dashboard CRM + «טיפול תחלואה כפולה» (Nov 21, 2026 — draft PR, not released)
 
@@ -938,3 +954,11 @@ check against pre-June-17 branches.
    July 4.
 7. **Dashboard Apps Script cleanup**: strip dead bonus logic (frontend now
    ignores it); keep raw-data endpoints only.
+# OUT tasks 2/3 candidate — 2026-11-20 (not released)
+
+Source of work: #152 / Dashboard #331, branch `codex/out-payment-workflow-20261120`,
+deployed base `3e393011`. Existing ledger/journal and workflows retained. Monthly
+coverage intent and four workflow integrity fixes are under acceptance; no
+production mutation. [Evidence, cross-app gaps, release and rollback](docs/OUT-PAYMENT-WORKFLOW-ACCEPTANCE-20261120.md).
+Therapists task 4 remains separately owned. Native Google and live paired
+acceptance must not be inferred from source/HTTP/browser fixture tests.
