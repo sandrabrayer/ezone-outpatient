@@ -161,15 +161,16 @@ test('#199-only source: native fixture is returned unchanged (same definition ha
   assert.strictEqual(withGroupJournal(base), base);
 });
 
-test('combined source: native Gate 0 fixture carries ONE committed group journal row', { skip }, () => {
+test('combined source: native Gate 0 fixture carries one committed and one PENDING group journal row', { skip }, () => {
   const base = fixture(), out = withGroupJournal(base);
-  const ops = out.grids.SessionOutcomeOps;
-  assert.equal(ops.length, 2);
-  assert.equal(ops[1][ops[0].indexOf('state')], 'committed');
-  assert.equal(out.grids.Clients.length, base.grids.Clients.length + 1);
-  assert.equal(out.grids.SessionLog.length, base.grids.SessionLog.length + 1);
+  const ops = out.grids.SessionOutcomeOps, state = ops[0].indexOf('state');
+  assert.equal(ops.length, 3);
+  assert.deepEqual(ops.slice(1).map(row => row[state]), ['committed', 'pending']);
+  assert.equal(out.grids.Clients.length, base.grids.Clients.length + 2);
+  assert.equal(out.grids.SessionLog.length, base.grids.SessionLog.length + 1, 'the pending report has no log row yet');
   assert.equal(JSON.stringify(fixture()), JSON.stringify(base), 'shared historical fixture never mutated');
   assert.equal(out.groupEvent.secret, undefined, 'no secret in the generated fixture');
+  assert.equal(out.pendingGroupEvent.secret, undefined);
 });
 
 test('combined source: the group fixture is deterministic (reproducible definition hash)', { skip }, () => {
