@@ -8,6 +8,32 @@ backup, restore, patient/financial cell read or permission change was performed.
 Native Gate 0 (23 Nov) was **not** re-run: its five phases remain the reference
 evidence ([PR #199 comment 7111339606](https://github.com/sandrabrayer/ezone-outpatient/pull/199#issuecomment-7111339606)).
 
+## 24 Nov 2026 addendum — combined candidate and combined Gate 0 harness
+
+- **Combined candidate (exact, prepared, NOT yet on GitHub):** two-parent merge of
+  #195 `d4a4f4638091a78b41af13ac5eec344696f8ada3` with #199 `e5c638c941ea569882b8b2a8c032b5875349d7b0`
+  → commit `eb510e9d56e14eba2bd9d93f836b32923e6d403b`, tree `03bcc48aefac1990604eae6bd0ab18fb541bc803`,
+  `apps-script/Code.gs` blob `c58440b82bfbe1e80a31a9f3ba4b8b581bb4907c`. Fast-forward of #195 (no
+  force). Conflicts only `CHANGELOG.md` (both kept, newest first) and the generated
+  `google-operational-drill-candidate.gs` (regenerated). #195 product/receiver code unchanged.
+  Local: **2,631 tests · 2,630 pass · 0 fail · 1 skip**, three consecutive full runs (one earlier
+  run had a single Chromium flake in the unrelated `patient-type tabs desktop 1280px` test;
+  it passed in all three re-runs). `npm audit` 0. The push to #195 was **blocked by the
+  session permission policy** and needs Sandra's explicit go-ahead.
+- **Combined native Gate 0 harness (#199 `2e179cc`):** on a source with `SessionOutcomeOps`
+  the fixture holds one committed **and one pending** group intent; Phase B must certify both
+  states; the restore resumes the pending intent ONCE on the isolated synthetic target with the
+  real `_soResumeOp`, a repeat retry is a no-op, credit stays 1. On #199 alone the old checks run.
+- **One click:** `runTwoStageDrillAuto` runs prepare → 18 expand batches → capture → verify →
+  restore, one phase per execution via a one-shot trigger **in the isolated project only**
+  (needs the extra `script.scriptapp` consent there), stops on the first failure, 40-step budget.
+- **Production read-only (24 Nov):** `EZONE-Backups` written again 2026-11-24 00:28:38Z (02:28
+  Israel), 2,898,002 → 3,058,218 bytes, still owner-only/PRIVATE; Railway `b7de864`, SW v43,
+  `/healthz` 200 ×3 (0.52 / 0.47 / 0.20 s). Write activity ≠ proof of a completed, checksum-valid run.
+- **Not possible from this session:** creating the Apps Script sandbox (Drive connector cannot
+  create script projects), executing Apps Script functions, reading production Executions,
+  triggers or Script Properties.
+
 Evidence levels used below — never mixed:
 
 | Level | Meaning |
