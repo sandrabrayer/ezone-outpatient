@@ -10,11 +10,6 @@ name: Sandbox Drill Push
 # five-phase drill stays available via explicit drill_kind: legacy.
 
 on:
-  # One-shot isolated upload on this QA-only branch; requires exact commit message
-  # and parent equal to frozen #195 candidate; never auto-runs on #195 or production.
-  push:
-    branches:
-      - qa/op03-combined-upload-20261124
   workflow_dispatch:
     inputs:
       sandbox_script_id:
@@ -43,22 +38,11 @@ permissions:
 
 jobs:
   push-drill:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-       github.ref == 'refs/heads/qa/op03-combined-upload-20261124' &&
-       github.event.head_commit.message == 'qa(op03): one-time combined native drill upload')
     runs-on: ubuntu-latest
-    env:
-      OP03_SANDBOX_ID: ${{ github.event_name == 'push' && '1g1eRpjnpR6N4-MoRR9CVnXgSZLXDmyWDDjsYD16wnHyoVjgAjEuXNDuc' || inputs.sandbox_script_id }}
-      OP03_EXPECTED_SOURCE: ${{ github.event_name == 'push' && 'd64260ab0f54e1711f71a399bc3286522cd97856' || inputs.expected_commit }}
-      OP03_DRILL_KIND: ${{ github.event_name == 'push' && 'two-stage' || inputs.drill_kind }}
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 2
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -70,18 +54,11 @@ jobs:
 
       - name: Refuse anything but the exact candidate and an isolated project
         env:
-          SANDBOX_ID: ${{ env.OP03_SANDBOX_ID }}
-          EXPECTED_COMMIT: ${{ env.OP03_EXPECTED_SOURCE }}
+          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: |
           set -eu
-          if [ "${{ github.event_name }}" = "push" ]; then
-            parent="$(git rev-parse HEAD^)"
-            changed="$(git diff-tree --no-commit-id --name-only -r HEAD)"
-            blob="$(git rev-parse HEAD:apps-script/Code.gs)"
-            if [ "$parent" != "$EXPECTED_COMMIT" ] || [ "$changed" != ".github/workflows/sandbox-drill-push.yml" ] || [ "$blob" != "c58440b82bfbe1e80a31a9f3ba4b8b581bb4907c" ]; then
-              echo "::error::QA upload must differ from the frozen combined candidate ONLY by this workflow; refusing."; exit 1
-            fi
-          elif [ "$GITHUB_SHA" != "$EXPECTED_COMMIT" ]; then
+          if [ "$GITHUB_SHA" != "$EXPECTED_COMMIT" ]; then
             echo "::error::Dispatched ref ($GITHUB_SHA) is not the expected candidate ($EXPECTED_COMMIT)."; exit 1
           fi
           prod="$(node -p "require('./.clasp.json').scriptId")"
@@ -92,11 +69,11 @@ jobs:
 
       - name: Build the bound drill from this exact source
         env:
-          SANDBOX_ID: ${{ env.OP03_SANDBOX_ID }}
+          SANDBOX_ID: ${{ inputs.sandbox_script_id }}
         run: |
           set -eu
           mkdir -p /tmp/drill
-          case "${{ env.OP03_DRILL_KIND }}" in
+          case "${{ inputs.drill_kind }}" in
             two-stage)
               node test-support/build-google-two-stage-drill.cjs --script-id "$SANDBOX_ID" | tee drill-metadata.json
               cp test-support/google-two-stage-drill-candidate.gs /tmp/drill/Code.gs
@@ -113,7 +90,7 @@ jobs:
           if grep -q "$(node -p "require('./.clasp.json').scriptId")" /tmp/drill/Code.gs; then
             echo "::error::Generated drill references the production script ID."; exit 1
           fi
-          if [ "${{ env.OP03_DRILL_KIND }}" = two-stage ]; then
+          if [ "${{ inputs.drill_kind }}" = two-stage ]; then
             grep -q 'function nightlyIntegrityJob(' /tmp/drill/Code.gs
             grep -q 'function finalizeNightlyIntegrityJob(' /tmp/drill/Code.gs
           fi
@@ -177,7 +154,7 @@ jobs:
             echo
             echo '```json'; cat drill-metadata.json; echo '```'
             echo
-            if [ "${{ env.OP03_DRILL_KIND }}" = two-stage ]; then
+            if [ "${{ inputs.drill_kind }}" = two-stage ]; then
               echo 'One click: run runTwoStageDrillAuto ONCE (it schedules the next phase itself, one per minute, ~25 min, stops on first failure). Or manually: prepareTwoStageDrill ONCE (creates 3 synthetic workbooks), expandTwoStageInventoryDrill until 350/350, captureTwoStageDrill, verifyTwoStageDrill, restoreTwoStageDrill. Never create sheets/properties manually. Real A/B elapsed times are logged. Manual archives deliberately BLOCK operational cutover.'
             else
               echo 'LEGACY only: prepareOperationalDrill → captureOperationalDrill → restoreOperationalDrill → verifyOperationalDrill → verifyManualTabDrill.'
