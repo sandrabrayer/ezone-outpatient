@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 combined Gate 0 harness: pending group intent + one-click run — DRAFT #199 (2026-11-24)
+- Native isolated drill on the combined #195 source now certifies a committed AND a pending `SessionOutcomeOps` intent and resumes the pending one exactly once after restore. `runTwoStageDrillAuto` runs all phases from one click in the sandbox project. No production change. See CHANGELOG-op03-two-stage-backup.md.
+
 ### OP-03 task 2: manual-tab policy on v3, interrupted-run exit, finalizer alerts, #195 integration — DRAFT #199 (2026-11-23)
 - `finalizeNightlyIntegrityJob` now e-mails the integrity alert on every refusal (missing Phase A, stranded/invalid marker, lock, flag left after rollback); a recovery hold stays silent. Success path unchanged.
 - New editor-only `abandonPendingIntegrityBackup(runId, reason)` (owner-decided exit from an interrupted run; deletes nothing, certifies nothing) and read-only `draftOutpatientManualPolicy(backupId, day)` (Sheet1 / Copy of Clients policy draft; attestations stay null). Production manual-policy pin stays blank.

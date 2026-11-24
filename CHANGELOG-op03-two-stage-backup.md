@@ -23,3 +23,9 @@
 - **Manual tabs:** `draftOutpatientManualPolicy(backupId, day)` — read-only draft from a certified set; v3 policy path tested (certificate required, pending run blocks, archive overwrite/drop refused).
 - **#195 integration:** `test/op03-group-journal-integration.test.js` (skips on #199-only trees, runs on the combined tree): pending group intent certified as-is, cutover refused while pending, single resume after restore, missing journal refused, tamper caught. Gate 0 builder seeds one committed group row on combined sources; shared historical fixture unchanged.
 - **Tests:** `test/op03-v3-manual-policy.test.js` (10), `test/op03-two-stage-ops.test.js` (9), integration (10). #199: 2,563 tests / 0 fail / 9 skip; combined #195 tree: 2,625 / 0 fail / 1 skip. Native Gate 0 not re-run (`nightlyIntegrityJob` and the finalizer success path unchanged); one native run on the combined candidate is required before release.
+
+## 24 Nov 2026 — combined Gate 0 harness
+
+- Builder (combined sources only): real `_soJournalRows` / `_soResumeOp` in the closure; fixture adds an interrupted group report (pending intent). Template: verify requires the certified set to hold 1 committed + 1 pending group row; restore resumes the pending intent once natively and proves a repeat retry is a no-op. #199-only artifacts unchanged in behaviour.
+- `runTwoStageDrillAuto`: one-click sequential run via one-shot triggers in the isolated project (stops on failure, 40-step budget, never bypasses the fresh-project guard). Upload manifest adds `script.scriptapp` (sandbox only).
+- Tests: `test/google-two-stage-drill-auto.test.js`. #199 local: 2,569 tests / 0 fail / 10 skip. Combined candidate `eb510e9` (local): 2,631 / 0 fail / 1 skip.

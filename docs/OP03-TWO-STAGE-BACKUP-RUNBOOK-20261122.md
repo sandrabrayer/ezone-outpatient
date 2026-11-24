@@ -153,3 +153,12 @@ Headers append-only; snapshot families only ever added (`pending-manifest`, `ver
 
 Release readiness, the manual-tab policy decision, #195 integration results and
 the read-only audit of the real 23 Nov backup: [OP03-RELEASE-READINESS-20261123.md](OP03-RELEASE-READINESS-20261123.md).
+
+## 24 Nov 2026 — combined Gate 0, one click
+
+On the combined #195 candidate, after the sandbox upload: open the NEW isolated
+project, select **`runTwoStageDrillAuto`**, Run once, approve the consent (Sheets +
+"manage triggers" for this project only). It schedules each next phase itself, one
+per minute, about 25 minutes in total, and stops at the first failure. Results are
+in the synthetic backup's `_DrillReport`; the last row must be `restore PASS` with
+"group pending intent resumed once natively". Do not run phases by hand in parallel.
