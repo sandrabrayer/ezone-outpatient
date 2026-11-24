@@ -3,6 +3,34 @@
 // deployed to any live application, attached to production, or authorized to
 // open production sheets. prepareTwoStageDrill self-creates all three workbooks.
 // No pre-created workbooks, triggers, Script Properties or secrets are needed.
+// ONE-CLICK option: run runTwoStageDrillAuto ONCE. It executes the next phase
+// in order (prepare, expand x18, capture, verify, restore), one phase per
+// execution, and schedules itself again one minute later via a one-shot
+// trigger in THIS isolated project only. It stops on the first failure (no
+// retry) and removes its own trigger at every step; nothing else is installed.
+function runTwoStageDrillAuto() { return op03AutoStep_(); }
+function continueTwoStageDrillAuto() { return op03AutoStep_(); }
+function op03AutoStep_() {
+  var handler = 'continueTwoStageDrillAuto';
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === handler) ScriptApp.deleteTrigger(t);
+  });
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('OP03_NATIVE_V3_STATE'), st = raw ? JSON.parse(raw) : null;
+  if (st && (st.failed || st.running))
+    throw new Error('Auto drill stopped: a phase failed or is still running; read _DrillReport');
+  var steps = Number(props.getProperty('OP03_AUTO_STEPS') || '0');
+  if (steps >= 40) throw new Error('Auto drill step budget exhausted');
+  var phase = !st ? 'prepare' : st.phase === 'prepared' ? (st.scaleTabs < 350 ? 'scale' : 'capture')
+    : st.phase === 'captured' ? 'verify' : st.phase === 'verified' ? 'restore' : 'done';
+  if (phase === 'done') return { ok: true, stage: st.phase, done: true, productionCertified: false };
+  var result = op03NativeTwoStage_(phase);
+  props.setProperty('OP03_AUTO_STEPS', String(steps + 1));
+  if (result.stage !== 'restored_readback')
+    ScriptApp.newTrigger(handler).timeBased().after(60 * 1000).create();
+  return result;
+}
+
 function prepareTwoStageDrill() { return op03NativeTwoStage_('prepare'); }
 function expandTwoStageInventoryDrill() { return op03NativeTwoStage_('scale'); }
 function captureTwoStageDrill() { return op03NativeTwoStage_('capture'); }
@@ -250,7 +278,18 @@ __HELPERS__
         check(inventory.some(function(item) { return item.source === 'SessionLog' && !item.absent; }),
               'Session log missing');
         check(elapsed < 300000, 'Phase B exceeded five-minute safety budget');
-        return {phase:'verified',detail:'Actual Phase B '+elapsed+' ms; certified '+inventory.length+' families'};
+        var groupNote = '';
+        if (typeof SESSION_OUTCOME_OP_SHEET !== 'undefined') {
+          // Combined #195 source: the certified set must hold the NONEMPTY group
+          // journal exactly as captured (one committed + one pending intent).
+          var gj = inventory.filter(function(item) { return item.source === SESSION_OUTCOME_OP_SHEET; })[0];
+          check(gj && !gj.absent && gj.grid.length === 3, 'Group credit journal missing from certified set');
+          var stCol = gj.grid[0].indexOf('state');
+          check(gj.grid[1][stCol] === 'committed' && gj.grid[2][stCol] === 'pending',
+                'Group journal states not preserved by A/B');
+          groupNote = '; group journal 2 rows (1 committed, 1 pending)';
+        }
+        return {phase:'verified',detail:'Actual Phase B '+elapsed+' ms; certified '+inventory.length+' families'+groupNote};
       }
       if (phase === 'restore') {
         var inventory = nativeReadback();
@@ -278,9 +317,37 @@ __HELPERS__
         try { _integrityVerifyRecoveredWorkbook(books.backup,state.day,target,true); }
         catch(err) { refused=/Unclassified sheets require/.test(String(err)); }
         check(refused,'Operational restore MUST remain held for manual archive policy');
+        var groupDetail = '';
+        if (typeof SESSION_OUTCOME_OP_SHEET !== 'undefined') {
+          // Combined #195 source, ISOLATED synthetic target only: the sender's
+          // retry after restore must resume the pending intent ONCE, with the
+          // real product resume path, and a repeated retry must change nothing.
+          currentBook = target;
+          var jSh = target.getSheetByName(SESSION_OUTCOME_OP_SHEET);
+          var cSh = target.getSheetByName('Clients'), lSh = target.getSheetByName('SessionLog');
+          check(jSh && cSh && lSh, 'Restored group journal, Clients or SessionLog missing');
+          var ops = _soJournalRows(jSh);
+          var pend = ops.filter(function(op) { return String(op.state) === 'pending'; });
+          check(ops.length === 2 && pend.length === 1, 'Restored group journal states mismatch');
+          var who = String(pend[0].clientId), key = String(pend[0].opKey);
+          var credit = _soLiveCredit(cSh, who), logRows = lSh.getLastRow();
+          check(credit === Number(pend[0].toCredits), 'Restored pending credit not as captured');
+          var first = _soResumeOp(pend[0], jSh, cSh, lSh, 'op03-native-drill', true);
+          check(first && first.ok, 'Native resume of the pending group intent failed');
+          check(_soLiveCredit(cSh, who) === credit, 'Native resume applied the credit twice');
+          check(lSh.getLastRow() === logRows + 1, 'Resume did not write exactly one SessionLog row');
+          var again = _soJournalRows(jSh).filter(function(op) { return String(op.opKey) === key; })[0];
+          check(again && String(again.state) === 'committed', 'Resumed intent not committed');
+          var second = _soResumeOp(again, jSh, cSh, lSh, 'op03-native-drill', true);
+          check(second && second.ok && _soLiveCredit(cSh, who) === credit && lSh.getLastRow() === logRows + 1,
+                'Repeated retry changed credits or SessionLog');
+          check(_soJournalRows(jSh).every(function(op) { return String(op.state) === 'committed'; }),
+                'Group journal not fully committed after resume');
+          groupDetail = '; group pending intent resumed once natively, repeat retry no-op, credit ' + credit;
+        }
         return {phase:'restored_readback',
                 detail:'Full native typed/opaque copy '+copied.length+
-                  ' tables; manual-policy operational cutover deliberately refused'};
+                  ' tables; manual-policy operational cutover deliberately refused'+groupDetail};
       }
       throw new Error('Unsupported Gate 0 stage');
     })(sheetFacade,propsFacade,mailFacade);

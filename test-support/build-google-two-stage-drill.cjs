@@ -19,6 +19,11 @@ const ENTRYPOINTS = Object.freeze([
   '_integrityFingerprint', '_integrityRecoveryMetadata'
 ]);
 
+// Combined OUT #195 source only: the REAL group-credit journal reader and
+// resume path, so the native restore can prove a pending intent resumes once.
+// Absent on a #199-only source, where the closure stays byte-identical.
+const GROUP_ENTRYPOINTS = Object.freeze(['_soJournalRows', '_soResumeOp']);
+
 function extract() {
   const source = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
   const ctx = sandbox().ctx;
@@ -40,6 +45,7 @@ function extract() {
     for (const dep of available) if (tokens.has(dep)) include(dep);
   }
   ENTRYPOINTS.forEach(include);
+  if (ctx.SESSION_OUTCOME_OP_SHEET === 'SessionOutcomeOps') GROUP_ENTRYPOINTS.forEach(include);
   const names = [...selected].sort();
   function literal(v) {
     if (Object.prototype.toString.call(v) === '[object RegExp]') return v.toString();
@@ -75,17 +81,33 @@ function withGroupJournal(base) {
     therapist: 'Synthetic Group Therapist', clinicalTreatmentType: 'קבוצה', date: '2026-10-19',
     outcome: 'patient_cancelled_notice', reportRevision: '2026-10-19T12:00:00.000Z' };
   const reply = s.post({ action: 'recordSessionOutcome', secret: s.props.SESSION_OUTCOME_SECRET, ...groupEvent });
-  const ops = s.sheets.SessionOutcomeOps && s.sheets.SessionOutcomeOps.grid;
-  if (!reply.ok || !ops || ops.length !== 2 || ops[1][ops[0].indexOf('state')] !== 'committed')
+  if (!reply.ok || !s.sheets.SessionOutcomeOps || s.sheets.SessionOutcomeOps.grid.length !== 2)
     throw Error('Synthetic group journal fixture failed');
+  // A second participant whose report was interrupted after the credit write
+  // and before the SessionLog row: its journal row stays PENDING. The native
+  // restore must refuse cutover on it and resume it exactly once.
+  s.seed('Clients', s.ctx.CLIENTS_HEADERS, [...s.rows('Clients'), { id: 'native-group-pending-client',
+    name: 'Synthetic pending participant', phone: '0500000097', clinicalTreatmentType: 'קבוצה',
+    serviceType: 'קבוצה', status: 'פעיל', sessionsPerWeek: '1', creditsOwed: 0 }]);
+  const pendingEvent = { ...groupEvent, sessionId: 'native-group-session-pending',
+    treatmentId: 'native-group-booking-pending', phone: '0500000097' };
+  const log = s.sheets.SessionLog, append = log.appendRow; let armed = true;
+  log.appendRow = function (...args) { if (armed) { armed = false; throw Error('synthetic interrupted write'); } return append.apply(this, args); };
+  const interrupted = s.post({ action: 'recordSessionOutcome', secret: s.props.SESSION_OUTCOME_SECRET, ...pendingEvent });
+  log.appendRow = append;
+  const states = s.rows('SessionOutcomeOps').map(r => r.state);
+  if (interrupted.ok || JSON.stringify(states) !== JSON.stringify(['committed', 'pending']) ||
+      Number(s.rows('Clients').find(r => r.id === 'native-group-pending-client').creditsOwed) !== 1)
+    throw Error('Synthetic pending group intent fixture failed');
   const out = JSON.parse(JSON.stringify(base));
   for (const name of ['Clients', 'SessionLog']) {
     const grid = s.sheets[name].grid;
     if (JSON.stringify(out.grids[name][0]) !== JSON.stringify(grid[0])) throw Error('Group fixture header drift: ' + name);
     out.grids[name] = out.grids[name].concat(JSON.parse(JSON.stringify(grid.slice(1))));
   }
-  out.grids.SessionOutcomeOps = JSON.parse(JSON.stringify(ops));
+  out.grids.SessionOutcomeOps = JSON.parse(JSON.stringify(s.sheets.SessionOutcomeOps.grid));
   out.groupEvent = groupEvent;
+  out.pendingGroupEvent = pendingEvent;
   return out;
 }
 function build({ scriptId = PLACEHOLDER } = {}) {
@@ -127,4 +149,4 @@ if (require.main === module) {
     ...result.metadata, bytes: Buffer.byteLength(result.output), runnable: Boolean(args[1])
   }));
 }
-module.exports = { build, extract, withGroupJournal, ENTRYPOINTS, PLACEHOLDER };
+module.exports = { build, extract, withGroupJournal, ENTRYPOINTS, GROUP_ENTRYPOINTS, PLACEHOLDER };
