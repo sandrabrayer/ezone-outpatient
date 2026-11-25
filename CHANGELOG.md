@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 #124: nightly backup no longer hits the 6-minute limit or blocks on a dead marker (2026-11-25)
+- The legacy nightly backup (341–361 s in production; timed out 17 and 24 Nov) now runs in segments of at most 200 s and continues by itself through a one-shot `resumeNightlyIntegrityJob` trigger. Every segment re-captures the sources and rewrites only changed snapshots, so the published set is one consistent capture. The manifest and full readback validation are unchanged.
+- A 35-minute watchdog resumes a killed segment the same night. An `INTEGRITY_ACTIVE_BACKUP` marker older than 30 min (its execution provably dead) is retired automatically, with an audit record and an alert. Young, malformed or pending markers, recovery hold and staged v3 mode stay fail-closed. At most 8 segments per night, with no retry loop. Apps Script deploy required; no new scope, header or Node change. See CHANGELOG-op03-segmented-backup.md.
+
 ### «שבועיים» — a plan frequency of once every two weeks (2026-11-25)
 - Every treatment type's frequency unit menu is now שבוע / שבועיים / חודש, so «טיפול פרטני 1 / שבועיים» can be set in עריכה, in חידוש ותשלום (package change) and in every lead/intake form. The card shows «1/שבועיים».
 - Monthly quota: שבוע ×4, שבועיים ×2, חודש ×1 — in the therapists-app projection (`monthQuota`) and in the credit engine. The renewal journal accepts the new unit and still refuses any unknown unit. Stored inside the existing `sessionsPerWeek` `_units` blob — no header change. SW v46. Apps Script deploy required. See CHANGELOG-session-unit-biweekly.md.

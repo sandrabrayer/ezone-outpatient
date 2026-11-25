@@ -250,7 +250,7 @@ test('alertBody: sections are omitted when empty', () => {
 // Source-scan guards: read-only contract + check ordering
 // ─────────────────────────────────────────────────────────────────────────────
 
-const JOB = gsFunction('nightlyIntegrityJob');
+const JOB = gsFunction('_integrityNightlyRun');
 
 test('job is read-only vs live sheets: no write primitives, no _ensureSheet in its body', () => {
   // Snapshot writes are delegated to _integrityWriteSnapshot (backup ss only);
@@ -295,8 +295,8 @@ test('sentinel state: persisted at end of run, only off a successful Clients rea
   const persistIdx = JOB.indexOf('INTEGRITY_PROP_LAST_COUNT, String(clients.length)');
   assert.ok(persistIdx !== -1, 'stored count updated');
   assert.ok(persistIdx > JOB.indexOf('CHECK 3'), 'state persisted after all checks');
-  assert.ok(JOB.slice(0, persistIdx).lastIndexOf('if (clientsReadOk)') !== -1,
-    'persist is gated on clientsReadOk');
+  assert.ok(JOB.slice(0, persistIdx).lastIndexOf('if (clientsReadOk && !continuing)') !== -1,
+    'persist is gated on clientsReadOk and only at the end of a (possibly segmented) run');
   assert.ok(JOB.includes('INTEGRITY_PROP_LAST_IDS, JSON.stringify(currentIds)'));
   assert.ok(JOB.includes('INTEGRITY_PROP_LAST_RUN'));
 });
@@ -314,7 +314,7 @@ test('alerting: fail-open — missing ALERT_EMAIL logs and returns, send failure
   assert.ok(/catch\s*\(err\)\s*\{[\s\S]*Logger\.log/.test(src), 'send failure caught, never thrown');
   assert.ok(!src.includes('throw '), 'never throws');
   // One email per run, only on problems: the job gates the send.
-  assert.ok(JOB.includes('if (missing.length || orphans.length || errors.length)'));
+  assert.ok(JOB.includes('if (!continuing && (missing.length || orphans.length || errors.length))'));
 });
 
 test('alert subject is the Hebrew mismatch subject', () => {

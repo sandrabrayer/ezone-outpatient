@@ -129,6 +129,12 @@ no new installer or scopes are needed for the staged four-dataset backup.
 After approval/deployment, verify the Clients, Leads and two archive snapshots
 in the existing backup workbook and verify the next scheduled run.
 
+**Segmented nightly backup (OP-03 #124, 2026-11-25).** The job creates and
+deletes its own one-shot `resumeNightlyIntegrityJob` trigger when a night needs
+more than one segment. That trigger is expected: do not delete it by hand
+during a run, and do not add one yourself. After a run, none should remain.
+See docs/OP03-SEGMENTED-BACKUP-RUNBOOK-20261125.md.
+
 Rolling the web deployment back to the recorded version does not revert
 **Head**, which runs the nightly job. A scheduled-job rollback also requires
 reverting the source through the approved repository/CI workflow. Neither

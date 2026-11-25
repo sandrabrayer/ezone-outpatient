@@ -57,7 +57,14 @@ function extract() {
     ? ctx[name].toString() : 'var ' + name + ' = ' + literal(ctx[name]) + ';').join('\n\n');
   // Only the explicitly sandboxed native services may be referenced. MailApp
   // is always injected as a no-send facade, even on a failing capture.
-  if (/\b(?:UrlFetchApp|DriveApp|GmailApp|ScriptApp|doGet|doPost|XmlService)\b/.test(helpers))
+  // OP-03 #124: the segmented LEGACY backup owns its one-shot continuation
+  // trigger through exactly two helpers. Gate 0 runs staged (v3) mode, which
+  // never calls them; ScriptApp stays forbidden everywhere else.
+  const TRIGGER_HELPERS = new Set(['_integrityDeleteResumeTriggers', '_integrityScheduleResume']);
+  const scanned = names.filter(name => !TRIGGER_HELPERS.has(name))
+    .map(name => typeof ctx[name] === 'function' ? ctx[name].toString() : '').join('\n\n');
+  if (/\b(?:UrlFetchApp|DriveApp|GmailApp|ScriptApp|doGet|doPost|XmlService)\b/.test(scanned) ||
+      /\b(?:UrlFetchApp|DriveApp|GmailApp|doGet|doPost|XmlService)\b/.test(helpers))
     throw Error('Unapproved service or HTTP handler in native Gate 0 closure');
   return { source, helpers, names };
 }
