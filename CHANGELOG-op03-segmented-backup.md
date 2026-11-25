@@ -42,6 +42,7 @@ resets the cycle.
 - **Bounded.** At most 8 segments per night. A real failure (write error,
   continuation trigger not creatable, cap reached) alerts once, drops the
   progress and schedules nothing: there is no automatic retry loop.
+- **Repo hygiene.** `.gitignore` now lists the generated `test-support/google-two-stage-drill-candidate.gs` (rebuilt by `npm test` and CI).
 - **Unchanged.** Staged v3 (`INTEGRITY_TWO_STAGE_ENABLED`) stays dormant and
   behaves as before. No new OAuth scope is needed (`script.scriptapp` is already
   in `appsscript.json`). No Sheets headers, no other triggers, no Node/UI change.
