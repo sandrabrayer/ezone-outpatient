@@ -345,7 +345,7 @@ checkout ever drifts back.
   status, startDate, exitDate, renewalDate, plannedExitDate,
   monthQuota, monthUsed, monthRemaining, makeupSessions }] }`
   (the last four — 2026-11-05 — are session COUNTS for this calendar month: the plan's
-  monthly quota with `_units` honoured, «happened» rows in `SessionLog`, remaining ≥ 0 or
+  monthly quota with `_units` honoured (שבוע ×4, שבועיים ×2, חודש ×1), «happened» rows in `SessionLog`, remaining ≥ 0 or
   `null` when the plan has no countable frequency, and `Clients.creditsOwed` as a count;
   never an amount — see `CHANGELOG-plan-session-counters.md`)
   for the E-Zone Therapists "מטופלי חוץ — תוכנית טיפול" tab. `phone` is the

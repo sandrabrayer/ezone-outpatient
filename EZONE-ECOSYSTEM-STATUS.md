@@ -313,6 +313,12 @@ backup, speed and controls. One implementation owner; Claude review where
 available, with exact commit and executed/static evidence distinguished. No
 subscriptions, check-ins or unapproved production release.
 
+## Outpatient: «שבועיים» frequency unit (Nov 25, 2026 — draft PR, not released)
+
+- Plan frequency unit menu is now שבוע / שבועיים / חודש for every treatment type (stored in the `sessionsPerWeek` `_units` blob as `"שבועיים"`; no header change). Monthly quota ×2 for it — `monthQuota` in `getTreatmentPlans` and the credit engine already reflect it.
+- ⚠️ **Therapists app follow-up:** its own `_units` parser must accept `"שבועיים"`, otherwise the plan line falls back to «1/שבוע» there (the `monthQuota` count is already right because outpatient computes it).
+- Release: merge → Railway → dispatch «Deploy Apps Script» (renewal validator + quota live in Code.gs). SW v46. CHANGELOG-session-unit-biweekly.md.
+
 ## Outpatient: combined release candidate #195 — finance/group receiver + two-stage backup (Nov 22, 2026 — DRAFT, not released)
 
 One candidate tree on `codex/out192-on-live-crm193-candidate-20261122`, aligned with deployed `b7de864f`, containing the per-participant group settlement / over-quota receiver (THR #171 pair), deployed CRM #193/#196 and monitor #197, and the OP-03 two-stage backup (#199, dormant until `setupIntegrityTwoStage()`). SW v45 (live v43). Order: OUT Node → OUT Apps Script → THR probe → THR #171. Gates still open: isolated native Google A/B + restore rehearsal, a verified current production backup (#124, last manifest 17 Nov), operator probe and UAT, Sandra's exact-SHA approval. See `docs/OUT-195-RELEASE-RUNBOOK-20261122.md`, `docs/OP03-TWO-STAGE-BACKUP-RUNBOOK-20261122.md`.

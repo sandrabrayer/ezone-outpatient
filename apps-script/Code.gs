@@ -1613,8 +1613,24 @@ function _planWeeklyFrequency(client) {
   return total;
 }
 
+/* Closed set of plan frequency units stored in the sessionsPerWeek `_units` blob
+ * (2026-11-25: «שבועיים» = once every two weeks). Mirrors SESSION_UNITS in
+ * public/charges-logic.js and public/app.js — keep in sync. */
+var SESSION_UNITS = ['שבוע', 'שבועיים', 'חודש'];
+
+/* Sessions per MONTH for `count` per `unit`: שבוע ×4, שבועיים ×2, חודש ×1; unknown or
+ * blank unit → weekly (legacy). Mirrors sessionsPerMonth in public/charges-logic.js. */
+function _sessionsPerMonth(count, unit) {
+  var n = parseInt(count, 10);
+  if (isNaN(n) || n <= 0) return 0;
+  var u = String(unit == null ? '' : unit).trim();
+  if (u === 'חודש') return n;
+  if (u === 'שבועיים') return n * 2;
+  return n * 4;
+}
+
 /* The plan's MONTHLY session quota (2026-11-05): each service's count × 4 for a weekly
- * unit, × 1 for a monthly one (`_units` — e.g. «מעקב פסיכיאטרי: 1 / חודש» used to count as
+ * unit, × 2 for a biweekly one («שבועיים», 2026-11-25), × 1 for a monthly one (`_units` — e.g. «מעקב פסיכיאטרי: 1 / חודש» used to count as
  * 4 per month). Bare numbers and services without a unit are weekly (the legacy rule). */
 function _planMonthlyQuota(client) {
   if (!client) return 0;
@@ -1626,8 +1642,7 @@ function _planMonthlyQuota(client) {
   var total = 0;
   Object.keys(o).forEach(function (k) {
     if (k === '_units') return;
-    var n = parseInt(o[k], 10); if (isNaN(n) || n <= 0) return;
-    total += (String(units[k] || '').trim() === 'חודש') ? n : n * 4;
+    total += _sessionsPerMonth(o[k], units[k]);
   });
   return total;
 }
@@ -6571,7 +6586,7 @@ function _finIntentError(intent, c, stored) {
     if (!sessions || Array.isArray(sessions) || typeof sessions !== 'object' || patch.packageChangeDate !== patch.paymentDate ||
         Object.keys(sessions).some(function (k) {
           if (k === '_units') return !sessions[k] || typeof sessions[k] !== 'object' || Array.isArray(sessions[k]) ||
-            Object.keys(sessions[k]).some(function (s) { return services.indexOf(s) < 0 || ['שבוע', 'חודש'].indexOf(sessions[k][s]) < 0; });
+            Object.keys(sessions[k]).some(function (s) { return services.indexOf(s) < 0 || SESSION_UNITS.indexOf(sessions[k][s]) < 0; });
           return services.indexOf(k) < 0 || typeof sessions[k] !== 'number' || !isFinite(sessions[k]) || sessions[k] < 0 || Math.floor(sessions[k]) !== sessions[k];
         })) return 'invalid_renewal_package';
   }

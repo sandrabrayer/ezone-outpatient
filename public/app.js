@@ -235,7 +235,7 @@
     var u = {};
     Object.keys(units || {}).forEach(function (k) {
       var val = String(units[k] == null ? '' : units[k]).trim();
-      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+      if (isSessionUnit(val)) u[k] = val;
     });
     if (Object.keys(u).length) obj._units = u;
     return JSON.stringify(obj);
@@ -413,11 +413,17 @@
   function sessionFrequencyUnit(serviceType) {
     return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
   }
+  // Closed set of frequency units («שבועיים» = once every two weeks, 2026-11-25).
+  // Mirrors SESSION_UNITS in public/charges-logic.js and apps-script/Code.gs.
+  var SESSION_UNITS = ['שבוע', 'שבועיים', 'חודש'];
+  // A function declaration (hoisted) that does not read SESSION_UNITS, so it is
+  // safe from formatSessionsBreakdown above even before this var is assigned.
+  function isSessionUnit(u) { return u === 'שבוע' || u === 'שבועיים' || u === 'חודש'; }
   // Resolve the unit for a service: a valid per-patient override wins, else the
   // by-type default. Mirrors sessionUnitFor in public/charges-logic.js.
   function sessionUnitFor(serviceType, units) {
     var u = units && units[serviceType];
-    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+    return isSessionUnit(u) ? u : sessionFrequencyUnit(serviceType);
   }
   // Extract per-service unit overrides from a stored sessionsPerWeek value
   // (object or JSON string); overrides live under the reserved `_units` key.
@@ -434,7 +440,7 @@
     if (obj && obj._units && typeof obj._units === 'object') {
       Object.keys(obj._units).forEach(function (k) {
         var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
-        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+        if (isSessionUnit(u)) out[k] = u;
       });
     }
     return out;
@@ -7252,7 +7258,7 @@
       // else the by-type default (psychiatric → חודש, all others → שבוע).
       var unitSel = document.createElement('select');
       unitSel.dataset.serviceUnit = svc;
-      ['שבוע', 'חודש'].forEach(function (unit) {
+      SESSION_UNITS.forEach(function (unit) {
         var o = document.createElement('option');
         o.value = unit; o.textContent = unit;
         unitSel.appendChild(o);
@@ -7438,11 +7444,11 @@
     return out;
   }
   // Read the per-service unit selections from a sessions host. Returns only
-  // services whose select carries a valid unit ('שבוע'|'חודש').
+  // services whose select carries a valid unit (SESSION_UNITS).
   function readSessionsUnits(host) {
     var out = {};
     $$('select[data-service-unit]', host).forEach(function (sel) {
-      if (sel.value === 'שבוע' || sel.value === 'חודש') out[sel.dataset.serviceUnit] = sel.value;
+      if (isSessionUnit(sel.value)) out[sel.dataset.serviceUnit] = sel.value;
     });
     return out;
   }
