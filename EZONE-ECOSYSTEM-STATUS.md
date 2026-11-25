@@ -1,3 +1,19 @@
+# Outpatient — OP-03 #124 nightly backup incident, 2026-11-25 (fix in PR, not released)
+
+Live: Railway / Apps Script `752b4b1` (#195), legacy single-run nightly backup.
+Production executions: 23 Nov Completed in 341.678 s; 24 Nov **Timed Out** at
+360.864 s, which stranded `INTEGRITY_ACTIVE_BACKUP`; 25 Nov refused with
+`backup_busy`. The last OUT manifest is 24 Nov. Fix (branch
+`claude/youthful-brahmagupta-gak64f`): the backup runs in segments of at most
+200 s that resume themselves, plus a 35-min watchdog, and a marker older than
+30 min is retired automatically with an audit record and an alert. After
+approval → merge → Apps Script deploy, the next 02:21 run retires the 24 Nov
+marker itself; no manual Script Property edit is needed. Closure needs one
+observed nightly chain: every segment Completed under 360 s, a new
+`outpatient-manifest-<day>`, and no ACTIVE marker or continuation trigger left
+afterwards. See CHANGELOG-op03-segmented-backup.md and
+docs/OP03-SEGMENTED-BACKUP-RUNBOOK-20261125.md.
+
 # Outpatient — OP-03 task 2 backups/recovery status, 2026-11-23 (DRAFT #199, not released)
 
 Two-stage backup (#199): native Gate 0 passed 23 Nov on a scaled synthetic fixture

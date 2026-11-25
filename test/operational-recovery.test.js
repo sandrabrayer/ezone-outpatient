@@ -587,11 +587,12 @@ test('a failed backup clears its own execution marker in finally and keeps recov
   assert.deepEqual(h.locks(), [false, false]);
 });
 
-test('an abandoned execution marker is never expired or removed automatically to bypass the drain gate', () => {
+test('an abandoned execution marker is never expired or removed automatically to bypass the recovery drain gate', () => {
+  // OP-03 #124: the NIGHTLY job may retire a provably dead marker (covered in
+  // nightly-segmented-backup.test.js); the recovery cutover never does.
   const h = snapshot(world()), r = restored(h);
   h.props.INTEGRITY_ACTIVE_BACKUP = '{"id":"stale-synthetic-run","startedAt":"2000-01-01T00:00:00Z"}';
   const marker = h.props.INTEGRITY_ACTIVE_BACKUP;
-  assert.throws(() => h.ctx.nightlyIntegrityJob(), /backup_busy/);
   assert.equal(h.ctx.beginOutpatientRecovery().error, 'backup_draining');
   h.ctx.SpreadsheetApp.getActiveSpreadsheet = () => target(r);
   assert.throws(() => h.ctx.finishOutpatientRecovery('backup', dayOf(h), true), /backup still running/);

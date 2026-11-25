@@ -9234,6 +9234,25 @@ var INTEGRITY_PROP_BACKUP_SSID = 'INTEGRITY_BACKUP_SSID';
 var INTEGRITY_PROP_ALERT_EMAIL = 'ALERT_EMAIL';
 var INTEGRITY_BACKUP_NAME      = 'EZONE-Backups';
 var INTEGRITY_RETENTION_DAYS   = 30;
+/* OP-03 #124 runtime fix. Google kills an Apps Script execution at 360 s and a
+ * killed run cannot run its finally block. The legacy single-run backup took
+ * 341-361 s in production (23-24 Nov 2026), so it now works in SEGMENTS: a
+ * segment starts no new snapshot write after INTEGRITY_SEGMENT_BUDGET_MS,
+ * records its progress and schedules a one-shot continuation. Every segment
+ * re-captures the live sources under the capture lock and rewrites any
+ * snapshot whose checksum changed, so the published set always equals ONE
+ * capture instant (the last one). Final manifest + full readback validation
+ * are unchanged. */
+var INTEGRITY_SEGMENT_BUDGET_MS   = 200 * 1000;
+// The manifest + FULL independent readback of every snapshot starts only in a
+// segment that still has this much head-room left; otherwise it gets a fresh one.
+var INTEGRITY_FINALIZE_START_MS   = 120 * 1000;
+var INTEGRITY_RETENTION_BUDGET_MS = 290 * 1000; // retention is idempotent; the rest waits for tomorrow
+var INTEGRITY_MAX_SEGMENTS        = 8;
+var INTEGRITY_RESUME_DELAY_MS     = 60 * 1000;
+var INTEGRITY_RESUME_HANDLER      = 'resumeNightlyIntegrityJob';
+var INTEGRITY_PROP_RESUME         = 'INTEGRITY_RESUME_BACKUP';
+var INTEGRITY_PROP_STALE_ACTIVE   = 'INTEGRITY_LAST_STALE_ACTIVE';
 var INTEGRITY_ALERT_SUBJECT    = '⚠️ E-ZONE: אי-התאמה בנתוני מטופלים';
 /* Snapshot sheet names are app-prefixed: the backup spreadsheet will be
  * shared with the Dashboard app's own job later, so each app's snapshots and
@@ -9845,13 +9864,16 @@ function _integrityWriteSnapshot(backupSs, snapName, grid, formats) {
 /* Delete OUR expired snapshot sheets from the backup spreadsheet. Strictly
  * name-matched via _integrityIsExpiredSnapshot; never deletes the last
  * remaining sheet (Sheets requires >= 1). */
-function _integrityApplyRetention(backupSs, todayName, retentionDays) {
+function _integrityApplyRetention(backupSs, todayName, retentionDays, deadlineMs) {
   // A single source inventory avoids 400+ remote getSheets() calls per
   // retention pass. Preserve the last worksheet and unknown/manual tabs.
+  // Optional deadline: deleting expired tabs is idempotent, so stopping early
+  // only defers the rest to the next night (never risks the 360 s kill).
   var sheets = backupSs.getSheets();
   var remaining = sheets.length, deleted = [];
   for (var i = 0; i < sheets.length; i++) {
     if (remaining <= 1) break;
+    if (deadlineMs && _integrityNowMs() > deadlineMs) break;
     var name = sheets[i].getName();
     if (_integrityIsExpiredSnapshot(name, todayName, retentionDays)) {
       backupSs.deleteSheet(sheets[i]);
@@ -9912,11 +9934,59 @@ function _integritySendAlert(body) {
   }
 }
 
+/* Clock seam (tests replace it); production uses the real wall clock. */
+function _integrityNowMs() { return new Date().getTime(); }
+
+/* A marker whose execution provably ended without cleanup: well-formed, with a
+ * startedAt older than INTEGRITY_DEAD_EXECUTION_MS (5x Google's 360 s hard
+ * limit, so no execution can still be alive). Malformed/young markers -> null:
+ * those keep the fail-closed backup_busy refusal for operator review. */
+function _integrityStaleActive(raw, nowMs) {
+  if (!raw) return null;
+  var marker = null;
+  try { marker = JSON.parse(raw); } catch (_) { return null; }
+  if (!marker || typeof marker !== 'object' || !marker.id) return null;
+  var started = Date.parse(marker.startedAt);
+  if (!isFinite(started) || nowMs - started < INTEGRITY_DEAD_EXECUTION_MS) return null;
+  return marker;
+}
+
+function _integrityDeleteResumeTriggers() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === INTEGRITY_RESUME_HANDLER) { ScriptApp.deleteTrigger(t); removed++; }
+  });
+  return removed;
+}
+
+/* Exactly one pending continuation trigger at a time (quota-safe). */
+function _integrityScheduleResume(delayMs) {
+  _integrityDeleteResumeTriggers();
+  ScriptApp.newTrigger(INTEGRITY_RESUME_HANDLER).timeBased().after(delayMs).create();
+}
+
 /* The 2:00 AM trigger handler. Each check runs in its own try/catch so one
  * failure never silences the others; internal errors join the alert. */
 function nightlyIntegrityJob() {
+  return _integrityNightlyRun(false);
+}
+
+/* One-shot continuation / watchdog handler, created only by the job itself.
+ * It never starts a NEW backup: without saved same-day progress it just
+ * removes its own trigger. Staged (v3) mode keeps its own two triggers. */
+function resumeNightlyIntegrityJob() {
+  try { _integrityDeleteResumeTriggers(); } catch (err) { Logger.log('resumeNightlyIntegrityJob: trigger cleanup failed: ' + err); }
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1') return { ok: true, state: 'staged_mode' };
+  if (!props.getProperty(INTEGRITY_PROP_RESUME)) return { ok: true, state: 'nothing_to_resume' };
+  return _integrityNightlyRun(true);
+}
+
+function _integrityNightlyRun(isResume) {
   var props = PropertiesService.getScriptProperties();
   var stagedMode = props.getProperty('INTEGRITY_TWO_STAGE_ENABLED') === '1';
+  var segmentStartMs = _integrityNowMs();
+  var segmented = !stagedMode;
   var admission = LockService.getScriptLock();
   if (!admission.tryLock(5000)) {
     _integritySendAlert('Backup not started: script lock unavailable; no new snapshot was captured.');
@@ -9924,16 +9994,48 @@ function nightlyIntegrityJob() {
     // Never bypass or delete a lock/marker automatically.
     throw new Error('backup_busy');
   }
-  var runMarker = '', admissionError = '';
+  var runMarker = '', admissionError = '', retired = null, resume = null;
+  var today = _integritySnapshotName(new Date()).slice(INTEGRITY_SNAPSHOT_PREFIX.length);
   try {
+    var activeRaw = props.getProperty('INTEGRITY_ACTIVE_BACKUP');
     if (props.getProperty('OUTPATIENT_RECOVERY_HOLD')) admissionError = 'recovery_pending';
-    else if (props.getProperty('INTEGRITY_ACTIVE_BACKUP') ||
-             props.getProperty('INTEGRITY_PENDING_BACKUP')) admissionError = 'backup_busy';
-    else {
-      runMarker = JSON.stringify({ id: Utilities.getUuid(), startedAt: new Date().toISOString() });
+    else if (props.getProperty('INTEGRITY_PENDING_BACKUP')) admissionError = 'backup_busy';
+    else if (activeRaw && !(segmented && (retired = _integrityStaleActive(activeRaw, segmentStartMs)))) {
+      admissionError = 'backup_busy';
+    } else {
+      if (retired) {
+        // Legacy mode only (staged v3 keeps its owner-decided abandon tool).
+        // The execution that wrote this marker was killed (no finally); retire
+        // it with an audit record instead of blocking every following night.
+        props.setProperty(INTEGRITY_PROP_STALE_ACTIVE, JSON.stringify({ id: String(retired.id),
+          startedAt: String(retired.startedAt), retiredAt: new Date(segmentStartMs).toISOString() }));
+        props.deleteProperty('INTEGRITY_ACTIVE_BACKUP');
+      }
+      if (segmented) {
+        try { resume = JSON.parse(props.getProperty(INTEGRITY_PROP_RESUME) || 'null'); } catch (_) { resume = null; }
+        if (!resume || typeof resume !== 'object' || resume.day !== today || !resume.id ||
+            !resume.written || typeof resume.written !== 'object') {
+          // Progress of an older day is never reused: start a fresh capture.
+          resume = { id: Utilities.getUuid(), day: today, segments: 0, written: {} };
+        }
+        resume.segments = Number(resume.segments || 0) + 1;
+        props.setProperty(INTEGRITY_PROP_RESUME, JSON.stringify(resume));
+      }
+      runMarker = JSON.stringify({ id: resume ? resume.id : Utilities.getUuid(),
+        segment: resume ? resume.segments : 1, startedAt: new Date(segmentStartMs).toISOString() });
       props.setProperty('INTEGRITY_ACTIVE_BACKUP', runMarker);
     }
   } finally { admission.releaseLock(); }
+  if (retired) {
+    _integritySendAlert('Stale backup marker retired automatically: the run started ' + String(retired.startedAt) +
+      ' ended without cleanup (Google runtime kill). No data was changed; a new backup starts now.');
+  }
+  if (segmented && runMarker) {
+    // Watchdog: if Google kills THIS segment, the continuation fires after the
+    // marker is provably dead and resumes from the recorded progress.
+    try { _integrityScheduleResume(INTEGRITY_DEAD_EXECUTION_MS + 5 * 60 * 1000); }
+    catch (err) { Logger.log('nightlyIntegrityJob: watchdog trigger unavailable: ' + err); }
+  }
   if (admissionError) {
     if (admissionError === 'backup_busy') {
       _integritySendAlert('Backup not started: another backup is active or its execution marker requires operator review.');
@@ -9945,8 +10047,13 @@ function nightlyIntegrityJob() {
   // This marker spans the WHOLE run, including publication, retention, alerts
   // and sentinel writes. It uses Script Properties/ScriptLock across users;
   // the short per-sheet UserLock is not a recovery/cutover barrier.
+  var continuing = false;
   try {
   var errors = [];
+  var overSegments = segmented && resume.segments > INTEGRITY_MAX_SEGMENTS;
+  if (overSegments) {
+    errors.push('הגיבוי לא הושלם אחרי ' + INTEGRITY_MAX_SEGMENTS + ' מקטעים; נדרשת בדיקה');
+  }
 
   // ---- read-only reads of the live data (getSheetByName, NEVER _ensureSheet:
   //      this job must not write to Clients/Payments, not even a header
@@ -10036,7 +10143,7 @@ function nightlyIntegrityJob() {
   // capture/verify exception merely emailed an alert. Track the manifest gate.
   var backupPublished = false;
   try {
-    if (clientsReadOk && clientsGrid && clientsGrid.length) {
+    if (!overSegments && clientsReadOk && clientsGrid && clientsGrid.length) {
       var sourceSs = _ss();
       // Verify duplicate-day admission BEFORE touching the same-day families.
       // This also prevents a manual retry from overwriting a certified set.
@@ -10063,12 +10170,31 @@ function nightlyIntegrityJob() {
           startedAt: admitted.startedAt
         }));
       }
+      var deadlineMs = segmentStartMs + INTEGRITY_SEGMENT_BUDGET_MS;
       for (var b = 0; b < captured.length; b++) {
-        var item = captured[b];
-        _integrityWriteSnapshot(backupSs, INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day, item.grid, item.formats);
+        var item = captured[b], snapName = INTEGRITY_SNAPSHOT_PREFIX + item.prefix + day;
+        if (segmented) {
+          var itemSha = _integrityFingerprint(item.grid);
+          // Unchanged since an earlier segment wrote it: keep that snapshot.
+          // The final full readback below still re-verifies every checksum.
+          if (resume.written[snapName] === itemSha && backupSs.getSheetByName(snapName)) continue;
+          if (_integrityNowMs() > deadlineMs) { continuing = true; break; }
+        }
+        _integrityWriteSnapshot(backupSs, snapName, item.grid, item.formats);
+        if (segmented) {
+          resume.written[snapName] = itemSha; // persisted per item: a kill loses nothing
+          props.setProperty(INTEGRITY_PROP_RESUME, JSON.stringify(resume));
+        }
         Logger.log('nightlyIntegrityJob: backup verified (%s; sourceAbsent=%s; rows=%s)',
           item.source, String(item.absent), String(item.grid.length - 1));
       }
+      if (segmented && !continuing &&
+          _integrityNowMs() > segmentStartMs + INTEGRITY_FINALIZE_START_MS) continuing = true;
+      if (continuing) {
+        _integrityScheduleResume(INTEGRITY_RESUME_DELAY_MS);
+        Logger.log('nightlyIntegrityJob: segment %s reached its time budget; continuation scheduled (%s)',
+          String(resume.segments), day);
+      } else {
       // Publish the manifest last. An interrupted same-day replacement leaves
       // mismatching hashes and cannot be mistaken for a coherent restore set.
       var manifest = [['id', 'source', 'snapshot', 'absent', 'sha256']];
@@ -10092,14 +10218,17 @@ function nightlyIntegrityJob() {
           return !x.absent && x.source !== '__RecoveryMetadata';
         }).map(function (x) { return x.source; })));
         // Retention runs only after every data snapshot and the manifest verify.
-        var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS);
+        var deleted = _integrityApplyRetention(backupSs, todayName, INTEGRITY_RETENTION_DAYS,
+          segmentStartMs + INTEGRITY_RETENTION_BUDGET_MS);
         if (deleted.length) Logger.log('nightlyIntegrityJob: retention deleted %s', deleted.join(', '));
       }
+      }
     }
-  } catch (err) { errors.push('הגיבוי היומי נכשל: ' + err); }
+  } catch (err) { continuing = false; errors.push('הגיבוי היומי נכשל: ' + err); }
 
   // ---- alert: one email per run, ONLY when something is wrong ----
-  if (missing.length || orphans.length || errors.length) {
+  // A budget-limited segment is not a result yet: report once, at the end.
+  if (!continuing && (missing.length || orphans.length || errors.length)) {
     _integritySendAlert(_integrityAlertBody({
       missing: missing,
       orphans: orphans,
@@ -10114,7 +10243,7 @@ function nightlyIntegrityJob() {
   // ---- persist the sentinel state for tomorrow's run — but only off a
   //      SUCCESSFUL Clients read: seeding count 0 after a failed read would
   //      fire a false full-loss alert tomorrow ----
-  if (clientsReadOk) {
+  if (clientsReadOk && !continuing) {
     // v3 updates this sentinel ONLY once the independent verification passes.
     if (!stagedMode) {
     props.setProperty(INTEGRITY_PROP_LAST_COUNT, String(clients.length));
@@ -10126,6 +10255,14 @@ function nightlyIntegrityJob() {
   // backup. The existing email is best-effort; Apps Script execution failure
   // must independently signal the missing publication. Nothing is retried or
   // written here, and the finally block still clears only our run marker.
+  if (segmented && !continuing) {
+    // Run finished (published or failed): drop its progress and continuation.
+    // A failure is never retried automatically; tomorrow starts fresh.
+    props.deleteProperty(INTEGRITY_PROP_RESUME);
+    try { _integrityDeleteResumeTriggers(); }
+    catch (err) { Logger.log('nightlyIntegrityJob: continuation cleanup failed: ' + err); }
+  }
+  if (continuing) return { ok: true, state: 'continuing', segment: resume.segments };
   if (!backupPublished) {
     Logger.log('nightlyIntegrityJob: no verified backup manifest published; execution FAILED');
     throw new Error('nightly_backup_not_published');
