@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### «שבועיים» — a plan frequency of once every two weeks (2026-11-25)
+- Every treatment type's frequency unit menu is now שבוע / שבועיים / חודש, so «טיפול פרטני 1 / שבועיים» can be set in עריכה, in חידוש ותשלום (package change) and in every lead/intake form. The card shows «1/שבועיים».
+- Monthly quota: שבוע ×4, שבועיים ×2, חודש ×1 — in the therapists-app projection (`monthQuota`) and in the credit engine. The renewal journal accepts the new unit and still refuses any unknown unit. Stored inside the existing `sessionsPerWeek` `_units` blob — no header change. SW v46. Apps Script deploy required. See CHANGELOG-session-unit-biweekly.md.
+
 ### OP-03 combined Gate 0 harness: pending group intent + one-click run — DRAFT #199 (2026-11-24)
 - Native isolated drill on the combined #195 source now certifies a committed AND a pending `SessionOutcomeOps` intent and resumes the pending one exactly once after restore. `runTwoStageDrillAuto` runs all phases from one click in the sandbox project. No production change. See CHANGELOG-op03-two-stage-backup.md.
 

@@ -32,21 +32,40 @@
     return serviceType === 'מעקב פסיכיאטרי' ? 'חודש' : 'שבוע';
   }
 
+  // The closed set of frequency units (2026-11-25: «שבועיים» = once every two
+  // weeks). Values are the stored strings inside the `_units` blob — the
+  // existing 'שבוע'/'חודש' records are Hebrew, so the new unit keeps that form.
+  // Mirrors SESSION_UNITS in public/app.js and apps-script/Code.gs — keep in sync.
+  var SESSION_UNITS = ['שבוע', 'שבועיים', 'חודש'];
+  function isSessionUnit(u) { return SESSION_UNITS.indexOf(u) >= 0; }
+
+  // Sessions per MONTH for `count` sessions per `unit`: שבוע ×4, שבועיים ×2,
+  // חודש ×1. Unknown/blank unit → weekly (the legacy rule). Mirrors
+  // _sessionsPerMonth in apps-script/Code.gs — keep in sync.
+  function sessionsPerMonth(count, unit) {
+    var n = parseInt(count, 10);
+    if (isNaN(n) || n <= 0) return 0;
+    var u = String(unit == null ? '' : unit).trim();
+    if (u === 'חודש') return n;
+    if (u === 'שבועיים') return n * 2;
+    return n * 4;
+  }
+
   // Resolve the frequency unit for a service: an explicit, valid per-patient
   // override wins; otherwise fall back to the by-type default in
-  // sessionFrequencyUnit. `units` is a { service: 'שבוע'|'חודש' } map and may be
+  // sessionFrequencyUnit. `units` is a { service: 'שבוע'|'שבועיים'|'חודש' } map and may be
   // empty/undefined (legacy records). Mirrors sessionUnitFor in public/app.js —
   // keep both in sync.
   function sessionUnitFor(serviceType, units) {
     var u = units && units[serviceType];
-    return (u === 'שבוע' || u === 'חודש') ? u : sessionFrequencyUnit(serviceType);
+    return isSessionUnit(u) ? u : sessionFrequencyUnit(serviceType);
   }
 
   // Extract per-service unit overrides from a stored sessionsPerWeek value
   // (object or JSON string). Overrides live under the reserved `_units` key
   // inside the SAME blob as the service→count entries, so no schema/column
   // change is needed. Invalid/unknown units are dropped. Returns a
-  // { service: 'שבוע'|'חודש' } map. Mirrors parseSessionsUnits in
+  // { service: 'שבוע'|'שבועיים'|'חודש' } map. Mirrors parseSessionsUnits in
   // public/app.js — keep both in sync.
   function parseSessionsUnits(v) {
     var out = {};
@@ -60,7 +79,7 @@
     if (obj && obj._units && typeof obj._units === 'object') {
       Object.keys(obj._units).forEach(function (k) {
         var u = String(obj._units[k] == null ? '' : obj._units[k]).trim();
-        if (u === 'שבוע' || u === 'חודש') out[k] = u;
+        if (isSessionUnit(u)) out[k] = u;
       });
     }
     return out;
@@ -79,7 +98,7 @@
     var u = {};
     Object.keys(units || {}).forEach(function (k) {
       var val = String(units[k] == null ? '' : units[k]).trim();
-      if (val === 'שבוע' || val === 'חודש') u[k] = val;
+      if (isSessionUnit(val)) u[k] = val;
     });
     if (Object.keys(u).length) obj._units = u;
     return obj;
@@ -431,6 +450,9 @@
   return {
     monthKey: monthKey,
     sessionFrequencyUnit: sessionFrequencyUnit,
+    SESSION_UNITS: SESSION_UNITS.slice(),
+    isSessionUnit: isSessionUnit,
+    sessionsPerMonth: sessionsPerMonth,
     sessionUnitFor: sessionUnitFor,
     parseSessionsUnits: parseSessionsUnits,
     attachSessionsUnits: attachSessionsUnits,

@@ -120,7 +120,10 @@
 // v43-v44 candidate: combined paid-date billing and participant-specific group outcomes, plus CRM parity.
 // This is NOT yet released. Keep both UI generations in one monotonic cache.
 // v45 draft: live v43 optional task date/time + OUT195 finance/group contracts; not deployed.
-var CACHE = 'ezone-outpatient-v45';
+// v46 (2026-11-25, «שבועיים» frequency unit): app.js + charges-logic.js changed
+//   (CHANGELOG-session-unit-biweekly.md). Bumped from the repo value v45 (deploy-branch HEAD 752b4b1,
+//   #195 merged); the LIVE /sw.js was NOT reachable from this session — confirm production serves v45 before release.
+var CACHE = 'ezone-outpatient-v46';
 var SHELL = [
   './',
   './index.html',
