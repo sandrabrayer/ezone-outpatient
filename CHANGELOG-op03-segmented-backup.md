@@ -70,3 +70,11 @@ property. The legacy single-run job resumes.
 
 No secrets or patient data in logs or properties. Property values hold only run
 IDs, timestamps, snapshot names and checksums. Every inconsistency fails closed.
+
+## 26 Nov 2026 — production verification
+
+The first night after deploy (`20fb90f`) ran in two segments:
+`nightlyIntegrityJob` completed in 143.672 s and `resumeNightlyIntegrityJob` in
+35.772 s. The stranded 24 Nov marker was retired automatically, with an alert.
+`outpatient-manifest-2026-11-26` has 26 entries, and every referenced tab is
+present. No failure alert. #124 is closed.

@@ -5,6 +5,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### OP-03 #124 closed: first segmented nightly backup verified (2026-11-26)
+- Docs only. On 26 Nov `nightlyIntegrityJob` completed in 143.672 s and `resumeNightlyIntegrityJob` in 35.772 s. The stale 24 Nov marker was retired automatically, and `outpatient-manifest-2026-11-26` has 26/26 snapshot tabs. EZONE-ECOSYSTEM-STATUS.md and CHANGELOG-op03-segmented-backup.md updated.
+
 ### OP-03 #124: nightly backup no longer hits the 6-minute limit or blocks on a dead marker (2026-11-25)
 - The legacy nightly backup (341–361 s in production; timed out 17 and 24 Nov) now runs in segments of at most 200 s and continues by itself through a one-shot `resumeNightlyIntegrityJob` trigger. Every segment re-captures the sources and rewrites only changed snapshots, so the published set is one consistent capture. The manifest and full readback validation are unchanged.
 - A 35-minute watchdog resumes a killed segment the same night. An `INTEGRITY_ACTIVE_BACKUP` marker older than 30 min (its execution provably dead) is retired automatically, with an audit record and an alert. Young, malformed or pending markers, recovery hold and staged v3 mode stay fail-closed. At most 8 segments per night, with no retry loop. Apps Script deploy required; no new scope, header or Node change. See CHANGELOG-op03-segmented-backup.md.
