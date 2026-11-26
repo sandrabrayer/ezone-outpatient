@@ -1,17 +1,26 @@
-# Outpatient — OP-03 #124 nightly backup incident, 2026-11-25 (fix in PR, not released)
+# Outpatient — OP-03 #124 nightly backup incident: RESOLVED and verified, 2026-11-26
 
-Live: Railway / Apps Script `752b4b1` (#195), legacy single-run nightly backup.
-Production executions: 23 Nov Completed in 341.678 s; 24 Nov **Timed Out** at
-360.864 s, which stranded `INTEGRITY_ACTIVE_BACKUP`; 25 Nov refused with
-`backup_busy`. The last OUT manifest is 24 Nov. Fix (branch
-`claude/youthful-brahmagupta-gak64f`): the backup runs in segments of at most
-200 s that resume themselves, plus a 35-min watchdog, and a marker older than
-30 min is retired automatically with an audit record and an alert. After
-approval → merge → Apps Script deploy, the next 02:21 run retires the 24 Nov
-marker itself; no manual Script Property edit is needed. Closure needs one
-observed nightly chain: every segment Completed under 360 s, a new
-`outpatient-manifest-<day>`, and no ACTIVE marker or continuation trigger left
-afterwards. See CHANGELOG-op03-segmented-backup.md and
+Live: Railway + Apps Script `20fb90f` (PR #201; Apps Script deploy run
+45652971532, existing deployment). The nightly backup now runs in segments of at
+most 200 s that resume themselves, with a 35-min watchdog. A run marker older
+than 30 min is retired automatically, with an audit record and an alert.
+
+First night (26 Nov 2026, owner-verified Executions):
+
+| Run | Started | Duration | Status |
+| --- | --- | --- | --- |
+| `nightlyIntegrityJob` | 02:21:15 | 143.672 s | Completed |
+| `resumeNightlyIntegrityJob` | 02:25:31 | 35.772 s | Completed |
+
+Both segments finished well under 360 s. Before the fix: 24 Nov Timed Out
+(360.864 s) and 25 Nov failed with `backup_busy`. The stranded 24 Nov marker was
+retired automatically at 00:21:18Z; no manual Script Property edit was needed.
+
+Backup verified: `EZONE-Backups` has `outpatient-manifest-2026-11-26`, with 26
+entries and every referenced snapshot tab present (capturedAt
+2026-11-26T00:25:45Z, schemaVersion 2). No failure alert. #124 is closed;
+central Dashboard #331 is updated. Staged v3 (`setupIntegrityTwoStage()`) stays
+dormant. See CHANGELOG-op03-segmented-backup.md and
 docs/OP03-SEGMENTED-BACKUP-RUNBOOK-20261125.md.
 
 # Outpatient — OP-03 task 2 backups/recovery status, 2026-11-23 (DRAFT #199, not released)
